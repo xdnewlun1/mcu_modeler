@@ -1,0 +1,7 @@
+unicorn
+capstone
+pyelftools
+pyyaml
+
+[test]
+pytest

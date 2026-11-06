@@ -1,0 +1,185 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      188     4 .isr_vector
+ 8000000  8000000      188     4         /tmp/startup-b6a0d9.o:(.isr_vector)
+ 8000000  8000000      188     1                 __vector_table
+ 8000188  8000188      468     4 .text
+ 8000188  8000188        2     4         /tmp/startup-b6a0d9.o:(.text.Default_Handler)
+ 8000188  8000188        0     1                 $t
+ 8000189  8000189        2     1                 Default_Handler
+ 8000189  8000189        2     1                 NMI_Handler
+ 8000189  8000189        2     1                 HardFault_Handler
+ 8000189  8000189        2     1                 MemManage_Handler
+ 8000189  8000189        2     1                 BusFault_Handler
+ 8000189  8000189        2     1                 UsageFault_Handler
+ 8000189  8000189        2     1                 SVC_Handler
+ 8000189  8000189        2     1                 DebugMon_Handler
+ 8000189  8000189        2     1                 PendSV_Handler
+ 8000189  8000189        2     1                 WWDG_IRQHandler
+ 8000189  8000189        2     1                 PVD_IRQHandler
+ 8000189  8000189        2     1                 TAMP_STAMP_IRQHandler
+ 8000189  8000189        2     1                 RTC_WKUP_IRQHandler
+ 8000189  8000189        2     1                 FLASH_IRQHandler
+ 8000189  8000189        2     1                 RCC_IRQHandler
+ 8000189  8000189        2     1                 EXTI0_IRQHandler
+ 8000189  8000189        2     1                 EXTI1_IRQHandler
+ 8000189  8000189        2     1                 EXTI2_IRQHandler
+ 8000189  8000189        2     1                 EXTI3_IRQHandler
+ 8000189  8000189        2     1                 EXTI4_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream0_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream1_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream2_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream3_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream4_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream5_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream6_IRQHandler
+ 8000189  8000189        2     1                 ADC_IRQHandler
+ 8000189  8000189        2     1                 CAN1_TX_IRQHandler
+ 8000189  8000189        2     1                 CAN1_RX0_IRQHandler
+ 8000189  8000189        2     1                 CAN1_RX1_IRQHandler
+ 8000189  8000189        2     1                 CAN1_SCE_IRQHandler
+ 8000189  8000189        2     1                 EXTI9_5_IRQHandler
+ 8000189  8000189        2     1                 TIM1_BRK_TIM9_IRQHandler
+ 8000189  8000189        2     1                 TIM1_UP_TIM10_IRQHandler
+ 8000189  8000189        2     1                 TIM1_TRG_COM_TIM11_IRQHandler
+ 8000189  8000189        2     1                 TIM1_CC_IRQHandler
+ 8000189  8000189        2     1                 TIM2_IRQHandler
+ 8000189  8000189        2     1                 TIM3_IRQHandler
+ 8000189  8000189        2     1                 TIM4_IRQHandler
+ 8000189  8000189        2     1                 I2C1_EV_IRQHandler
+ 8000189  8000189        2     1                 I2C1_ER_IRQHandler
+ 8000189  8000189        2     1                 I2C2_EV_IRQHandler
+ 8000189  8000189        2     1                 I2C2_ER_IRQHandler
+ 8000189  8000189        2     1                 SPI1_IRQHandler
+ 8000189  8000189        2     1                 SPI2_IRQHandler
+ 8000189  8000189        2     1                 USART2_IRQHandler
+ 8000189  8000189        2     1                 USART3_IRQHandler
+ 8000189  8000189        2     1                 EXTI15_10_IRQHandler
+ 8000189  8000189        2     1                 RTC_Alarm_IRQHandler
+ 8000189  8000189        2     1                 OTG_FS_WKUP_IRQHandler
+ 8000189  8000189        2     1                 TIM8_BRK_TIM12_IRQHandler
+ 8000189  8000189        2     1                 TIM8_UP_TIM13_IRQHandler
+ 8000189  8000189        2     1                 TIM8_TRG_COM_TIM14_IRQHandler
+ 8000189  8000189        2     1                 TIM8_CC_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream7_IRQHandler
+ 8000189  8000189        2     1                 FSMC_IRQHandler
+ 8000189  8000189        2     1                 SDIO_IRQHandler
+ 8000189  8000189        2     1                 TIM5_IRQHandler
+ 8000189  8000189        2     1                 SPI3_IRQHandler
+ 8000189  8000189        2     1                 UART4_IRQHandler
+ 8000189  8000189        2     1                 UART5_IRQHandler
+ 8000189  8000189        2     1                 TIM6_DAC_IRQHandler
+ 8000189  8000189        2     1                 TIM7_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream0_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream1_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream2_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream3_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream4_IRQHandler
+ 8000189  8000189        2     1                 ETH_IRQHandler
+ 8000189  8000189        2     1                 ETH_WKUP_IRQHandler
+ 8000189  8000189        2     1                 CAN2_TX_IRQHandler
+ 8000189  8000189        2     1                 CAN2_RX0_IRQHandler
+ 8000189  8000189        2     1                 CAN2_RX1_IRQHandler
+ 8000189  8000189        2     1                 CAN2_SCE_IRQHandler
+ 8000189  8000189        2     1                 OTG_FS_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream5_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream6_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream7_IRQHandler
+ 8000189  8000189        2     1                 USART6_IRQHandler
+ 8000189  8000189        2     1                 I2C3_EV_IRQHandler
+ 8000189  8000189        2     1                 I2C3_ER_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_EP1_OUT_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_EP1_IN_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_WKUP_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_IRQHandler
+ 8000189  8000189        2     1                 DCMI_IRQHandler
+ 8000189  8000189        2     1                 CRYP_IRQHandler
+ 8000189  8000189        2     1                 HASH_RNG_IRQHandler
+ 8000189  8000189        2     1                 FPU_IRQHandler
+ 800018c  800018c       72     4         /tmp/startup-b6a0d9.o:(.text.Reset_Handler)
+ 800018c  800018c        0     1                 $t
+ 800018d  800018d       72     1                 Reset_Handler
+ 8000200  8000200       42     4         /tmp/uart_chat-c14116.o:(.text.USART1_IRQHandler)
+ 8000200  8000200        0     1                 $t
+ 8000201  8000201       42     1                 USART1_IRQHandler
+ 8000244  8000244       10     4         /tmp/uart_chat-c14116.o:(.text.SysTick_Handler)
+ 8000244  8000244        0     1                 $t
+ 8000245  8000245       10     1                 SysTick_Handler
+ 8000254  8000254      376     4         /tmp/uart_chat-c14116.o:(.text.main)
+ 8000254  8000254        0     1                 $t
+ 8000255  8000255      376     1                 main
+ 80005ca  80005ca       24     1         <internal>:(.rodata.str1.1)
+ 80005ee  80005ee        2     1         . = ALIGN(4)
+ 80005f0  80005f0       10     4 .ARM.exidx
+ 80005f0  80005f0       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000       88     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/uart_chat-c14116.o:(.bss.ring_head)
+20000000 20000000        4     1                 ring_head
+20000004 20000004        4     4         /tmp/uart_chat-c14116.o:(.bss.ring_tail)
+20000004 20000004        4     1                 ring_tail
+20000008 20000008       40     1         /tmp/uart_chat-c14116.o:(.bss.ring)
+20000008 20000008       40     1                 ring
+20000048 20000048        4     4         /tmp/uart_chat-c14116.o:(.bss.ticks)
+20000048 20000048        4     1                 ticks
+2000004c 2000004c        4     4         /tmp/uart_chat-c14116.o:(.bss.pongs)
+2000004c 2000004c        4     1                 pongs
+20000050 20000050        4     4         /tmp/uart_chat-c14116.o:(.bss.pings_answered)
+20000050 20000050        4     1                 pings_answered
+20000054 20000054        4     4         /tmp/uart_chat-c14116.o:(.bss.peer_seen)
+20000054 20000054        4     1                 peer_seen
+20000058 20000058        4     4         /tmp/uart_chat-c14116.o:(.bss.ping_n)
+20000058 20000058        4     1                 ping_n
+2000005c 2000005c        4     4         /tmp/uart_chat-c14116.o:(.bss.hello_answered)
+2000005c 2000005c        4     1                 hello_answered
+20000060 20000060       21     1         /tmp/uart_chat-c14116.o:(.bss.line)
+20000060 20000060       21     1                 line
+20000084 20000084        4     4         /tmp/uart_chat-c14116.o:(.bss.line_len)
+20000084 20000084        4     1                 line_len
+20000088 20000088        0     1         . = ALIGN(4)
+20000088 20000088        0     1         _ebss = .
+       0        0      177     1 .debug_loclists
+       0        0       39     1         /tmp/startup-b6a0d9.o:(.debug_loclists)
+      39       39      13e     1         /tmp/uart_chat-c14116.o:(.debug_loclists)
+       0        0      2b6     1 .debug_abbrev
+       0        0       d7     1         /tmp/startup-b6a0d9.o:(.debug_abbrev)
+      d7       d7      1df     1         /tmp/uart_chat-c14116.o:(.debug_abbrev)
+       0        0      71d     1 .debug_info
+       0        0       b0     1         /tmp/startup-b6a0d9.o:(.debug_info)
+      b0       b0      66d     1         /tmp/uart_chat-c14116.o:(.debug_info)
+       0        0       c8     1 .debug_rnglists
+       0        0       24     1         /tmp/startup-b6a0d9.o:(.debug_rnglists)
+      24       24       a4     1         /tmp/uart_chat-c14116.o:(.debug_rnglists)
+       0        0      164     1 .debug_str_offsets
+       0        0       38     1         /tmp/startup-b6a0d9.o:(.debug_str_offsets)
+      38       38      12c     1         /tmp/uart_chat-c14116.o:(.debug_str_offsets)
+       0        0      2e7     1 .debug_str
+       0        0      2e7     1         <internal>:(.debug_str)
+       0        0       d8     1 .debug_addr
+       0        0       18     1         /tmp/startup-b6a0d9.o:(.debug_addr)
+      18       18       c0     1         /tmp/uart_chat-c14116.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       49     1 .ARM.attributes
+       0        0       49     1         /tmp/startup-b6a0d9.o:(.ARM.attributes)
+       0        0       7c     4 .debug_frame
+       0        0       34     4         /tmp/startup-b6a0d9.o:(.debug_frame)
+      34       34       48     4         /tmp/uart_chat-c14116.o:(.debug_frame)
+       0        0      4b2     1 .debug_line
+       0        0       c8     1         /tmp/startup-b6a0d9.o:(.debug_line)
+      c8       c8      3ea     1         /tmp/uart_chat-c14116.o:(.debug_line)
+       0        0       91     1 .debug_line_str
+       0        0       91     1         <internal>:(.debug_line_str)
+       0        0      780     4 .symtab
+       0        0      780     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      7de     1 .strtab
+       0        0      7de     1         <internal>:(.strtab)

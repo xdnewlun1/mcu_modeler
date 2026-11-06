@@ -1,0 +1,36 @@
+{
+ "format": "c28img",
+ "unit_bits": 16,
+ "entry": 3342336,
+ "segments": [
+  {
+   "addr": 3342336,
+   "data_hex": "103b22761f76c0012928680011187ffe21280a001140ff6c111a00011c1a00041f76be01091a00051a7673761f001546ff6c1792ff901447ff6c1996f96f1f76c1011028070011280300142b122b13281a00112823000600"
+  },
+  {
+   "addr": 3407862,
+   "data_hex": "73000000"
+  }
+ ],
+ "symbols": {
+  "BRR": 26,
+  "GPAMUX2H": 28553,
+  "PLLSTS": 28689,
+  "PCLKCR0": 28700,
+  "PLLCR": 28705,
+  "WDCR": 28713,
+  "SCICCRA": 28752,
+  "SCICTL1A": 28753,
+  "SCIHBAUDA": 28754,
+  "SCILBAUDA": 28755,
+  "SCICTL2A": 28756,
+  "SCIRXSTA": 28757,
+  "SCIRXBUFA": 28759,
+  "SCITXBUFA": 28761,
+  "_c_int00": 3342336,
+  "pll": 3342346,
+  "loop": 3342359,
+  "txw": 3342363,
+  "sci_init": 3342367
+ }
+}

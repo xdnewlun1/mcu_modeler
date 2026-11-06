@@ -1,0 +1,253 @@
+/* Board / package drawing (board.js, package.js, parts.js). Loaded by board.js after style.css.
+   Tokens: the :root block of style.css. Encoding never relies on colour alone:
+   H = solid pad / solid thick wire, L = hollow pad / thin solid wire, X = hatched pad / dotted wire,
+   power = neutral solid pad, analog = dotted outline, conflict = red dashed wire. */
+
+/* canvas */
+.bv { user-select: none; touch-action: none; }
+svg.bv#pkg { cursor: grab; background: var(--panel); }
+svg.bv#pkg.panning { cursor: grabbing; }
+.bv text { font-family: var(--mono); }
+
+/* ---------- package ---------- */
+.bv .body { fill: var(--raise); stroke: var(--line-2); stroke-width: 1.5; }
+.bv .package.selected .body { stroke: var(--accent); stroke-width: 2.5; }
+.bv .pin1-dot { fill: var(--panel); stroke: var(--line-2); stroke-width: 1.2; }
+.bv .body-g { cursor: default; }
+.board-mode .bv .body-g { cursor: pointer; }
+.bv .body-id { fill: var(--fg-3); font: 700 44px var(--mono); text-anchor: middle; }
+.bv .body-title { fill: var(--fg); font: 600 20px var(--sans); text-anchor: middle; }
+.bv .body-sub { fill: var(--fg-2); font: 13px var(--sans); text-anchor: middle; }
+.bv .body-sub.dim { fill: var(--fg-3); }
+.bv .body-sub.run { fill: var(--lv-h); }
+.bv .body-sub.mono { font-family: var(--mono); }
+.bv .body-time { fill: var(--fg); font: 600 19px var(--mono); text-anchor: middle; }
+.bv .hatch-bg { fill: var(--panel); }
+.bv .hatch-line { stroke: var(--lv-x); stroke-width: 2; }
+
+/* pads */
+.bv .pin .hit { fill: transparent; }
+.bv .pin .pad { stroke-width: 1.2; fill: var(--panel); stroke: var(--lv-l); }
+.bv .pin.hi .pad { fill: var(--lv-h); stroke: var(--lv-h); }
+.bv .pin.lo .pad { fill: var(--panel); stroke: var(--lv-l); }
+.bv .pin.x .pad { fill: url(#hatch); stroke: var(--lv-x); stroke-width: .8; }
+.bv .pin.power .pad { fill: var(--k-power); stroke: var(--k-power); }
+.bv .pin.analog .pad { fill: var(--raise); stroke: var(--fg-2); stroke-dasharray: 1.6 1.4; }
+.bv .pin.own-disabled .pad { opacity: .45; }
+.bv .pin .arrow { fill: var(--fg); stroke: none; pointer-events: none; }
+.bv .pin.hi .arrow { fill: var(--bg); }
+.bv .pin .ext { fill: none; stroke: none; }
+.bv .pin .ext.ext-H { fill: var(--lv-h); stroke: var(--fg); stroke-width: .8; }
+.bv .pin .ext.ext-L { fill: var(--panel); stroke: var(--fg); stroke-width: 1.4; }
+.bv .pin .ext.ext-X { fill: var(--lv-x); stroke: var(--fg); stroke-width: .8; }
+
+/* pin text: halo in the canvas colour so wires pass visibly *under* labels */
+.bv .pin-num { fill: var(--fg-3); font-family: var(--mono); text-anchor: middle; dominant-baseline: central; }
+/* --pf / --of: name / owner font in world units, set per package by PackageView.setScale (level of detail) */
+.bv .pin-label { font-family: var(--mono); font-size: var(--pf, 11px); dominant-baseline: central;
+                 paint-order: stroke; stroke: var(--panel); stroke-width: calc(var(--pf, 11px) * .26); stroke-linejoin: round; }
+.bv .lbl-owner { font-size: var(--of, 10px); }
+.bv .lbl-name { fill: var(--fg); }
+.bv .lbl-owner { fill: var(--own); }
+.bv .lbl-owner.gpio { fill: var(--fg-3); }
+.bv .pin.own-disabled .lbl-name { fill: var(--fg-3); }
+.bv .pin.power .lbl-name { fill: var(--fg-3); }
+.bv .pin.analog .lbl-name { fill: var(--fg-2); }
+.bv .pin.in-net .lbl-name { font-weight: 700; }
+.bv .package.lod-nolabel .pin-label { display: none; }
+.bv .package.lod-nonum .pin-num { display: none; }
+
+/* pin interaction: one accent */
+.bv .pin.clickable { cursor: pointer; }
+.bv .pin:hover .pad, .bv .pin:focus .pad { stroke: var(--accent); stroke-width: 2; }
+.bv .pin:hover .lbl-name, .bv .pin:focus .lbl-name { fill: var(--accent); }
+.bv .pin:focus { outline: none; }
+.bv .pin.flash .pad { animation: bv-flash .5s ease-out; }
+@keyframes bv-flash { from { stroke: var(--accent); stroke-width: 3; } }
+.bv .pin.net-hl .pad { stroke: var(--fg); stroke-width: 2.2; }
+.bv .pin.net-hl .lbl-name { fill: var(--fg); font-weight: 700; }
+/* search: every match outlined, the current one ringed */
+.bv.find-on .pin.find-match .pad { stroke: var(--accent); stroke-width: 2; }
+.bv .pin.find-cur .pad { stroke: var(--accent); stroke-width: 3.5; }
+.bv .pin.find-cur .lbl-name, .bv .pin.find-match .lbl-name { fill: var(--accent); font-weight: 700; }
+.bv .pin.find-cur .hit { fill: var(--accent-weak); stroke: var(--accent); stroke-width: 1.5; }
+
+/* ---------- nets ---------- */
+.bv .wire { fill: none; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.bv .wire-halo { fill: none; stroke: var(--panel); stroke-width: 6; stroke-linejoin: round; }
+.bv .net-H .wire { stroke: var(--lv-h); }
+.bv .net-L .wire { stroke: var(--lv-l); stroke-width: 1.4; }
+.bv .net-X .wire { stroke: var(--lv-x); stroke-width: 1.8; stroke-dasharray: .5 4; }
+.bv .net.conflict .wire { stroke: var(--danger); stroke-width: 2.4; stroke-dasharray: 7 3; stroke-linecap: butt; }
+.bv .wire-end { fill: var(--panel); stroke: var(--fg-2); stroke-width: 1.4; }
+.bv .net-H .wire-end { stroke: var(--lv-h); } .bv .net-X .wire-end { stroke: var(--lv-x); }
+.bv .wire-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; }
+.bv .net { cursor: pointer; }
+.bv .net:hover .wire { stroke-width: 3.4; }
+.bv .net.hl .wire { stroke-width: 3.6; }
+.bv .net.sel .wire-halo { stroke: var(--accent); opacity: .5; stroke-width: 8; }
+#pkg.bv.hl-on .net:not(.hl):not(.sel) { opacity: .2; }
+#pkg.bv.hl-on .link { opacity: .3; }
+#pkg.bv.hl-on .net-label:not(.hl) { opacity: .35; }
+
+/* net and link labels: constant on-screen size (--ls / --lw set by board.js), halo, placed once */
+.bv .net-label, .bv .link-label {
+  font: 600 var(--ls, 11px) var(--mono); paint-order: stroke; stroke: var(--panel);
+  stroke-width: calc(var(--lw, 1px) * 3.5); stroke-linejoin: round; cursor: pointer;
+}
+.bv .net-label { fill: var(--fg-2); }
+.bv .net-label.hl { fill: var(--fg); }
+.bv .link-label { fill: var(--accent); cursor: default; }
+
+/* ---------- UART links ---------- */
+.bv .link-line { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 6 4; }
+.bv .link-auto .link-line { stroke-dasharray: 2 3; }
+.bv .link-body .link-line { opacity: .55; }
+.bv .link-onnet .link-line { stroke: none; }
+.bv .link.active:not(.link-onnet) .link-line { stroke-width: 2.4; animation: bv-dash .6s linear infinite; }
+@keyframes bv-dash { to { stroke-dashoffset: -20; } }
+.bv .arrow-head { fill: var(--accent); }
+.bv .marker circle { fill: var(--accent); stroke: var(--panel); stroke-width: 1.5; }
+.bv .marker text { fill: var(--fg); font: 700 11px var(--mono); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+
+/* ---------- wire mode ---------- */
+#pkg.bv.wire-mode .pin, #pkg.bv.wire-mode .port, body.picking #pkg.bv .pin, body.picking #pkg.bv .port { cursor: crosshair; }
+#pkg.bv.wire-mode .pin:hover .pad { stroke: var(--accent); stroke-width: 2.4; }
+.bv .pin.wire-pending .pad { stroke: var(--accent); stroke-width: 3; }
+.bv .rubber { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
+
+/* ---------- parts (parts.js): same tokens, no glows ---------- */
+.bv .part { cursor: default; }
+/* part id / state: native size, but never below ~8.5 / 8 px on screen (--lw = 1 / scale, --pkinv = 1 / part scale) */
+.bv .part-id { fill: var(--fg); font: 700 13px var(--mono); font-size: max(13px, calc(var(--lw, 1px) * 8.5 * var(--pkinv, 1))); }
+.bv .part-state { fill: var(--fg-2); font: 11px var(--mono); font-size: max(11px, calc(var(--lw, 1px) * 8 * var(--pkinv, 1))); }
+.bv .part-box { fill: var(--raise); stroke: var(--fg-3); stroke-width: 1.4; }
+.bv .part-box.meter { fill: var(--panel); }
+.bv .gate { fill: var(--raise); stroke: var(--fg-2); stroke-width: 1.6; stroke-linejoin: round; }
+.bv .gate.out-H { stroke: var(--lv-h); stroke-width: 2.4; }
+.bv .gate.out-X { stroke: var(--lv-x); stroke-dasharray: 2 2; }
+.bv .gate-xor, .bv .gate-stub { fill: none; stroke: var(--fg-2); stroke-width: 1.6; }
+.bv .gate-bubble { fill: var(--raise); stroke: var(--fg-2); stroke-width: 1.6; }
+.bv .gate-hitbox { fill: transparent; }
+.bv .gate-name { fill: var(--fg-2); font: 600 11px var(--mono); pointer-events: none; }
+.bv .port-label { fill: var(--fg-2); font: 10px var(--mono); pointer-events: none; }
+.bv .clk-tri { fill: none; stroke: var(--fg-2); stroke-width: 1.2; }
+.bv .lead { stroke: var(--fg-3); stroke-width: 1.6; }
+.bv .lead-hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; }
+.bv .lead-end { fill: var(--panel); stroke: var(--fg-3); stroke-width: 1.4; }
+.bv .port { cursor: pointer; }
+.bv .port.lv-H .lead { stroke: var(--lv-h); stroke-width: 2.4; } .bv .port.lv-H .lead-end { stroke: var(--lv-h); }
+.bv .port.lv-L .lead { stroke: var(--lv-l); stroke-width: 1.4; } .bv .port.lv-L .lead-end { stroke: var(--lv-l); }
+.bv .port.lv-X .lead { stroke: var(--lv-x); stroke-dasharray: .5 3.5; stroke-linecap: round; } .bv .port.lv-X .lead-end { stroke: var(--lv-x); }
+.bv .port:hover .lead, .bv .port.net-hl .lead { stroke-width: 3.2; }
+.bv .port:hover .lead-end, .bv .port.net-hl .lead-end { stroke: var(--accent); }
+.bv .port.wire-pending .lead-end { stroke: var(--accent); stroke-width: 3; }
+.bv .part.hl .part-box, .bv .part.hl .gate, .bv .part.hl .led { stroke: var(--accent); stroke-width: 2.4; }
+.bv .part-body.clickable { cursor: pointer; }
+.bv .part-body.clickable:hover .part-box { stroke: var(--accent); }
+/* LED: the LED's own colour is data (params.color); off = hollow, on = filled, X = hatch */
+.bv .led { fill: var(--panel); stroke: var(--fg-3); stroke-width: 1.6; }
+.bv .led-halo { fill: none; stroke: none; }
+.bv .led-glyph { fill: none; stroke: var(--fg-3); stroke-width: 1.3; pointer-events: none; }
+.bv .led-rays { fill: none; stroke: transparent; stroke-width: 1.4; }
+.bv .part-led.on .led { fill: var(--led); stroke: var(--fg); }
+.bv .part-led.on .led-halo { fill: none; stroke: var(--led); stroke-width: 1.2; }
+.bv .part-led.on .led-glyph { stroke: var(--bg); }
+.bv .part-led.on .led-rays { stroke: var(--led); }
+.bv .part-led.x .led { fill: url(#hatch); stroke: var(--lv-x); }
+/* switch / button / meters / generators / rails */
+.bv .sw-track { fill: var(--panel); stroke: var(--lv-l); stroke-width: 1.2; }
+.bv .sw-track.lv-H { fill: var(--lv-h); stroke: var(--lv-h); }
+.bv .sw-track.lv-X { fill: url(#hatch); stroke: var(--lv-x); }
+.bv .sw-knob { fill: var(--fg); stroke: var(--bg); stroke-width: 1; pointer-events: none; }
+.bv .sw-level { font: 700 17px var(--mono); fill: var(--fg-2); pointer-events: none; }
+.bv .sw-level.small { font-size: 14px; }
+.bv .sw-level.lv-H { fill: var(--lv-h); } .bv .sw-level.lv-L { fill: var(--fg); } .bv .sw-level.lv-X { fill: var(--lv-x); }
+.bv .btn-ring { fill: var(--panel); stroke: var(--fg-3); stroke-width: 1.4; }
+.bv .btn-cap { fill: var(--raise); stroke: var(--fg-2); stroke-width: 1.4; }
+.bv .btn-cap.pressed { fill: var(--accent); stroke: var(--accent); }
+.bv .wave { fill: none; stroke: var(--fg-2); stroke-width: 1.8; stroke-linejoin: round; }
+.bv .wave.lv-H { stroke: var(--lv-h); }
+.bv .meter-txt { fill: var(--fg); font: 600 11px var(--mono); pointer-events: none; }
+.bv .counter-num { fill: var(--fg); font: 700 19px var(--mono); pointer-events: none; }
+.bv .rail-line { fill: none; stroke: var(--fg-2); stroke-width: 2; }
+.bv .rail.lv-H .rail-line { stroke: var(--lv-h); }
+.bv .rail-txt { fill: var(--fg-2); font: 700 10px var(--mono); }
+
+/* ---------- canvas overlay: toolbar, legend ---------- */
+.bv-wrap { position: relative; }
+.bv-tools {
+  position: absolute; top: var(--sp-3); right: var(--sp-3); z-index: 3;
+  display: flex; align-items: center; gap: 0;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius);
+  font: var(--fs-1)/1 var(--mono);
+}
+.bv-tools input.bv-find {
+  width: 150px; height: 24px; padding: 0 var(--sp-3); border: 0; border-right: 1px solid var(--line-2);
+  border-radius: var(--radius) 0 0 var(--radius); background: transparent; color: var(--fg); font: var(--fs-2) var(--mono);
+}
+.bv-tools input.bv-find:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+.bv-tools .bv-count { color: var(--fg-3); padding: 0 var(--sp-3); white-space: nowrap; min-width: 0; }
+.bv-tools .bv-count:empty { display: none; }
+.bv-tools button {
+  height: 24px; min-width: 24px; padding: 0 var(--sp-3); border: 0; border-left: 1px solid var(--line-2);
+  background: transparent; color: var(--fg-2); font: var(--fs-2) var(--mono); cursor: pointer;
+}
+.bv-tools button:hover { color: var(--fg); background: var(--raise); }
+.bv-tools button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.bv-tools .bv-pct { min-width: 46px; }
+/* in the board pane header (board.js puts it there when the canvas sits in a .pane) */
+.bv-tools.in-head { position: static; margin-left: auto; background: var(--panel); }
+.bv-tools.in-head input.bv-find, .bv-tools.in-head button { height: 22px; }
+.pane-head .bv-tools.in-head + .head-tools { margin-left: 0; }
+
+.bv-legend {
+  position: absolute; left: var(--sp-3); bottom: var(--sp-3); z-index: 3; max-width: calc(100% - 12px);
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius);
+  font: var(--fs-1)/1.3 var(--sans); color: var(--fg-2);
+}
+.bv-legend summary { cursor: pointer; padding: var(--sp-2) var(--sp-4); color: var(--fg-3); font-family: var(--mono); user-select: none; }
+.bv-legend[open] summary { border-bottom: 1px solid var(--line); }
+.bv-lg-grid { display: grid; grid-template-columns: repeat(3, max-content); gap: var(--sp-2) var(--sp-5); padding: var(--sp-3) var(--sp-4); }
+.bv-lg-grid span { display: inline-flex; align-items: center; gap: var(--sp-3); white-space: nowrap; }
+.bv-lg-grid span[hidden] { display: none; }
+.bv-lg-grid svg { flex: none; }
+.bv-legend .bv-own { color: var(--own); font: 600 var(--fs-1) var(--mono); }
+.bv-legend .bv-gpio { color: var(--fg-3); font: 600 var(--fs-1) var(--mono); }
+.bv-keys { padding: 0 var(--sp-4) var(--sp-3); color: var(--fg-3); font-family: var(--mono); }
+
+/* ---------- pin data card ---------- */
+.bv-card {
+  position: fixed; z-index: 50; pointer-events: none; max-width: 380px;
+  padding: var(--sp-4) var(--sp-5); background: var(--raise); color: var(--fg);
+  border: 1px solid var(--line-2); border-radius: var(--radius); font: var(--fs-2)/1.45 var(--sans);
+}
+.bv-card.pinned { pointer-events: auto; border-color: var(--accent); user-select: text; }
+.bv-card-h { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); font: 600 var(--fs-3) var(--mono); }
+.bv-card-h b { margin-right: auto; }
+.bv-card button {
+  height: 20px; padding: 0 var(--sp-3); border: 1px solid var(--line-2); border-radius: var(--radius);
+  background: var(--panel); color: var(--fg-2); font: var(--fs-1) var(--mono); cursor: pointer;
+}
+.bv-card button:hover { color: var(--fg); border-color: var(--accent); }
+.bv-card button.on { color: var(--fg); border-color: var(--accent); background: var(--accent-weak); }
+.bv-lv { font: 700 var(--fs-1) var(--mono); padding: 0 var(--sp-2); border: 1px solid; border-radius: var(--radius); }
+.bv-lv.lv-H { color: var(--bg); background: var(--lv-h); border-color: var(--lv-h); }
+.bv-lv.lv-L { color: var(--lv-l); border-color: var(--lv-l); }
+.bv-lv.lv-X { color: var(--lv-x); border-color: var(--lv-x); border-style: dashed; }
+.bv-card dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 1px var(--sp-5); }
+.bv-card dt { color: var(--fg-3); font-family: var(--mono); }
+.bv-card dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+.bv-alts {
+  margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: max-content 1fr max-content 1fr; gap: 0 var(--sp-4);
+  font: var(--fs-1)/1.45 var(--mono); color: var(--fg-2);
+}
+.bv-alts span:nth-child(odd) { color: var(--fg-3); }
+.bv-alts .on { color: var(--own); font-weight: 700; }
+.bv-drive { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); font: var(--fs-1) var(--mono); color: var(--fg-3); }
+.bv-drive span { margin-right: var(--sp-2); }
+.bv-hint { margin-top: var(--sp-3); color: var(--fg-3); font: var(--fs-1) var(--mono); }
+.bv .pin .lbl-bg { display: none; fill: var(--panel); }
+.bv .pin.in-net .lbl-bg { display: inline; }
+.bv .package.lod-nolabel .lbl-bg { display: none; }

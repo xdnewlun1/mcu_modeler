@@ -1,0 +1,21 @@
+# A TMS320F28232 running TI-compiled C (cl2000 25.11.1, EABI) and an STM32F405ZG running ST's STM32CubeF4 HAL,
+# talking the "chat" protocol over UART (same as boards/c2000_stm32_chat_hal.yaml, with A's assembler firmware
+# replaced by the C version):
+#   each side sends "HELLO <name>\r\n" at boot and "PING <n>\r\n" every 5 ms, answers "PING <n>" with "PONG <n>",
+#   toggles its LED on every PONG (A.GPIO34 / B.PB0) and raises a "peer seen" pin on HELLO (A.GPIO35 / B.PB1).
+#   A (F28232)     firmware/samples_c2000_c/build/uart_chat.out (firmware/samples_c2000_c/uart_chat.c built with TI's
+#                  cl2000: EABI ELF, RTS _c_int00), SCI-A on GPIO28 (SCIRXDA) / GPIO29 (SCITXDA).
+#   B (STM32F405)  firmware/samples_stm32_hal/build/uart_chat_hal.elf (real ST HAL: HSE 8 MHz + PLL -> 168 MHz,
+#                  SysTick 1 kHz, USART1 115200 8N1 on PA9 (TX) / PA10 (RX), RX by HAL_UART_Receive_IT).
+# Wired with nets only (automatic byte links once both sides mux their pins to the UART).
+# Run:  chipem run --board boards/c2000_stm32_chat_c.yaml --for 40ms --pin-report
+# Build A with firmware/samples_c2000_c/build.sh (needs TI's C2000 code generation tools in toolchains/),
+# B with firmware/samples_stm32_hal/build.sh.
+name: c2000_stm32_chat_c
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000_c/build/uart_chat.out}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32_hal/build/uart_chat_hal.elf}
+nets:
+  - {name: C2000_TX, pins: [A.GPIO29, B.PA10]}        # A.SCITXDA -> B.USART1_RX
+  - {name: STM32_TX, pins: [B.PA9, A.GPIO28]}         # B.USART1_TX -> A.SCIRXDA

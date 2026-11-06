@@ -1,0 +1,487 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Thu Nov  5 19:21:57 2026
+
+OUTPUT FILE NAME:   <build/selftest_coff.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00330000   0000ff80  00001b10  0000e470  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  00000168  00000e98  RWIX
+  RAML5                 0000d000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00330000    000018f2     
+                  00330000    0000069a     rts2800_ml.lib : _printfi.c.obj (.text)
+                  0033069a    000005eb                    : _printfi.c.obj (.text:__TI_printfi)
+                  00330c85    0000029e     selftest.obj (.text)
+                  00330f23    00000107     rts2800_ml.lib : ll_div28.asm.obj (.text)
+                  0033102a    000000aa                    : s_scalbn.c.obj (.text)
+                  003310d4    000000a6                    : qsort.c.obj (.text)
+                  0033117a    0000009c                    : fd_add28.asm.obj (.text)
+                  00331216    0000008b                    : fd_div28.asm.obj (.text)
+                  003312a1    00000083                    : fd_mpy28.asm.obj (.text)
+                  00331324    00000083                    : fs_div28.asm.obj (.text)
+                  003313a7    00000078                    : fs_add28.asm.obj (.text)
+                  0033141f    0000005c                    : s_frexp.c.obj (.text)
+                  0033147b    0000005a                    : fs_mpy28.asm.obj (.text)
+                  003314d5    0000005a                    : snprintf.c.obj (.text)
+                  0033152f    00000054                    : boot28.asm.obj (.text)
+                  00331583    00000036                    : atol.c.obj (.text)
+                  003315b9    00000031                    : atoi.c.obj (.text)
+                  003315ea    0000002e                    : _ltoa.c.obj (.text)
+                  00331618    0000002a                    : fd_cmp28.asm.obj (.text)
+                  00331642    0000002a                    : l_div28.asm.obj (.text)
+                  0033166c    00000029                    : exit.c.obj (.text)
+                  00331695    00000029                    : fs_tol28.asm.obj (.text)
+                  003316be    00000024                    : cpy_tbl.c.obj (.text)
+                  003316e2    00000023                    : s_copysign.c.obj (.text)
+                  00331705    00000022                    : i_div28.asm.obj (.text)
+                  00331727    00000021                    : fd_toi28.asm.obj (.text)
+                  00331748    00000020                    : memcpy.c.obj (.text)
+                  00331768    0000001f                    : fd_tol28.asm.obj (.text)
+                  00331787    0000001e                    : ll_cmp28.asm.obj (.text)
+                  003317a5    0000001d                    : i_tofd28.asm.obj (.text)
+                  003317c2    0000001c                    : fs_tofd28.asm.obj (.text)
+                  003317de    0000001c                    : l_tofd28.asm.obj (.text)
+                  003317fa    0000001a                    : l_tofs28.asm.obj (.text)
+                  00331814    00000018                    : ll_aox28.asm.obj (.text)
+                  0033182c    00000017                    : fs_cmp28.asm.obj (.text)
+                  00331843    00000014                    : ll_mpy28.asm.obj (.text)
+                  00331857    00000013                    : ul_tofs28.asm.obj (.text)
+                  0033186a    00000011                    : args_main.c.obj (.text)
+                  0033187b    00000010                    : memccpy.c.obj (.text)
+                  0033188b    0000000e                    : fd_sub28.asm.obj (.text)
+                  00331899    0000000b                    : strchr.c.obj (.text)
+                  003318a4    0000000b                    : u_div28.asm.obj (.text)
+                  003318af    0000000a                    : strcmp.c.obj (.text)
+                  003318b9    00000009                    : _lock.c.obj (.text)
+                  003318c2    00000009                    : fd_neg28.asm.obj (.text)
+                  003318cb    00000008     codestart.obj (.text)
+                  003318d3    00000008     rts2800_ml.lib : strlen.c.obj (.text)
+                  003318db    00000008                    : wcslen.c.obj (.text)
+                  003318e3    00000007                    : memset.c.obj (.text)
+                  003318ea    00000005                    : strcpy.c.obj (.text)
+                  003318ef    00000002                    : pre_init.c.obj (.text)
+                  003318f1    00000001                    : startup.c.obj (.text)
+
+.cinit     0    00331a93    0000007d     
+                  00331a93    0000005f     selftest.obj (.cinit)
+                  00331af2    0000000e     rts2800_ml.lib : exit.c.obj (.cinit)
+                  00331b00    00000005                    : _lock.c.obj (.cinit:__lock)
+                  00331b05    00000005                    : _lock.c.obj (.cinit:__unlock)
+                  00331b0a    00000004                    : errno.c.obj (.cinit)
+                  00331b0e    00000002     --HOLE-- [fill = 0]
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000002     DSECT
+                  003fffc0    00000002     rts2800_ml.lib : boot28.asm.obj (.reset)
+
+.pinit     0    00330000    00000000     UNINITIALIZED
+
+.econst    0    003318f2    000001a1     
+                  003318f2    00000101     rts2800_ml.lib : ctype.c.obj (.econst:.string:__ctypes_)
+                  003319f3    00000001     --HOLE-- [fill = 0]
+                  003319f4    00000026                    : _printfi.c.obj (.econst:.string)
+                  00331a1a    0000001c                    : _printfi.c.obj (.econst)
+                  00331a36    0000001c                    : s_scalbn.c.obj (.econst)
+                  00331a52    0000001b     selftest.obj (.econst:.string)
+                  00331a6d    0000000c     selftest.obj (.econst:.string:_src$1)
+                  00331a79    00000001     --HOLE-- [fill = 0]
+                  00331a7a    0000000a     selftest.obj (.econst:_$P$T0$2)
+                  00331a84    00000008     rts2800_ml.lib : s_frexp.c.obj (.econst)
+                  00331a8c    00000007     selftest.obj (.econst:_$P$T1$3)
+
+.ebss      1    0000c000    00000168     UNINITIALIZED
+                  0000c000    00000100     selftest.obj (.ebss:_results)
+                  0000c100    0000002a     selftest.obj (.ebss)
+                  0000c12a    00000006     rts2800_ml.lib : exit.c.obj (.ebss)
+                  0000c130    00000002                    : _lock.c.obj (.ebss:__lock)
+                  0000c132    00000002                    : _lock.c.obj (.ebss:__unlock)
+                  0000c134    00000001                    : errno.c.obj (.ebss)
+                  0000c135    0000000b     --HOLE--
+                  0000c140    00000028     selftest.obj (.ebss:_text)
+
+MODULE SUMMARY
+
+       Module              code   initialized data   uninitialized data
+       ------              ----   ----------------   ------------------
+    build/obj_coff/selftest/
+       selftest.obj        670    151                338               
+       codestart.obj       10     0                  0                 
+    +--+-------------------+------+------------------+--------------------+
+       Total:              680    151                338               
+                                                                       
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml.lib
+       _printfi.c.obj      3205   66                 0                 
+       ll_div28.asm.obj    263    0                  0                 
+       ctype.c.obj         0      257                0                 
+       s_scalbn.c.obj      170    28                 0                 
+       qsort.c.obj         166    0                  0                 
+       fd_add28.asm.obj    156    0                  0                 
+       fd_div28.asm.obj    139    0                  0                 
+       fd_mpy28.asm.obj    131    0                  0                 
+       fs_div28.asm.obj    131    0                  0                 
+       fs_add28.asm.obj    120    0                  0                 
+       s_frexp.c.obj       92     8                  0                 
+       fs_mpy28.asm.obj    90     0                  0                 
+       snprintf.c.obj      90     0                  0                 
+       boot28.asm.obj      84     0                  0                 
+       exit.c.obj          41     14                 6                 
+       atol.c.obj          54     0                  0                 
+       atoi.c.obj          49     0                  0                 
+       _ltoa.c.obj         46     0                  0                 
+       fd_cmp28.asm.obj    42     0                  0                 
+       l_div28.asm.obj     42     0                  0                 
+       fs_tol28.asm.obj    41     0                  0                 
+       cpy_tbl.c.obj       36     0                  0                 
+       s_copysign.c.obj    35     0                  0                 
+       i_div28.asm.obj     34     0                  0                 
+       fd_toi28.asm.obj    33     0                  0                 
+       memcpy.c.obj        32     0                  0                 
+       fd_tol28.asm.obj    31     0                  0                 
+       ll_cmp28.asm.obj    30     0                  0                 
+       i_tofd28.asm.obj    29     0                  0                 
+       fs_tofd28.asm.obj   28     0                  0                 
+       l_tofd28.asm.obj    28     0                  0                 
+       l_tofs28.asm.obj    26     0                  0                 
+       ll_aox28.asm.obj    24     0                  0                 
+       _lock.c.obj         9      10                 4                 
+       fs_cmp28.asm.obj    23     0                  0                 
+       ll_mpy28.asm.obj    20     0                  0                 
+       ul_tofs28.asm.obj   19     0                  0                 
+       args_main.c.obj     17     0                  0                 
+       memccpy.c.obj       16     0                  0                 
+       fd_sub28.asm.obj    14     0                  0                 
+       strchr.c.obj        11     0                  0                 
+       u_div28.asm.obj     11     0                  0                 
+       strcmp.c.obj        10     0                  0                 
+       fd_neg28.asm.obj    9      0                  0                 
+       strlen.c.obj        8      0                  0                 
+       wcslen.c.obj        8      0                  0                 
+       memset.c.obj        7      0                  0                 
+       errno.c.obj         0      4                  1                 
+       strcpy.c.obj        5      0                  0                 
+       pre_init.c.obj      2      0                  0                 
+       startup.c.obj       1      0                  0                 
+    +--+-------------------+------+------------------+--------------------+
+       Total:              5708   387                11                
+                                                                       
+       Stack:              0      0                  768               
+    +--+-------------------+------+------------------+--------------------+
+       Grand Total:        6388   538                1117              
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c000     300 (0000c000)     _results
+
+0000c100     304 (0000c100)     _selftest_done
+0000c101     304 (0000c100)     _nresults
+0000c102     304 (0000c100)     _a16
+0000c103     304 (0000c100)     _b16
+0000c104     304 (0000c100)     _ua16
+0000c105     304 (0000c100)     _ub16
+0000c106     304 (0000c100)     _sel
+0000c107     304 (0000c100)     _shift
+0000c10a     304 (0000c100)     _a32
+0000c10c     304 (0000c100)     _b32
+0000c10e     304 (0000c100)     _ua32
+0000c110     304 (0000c100)     _ub32
+0000c112     304 (0000c100)     _f1
+0000c114     304 (0000c100)     _f2
+0000c116     304 (0000c100)     _f3
+0000c118     304 (0000c100)     _d1
+0000c11a     304 (0000c100)     _d2
+0000c11e     304 (0000c100)     _a64
+0000c122     304 (0000c100)     _b64
+0000c126     304 (0000c100)     _ua64
+0000c12a     304 (0000c100)     ___TI_enable_exit_profile_output
+0000c12c     304 (0000c100)     ___TI_cleanup_ptr
+0000c12e     304 (0000c100)     ___TI_dtors_ptr
+0000c130     304 (0000c100)     __lock
+0000c132     304 (0000c100)     __unlock
+0000c134     304 (0000c100)     _errno
+
+0000c140     305 (0000c140)     _text
+
+003318f2    cc63 (003318c0)     __ctypes_
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     0033166c  C$$EXIT                         
+0     0033117a  FD$$ADD                         
+0     00331618  FD$$CMP                         
+0     00331216  FD$$DIV                         
+0     003312a1  FD$$MPY                         
+0     003318c2  FD$$NEG                         
+0     0033188b  FD$$SUB                         
+0     00331727  FD$$TOI                         
+0     00331768  FD$$TOL                         
+0     003313ac  FS$$ADD                         
+0     0033182c  FS$$CMP                         
+0     00331324  FS$$DIV                         
+0     0033147b  FS$$MPY                         
+0     003313a7  FS$$SUB                         
+0     003317c2  FS$$TOFD                        
+0     00331695  FS$$TOL                         
+0     00331705  I$$DIV                          
+0     00331716  I$$MOD                          
+0     003317a5  I$$TOFD                         
+0     00331642  L$$DIV                          
+0     00331651  L$$MOD                          
+0     003317de  L$$TOFD                         
+0     003317fa  L$$TOFS                         
+0     00331814  LL$$AND                         
+0     00331787  LL$$CMP                         
+0     00330f23  LL$$DIV                         
+0     00330f5f  LL$$MOD                         
+0     00331843  LL$$MPY                         
+0     0033181c  LL$$OR                          
+0     00331824  LL$$XOR                         
+0     003318a4  U$$DIV                          
+0     003318a9  U$$MOD                          
+0     0033165f  UL$$DIV                         
+0     00331666  UL$$MOD                         
+0     00331857  UL$$TOFS                        
+0     00331799  ULL$$CMP                        
+0     00330f99  ULL$$DIV                        
+0     00330fc8  ULL$$MOD                        
+1     00000700  __STACK_END                     
+abs   00000300  __STACK_SIZE                    
+1     0000c12c  ___TI_cleanup_ptr               
+1     0000c12e  ___TI_dtors_ptr                 
+1     0000c12a  ___TI_enable_exit_profile_output
+0     003315ea  ___TI_ltoa                      
+abs   ffffffff  ___TI_pprof_out_hndl            
+0     00330b03  ___TI_printfi                   
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+0     00331a93  ___cinit__                      
+0     003318f2  ___etext__                      
+abs   ffffffff  ___pinit__                      
+0     00330000  ___text__                       
+0     0033186a  __args_main                     
+0     003318f2  __ctypes_                       
+1     0000c130  __lock                          
+0     003318c1  __nop                           
+0     003318bd  __register_lock                 
+0     003318b9  __register_unlock               
+1     00000400  __stack                         
+0     003318f1  __system_post_cinit             
+0     003318ef  __system_pre_init               
+1     0000c132  __unlock                        
+1     0000c102  _a16                            
+1     0000c10a  _a32                            
+1     0000c11e  _a64                            
+0     0033166c  _abort                          
+0     003315b9  _atoi                           
+0     00331583  _atol                           
+1     0000c103  _b16                            
+1     0000c10c  _b32                            
+1     0000c122  _b64                            
+0     0033152f  _c_int00                        
+0     003316be  _copy_in                        
+0     003316e2  _copysignl                      
+1     0000c118  _d1                             
+1     0000c11a  _d2                             
+1     0000c134  _errno                          
+0     0033166e  _exit                           
+1     0000c112  _f1                             
+1     0000c114  _f2                             
+1     0000c116  _f3                             
+0     0033141f  _frexpl                         
+0     0033102a  _ldexpl                         
+0     00330cea  _main                           
+0     0033187b  _memccpy                        
+0     00331748  _memcpy                         
+0     003318e3  _memset                         
+1     0000c101  _nresults                       
+0     003310d4  _qsort                          
+1     0000c000  _results                        
+0     0033102a  _scalbnl                        
+1     0000c106  _sel                            
+1     0000c100  _selftest_done                  
+1     0000c107  _shift                          
+0     003314d5  _snprintf                       
+0     00331899  _strchr                         
+0     003318af  _strcmp                         
+0     003318ea  _strcpy                         
+0     003318d3  _strlen                         
+1     0000c140  _text                           
+1     0000c104  _ua16                           
+1     0000c10e  _ua32                           
+1     0000c126  _ua64                           
+1     0000c105  _ub16                           
+1     0000c110  _ub32                           
+0     003318db  _wcslen                         
+abs   ffffffff  binit                           
+0     00331a93  cinit                           
+0     0033fff6  code_start                      
+0     003318f2  etext                           
+abs   ffffffff  pinit                           
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     00330000  ___text__                       
+0     00330b03  ___TI_printfi                   
+0     00330cea  _main                           
+0     00330f23  LL$$DIV                         
+0     00330f5f  LL$$MOD                         
+0     00330f99  ULL$$DIV                        
+0     00330fc8  ULL$$MOD                        
+0     0033102a  _ldexpl                         
+0     0033102a  _scalbnl                        
+0     003310d4  _qsort                          
+0     0033117a  FD$$ADD                         
+0     00331216  FD$$DIV                         
+0     003312a1  FD$$MPY                         
+0     00331324  FS$$DIV                         
+0     003313a7  FS$$SUB                         
+0     003313ac  FS$$ADD                         
+0     0033141f  _frexpl                         
+0     0033147b  FS$$MPY                         
+0     003314d5  _snprintf                       
+0     0033152f  _c_int00                        
+0     00331583  _atol                           
+0     003315b9  _atoi                           
+0     003315ea  ___TI_ltoa                      
+0     00331618  FD$$CMP                         
+0     00331642  L$$DIV                          
+0     00331651  L$$MOD                          
+0     0033165f  UL$$DIV                         
+0     00331666  UL$$MOD                         
+0     0033166c  C$$EXIT                         
+0     0033166c  _abort                          
+0     0033166e  _exit                           
+0     00331695  FS$$TOL                         
+0     003316be  _copy_in                        
+0     003316e2  _copysignl                      
+0     00331705  I$$DIV                          
+0     00331716  I$$MOD                          
+0     00331727  FD$$TOI                         
+0     00331748  _memcpy                         
+0     00331768  FD$$TOL                         
+0     00331787  LL$$CMP                         
+0     00331799  ULL$$CMP                        
+0     003317a5  I$$TOFD                         
+0     003317c2  FS$$TOFD                        
+0     003317de  L$$TOFD                         
+0     003317fa  L$$TOFS                         
+0     00331814  LL$$AND                         
+0     0033181c  LL$$OR                          
+0     00331824  LL$$XOR                         
+0     0033182c  FS$$CMP                         
+0     00331843  LL$$MPY                         
+0     00331857  UL$$TOFS                        
+0     0033186a  __args_main                     
+0     0033187b  _memccpy                        
+0     0033188b  FD$$SUB                         
+0     00331899  _strchr                         
+0     003318a4  U$$DIV                          
+0     003318a9  U$$MOD                          
+0     003318af  _strcmp                         
+0     003318b9  __register_unlock               
+0     003318bd  __register_lock                 
+0     003318c1  __nop                           
+0     003318c2  FD$$NEG                         
+0     003318d3  _strlen                         
+0     003318db  _wcslen                         
+0     003318e3  _memset                         
+0     003318ea  _strcpy                         
+0     003318ef  __system_pre_init               
+0     003318f1  __system_post_cinit             
+0     003318f2  ___etext__                      
+0     003318f2  __ctypes_                       
+0     003318f2  etext                           
+0     00331a93  ___cinit__                      
+0     00331a93  cinit                           
+0     0033fff6  code_start                      
+1     00000400  __stack                         
+1     00000700  __STACK_END                     
+1     0000c000  _results                        
+1     0000c100  _selftest_done                  
+1     0000c101  _nresults                       
+1     0000c102  _a16                            
+1     0000c103  _b16                            
+1     0000c104  _ua16                           
+1     0000c105  _ub16                           
+1     0000c106  _sel                            
+1     0000c107  _shift                          
+1     0000c10a  _a32                            
+1     0000c10c  _b32                            
+1     0000c10e  _ua32                           
+1     0000c110  _ub32                           
+1     0000c112  _f1                             
+1     0000c114  _f2                             
+1     0000c116  _f3                             
+1     0000c118  _d1                             
+1     0000c11a  _d2                             
+1     0000c11e  _a64                            
+1     0000c122  _b64                            
+1     0000c126  _ua64                           
+1     0000c12a  ___TI_enable_exit_profile_output
+1     0000c12c  ___TI_cleanup_ptr               
+1     0000c12e  ___TI_dtors_ptr                 
+1     0000c130  __lock                          
+1     0000c132  __unlock                        
+1     0000c134  _errno                          
+1     0000c140  _text                           
+abs   00000300  __STACK_SIZE                    
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+abs   ffffffff  ___pinit__                      
+abs   ffffffff  binit                           
+abs   ffffffff  pinit                           
+
+[114 symbols]

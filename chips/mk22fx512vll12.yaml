@@ -1,0 +1,11 @@
+# NXP/Freescale Kinetis MK22FX512VLL12: same die/pinout/peripherals as MK22FN1M0VLL12 (included below),
+# but 512 KB program flash + 128 KB FlexNVM (0x10000000) + 4 KB FlexRAM (0x14000000).
+include: mk22fn1m0vll12.yaml
+name: MK22FX512VLL12
+regs_file: mk22_regs.yaml
+memory:
+  - {name: FLASH, base: 0x00000000, size: 0x80000, kind: flash}
+  - {name: FlexNVM, base: 0x10000000, size: 0x20000, kind: flexnvm}
+  - {name: FlexRAM, base: 0x14000000, size: 0x1000, kind: flexram}
+  - {name: SRAM_L, base: 0x1FFF0000, size: 0x10000, kind: ram}
+  - {name: SRAM_U, base: 0x20000000, size: 0x10000, kind: ram}

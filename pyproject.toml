@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chipem"
+version = "0.1.0"
+description = "Description-driven microcontroller emulator (Kinetis K22 / Cortex-M4F first)"
+requires-python = ">=3.12"
+dependencies = ["unicorn", "capstone", "pyelftools", "pyyaml"]
+
+[project.optional-dependencies]
+test = ["pytest", "keystone-engine"]
+
+[project.scripts]
+chipem = "chipem.cli:main"
+
+[tool.setuptools]
+packages = { find = { include = ["chipem*"] } }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

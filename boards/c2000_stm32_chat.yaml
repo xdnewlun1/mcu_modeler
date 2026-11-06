@@ -1,0 +1,23 @@
+# A TMS320F28232 (C2000) and an STM32F405ZG chatting over one UART line pair: both sides initiate and both answer.
+#   Protocol (115200 8N1, ASCII lines ending "\r\n"): at boot "HELLO <NAME>"; every 5 ms of its own time
+#   "PING <n>" (n = 1, 2, ...); "PING <n>" is answered with "PONG <n>"; a received PONG toggles the LED pin and
+#   counts `pongs`; a received HELLO sets the peer flag and drives the peer pin high, and the first HELLO received
+#   is answered once with an own HELLO (so each side sends exactly two HELLO lines here; no HELLO loop).
+#   A (F28232)     uart_chat.asm: SCI-A on GPIO29 (TX) / GPIO28 (RX), RX by interrupt (PIE INT9.1), CPU timer 0 tick;
+#                  LED GPIO34, peer pin GPIO35, counters PINGN/PONGS/PEER/PINGSRX at 0x0100..0x0107.
+#   B (STM32F405)  uart_chat.c: USART1 on PA9 (TX) / PA10 (RX), RXNE interrupt, SysTick tick, 16 MHz HSI;
+#                  LED PB0, peer pin PB1, globals pongs / pings_answered / peer_seen / ping_n.
+# Wired with nets only (no `links:`): once the firmware muxes the pins, each net joins a UART TX signal to the
+# other chip's RX signal and the board creates an automatic one-way byte link per net (two links in all).
+# The F28232 configures SCI-A only after its ~6.6 ms PLL relock, so the STM32's boot HELLO and PING 1 are lost on
+# the wire (uart events dir=drop), as on hardware; the F28232's own HELLO (~6.6 ms) is answered once by the STM32,
+# and that answer raises GPIO35. Its first PING follows at ~11.6 ms.  SCI-A runs at 115741 baud, USART1 at 115108 baud (within 1 %).
+# Run:  chipem run --board boards/c2000_stm32_chat.yaml --for 40ms
+name: c2000_stm32_chat
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/uart_chat.c28img}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/uart_chat.elf}
+nets:
+  - {name: C2000_TX, pins: [A.GPIO29, B.PA10]}       # A.SCITXDA -> B.USART1_RX (auto UART link)
+  - {name: STM32_TX, pins: [B.PA9, A.GPIO28]}        # B.USART1_TX -> A.SCIRXDA (auto UART link)

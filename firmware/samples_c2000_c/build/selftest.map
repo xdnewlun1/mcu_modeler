@@ -1,0 +1,515 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Thu Nov  5 19:21:57 2026
+
+OUTPUT FILE NAME:   <build/selftest.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00330000   0000ff80  00001b5e  0000e422  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  00000169  00000e97  RWIX
+  RAML5                 0000d000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00330000    00001972     
+                  00330000    0000068e     rts2800_ml_eabi.lib : _printfi.c.obj (.text)
+                  0033068e    00000607                         : _printfi.c.obj (.text:__TI_printfi)
+                  00330c95    000002fc     selftest.obj (.text)
+                  00330f91    00000107     rts2800_ml_eabi.lib : ll_div28.asm.obj (.text)
+                  00331098    000000aa                         : s_scalbn.c.obj (.text)
+                  00331142    000000a6                         : qsort.c.obj (.text)
+                  003311e8    0000009c                         : fd_add28.asm.obj (.text)
+                  00331284    0000008b                         : fd_div28.asm.obj (.text)
+                  0033130f    00000083                         : fd_mpy28.asm.obj (.text)
+                  00331392    00000083                         : fs_div28.asm.obj (.text)
+                  00331415    00000078                         : fs_add28.asm.obj (.text)
+                  0033148d    0000005c                         : s_frexp.c.obj (.text)
+                  003314e9    0000005a                         : fs_mpy28.asm.obj (.text)
+                  00331543    0000005a                         : snprintf.c.obj (.text)
+                  0033159d    00000036                         : atol.c.obj (.text)
+                  003315d3    00000031                         : atoi.c.obj (.text)
+                  00331604    0000002e                         : copy_decompress_lzss.c.obj (.text:decompress:lzss)
+                  00331632    0000002e                         : _ltoa.c.obj (.text)
+                  00331660    0000002b                         : autoinit.c.obj (.text:__TI_auto_init_nobinit_nopinit)
+                  0033168b    0000002a                         : fd_cmp28.asm.obj (.text)
+                  003316b5    0000002a                         : l_div28.asm.obj (.text)
+                  003316df    00000029                         : exit.c.obj (.text)
+                  00331708    00000029                         : fs_tol28.asm.obj (.text)
+                  00331731    00000023                         : s_copysign.c.obj (.text)
+                  00331754    00000022                         : i_div28.asm.obj (.text)
+                  00331776    00000021                         : fd_tofs28.asm.obj (.text)
+                  00331797    00000021                         : fd_toi28.asm.obj (.text)
+                  003317b8    00000020                         : memcpy.c.obj (.text)
+                  003317d8    0000001f                         : fd_tol28.asm.obj (.text)
+                  003317f7    0000001e                         : ll_cmp28.asm.obj (.text)
+                  00331815    0000001d                         : i_tofd28.asm.obj (.text)
+                  00331832    0000001c                         : l_tofd28.asm.obj (.text)
+                  0033184e    0000001a                         : l_tofs28.asm.obj (.text)
+                  00331868    00000018                         : ll_aox28.asm.obj (.text)
+                  00331880    00000017                         : fs_cmp28.asm.obj (.text)
+                  00331897    00000015                         : boot28.asm.obj (.text)
+                  003318ac    00000014                         : ll_mpy28.asm.obj (.text)
+                  003318c0    00000013                         : ul_tofs28.asm.obj (.text)
+                  003318d3    00000011                         : args_main.c.obj (.text)
+                  003318e4    00000010                         : memccpy.c.obj (.text)
+                  003318f4    0000000e                         : fd_sub28.asm.obj (.text)
+                  00331902    0000000d                         : copy_zero_init.c.obj (.text:decompress:ZI:__TI_zero_init_nomemset)
+                  0033190f    0000000b                         : strchr.c.obj (.text)
+                  0033191a    0000000b                         : u_div28.asm.obj (.text)
+                  00331925    0000000a                         : strcmp.c.obj (.text)
+                  0033192f    0000000a                         : wcslen.c.obj (.text)
+                  00331939    00000009                         : _lock.c.obj (.text)
+                  00331942    00000009                         : fd_neg28.asm.obj (.text)
+                  0033194b    00000008     codestart.obj (.text)
+                  00331953    00000008     rts2800_ml_eabi.lib : copy_decompress_none.c.obj (.text:decompress:none)
+                  0033195b    00000008                         : strlen.c.obj (.text)
+                  00331963    00000007                         : memset.c.obj (.text)
+                  0033196a    00000005                         : strcpy.c.obj (.text)
+                  0033196f    00000002                         : pre_init.c.obj (.text)
+                  00331971    00000001                         : startup.c.obj (.text)
+
+.cinit     0    00331b1a    00000044     
+                  00331b1a    00000032     (.cinit..data.load) [load image, compression = lzss]
+                  00331b4c    00000006     (__TI_handler_table)
+                  00331b52    00000004     (.cinit..bss.load) [load image, compression = zero_init]
+                  00331b56    00000008     (__TI_cinit_table)
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000000     DSECT
+
+.init_array 
+*          0    00330000    00000000     UNINITIALIZED
+
+.const     0    00331972    000001a8     
+                  00331972    00000101     rts2800_ml_eabi.lib : ctype.c.obj (.const:.string:_ctypes_)
+                  00331a73    00000001     --HOLE-- [fill = 0]
+                  00331a74    00000026                         : _printfi.c.obj (.const:.string)
+                  00331a9a    0000001c                         : _printfi.c.obj (.const)
+                  00331ab6    00000008                         : s_frexp.c.obj (.const)
+                  00331abe    00000002     --HOLE-- [fill = 0]
+                  00331ac0    0000001c                         : s_scalbn.c.obj (.const)
+                  00331adc    0000001b     selftest.obj (.const:.string)
+                  00331af7    00000007     selftest.obj (.const:$P$T1$3)
+                  00331afe    00000002     --HOLE-- [fill = 0]
+                  00331b00    0000000e     selftest.obj (.const)
+                  00331b0e    0000000c     selftest.obj (.const:.string:src$1)
+
+.bss       1    0000c000    0000012b     UNINITIALIZED
+                  0000c000    00000100     selftest.obj (.bss:results)
+                  0000c100    00000028     selftest.obj (.bss:text)
+                  0000c128    00000003     selftest.obj (.bss)
+
+.data      1    0000c12c    0000003e     UNINITIALIZED
+                  0000c12c    00000006     rts2800_ml_eabi.lib : exit.c.obj (.data)
+                  0000c132    00000002                         : _lock.c.obj (.data:_lock)
+                  0000c134    00000002                         : _lock.c.obj (.data:_unlock)
+                  0000c136    00000001                         : errno.c.obj (.data)
+                  0000c137    00000009     --HOLE--
+                  0000c140    0000002a     selftest.obj (.data)
+
+MODULE SUMMARY
+
+       Module                       code   ro data   rw data
+       ------                       ----   -------   -------
+    build/obj_eabi/selftest/
+       selftest.obj                 764    60        341    
+       codestart.obj                10     0         0      
+    +--+----------------------------+------+---------+---------+
+       Total:                       774    60        341    
+                                                            
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml_eabi.lib
+       _printfi.c.obj               3221   66        0      
+       ll_div28.asm.obj             263    0         0      
+       ctype.c.obj                  0      257       0      
+       s_scalbn.c.obj               170    28        0      
+       qsort.c.obj                  166    0         0      
+       fd_add28.asm.obj             156    0         0      
+       fd_div28.asm.obj             139    0         0      
+       fd_mpy28.asm.obj             131    0         0      
+       fs_div28.asm.obj             131    0         0      
+       fs_add28.asm.obj             120    0         0      
+       s_frexp.c.obj                92     8         0      
+       fs_mpy28.asm.obj             90     0         0      
+       snprintf.c.obj               90     0         0      
+       atol.c.obj                   54     0         0      
+       atoi.c.obj                   49     0         0      
+       exit.c.obj                   41     0         6      
+       _ltoa.c.obj                  46     0         0      
+       copy_decompress_lzss.c.obj   46     0         0      
+       autoinit.c.obj               43     0         0      
+       fd_cmp28.asm.obj             42     0         0      
+       l_div28.asm.obj              42     0         0      
+       fs_tol28.asm.obj             41     0         0      
+       s_copysign.c.obj             35     0         0      
+       i_div28.asm.obj              34     0         0      
+       fd_tofs28.asm.obj            33     0         0      
+       fd_toi28.asm.obj             33     0         0      
+       memcpy.c.obj                 32     0         0      
+       fd_tol28.asm.obj             31     0         0      
+       ll_cmp28.asm.obj             30     0         0      
+       i_tofd28.asm.obj             29     0         0      
+       l_tofd28.asm.obj             28     0         0      
+       l_tofs28.asm.obj             26     0         0      
+       ll_aox28.asm.obj             24     0         0      
+       fs_cmp28.asm.obj             23     0         0      
+       boot28.asm.obj               21     0         0      
+       ll_mpy28.asm.obj             20     0         0      
+       ul_tofs28.asm.obj            19     0         0      
+       args_main.c.obj              17     0         0      
+       memccpy.c.obj                16     0         0      
+       fd_sub28.asm.obj             14     0         0      
+       _lock.c.obj                  9      0         4      
+       copy_zero_init.c.obj         13     0         0      
+       strchr.c.obj                 11     0         0      
+       u_div28.asm.obj              11     0         0      
+       strcmp.c.obj                 10     0         0      
+       wcslen.c.obj                 10     0         0      
+       fd_neg28.asm.obj             9      0         0      
+       copy_decompress_none.c.obj   8      0         0      
+       strlen.c.obj                 8      0         0      
+       memset.c.obj                 7      0         0      
+       strcpy.c.obj                 5      0         0      
+       pre_init.c.obj               2      0         0      
+       errno.c.obj                  0      0         1      
+       startup.c.obj                1      0         0      
+    +--+----------------------------+------+---------+---------+
+       Total:                       5742   359       11     
+                                                            
+       Stack:                       0      0         768    
+       Linker Generated:            0      68        0      
+    +--+----------------------------+------+---------+---------+
+       Grand Total:                 6516   487       1120   
+
+
+LINKER GENERATED COPY TABLES
+
+__TI_cinit_table @ 00331b56 records: 2, size/record: 4, table size: 8
+	.data: load addr=00331b1a, load size=00000032 bytes, run addr=0000c12c, run size=0000003e bytes, compression=lzss
+	.bss: load addr=00331b52, load size=00000004 bytes, run addr=0000c000, run size=0000012b bytes, compression=zero_init
+
+
+LINKER GENERATED HANDLER TABLE
+
+__TI_handler_table @ 00331b4c records: 3, size/record: 2, table size: 6
+	index: 0, handler: __TI_zero_init
+	index: 1, handler: __TI_decompress_lzss
+	index: 2, handler: __TI_decompress_none
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c000     300 (0000c000)     results
+
+0000c100     304 (0000c100)     text
+0000c128     304 (0000c100)     selftest_done
+0000c129     304 (0000c100)     nresults
+0000c12c     304 (0000c100)     __TI_enable_exit_profile_output
+0000c12e     304 (0000c100)     __TI_cleanup_ptr
+0000c130     304 (0000c100)     __TI_dtors_ptr
+0000c132     304 (0000c100)     _lock
+0000c134     304 (0000c100)     _unlock
+0000c136     304 (0000c100)     errno
+
+0000c140     305 (0000c140)     a16
+0000c141     305 (0000c140)     b16
+0000c142     305 (0000c140)     ua16
+0000c143     305 (0000c140)     ub16
+0000c144     305 (0000c140)     sel
+0000c145     305 (0000c140)     shift
+0000c146     305 (0000c140)     a32
+0000c148     305 (0000c140)     b32
+0000c14a     305 (0000c140)     ua32
+0000c14c     305 (0000c140)     ub32
+0000c14e     305 (0000c140)     f1
+0000c150     305 (0000c140)     f2
+0000c152     305 (0000c140)     f3
+0000c156     305 (0000c140)     a64
+0000c15a     305 (0000c140)     b64
+0000c15e     305 (0000c140)     ua64
+0000c162     305 (0000c140)     d1
+0000c166     305 (0000c140)     d2
+
+00331972    cc65 (00331940)     _ctypes_
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                           
+----  -------   ----                           
+0     003316df  C$$EXIT                        
+0     00331b56  __TI_CINIT_Base                
+0     00331b5e  __TI_CINIT_Limit               
+0     00331b5e  __TI_CINIT_Warm                
+0     00331b4c  __TI_Handler_Table_Base        
+0     00331b52  __TI_Handler_Table_Limit       
+1     00000700  __TI_STACK_END                 
+abs   00000300  __TI_STACK_SIZE                
+0     00331660  __TI_auto_init_nobinit_nopinit 
+1     0000c12e  __TI_cleanup_ptr               
+0     00331604  __TI_decompress_lzss           
+0     00331953  __TI_decompress_none           
+1     0000c130  __TI_dtors_ptr                 
+1     0000c12c  __TI_enable_exit_profile_output
+0     00331632  __TI_ltoa                      
+abs   ffffffff  __TI_pprof_out_hndl            
+0     00330b13  __TI_printfi                   
+abs   ffffffff  __TI_prof_data_size            
+abs   ffffffff  __TI_prof_data_start           
+0     00331902  __TI_zero_init_nomemset        
+0     003311e8  __c28xabi_addd                 
+0     0033141a  __c28xabi_addf                 
+0     00331868  __c28xabi_andll                
+0     0033168b  __c28xabi_cmpd                 
+0     00331880  __c28xabi_cmpf                 
+0     003317f7  __c28xabi_cmpll                
+0     00331809  __c28xabi_cmpull               
+0     00331284  __c28xabi_divd                 
+0     00331392  __c28xabi_divf                 
+0     00331754  __c28xabi_divi                 
+0     003316b5  __c28xabi_divl                 
+0     00330f91  __c28xabi_divll                
+0     0033191a  __c28xabi_divu                 
+0     003316d2  __c28xabi_divul                
+0     00331007  __c28xabi_divull               
+0     00331776  __c28xabi_dtof                 
+0     00331797  __c28xabi_dtoi                 
+0     003317d8  __c28xabi_dtol                 
+0     00331708  __c28xabi_ftol                 
+0     00331815  __c28xabi_itod                 
+0     00331832  __c28xabi_ltod                 
+0     0033184e  __c28xabi_ltof                 
+0     00331765  __c28xabi_modi                 
+0     003316c4  __c28xabi_modl                 
+0     00330fcd  __c28xabi_modll                
+0     0033191f  __c28xabi_modu                 
+0     003316d9  __c28xabi_modul                
+0     00331036  __c28xabi_modull               
+0     0033130f  __c28xabi_mpyd                 
+0     003314e9  __c28xabi_mpyf                 
+0     003318ac  __c28xabi_mpyll                
+0     00331942  __c28xabi_negd                 
+0     00331870  __c28xabi_orll                 
+0     003318f4  __c28xabi_subd                 
+0     00331415  __c28xabi_subf                 
+0     003318c0  __c28xabi_ultof                
+0     00331878  __c28xabi_xorll                
+abs   ffffffff  __c_args__                     
+1     00000400  __stack                        
+0     003318d3  _args_main                     
+0     00331897  _c_int00                       
+0     00331972  _ctypes_                       
+1     0000c132  _lock                          
+0     00331941  _nop                           
+0     0033193d  _register_lock                 
+0     00331939  _register_unlock               
+0     00331971  _system_post_cinit             
+0     0033196f  _system_pre_init               
+1     0000c134  _unlock                        
+1     0000c140  a16                            
+1     0000c146  a32                            
+1     0000c156  a64                            
+0     003316df  abort                          
+0     003315d3  atoi                           
+0     0033159d  atol                           
+1     0000c141  b16                            
+1     0000c148  b32                            
+1     0000c15a  b64                            
+0     0033fff6  code_start                     
+0     00331731  copysign                       
+0     00331731  copysignl                      
+1     0000c162  d1                             
+1     0000c166  d2                             
+1     0000c136  errno                          
+0     003316e1  exit                           
+1     0000c14e  f1                             
+1     0000c150  f2                             
+1     0000c152  f3                             
+0     0033148d  frexp                          
+0     0033148d  frexpl                         
+0     00331098  ldexp                          
+0     00331098  ldexpl                         
+0     00330cfa  main                           
+0     003318e4  memccpy                        
+0     003317b8  memcpy                         
+0     00331963  memset                         
+1     0000c129  nresults                       
+0     00331142  qsort                          
+1     0000c000  results                        
+0     00331098  scalbn                         
+0     00331098  scalbnl                        
+1     0000c144  sel                            
+1     0000c128  selftest_done                  
+1     0000c145  shift                          
+0     00331543  snprintf                       
+0     0033190f  strchr                         
+0     00331925  strcmp                         
+0     0033196a  strcpy                         
+0     0033195b  strlen                         
+1     0000c100  text                           
+1     0000c142  ua16                           
+1     0000c14a  ua32                           
+1     0000c15e  ua64                           
+1     0000c143  ub16                           
+1     0000c14c  ub32                           
+0     0033192f  wcslen                         
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                           
+----  -------   ----                           
+0     00330b13  __TI_printfi                   
+0     00330cfa  main                           
+0     00330f91  __c28xabi_divll                
+0     00330fcd  __c28xabi_modll                
+0     00331007  __c28xabi_divull               
+0     00331036  __c28xabi_modull               
+0     00331098  ldexp                          
+0     00331098  ldexpl                         
+0     00331098  scalbn                         
+0     00331098  scalbnl                        
+0     00331142  qsort                          
+0     003311e8  __c28xabi_addd                 
+0     00331284  __c28xabi_divd                 
+0     0033130f  __c28xabi_mpyd                 
+0     00331392  __c28xabi_divf                 
+0     00331415  __c28xabi_subf                 
+0     0033141a  __c28xabi_addf                 
+0     0033148d  frexp                          
+0     0033148d  frexpl                         
+0     003314e9  __c28xabi_mpyf                 
+0     00331543  snprintf                       
+0     0033159d  atol                           
+0     003315d3  atoi                           
+0     00331604  __TI_decompress_lzss           
+0     00331632  __TI_ltoa                      
+0     00331660  __TI_auto_init_nobinit_nopinit 
+0     0033168b  __c28xabi_cmpd                 
+0     003316b5  __c28xabi_divl                 
+0     003316c4  __c28xabi_modl                 
+0     003316d2  __c28xabi_divul                
+0     003316d9  __c28xabi_modul                
+0     003316df  C$$EXIT                        
+0     003316df  abort                          
+0     003316e1  exit                           
+0     00331708  __c28xabi_ftol                 
+0     00331731  copysign                       
+0     00331731  copysignl                      
+0     00331754  __c28xabi_divi                 
+0     00331765  __c28xabi_modi                 
+0     00331776  __c28xabi_dtof                 
+0     00331797  __c28xabi_dtoi                 
+0     003317b8  memcpy                         
+0     003317d8  __c28xabi_dtol                 
+0     003317f7  __c28xabi_cmpll                
+0     00331809  __c28xabi_cmpull               
+0     00331815  __c28xabi_itod                 
+0     00331832  __c28xabi_ltod                 
+0     0033184e  __c28xabi_ltof                 
+0     00331868  __c28xabi_andll                
+0     00331870  __c28xabi_orll                 
+0     00331878  __c28xabi_xorll                
+0     00331880  __c28xabi_cmpf                 
+0     00331897  _c_int00                       
+0     003318ac  __c28xabi_mpyll                
+0     003318c0  __c28xabi_ultof                
+0     003318d3  _args_main                     
+0     003318e4  memccpy                        
+0     003318f4  __c28xabi_subd                 
+0     00331902  __TI_zero_init_nomemset        
+0     0033190f  strchr                         
+0     0033191a  __c28xabi_divu                 
+0     0033191f  __c28xabi_modu                 
+0     00331925  strcmp                         
+0     0033192f  wcslen                         
+0     00331939  _register_unlock               
+0     0033193d  _register_lock                 
+0     00331941  _nop                           
+0     00331942  __c28xabi_negd                 
+0     00331953  __TI_decompress_none           
+0     0033195b  strlen                         
+0     00331963  memset                         
+0     0033196a  strcpy                         
+0     0033196f  _system_pre_init               
+0     00331971  _system_post_cinit             
+0     00331972  _ctypes_                       
+0     00331b4c  __TI_Handler_Table_Base        
+0     00331b52  __TI_Handler_Table_Limit       
+0     00331b56  __TI_CINIT_Base                
+0     00331b5e  __TI_CINIT_Limit               
+0     00331b5e  __TI_CINIT_Warm                
+0     0033fff6  code_start                     
+1     00000400  __stack                        
+1     00000700  __TI_STACK_END                 
+1     0000c000  results                        
+1     0000c100  text                           
+1     0000c128  selftest_done                  
+1     0000c129  nresults                       
+1     0000c12c  __TI_enable_exit_profile_output
+1     0000c12e  __TI_cleanup_ptr               
+1     0000c130  __TI_dtors_ptr                 
+1     0000c132  _lock                          
+1     0000c134  _unlock                        
+1     0000c136  errno                          
+1     0000c140  a16                            
+1     0000c141  b16                            
+1     0000c142  ua16                           
+1     0000c143  ub16                           
+1     0000c144  sel                            
+1     0000c145  shift                          
+1     0000c146  a32                            
+1     0000c148  b32                            
+1     0000c14a  ua32                           
+1     0000c14c  ub32                           
+1     0000c14e  f1                             
+1     0000c150  f2                             
+1     0000c152  f3                             
+1     0000c156  a64                            
+1     0000c15a  b64                            
+1     0000c15e  ua64                           
+1     0000c162  d1                             
+1     0000c166  d2                             
+abs   00000300  __TI_STACK_SIZE                
+abs   ffffffff  __TI_pprof_out_hndl            
+abs   ffffffff  __TI_prof_data_size            
+abs   ffffffff  __TI_prof_data_start           
+abs   ffffffff  __c_args__                     
+
+[116 symbols]

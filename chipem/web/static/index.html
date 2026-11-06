@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>chipem</title>
+  <script>
+    // theme before the first paint: the saved choice (localStorage "chipem.theme", set by the header toggle),
+    // else the system preference. app.js keeps following the system until the user picks a theme.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("chipem.theme"); } catch (e) { /* private mode */ }
+      if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/layout.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <!-- App shell (layout.css): one-row header; main = [board + pins tray] | splitter | sidebar of panes.
+       Every pane: .pane > .pane-head (collapse, title, count, tools, filter, copy, download) + .pane-body (own scroll).
+       Pane sizes / collapsed state persist in localStorage (app.js, "chipem.ui.v1"). -->
+  <header class="topbar">
+    <div class="title" title="">
+      <b class="chip-name" id="chipName">chipem</b>
+      <span class="chip-meta" id="chipMeta">connecting…</span>
+    </div>
+
+    <div class="controls" role="toolbar" aria-label="Emulator controls">
+      <button id="btnRun" class="btn primary" title="Run until paused (Space)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>Run
+      </button>
+      <button id="btnPause" class="btn" title="Pause (Space)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/></svg>Pause
+      </button>
+      <button id="btnStep" class="btn" title="Execute one instruction (S)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5v11l7-5.5zM11 2.5h2.5v11H11z"/></svg>Step
+      </button>
+      <button id="btnReset" class="btn" title="Reset the chip (R)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 1-5.2 3.7l1.4.5A4 4 0 1 0 8 4v2L4.8 3.3 8 .5z"/></svg>Reset
+      </button>
+      <div class="runfor">
+        <input id="runFor" type="text" value="100ms" spellcheck="false" aria-label="Run duration" title="Duration, e.g. 500us, 10ms, 1.5s (Enter runs)">
+        <button id="btnRunFor" class="btn" title="Run for the given virtual time">Run for</button>
+      </div>
+    </div>
+
+    <div class="chip-sel" id="chipSel" role="tablist" aria-label="Selected chip (1-9)" hidden></div>
+
+    <div class="readouts" aria-live="off">
+      <span class="status-badge connecting" id="status" title="">CONNECTING</span>
+      <span class="ro" title="Virtual time (board: the common board time)"><i>t</i><b id="tTime">—</b></span>
+      <span class="ro" title="Speed: virtual time per wall-clock second while running"><i>speed</i><b id="tSpeed">—</b></span>
+      <span class="ro ro-clk" title="Core clock of the selected chip"><i>clk</i><b id="tClock">—</b></span>
+      <span class="ro" title="Program counter of the selected chip"><i>pc</i><b id="tPc">—</b></span>
+      <span class="ro ro-insn" title="Instructions executed by the selected chip"><i>insn</i><b id="tInsn">—</b></span>
+      <span class="ro" title="Core cycles of the selected chip"><i>cyc</i><b id="tCycles">—</b></span>
+      <span class="conn" id="conn" title="Live stream (Server-Sent Events)">connecting</span>
+      <button id="btnTheme" class="btn small ghost theme-btn" type="button" title="Theme" aria-label="Switch theme">
+        <svg class="ico-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M7.3 0h1.4v2.6H7.3zM7.3 13.4h1.4V16H7.3zM0 7.3h2.6v1.4H0zM13.4 7.3H16v1.4h-2.6zM2.1 3.1l1-1 1.8 1.8-1 1zM11.1 12.1l1-1 1.8 1.8-1 1zM2.1 12.9l1.8-1.8 1 1-1.8 1.8zM11.1 3.9l1.8-1.8 1 1-1.8 1.8z"/></svg>
+        <svg class="ico-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 1.2A6.8 6.8 0 1 0 14.8 11 5.6 5.6 0 0 1 10.5 1.2z"/></svg>
+      </button>
+      <button id="btnHelp" class="btn small ghost" title="Keyboard shortcuts (?)" aria-expanded="false">?</button>
+    </div>
+  </header>
+
+  <div id="helpPop" class="help-pop" role="dialog" aria-label="Keyboard shortcuts" hidden>
+    <table>
+      <tr><th>Space</th><td>run / pause</td></tr>
+      <tr><th>S</th><td>step one instruction</td></tr>
+      <tr><th>R</th><td>reset</td></tr>
+      <tr><th>F</th><td>fit the board</td></tr>
+      <tr class="board-row"><th>W</th><td>wire mode (click two pins)</td></tr>
+      <tr class="board-row"><th>1–9</th><td>select chip</td></tr>
+      <tr class="board-row"><th>Del</th><td>remove the selected net</td></tr>
+      <tr><th>/</th><td>focus the filter of the pane under the pointer (over the board: find pin)</td></tr>
+      <tr><th>Esc</th><td>clear the filter / cancel</td></tr>
+      <tr><th>End</th><td>jump to the newest line (UART, events)</td></tr>
+      <tr><th>?</th><td>this list</td></tr>
+    </table>
+    <p class="help-filter">Filters: plain text = case-insensitive substring; <code>/regex/</code> = regular expression.</p>
+    <p class="help-board" id="pkgHint">Canvas: wheel zooms, drag pans, double-click fits; hover a pin for its data, click for the pin card, alt-click to drive it H → L → open.</p>
+  </div>
+
+  <main class="shell">
+    <div class="maincol">
+      <section class="pane package-panel" id="paneBoard" data-pane="board">
+        <div class="pane-head">
+          <h2 id="pkgTitle">Package</h2>
+          <div class="head-tools">
+            <button id="btnWire" class="btn small ghost board-only wire-btn" title="Wire mode (W): click a pin, then another pin, to connect them with a net · Esc: cancel" aria-pressed="false">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12h3V8h6V4h3v2h-1.5v3.5h-6V13H2z"/></svg>wire</button>
+            <button id="btnAddPart0" class="btn small ghost single-only" title="Add a part (switch, LED, gate, ...) wired to this chip's pins; the view switches to the board layout">+ part</button>
+          </div>
+        </div>
+        <div class="svg-wrap board-canvas-wrap">
+          <!-- board canvas: every chip's package, nets and UART links (chipem/web/static/board.js) -->
+          <svg id="pkg" class="board-canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+      </section>
+
+      <div class="split split-h" id="splitTray" role="separator" aria-orientation="horizontal" title="drag: resize the pins tray"></div>
+
+      <section class="pane pins-panel tray" id="panePins" data-pane="pins">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <div class="tabs" role="tablist">
+            <button class="tab on" id="tabPins" role="tab" aria-selected="true">Pins <span class="count" id="pinCount"></span></button>
+            <button class="tab" id="tabDisc" role="tab" aria-selected="false"
+                    title="What the firmware did with each pin: configuring code, reads/writes, interrupts, floating inputs">Discovery</button>
+          </div>
+          <span class="pins-chip" id="pinsChip"></span>
+          <div class="head-tools" id="discTools" hidden>
+            <label class="toggle" title="Compare with the static guess of 'chipem info'"><input type="checkbox" id="discStatic" checked> static</label>
+            <button id="discRefresh" class="btn small">refresh</button>
+          </div>
+          <div class="head-tools" id="pinTools">
+            <label class="toggle" title="only pins that changed since load / reset"><input type="checkbox" id="changedOnly"> changed</label>
+            <label class="toggle" title="hide power pins and disabled pins"><input type="checkbox" id="hideDisabled" checked> hide pwr/off</label>
+          </div>
+          <div class="pane-tools">
+            <input id="pinFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter pins">
+            <button class="btn small ghost" id="pinCopy" title="Copy the visible rows as tab-separated text (pastes into a spreadsheet)">copy</button>
+            <button class="btn small ghost" id="pinCsv" title="Download the visible rows as CSV">csv</button>
+          </div>
+        </div>
+        <div class="pane-body">
+          <div class="table-wrap" id="pinWrap">
+            <table id="pinTable" class="pins">
+              <thead>
+                <tr>
+                  <th data-k="num" class="num">#</th>
+                  <th data-k="short">pin</th>
+                  <th data-k="owner">owner / function</th>
+                  <th data-k="direction">dir</th>
+                  <th data-k="level">level</th>
+                  <th data-k="pull">pull</th>
+                  <th data-k="external">external</th>
+                  <th data-k="net">net</th>
+                  <th data-k="name">datasheet name</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="discPane" class="disc" hidden>
+            <div class="table-wrap">
+              <table id="discTable" class="pins">
+                <thead>
+                  <tr>
+                    <th class="num">#</th><th>pin</th><th>final role</th><th>configured by</th><th>at</th>
+                    <th class="num">reads</th><th class="num">writes</th><th class="num">changes</th><th class="num">irqs</th>
+                    <th>static</th><th>notes</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <pre id="discText" class="term disc-text"></pre>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="split split-v" id="splitSide" role="separator" aria-orientation="vertical" title="drag: resize the sidebar"></div>
+
+    <aside class="sidebar" id="sidebar">
+      <section class="pane uart-panel" id="paneUart" data-pane="uart">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <h2>UART</h2>
+          <div class="head-tools">
+            <select id="uartSel" aria-label="UART"></select>
+            <select id="uartMode" aria-label="View" title="lines: TX lines of the selected UART and its link peer (timestamps available); raw: the selected UART's complete output">
+              <option value="lines">lines</option>
+              <option value="raw">raw</option>
+            </select>
+            <label class="toggle" id="uartTsWrap" title="prefix each line with the virtual time of its first byte"><input type="checkbox" id="uartTs"> time</label>
+            <label class="toggle" id="uartAllWrap" title="show the TX lines of every UART"><input type="checkbox" id="uartAll"> all</label>
+          </div>
+          <div class="pane-tools">
+            <input id="uartFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter UART lines">
+            <button class="btn small ghost" id="uartCopy" title="Copy the visible text">copy</button>
+            <button class="btn small ghost" id="uartDl" title="Download as .txt (raw: the complete output from the emulator; lines: the transcript as shown)">txt</button>
+            <button class="btn small ghost" id="uartClear" title="Clear the view (the emulator keeps the output)">clear</button>
+          </div>
+        </div>
+        <div class="pane-body">
+          <div class="log-wrap">
+            <pre id="uartOut" class="term" aria-live="off" tabindex="0"></pre>
+            <button class="follow" id="uartFollow" type="button" hidden title="scrolled up: new output is not followed · click or End: jump to the end"></button>
+          </div>
+          <form id="uartForm" class="uart-input">
+            <input id="uartText" type="text" placeholder="send (escapes: \n \r \xNN)" spellcheck="false" autocomplete="off">
+            <select id="uartEol" aria-label="Line ending">
+              <option value="\r\n">CRLF</option>
+              <option value="\n">LF</option>
+              <option value="\r">CR</option>
+              <option value="">none</option>
+            </select>
+            <span id="uartDrops" class="uart-drops" hidden title="bytes the receiver lost: not listening (RX disabled, clock gated, in reset, RX pin not muxed) or overrun, as on hardware"></span>
+            <button class="btn small" type="submit">send</button>
+          </form>
+          <details class="link-mon-wrap" id="linkMonWrap" hidden>
+            <summary>link monitor <span class="count" id="linkMonCount"></span></summary>
+            <div id="linkMon" class="link-mon" aria-label="Link monitor: last bytes crossing each link"></div>
+          </details>
+        </div>
+      </section>
+      <div class="split split-p" role="separator" aria-orientation="horizontal"></div>
+
+      <section class="pane events-panel" id="paneEvents" data-pane="events">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <h2>Events <span class="count" id="evCount"></span></h2>
+          <div class="pane-tools">
+            <input id="evFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter events">
+            <button class="btn small ghost" id="evCopy" title="Copy the visible rows">copy</button>
+            <button class="btn small ghost" id="evTxt" title="Download every kept event matching the kind/chip/text filters as .txt (from the emulator, up to 20000 events)">txt</button>
+            <button class="btn small ghost" id="evCsv" title="Same as .csv">csv</button>
+            <button class="btn small ghost" id="evClear" title="Clear the view">clear</button>
+          </div>
+          <div class="kind-filter" id="kindFilter"></div>
+        </div>
+        <div class="pane-body">
+          <div class="log-wrap">
+            <div id="events" class="events" role="log" tabindex="0"></div>
+            <button class="follow" id="evFollow" type="button" hidden title="scrolled up: new events are not followed · click or End: jump to the end"></button>
+          </div>
+        </div>
+      </section>
+      <div class="split split-p board-only" role="separator" aria-orientation="horizontal"></div>
+
+      <section class="pane wiring-panel board-only" id="paneNets" data-pane="nets" aria-label="Nets">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <h2>Nets <span class="count" id="netCount"></span></h2>
+          <div class="pane-tools">
+            <input id="netFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter nets">
+            <button class="btn small ghost" id="netCopy" title="Copy the visible nets (name, level, pins)">copy</button>
+            <button class="btn small ghost" id="netCsv" title="Download the visible nets as CSV">csv</button>
+            <button id="btnExport" class="btn small ghost" title="Download the current board (chips, firmware, nets, links, parts) as board YAML">yaml</button>
+          </div>
+        </div>
+        <div class="pane-body">
+          <div id="netList" class="net-list" aria-label="Nets: hover to highlight, click to select, Delete removes the selected net"></div>
+        </div>
+      </section>
+      <div class="split split-p board-only" role="separator" aria-orientation="horizontal"></div>
+
+      <section class="pane board-only" id="paneLinks" data-pane="links" aria-label="UART links">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <h2>Links <span class="count" id="linkCount"></span></h2>
+          <div class="pane-tools">
+            <input id="linkFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter links">
+            <button class="btn small ghost" id="linkCopy" title="Copy the visible links">copy</button>
+            <button class="btn small ghost" id="linkCsv" title="Download the visible links as CSV">csv</button>
+          </div>
+        </div>
+        <div class="pane-body">
+          <div id="linkList" class="link-list"></div>
+          <div class="link-add">
+            <select id="linkFrom" aria-label="link from (TX)"></select>
+            <span class="arrow-txt">→</span>
+            <select id="linkTo" aria-label="link to (RX)"></select>
+            <label class="toggle" title="also carry bytes back (to → from)"><input type="checkbox" id="linkBidir" checked> both</label>
+            <button id="linkAdd" class="btn small">add</button>
+          </div>
+        </div>
+      </section>
+      <div class="split split-p board-only" role="separator" aria-orientation="horizontal"></div>
+
+      <section class="pane board-only" id="paneParts" data-pane="parts" aria-label="Parts">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <h2>Parts <span class="count" id="partCount"></span></h2>
+          <div class="pane-tools">
+            <input id="partFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter parts">
+            <button class="btn small ghost" id="partCopy" title="Copy the visible parts (id, type, state, ports)">copy</button>
+            <button class="btn small ghost" id="partCsv" title="Download the visible parts as CSV">csv</button>
+            <button id="btnAddPart" class="btn small" title="Add a switch, button, LED, probe, logic gate, ... and wire its ports">+ part</button>
+          </div>
+        </div>
+        <div class="pane-body">
+          <div id="partList" class="part-list" aria-label="Board parts: inputs, indicators and logic"></div>
+        </div>
+      </section>
+      <datalist id="netPinList"></datalist>
+    </aside>
+  </main>
+
+  <div id="partDlg" class="dialog" role="dialog" aria-labelledby="pdTitle" hidden>
+    <div class="dlg-head">
+      <h3 id="pdTitle">Add part</h3>
+      <button type="button" id="pdClose" class="btn small ghost" title="Close (Esc)">×</button>
+    </div>
+    <form id="partForm" autocomplete="off">
+      <label class="pd-row"><span>type</span><select id="pdType"></select></label>
+      <label class="pd-row"><span>id</span><input type="text" id="pdId" placeholder="automatic (SW1, LED2, U1, ...)" spellcheck="false"></label>
+      <div id="pdParams" class="pd-params"></div>
+      <div id="pdPorts" class="pd-ports"></div>
+      <div class="dlg-foot">
+        <button type="button" id="pdCancel" class="btn small">Cancel</button>
+        <button type="submit" class="btn small primary">Add part</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+</body>
+</html>

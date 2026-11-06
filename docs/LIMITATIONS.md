@@ -1,0 +1,284 @@
+# Known limitations
+
+This document lists everything known to be approximate or missing, taken from the code and from
+[PLAN.md](PLAN.md). The model is good enough to see what firmware does with its pins, clocks, interrupts
+and UARTs, and to follow its control flow. It is not cycle-accurate, and most peripherals beyond
+clocks/GPIO/timers/UART are stubs.
+
+## Timing model
+
+- **One cycle per instruction.** Virtual time is the instruction count divided by the core clock. Flash wait
+  states, pipeline refills on branches, multi-cycle instructions (`ldm/stm`, `udiv/sdiv`, VFP `vdiv/vsqrt`,
+  `push/pop` of many registers) and bus wait states are not modelled. Busy-wait delays and bit-banged
+  protocols run at a different speed than on silicon. In fast mode blinky's half period is 5000
+  instructions = 0.239 ms at 20.97 MHz. The cycle count on real hardware depends on the flash and cache
+  configuration.
+- **The `instructions` line of the `chipem run` summary is really virtual cycles.** It includes time skipped
+  while sleeping in WFI, so idle firmware shows hundreds of "M insn/s".
+- **Exception entry and return cost zero cycles.** There is no 12-cycle entry latency, no late-arrival or
+  tail-chaining optimisation timing, and no lazy-stacking cost.
+- **Exceptions are taken between slices.** A peripheral or MMIO write that pends a preempting exception asks
+  the core to stop right after the current instruction. This only works when that instruction is a plain
+  single-register `str/strb/strh` outside an IT block. Otherwise the exception is taken at the end of the
+  slice, up to `max_slice` = 2000 instructions later (`chipem run --max-slice N` lowers this). Scheduler
+  events (timers, stimulus, UART pacing) always end a slice at their exact cycle, so timer interrupts are
+  not late.
+- **Fast-mode instruction counts depend on a Unicorn internal.** Exact counts for early stops come from
+  reading Unicorn's private `emu_counter` through ctypes, located by calibration at import
+  (`core/unicorn_cm.py`). If a Unicorn upgrade breaks the calibration, early stops are charged half the
+  slice and handler slices shrink to 256 instructions. Timing becomes visibly approximate. `--precise`
+  avoids the dependency and runs about 10x slower.
+- **Clock switching is instantaneous.** MCG status bits (IREFST, CLKST, PLLST/LOCK0, OSCINIT0) mirror
+  control writes immediately, with no FLL settle or PLL lock time. Clocks are ideal: no IRC trim, no
+  jitter, and the external crystal is 8 MHz unless the MCG block's `params.ext_hz` says otherwise.
+- **SysTick** counts at the core clock with `CSR.CLKSOURCE=1` and at core / `systick_ext_div` with
+  `CLKSOURCE=0` (chip YAML, default 8: the STM32's HCLK/8). The K22 has no external reference (K22P100M120SF5V2RM
+  §3.2.1.2 "System Tick Timer": the clock is always FCLK, CLKSOURCE always reads 1, SYST_CALIB NOREF=1 and
+  TENMS=0); its YAML sets `systick_ext_div: 0`, which models exactly that. For chips with a reference,
+  `SYST_CALIB` (TENMS) is computed from the clock when the chip is built, not when it changes.
+- **Wall-clock speed** varies with what the firmware does. Expect about 100–850 M virtual cycles/s while
+  sleeping or in pure computation, about 3–10 M/s in loops that hammer modelled MMIO (each access is a
+  Python call), and about 10 M/s in `--precise` mode. Code that polls a peripheral every few instructions
+  is the slow case. Before the SPI model existed, the Withings image dropped from 140 M/s to 9 M/s once
+  it started polling SPI0.
+
+## Core and exception model
+
+- **Eager FP stacking.** When CONTROL.FPCA is set, the 26-word frame (s0–s15, FPSCR) is written at
+  exception entry. `FPCCR.LSPEN` lazy stacking and `FPCAR` are not modelled (FPCCR.ASPEN is honoured).
+  Frames are architecturally identical, so software cannot tell the difference except through FPCAR.
+- **All faults escalate to HardFault.** CFSR/HFSR/BFAR bits are set, but MemManage, BusFault and
+  UsageFault handlers are never entered separately, whatever SHCSR enables. A fault in HardFault or NMI,
+  or with FAULTMASK set, is a lockup: the run stops with exit status 3.
+- **No MPU.** The MPU registers at 0xE000ED90 and the Kinetis system MPU (0x4000D000) are storage only.
+- **No debug blocks.** DWT, ITM, FPB and TPIU are RAM-like auto-stubs. `DWT_CYCCNT` does not count, so
+  delays built on it never finish (or finish at once, depending on the code). ITM stimulus writes are not
+  captured. There is no GDB stub and no semihosting. `bkpt` stops the run with `BREAKPOINT`.
+- **Sleep.** WFI and WFE both sleep until an enabled exception could preempt (WFE has no event register;
+  SEV is a no-op). `SCR.SLEEPDEEP` and `SLEEPONEXIT` are stored but ignored.
+- **NVIC priority bits** are fixed at 4 for ARMv7-M and 2 for ARMv6-M, regardless of the part.
+- **NVIC inputs** are level lines with a latched pending bit, as on silicon: asserting a line pends the IRQ,
+  deasserting it does not clear a pending state that was already latched (only taking the exception or an
+  `ICPR` write does). A peripheral flag cleared before its IRQ was serviced therefore still causes one handler
+  entry, so firmware that enables an IRQ late should clear its pending bit first (CMSIS
+  `NVIC_ClearPendingIRQ`). While the line stays asserted the IRQ re-pends on handler return.
+- `AIRCR.VECTCLRACTIVE` clears the active list. `VECTRESET` and `SYSRESETREQ` both perform a full chip
+  reset.
+
+## Memory
+
+- **Flash is writable by ordinary stores.** Real silicon would bus-fault. The FTFE model also writes flash
+  directly. Firmware that relies on a store to flash faulting will behave differently.
+- FlexNVM and FlexRAM are plain memory. FlexRAM EEPROM emulation (EEE) is not modelled: `PGMPART` and
+  `SETRAM` are acknowledged only.
+- No flash cache, prefetch buffer or FMC behaviour (FMC is a stub).
+- Unmapped addresses outside the two catch-all windows (0x40000000–0x400FFFFF, 0xE0000000–0xE00FFFFF)
+  bus-fault. Inside them, the first access creates a RAM-like 4 KB stub.
+
+## Peripherals
+
+**Stubs.** I2C0–2, FTM0–3, USB0, USBDCD, CAN0, I2S0, CRC, CMP, DAC0, VREF, EWM, CMT, SDHC,
+FlexBus, AXBS, AIPS, MPU, FMC and MCM have no behaviour. They read back what was written and start at 0,
+not at the SVD reset value. Firmware that waits for a status bit set by hardware (I2C byte complete,
+CRC result, FTM overflow) loops forever. The chip YAML's `model:` fields are the authoritative
+list.
+
+Notes on the modelled peripherals:
+
+| model | what is missing or approximate |
+|---|---|
+| SIM | Clock-gate violations log one `warn` per peripheral; silicon bus-faults. Only PORT, ADC and FTFE check their gate. |
+| MCG/OSC | No lock/settle delays; no loss-of-clock or loss-of-lock monitors; IRC trim registers stored only. |
+| PORT | Digital filter, slew rate, drive strength and open-drain (ODE) do not affect pin levels: an ODE output driving H shows H. IRQC DMA-request modes only set ISF. |
+| GPIO | No electrical contention: an output always wins over external stimulus. Floating inputs read 0 (one `warn`). |
+| WDOG | The unlock window lasts at least 4096 core cycles (silicon: 256 bus clocks). Window violations and writes outside the unlock window log a `warn` instead of resetting. Test mode is not modelled. |
+| PIT | Lifetime timer (LTMR64) not modelled. |
+| LPTMR | Pulse-counter mode (TMS=1) is not supported (logged once). MCGIRCLK is fixed at 32.768 kHz and OSCERCLK at 8 MHz. |
+| UART | The TX pin does not toggle: it shows its idle level (output, H) and RX is an input (level from the pull or the net, else `X`). RX behaves like silicon: no input queue; a byte arriving with C2.RE clear, the SIM gate off or no pin muxed to UARTn_RX is dropped, and one arriving while RDRF/OR is set is lost with S1.OR (OR & C3.ORIE drives UARTn_ERR). No parity, framing or noise errors, no break, LIN, IrDA or ISO-7816. TX/RX buffers follow RM ch. 49: UART0/1 have 8-entry FIFOs (`fifo_depth: 8` in the chip YAML; PFIFO reports the size), UART2–4 one entry; the effective depth is 1 until PFIFO.TXFE/RXFE is set. TDRE/RDRF follow the TWFIFO/RWFIFO watermarks, a byte arriving with the buffer full is lost with OR and SFIFO.RXOF, a write to a full transmit buffer sets TXOF, reading D from an empty buffer sets RXUF (silicon's resulting FIFO-pointer misalignment is not modelled), CFIFO flushes and the RXUFE/TXOFE/RXOFE error interrupts work. The transmitter is double buffered (buffer + shift register) and setting C2.TE shifts out a one-character idle preamble first. DMA requests (C5.RDMAS/TDMAS) are supported. Baud pacing is modelled, so TDRE/TC/RDRF timing follows the configured baud rate; UART0/1 run from the core clock, UART2–5 from the bus clock. |
+| ADC | Hardware triggers (SC2.ADTRG) come only from the PDB model; with ADTRG=1 an SC1n write just selects the channel. Calibration completes instantly. Conversion time is fixed (`params.conv_ns`, default 4 µs). Values come from `--adc`/`set_channel`, not from pin levels; unset channels read 0. |
+| PDB | Only the software trigger (TRGSEL=15) starts the counter; other trigger sources are logged once and never fire. Pre-triggers drive ADC0/ADC1 SC1A/SC1B (pre-triggers 2–7 ignored); back-to-back chaining follows ADC completion (ch0 pre-trigger 0 chains from ADC1 SC1B). LDMOD=1/2/3 load buffered values at the next wrap or trigger (no distinction). Sequence errors flag when the target COCO is still set, but the conversion still starts. DAC interval triggers and pulse-out (POEN/POnDLY) are storage only. One-shot mode leaves CNT at 0. |
+| DMA/DMAMUX | Transfers complete instantly (zero bus time); no channel arbitration, priorities or bandwidth control. DMAMUX periodic triggering (PIT TRIG) is not modelled (logged once; the channel behaves as untriggered). Only peripherals that call `dma_request` (e.g. UART, ADC, DSPI) can request DMA. |
+| DSPI (SPI0–2) | Master mode only. Frames transfer instantly, with no baud rate or CS-to-SCK delays and no continuous SCK. MISO reads all ones unless a responder is attached: `--spi-flash` (SPI NOR flash device) or a `responder(tx, pcs, bits)` callback in Python. The SPI pins do not toggle: SCK/SOUT show output L (CPOL is not looked at), PCS output H, SIN an input. |
+| RTC | Driven by virtual time. Keeps state across chip resets (VBAT domain) but not across a new Session. TCR compensation stored only. |
+| FTFE | Commands complete synchronously (CCIF never reads 0, no erase/program time). Program-only-clears-bits is honoured. Security, backdoor key and protection registers are loaded from the flash configuration field, but protection is not enforced on writes. |
+| SMC/PMC/LLWU | Power modes are not modelled: `SMC_PMCTRL` STOPM is logged and stored, PMSTAT stays RUN, WFI is plain sleep. LLS/VLLS entry, VLLS wake-up through reset, and LLWU wake-up flags (always 0) are missing. |
+| RCM | Reports the last reset cause from the `reset` event reason (POR, watchdog, lockup, SYSRESETREQ). |
+| VBAT | Plain RAM that survives chip reset. |
+
+**K22 checks against the reference manual** (K22P100M120SF5V2RM Rev. 5, which covers the "A" mask parts
+MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet K22P100M120SF5 Rev 4):
+
+- Confirmed: WDOG configuration time 256 bus clocks and unlock within 20 bus clocks (§24.3.1, §24.3.2);
+  LPTMR reset only on POR/LVD (§40.4.1, §6.2.3.3); FEI reset clock 32.768 kHz × 640 = 20.97 MHz (§25.3.4 DCO
+  range table, §25.5.2); UART0/1 on the system clock, UART2–4 on the bus clock (Table 5-2); boot only from internal
+  flash, no ROM bootloader (§6.3.1).
+- Corrected: DMAMUX sources 11 and 46 are Reserved (Table 3-25), so `kinetis.dma.SOURCES` no longer lists
+  UART5/DAC1.
+- Removed: UART5 and DAC1 are not on the 100-pin part (0x400EB000 is unassigned, Table 4-3 in §4.5.3; IRQs
+  68/69/72 reserved in Table 3-5; no UART5 or DAC1 pins in the data sheet). The MK22F12 SVD has them because it
+  also covers larger packages. The chip YAML lists them under `omitted:` (with the reason), names IRQs 68/69/72
+  `Reserved84/85/88`, and `svd2chip --check` reports them as OMITTED. Accesses to 0x400CD000/0x400EB000 fall into
+  the auto-stub window (silicon would bus-fault).
+
+## STM32F405ZG
+
+- **No flash alias at 0x00000000.** The boot alias is not mapped; `vtor: 0x08000000` makes the core fetch the
+  vector table from flash. Code that reads or jumps through address 0 (or relies on the alias for a system
+  memory/SRAM boot) bus-faults.
+- **USART** is single-buffered like silicon: a byte arriving while RXNE is set sets ORE and is lost; bytes arriving
+  with UE/RE clear, the RCC enable off, the RCC reset bit set or no pin in AF mode for USARTn_RX are dropped; no
+  parity/framing/noise errors, no LIN, smartcard, IrDA or hardware flow control; DMA requests are not generated.
+- **Timers** (TIM1–8) model the time base and the update interrupt only: no capture/compare, PWM output on pins,
+  encoder mode, master/slave triggers or DMA. TIM9–14 are stubs.
+- **WWDG** is storage only (a `warn` when enabled); IWDG is modelled.
+- RCC clock switches and PLL lock complete instantly; clock gates only `warn` on access to a gated-off block.
+- ADC, DAC, SPI, I2C, CAN, DMA, SDIO, USB, FSMC, RTC, RNG and CRC are RAM-like stubs.
+- **What ST's HAL meets** (`firmware/samples_stm32_hal`, STM32CubeF4 HAL 1.8.5): HSE/PLL ready flags follow their
+  enable bits at once, so `HSE_STARTUP_TIMEOUT`/PLL timeouts never fire and a missing crystal cannot be simulated;
+  the clock security system and `RCC_CIR` ready interrupts are not modelled. FLASH `ACR` latency, prefetch and
+  caches are stored but cost nothing (1 cycle per instruction). `PWR_CSR.VOSRDY` is always 1. DMA is a stub, so
+  `HAL_UART_Transmit_DMA`/`Receive_DMA` (and any `*_DMA` HAL call) never complete; use polling or `_IT` calls.
+  The checkout has no libc/compiler-rt for Cortex-M, so HAL builds must bring `memset`/`memcpy`, `__aeabi_memclr*`
+  and `__aeabi_uldivmod` themselves (`firmware/samples_stm32_hal/aeabi_rt.c`, `startup.c`).
+
+## TMS320F28232 (C2000)
+
+- **ISA checked against TI's tools**: every `isa.yaml` entry assembles to the same words as TI's cl2000 25.11.1
+  assembler, and our disassembler agrees with `dis2000` on every C28x and FPU32 instruction of TI's run-time
+  libraries (about 600,000 instructions). TI-compiled C runs: `firmware/samples_c2000_c` (EABI and COFF builds, RTS
+  `_c_int00`, soft-float and 64-bit helpers) behaves like the assembler samples. Not covered: FPU64 and the fast
+  integer division (FINTDIV) instructions of newer C28x devices, VCU/TMU/CLA, and `SXTB AX` (listed in SPRU430F
+  without an opcode; it traps as an illegal instruction). See [C28X_CORE.md](C28X_CORE.md).
+- **No pipeline timing**: one cycle per instruction, no pipeline stalls, wait states or flash timing. `RPT` is
+  atomic, and instructions the manual marks "not repeatable" are still repeated (only flow control runs once).
+  The F28232 has no FPU (`fpu: false`): FPU32 opcodes, including `RPTB`, trap as illegal instructions there, as on
+  silicon; FPU32 and `RPTB` run on F2833x-class chips (`fpu: true`).
+- **AMODE = 1** (C2xLP addressing) is executed but the assembler/disassembler only know the AMODE = 0 syntax.
+- **Loaders**: TI COFF2 and C2000 ELF (EABI, the cl2000 v25 default) load sections/segments at their load address,
+  checked with real cl2000 25.11.1 output. `--rom_model` (.cinit copied by `_c_int00` at run time) works for both;
+  `--ram_model` load-time initialisation is applied for COFF only (EABI's compressed `.cinit` is not decoded).
+  `.ebss`/`.bss` are not zeroed by the loader (RAM resets to 0 anyway).
+- **EALLOW protection is enforced**: a write to a protected register without EALLOW is ignored (one `warn` per
+  block), like silicon. Missing `EALLOW` in firmware shows up as configuration that does nothing.
+- **Storage only**: ePWM/HRPWM, eCAP, eQEP, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
+  no behaviour; the ADC supports software start only (no ePWM SOC, no continuous mode); SPI MISO reads 0xFFFF.
+- **Clock gates only warn** (PCLKCR); silicon ignores accesses to an unclocked peripheral.
+- SCI: overrun is modelled (OE/RXERROR without FIFO: the unread character is overwritten; RXFFOVF with the FIFO:
+  the 17th character is not stored, our reading of the guide's ambiguous wording); bytes arriving in SW RESET, with
+  RXENA clear, the PCLKCR0 gate off or GPIO not muxed to SCIRXDx are dropped. No framing/parity errors, break
+  detection, FFTXDLY or autobaud. No boot ROM (reset jumps to the
+  image entry or 0x33FFF6), CSM always unsecured, flash writable by the CPU, no input qualification.
+- The interpreter runs about 2–5 M instructions/s, 1/20 to 1/50 of real time at 100 MHz.
+
+More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
+
+## Pins
+
+- Levels are digital (H/L/X). There are no voltages, so analog pins do not feed the ADC.
+- Peripheral functions (UART, SPI, FTM, I2C) do not toggle pin levels with their traffic. A peripheral-owned pin
+  shows the **idle** state of its signal from the family signal table (`chipem/periph/<family>/signals.py`, rule
+  in `docs/CONTRACTS.md`): UART/SCI TX is an output at H, RX an input, SPI SCK/MOSI an output at L (CPOL is not
+  looked at), chip selects an output at H, I2C pins open-drain (H only when pulled), timer/PWM channels and clock
+  outputs an output at L, ADC/CMP/DAC analog, JTAG/SWD TCK/TMS/TDI inputs and TDO/SWO an output at H. Signals
+  the table does not know keep direction `none` and level `X`. On a board (`--board`), a TX pin therefore drives
+  its net H and the connected RX reads H, but bytes travel only over a `links:` entry (or the automatic UART link
+  a TX→RX net creates).
+- Board lockstep: cross-chip effects (net edges, UART link bytes) can arrive up to one quantum (default 10 µs)
+  late when the receiving chip is ahead in time.
+- UART input (links, `--uart-in`, `--at TIME:UARTn=TEXT`, shell, web) is never queued for the firmware: each byte
+  arrives at its stop-bit time and is taken or dropped as on silicon (`uart` events with `dir=drop` and a
+  `reason`; the run summary counts them). Host input is paced at the receiving UART's current baud (115200 8N1
+  while it has none). `--uart-in` starts at t=0, so bytes sent before the firmware has enabled its receiver are
+  lost; use `--at` to type later. A chip with no pin offering a UART's RX function receives host input without a
+  pin check but nothing over board links.
+- A net is a perfect wire: there is no propagation delay, drive strength or open-drain modelling. A peripheral
+  output contributes its idle level as a strong driver; a peripheral input or open-drain pin contributes only its
+  pull resistor.
+- Pin identifiers come from the chip YAML's `gpio_name_format` (`PTC5`, `PA9`, `GPIO34`).
+- The idle level is fixed: a PWM channel at 100 % duty, an inverted-polarity output (FTM ELSnA, TIM CCxP) or a
+  CPOL=1 SPI clock still shows L. The idle state is applied whenever the owner changes and at reset (JTAG/SWD
+  pins on Kinetis and STM32).
+
+## Board parts
+
+- Parts are digital only (H/L/X/Z): no analog parts (potentiometers, RC filters, voltage dividers), and an LED has no
+  current or brightness: it is lit while its net is at the active level.
+- Logic is zero-delay combinational: no propagation delay, rise time, setup/hold checks or metastability; a
+  flip-flop samples `d` as it is at the clock edge (an edge that changes `d` in the same event may see the old or
+  new value depending on wiring order). Combinational loops are detected (16 re-resolutions of a net in one event),
+  warned once and left at their last level, so ring oscillators do not oscillate.
+- No bus-level parts (I2C/SPI/UART devices are `devices:`/`links:`, not parts), and parts cannot carry UART bytes
+  (peripheral pins do not toggle with traffic).
+- Timed parts (pulse, pattern) run on the first chip's scheduler; other chips see their edges with the usual board
+  lockstep latency (up to one quantum). A pulse faster than the board quantum still works but costs a slice cut per
+  edge.
+- A `--vcd` file is complete only when the run / session ends: value changes are spooled to a temporary file next
+  to it and the header (which must list every wire, including parts added later from the web or the shell) is
+  written at close. The shell's own `vcd PATH` command traces pins only (no parts scope).
+
+## Tooling
+
+- Static analysis (`chipem info`) is heuristic. Peripheral references come from literal pools and
+  `movw/movt` pairs (ARM) or `MOVW/MOVZ DP` and `MOVL XARn,#22` (C28x). Pin roles come from a bounded forward
+  dataflow per function (no path enumeration, no symbolic values): register constants (literal, `movw/movt`,
+  `add #imm`, register copies; C28x `MOVL XARn,#addr`, DP, `ADDB XARn`), stack-slot constants and read-modify-write
+  known bits, resolved at base+displacement stores (ARM `[rN, #off]`; C28x `@off`, `*+XARn[k]`, `*XARn++`,
+  `*--XARn`, `*(0:abs)`). Unknown bits are assumed to keep their reset value. Joins keep the facts all incoming
+  paths agree on, loop heads drop what the body redefines, calls drop caller-saved registers. Values passed into a
+  function as arguments are not followed (no interprocedural analysis), except the STM32 HAL GPIO calls
+  (`HAL_GPIO_Init` with its `GPIO_InitTypeDef` on the stack, `HAL_GPIO_WritePin/TogglePin/DeInit`), recognised by
+  ELF symbol name. Pins computed in a loop or taken from tables are missed: on the Withings image only one pin
+  write is found (the rest go through a table-driven driver; the pin report shows 0 of 19 configured pins
+  predicted). Raw images have no symbols, so function starts are taken from `bl` targets and the vector table, and
+  data decoded as code can blur the result. The scan takes about 1 s on the 500 KB Withings image.
+- Load-address auto-detection for `.bin` tries only 0x0, 0x1000, 0x2000, 0x4000, 0x8000 and 0x10000.
+  Anything else needs `--load-addr` (and possibly `--vtor`).
+- `chips/` and the web assets are located relative to the source tree. The package works from the checkout
+  (editable install), not as a standalone wheel.
+- `keystone-engine` is needed by the tests but not declared in `pyproject.toml`.
+- The comment in `firmware/samples/uart_echo.c` says UART0 runs from the 60 MHz bus clock. The model
+  clocks UART0/1 from the core clock, as silicon does, so the sample's baud rate is only correct when the
+  core clock is 60 MHz (e.g. `--clock 60e6`); at `--clock 120e6` the line runs at about 230 kbaud.
+  Byte-level capture works at any clock.
+
+## The Withings image (`s1_off000084_503080.bin`)
+
+What works (run with `--chip mk22fx512vll12`; the load address 0x4000 is auto-detected):
+
+- Boots, and runs its first 2 s without faults:
+  - watchdog unlock and reconfigure (5 s on the LPO), refreshed afterwards;
+  - SIM gates and MCG FEI with DMX32 → 23.99 MHz;
+  - GPIO setup of 13 pins;
+  - VBAT register file used as battery-backed RAM;
+  - LLWU/PMC/SMC/RTC init;
+  - ADC0 calibration;
+  - NVIC priorities.
+- Starts its RTOS: SVC #0, PendSV task switches on PSP with FP context, SysTick at 1 kHz with BASEPRI
+  masking.
+- Prints on UART2 (PTD3): ` ------> ENTERING MAINTASK <-------`, `WDOG_RSTCNT=0` at about 17 ms, then
+  `[BAT] Use default cal` and the battery reading `[BAT] N mv (P %) ...` at about 20 ms (see below).
+
+What it does not do yet:
+
+- **Without a SPI flash it resets itself about every 0.69 s.** At about 21.5 ms (right after the battery
+  reading) it sends a
+  JEDEC "read ID" (0x9F) on SPI0 to an external SPI NOR flash (chip select PTC4). With nothing attached MISO
+  reads all ones, it reaches a deliberate `udf #0` at 0x3AE1C, its HardFault handler prints a register dump
+  on UART2 and it requests SYSRESETREQ. Pass `--spi-flash SPI0:cs=PTC4` to attach the emulated flash
+  (`chipem/devices/spi_flash.py`, default Micron M25P16 id 0x202015; the firmware accepts only Micron/ST,
+  Atmel and SST ids) and the boot continues through the flash-backed database init.
+- **The console needs PTD2 held high.** The firmware only starts its UART2 console (and enables IRQ 35) when
+  the receive pin reads idle-high ("UART IS CONNECTED"). With `--set PTD2=1 --at '100ms:UART2=help\r\n'` and
+  the flash attached it answers with its command list (the console is up at about 35 ms; bytes sent earlier, e.g.
+  `--uart-in` from t=0, are dropped while the UART is gated off or overrun during boot); the `gpio set/get` commands are available there.
+- **Battery measurement.** PDB0 (software trigger, continuous, MOD 3999, delay 1999) hardware-triggers ADC0
+  channel SE18 (16-bit), DMA0 copies 5 results, and the firmware prints `[BAT] N mv` at about 20 ms. The
+  mapping is mV = counts × 0.141 ("Use default cal"): `--adc ADC0_SE18=40000` gives
+  `[BAT] 5640 mv (77 %) ... State <OK>`; about 31560–42550 counts cover the 4450–6000 mV range. Without `--adc` it
+  reads 0 mV. The software-triggered temperature-sensor read (ADCH 26) also reads 0.
+- **PTA13 floats.** It is an input with IRQC "logic 0", and with nothing connected it reads 0, so PORTA's
+  ISF stays set. Drive it (e.g. `--set PTA13=1`) to mimic the board's idle level.
+- It references DWT, ITM, FPB, TPIU, I2C0/1, FTM0–2, USB0 and CRC, all stubs. Code paths that depend
+  on them (sensor I2C, FTM PWM, USB) will not behave.
+- The 0x0–0x3FFF bootloader is not in the file. That region is erased flash (0xFF), so anything that calls
+  into the bootloader would fault.

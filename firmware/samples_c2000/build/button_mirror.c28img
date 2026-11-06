@@ -1,0 +1,26 @@
+{
+ "format": "c28img",
+ "unit_bits": 16,
+ "entry": 3342336,
+ "segments": [
+  {
+   "addr": 3342336,
+   "data_hex": "22761f76c001292868001f76be011a1a04001a761f76bf01004c046d0c280400fc6f0a280400f96f"
+  },
+  {
+   "addr": 3407862,
+   "data_hex": "73000000"
+  }
+ ],
+ "symbols": {
+  "LED": 4,
+  "GPBDIR": 28570,
+  "GPADAT": 28608,
+  "GPBSET": 28618,
+  "GPBCLEAR": 28620,
+  "WDCR": 28713,
+  "_c_int00": 3342336,
+  "loop": 3342348,
+  "high": 3342353
+ }
+}

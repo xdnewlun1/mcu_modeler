@@ -1,0 +1,437 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      188     4 .isr_vector
+ 8000000  8000000      188     4         build/obj/startup.o:(.isr_vector)
+ 8000000  8000000      188     1                 __vector_table
+ 8000188  8000188     16b4     4 .text
+ 8000188  8000188      38c     4         build/obj/main.o:(.text.main)
+ 8000188  8000188        0     1                 $t
+ 8000189  8000189      38c     1                 main
+ 8000514  8000514       96     4         build/obj/main.o:(.text.send_word_num)
+ 8000514  8000514        0     1                 $t
+ 8000515  8000515       96     1                 send_word_num
+ 80005aa  80005aa       4a     2         build/obj/main.o:(.text.HAL_UART_RxCpltCallback)
+ 80005aa  80005aa        0     1                 $t
+ 80005ab  80005ab       4a     1                 HAL_UART_RxCpltCallback
+ 80005f4  80005f4       38     2         build/obj/main.o:(.text.HAL_UART_ErrorCallback)
+ 80005f4  80005f4        0     1                 $t
+ 80005f5  80005f5       38     1                 HAL_UART_ErrorCallback
+ 800062c  800062c       82     2         build/obj/main.o:(.text.HAL_UART_MspInit)
+ 800062c  800062c        0     1                 $t
+ 800062d  800062d       82     1                 HAL_UART_MspInit
+ 80006ae  80006ae        4     2         build/obj/main.o:(.text.SysTick_Handler)
+ 80006ae  80006ae        0     1                 $t
+ 80006af  80006af        4     1                 SysTick_Handler
+ 80006b2  80006b2        c     2         build/obj/main.o:(.text.USART1_IRQHandler)
+ 80006b2  80006b2        0     1                 $t
+ 80006b3  80006b3        c     1                 USART1_IRQHandler
+ 80006c0  80006c0        2     4         build/obj/startup.o:(.text.Default_Handler)
+ 80006c0  80006c0        0     1                 $t
+ 80006c1  80006c1        2     1                 Default_Handler
+ 80006c1  80006c1        2     1                 NMI_Handler
+ 80006c1  80006c1        2     1                 HardFault_Handler
+ 80006c1  80006c1        2     1                 MemManage_Handler
+ 80006c1  80006c1        2     1                 BusFault_Handler
+ 80006c1  80006c1        2     1                 UsageFault_Handler
+ 80006c1  80006c1        2     1                 SVC_Handler
+ 80006c1  80006c1        2     1                 DebugMon_Handler
+ 80006c1  80006c1        2     1                 PendSV_Handler
+ 80006c1  80006c1        2     1                 WWDG_IRQHandler
+ 80006c1  80006c1        2     1                 PVD_IRQHandler
+ 80006c1  80006c1        2     1                 TAMP_STAMP_IRQHandler
+ 80006c1  80006c1        2     1                 RTC_WKUP_IRQHandler
+ 80006c1  80006c1        2     1                 FLASH_IRQHandler
+ 80006c1  80006c1        2     1                 RCC_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI0_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI1_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI2_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI3_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI4_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream0_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream1_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream2_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream3_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream4_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream5_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream6_IRQHandler
+ 80006c1  80006c1        2     1                 ADC_IRQHandler
+ 80006c1  80006c1        2     1                 CAN1_TX_IRQHandler
+ 80006c1  80006c1        2     1                 CAN1_RX0_IRQHandler
+ 80006c1  80006c1        2     1                 CAN1_RX1_IRQHandler
+ 80006c1  80006c1        2     1                 CAN1_SCE_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI9_5_IRQHandler
+ 80006c1  80006c1        2     1                 TIM1_BRK_TIM9_IRQHandler
+ 80006c1  80006c1        2     1                 TIM1_UP_TIM10_IRQHandler
+ 80006c1  80006c1        2     1                 TIM1_TRG_COM_TIM11_IRQHandler
+ 80006c1  80006c1        2     1                 TIM1_CC_IRQHandler
+ 80006c1  80006c1        2     1                 TIM2_IRQHandler
+ 80006c1  80006c1        2     1                 TIM3_IRQHandler
+ 80006c1  80006c1        2     1                 TIM4_IRQHandler
+ 80006c1  80006c1        2     1                 I2C1_EV_IRQHandler
+ 80006c1  80006c1        2     1                 I2C1_ER_IRQHandler
+ 80006c1  80006c1        2     1                 I2C2_EV_IRQHandler
+ 80006c1  80006c1        2     1                 I2C2_ER_IRQHandler
+ 80006c1  80006c1        2     1                 SPI1_IRQHandler
+ 80006c1  80006c1        2     1                 SPI2_IRQHandler
+ 80006c1  80006c1        2     1                 USART2_IRQHandler
+ 80006c1  80006c1        2     1                 USART3_IRQHandler
+ 80006c1  80006c1        2     1                 EXTI15_10_IRQHandler
+ 80006c1  80006c1        2     1                 RTC_Alarm_IRQHandler
+ 80006c1  80006c1        2     1                 OTG_FS_WKUP_IRQHandler
+ 80006c1  80006c1        2     1                 TIM8_BRK_TIM12_IRQHandler
+ 80006c1  80006c1        2     1                 TIM8_UP_TIM13_IRQHandler
+ 80006c1  80006c1        2     1                 TIM8_TRG_COM_TIM14_IRQHandler
+ 80006c1  80006c1        2     1                 TIM8_CC_IRQHandler
+ 80006c1  80006c1        2     1                 DMA1_Stream7_IRQHandler
+ 80006c1  80006c1        2     1                 FSMC_IRQHandler
+ 80006c1  80006c1        2     1                 SDIO_IRQHandler
+ 80006c1  80006c1        2     1                 TIM5_IRQHandler
+ 80006c1  80006c1        2     1                 SPI3_IRQHandler
+ 80006c1  80006c1        2     1                 UART4_IRQHandler
+ 80006c1  80006c1        2     1                 UART5_IRQHandler
+ 80006c1  80006c1        2     1                 TIM6_DAC_IRQHandler
+ 80006c1  80006c1        2     1                 TIM7_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream0_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream1_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream2_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream3_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream4_IRQHandler
+ 80006c1  80006c1        2     1                 ETH_IRQHandler
+ 80006c1  80006c1        2     1                 ETH_WKUP_IRQHandler
+ 80006c1  80006c1        2     1                 CAN2_TX_IRQHandler
+ 80006c1  80006c1        2     1                 CAN2_RX0_IRQHandler
+ 80006c1  80006c1        2     1                 CAN2_RX1_IRQHandler
+ 80006c1  80006c1        2     1                 CAN2_SCE_IRQHandler
+ 80006c1  80006c1        2     1                 OTG_FS_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream5_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream6_IRQHandler
+ 80006c1  80006c1        2     1                 DMA2_Stream7_IRQHandler
+ 80006c1  80006c1        2     1                 USART6_IRQHandler
+ 80006c1  80006c1        2     1                 I2C3_EV_IRQHandler
+ 80006c1  80006c1        2     1                 I2C3_ER_IRQHandler
+ 80006c1  80006c1        2     1                 OTG_HS_EP1_OUT_IRQHandler
+ 80006c1  80006c1        2     1                 OTG_HS_EP1_IN_IRQHandler
+ 80006c1  80006c1        2     1                 OTG_HS_WKUP_IRQHandler
+ 80006c1  80006c1        2     1                 OTG_HS_IRQHandler
+ 80006c1  80006c1        2     1                 DCMI_IRQHandler
+ 80006c1  80006c1        2     1                 CRYP_IRQHandler
+ 80006c1  80006c1        2     1                 HASH_RNG_IRQHandler
+ 80006c1  80006c1        2     1                 FPU_IRQHandler
+ 80006c4  80006c4       5a     4         build/obj/startup.o:(.text.Reset_Handler)
+ 80006c4  80006c4        0     1                 $t
+ 80006c5  80006c5       5a     1                 Reset_Handler
+ 8000720  8000720        e     4         build/obj/startup.o:(.text.memset)
+ 8000720  8000720        0     1                 $t
+ 8000721  8000721        e     1                 memset
+ 800072e  800072e       1c     2         build/obj/system_stm32f4xx.o:(.text.SystemInit)
+ 800072e  800072e        0     1                 $t
+ 800072f  800072f       1c     1                 SystemInit
+ 800074a  800074a        8     2         build/obj/aeabi_rt.o:(.text.__aeabi_memclr)
+ 800074a  800074a        0     1                 $t
+ 800074b  800074b        8     1                 __aeabi_memclr
+ 800074b  800074b        8     1                 __aeabi_memclr4
+ 800074b  800074b        8     1                 __aeabi_memclr8
+ 8000754  8000754       ac     4         build/obj/aeabi_rt.o:(.text.__udivmoddi4)
+ 8000754  8000754        0     1                 $t
+ 8000755  8000755       ac     1                 __udivmoddi4
+ 8000800  8000800       14     2         build/obj/aeabi_rt.o:(.text.__aeabi_uldivmod)
+ 8000800  8000800        0     1                 $t
+ 8000801  8000801       14     1                 __aeabi_uldivmod
+ 8000814  8000814       36     2         build/obj/stm32f4xx_hal.o:(.text.HAL_Init)
+ 8000814  8000814        0     1                 $t
+ 8000815  8000815       36     1                 HAL_Init
+ 800084a  800084a       50     2         build/obj/stm32f4xx_hal.o:(.text.HAL_InitTick)
+ 800084a  800084a        0     1                 $t
+ 800084b  800084b       50     1                 HAL_InitTick
+ 800089a  800089a        2     2         build/obj/stm32f4xx_hal.o:(.text.HAL_MspInit)
+ 800089a  800089a        0     1                 $t
+ 800089b  800089b        2     1                 HAL_MspInit
+ 800089c  800089c       1a     2         build/obj/stm32f4xx_hal.o:(.text.HAL_IncTick)
+ 800089c  800089c        0     1                 $t
+ 800089d  800089d       1a     1                 HAL_IncTick
+ 80008b6  80008b6        c     2         build/obj/stm32f4xx_hal.o:(.text.HAL_GetTick)
+ 80008b6  80008b6        0     1                 $t
+ 80008b7  80008b7        c     1                 HAL_GetTick
+ 80008c4  80008c4       28     4         build/obj/stm32f4xx_hal.o:(.text.HAL_Delay)
+ 80008c4  80008c4        0     1                 $t
+ 80008c5  80008c5       28     1                 HAL_Delay
+ 80008ec  80008ec       20     2         build/obj/stm32f4xx_hal_cortex.o:(.text.HAL_NVIC_SetPriorityGrouping)
+ 80008ec  80008ec        0     1                 $t
+ 80008ed  80008ed       20     1                 HAL_NVIC_SetPriorityGrouping
+ 800090c  800090c       56     2         build/obj/stm32f4xx_hal_cortex.o:(.text.HAL_NVIC_SetPriority)
+ 800090c  800090c        0     1                 $t
+ 800090d  800090d       56     1                 HAL_NVIC_SetPriority
+ 8000962  8000962       1e     2         build/obj/stm32f4xx_hal_cortex.o:(.text.HAL_NVIC_EnableIRQ)
+ 8000962  8000962        0     1                 $t
+ 8000963  8000963       1e     1                 HAL_NVIC_EnableIRQ
+ 8000980  8000980       2c     2         build/obj/stm32f4xx_hal_cortex.o:(.text.HAL_SYSTICK_Config)
+ 8000980  8000980        0     1                 $t
+ 8000981  8000981       2c     1                 HAL_SYSTICK_Config
+ 80009ac  80009ac      350     4         build/obj/stm32f4xx_hal_rcc.o:(.text.HAL_RCC_OscConfig)
+ 80009ac  80009ac        0     1                 $t
+ 80009ad  80009ad      350     1                 HAL_RCC_OscConfig
+ 8000cfc  8000cfc      14a     4         build/obj/stm32f4xx_hal_rcc.o:(.text.HAL_RCC_ClockConfig)
+ 8000cfc  8000cfc        0     1                 $t
+ 8000cfd  8000cfd      14a     1                 HAL_RCC_ClockConfig
+ 8000e48  8000e48       6a     4         build/obj/stm32f4xx_hal_rcc.o:(.text.HAL_RCC_GetSysClockFreq)
+ 8000e48  8000e48        0     1                 $t
+ 8000e49  8000e49       6a     1                 HAL_RCC_GetSysClockFreq
+ 8000e64  8000e64        0     1                 $d
+ 8000e68  8000e68        0     1                 $t
+ 8000eb2  8000eb2       26     2         build/obj/stm32f4xx_hal_rcc.o:(.text.HAL_RCC_GetPCLK1Freq)
+ 8000eb2  8000eb2        0     1                 $t
+ 8000eb3  8000eb3       26     1                 HAL_RCC_GetPCLK1Freq
+ 8000ed8  8000ed8       26     2         build/obj/stm32f4xx_hal_rcc.o:(.text.HAL_RCC_GetPCLK2Freq)
+ 8000ed8  8000ed8        0     1                 $t
+ 8000ed9  8000ed9       26     1                 HAL_RCC_GetPCLK2Freq
+ 8000f00  8000f00      19e     4         build/obj/stm32f4xx_hal_gpio.o:(.text.HAL_GPIO_Init)
+ 8000f00  8000f00        0     1                 $t
+ 8000f01  8000f01      19e     1                 HAL_GPIO_Init
+ 800109e  800109e        a     2         build/obj/stm32f4xx_hal_gpio.o:(.text.HAL_GPIO_WritePin)
+ 800109e  800109e        0     1                 $t
+ 800109f  800109f        a     1                 HAL_GPIO_WritePin
+ 80010a8  80010a8       10     2         build/obj/stm32f4xx_hal_gpio.o:(.text.HAL_GPIO_TogglePin)
+ 80010a8  80010a8        0     1                 $t
+ 80010a9  80010a9       10     1                 HAL_GPIO_TogglePin
+ 80010b8  80010b8       54     2         build/obj/stm32f4xx_hal_uart.o:(.text.HAL_UART_Init)
+ 80010b8  80010b8        0     1                 $t
+ 80010b9  80010b9       54     1                 HAL_UART_Init
+ 800110c  800110c       de     2         build/obj/stm32f4xx_hal_uart.o:(.text.UART_SetConfig)
+ 800110c  800110c        0     1                 $t
+ 800110d  800110d       de     1                 UART_SetConfig
+ 80011ec  80011ec       a2     4         build/obj/stm32f4xx_hal_uart.o:(.text.HAL_UART_Transmit)
+ 80011ec  80011ec        0     1                 $t
+ 80011ed  80011ed       a2     1                 HAL_UART_Transmit
+ 8001290  8001290       7a     4         build/obj/stm32f4xx_hal_uart.o:(.text.UART_WaitOnFlagUntilTimeout)
+ 8001290  8001290        0     1                 $t
+ 8001291  8001291       7a     1                 UART_WaitOnFlagUntilTimeout
+ 800130a  800130a       44     2         build/obj/stm32f4xx_hal_uart.o:(.text.HAL_UART_Receive_IT)
+ 800130a  800130a        0     1                 $t
+ 800130b  800130b       44     1                 HAL_UART_Receive_IT
+ 8001350  8001350       5a     4         build/obj/stm32f4xx_hal_uart.o:(.text.UART_EndRxTransfer)
+ 8001350  8001350        0     1                 $t
+ 8001351  8001351       5a     1                 UART_EndRxTransfer
+ 80013ac  80013ac      2e4     4         build/obj/stm32f4xx_hal_uart.o:(.text.HAL_UART_IRQHandler)
+ 80013ac  80013ac        0     1                 $t
+ 80013ad  80013ad      2e4     1                 HAL_UART_IRQHandler
+ 8001690  8001690       c2     4         build/obj/stm32f4xx_hal_uart.o:(.text.UART_Receive_IT)
+ 8001690  8001690        0     1                 $t
+ 8001691  8001691       c2     1                 UART_Receive_IT
+ 8001752  8001752        a     2         build/obj/stm32f4xx_hal_uart.o:(.text.UART_DMAAbortOnError)
+ 8001752  8001752        0     1                 $t
+ 8001753  8001753        a     1                 UART_DMAAbortOnError
+ 800175c  800175c        2     2         build/obj/stm32f4xx_hal_uart.o:(.text.HAL_UARTEx_RxEventCallback)
+ 800175c  800175c        0     1                 $t
+ 800175d  800175d        2     1                 HAL_UARTEx_RxEventCallback
+ 800175e  800175e        2     2         build/obj/stm32f4xx_hal_uart.o:(.text.HAL_UART_TxCpltCallback)
+ 800175e  800175e        0     1                 $t
+ 800175f  800175f        2     1                 HAL_UART_TxCpltCallback
+ 8001760  8001760       76     4         build/obj/stm32f4xx_hal_dma.o:(.text.HAL_DMA_Abort)
+ 8001760  8001760        0     1                 $t
+ 8001761  8001761       76     1                 HAL_DMA_Abort
+ 80017d6  80017d6       20     2         build/obj/stm32f4xx_hal_dma.o:(.text.HAL_DMA_Abort_IT)
+ 80017d6  80017d6        0     1                 $t
+ 80017d7  80017d7       20     1                 HAL_DMA_Abort_IT
+ 80017f6  80017f6       2b     1         <internal>:(.rodata.str1.1)
+ 8001821  8001821       10     1         build/obj/system_stm32f4xx.o:(.rodata.AHBPrescTable)
+ 8001821  8001821       10     1                 AHBPrescTable
+ 8001831  8001831        8     1         build/obj/system_stm32f4xx.o:(.rodata.APBPrescTable)
+ 8001831  8001831        8     1                 APBPrescTable
+ 8001839  8001839        3     1         . = ALIGN(4)
+ 800183c  800183c       10     4 .ARM.exidx
+ 800183c  800183c       10     4         <internal>:(.ARM.exidx)
+20000000  800184c        c     4 .data
+20000000  800184c        0     1         . = ALIGN(4)
+20000000  800184c        0     1         _sdata = .
+20000000  800184c        4     4         build/obj/system_stm32f4xx.o:(.data.SystemCoreClock)
+20000000  800184c        4     1                 SystemCoreClock
+20000004  8001850        4     4         build/obj/stm32f4xx_hal.o:(.data.uwTickPrio)
+20000004  8001850        4     1                 uwTickPrio
+20000008  8001854        4     4         build/obj/stm32f4xx_hal.o:(.data.uwTickFreq)
+20000008  8001854        4     1                 uwTickFreq
+2000000c  8001858        0     1         . = ALIGN(4)
+2000000c  8001858        0     1         _edata = .
+2000000c  8001858        0     1 _sidata = LOADADDR(.data)
+2000000c 2000000c      1ac     4 .bss
+2000000c 2000000c        0     1         . = ALIGN(4)
+2000000c 2000000c        0     1         _sbss = .
+2000000c 2000000c       50     4         build/obj/main.o:(.bss.huart1)
+2000000c 2000000c       50     1                 huart1
+2000005c 2000005c        1     1         build/obj/main.o:(.bss.rx_byte)
+2000005c 2000005c        1     1                 rx_byte
+20000060 20000060        4     4         build/obj/main.o:(.bss.pings_tx)
+20000060 20000060        4     1                 pings_tx
+20000064 20000064      100     1         build/obj/main.o:(.bss.rx_ring)
+20000064 20000064      100     1                 rx_ring
+20000164 20000164        4     4         build/obj/main.o:(.bss.rx_head)
+20000164 20000164        4     1                 rx_head
+20000168 20000168        4     4         build/obj/main.o:(.bss.uart_errors)
+20000168 20000168        4     1                 uart_errors
+2000016c 2000016c        4     4         build/obj/main.o:(.bss.pongs)
+2000016c 2000016c        4     1                 pongs
+20000170 20000170        4     4         build/obj/main.o:(.bss.pings_rx)
+20000170 20000170        4     1                 pings_rx
+20000174 20000174        4     4         build/obj/main.o:(.bss.peer_seen)
+20000174 20000174        4     1                 peer_seen
+20000178 20000178       30     1         build/obj/main.o:(.bss.poll_rx.line)
+20000178 20000178       30     1                 poll_rx.line
+200001a8 200001a8        4     4         build/obj/main.o:(.bss.poll_rx.len)
+200001a8 200001a8        4     1                 poll_rx.len
+200001ac 200001ac        1     4         build/obj/main.o:(.bss.poll_rx.overflow)
+200001ac 200001ac        1     1                 poll_rx.overflow
+200001b0 200001b0        4     4         build/obj/main.o:(.bss.rx_tail)
+200001b0 200001b0        4     1                 rx_tail
+200001b4 200001b4        4     4         build/obj/stm32f4xx_hal.o:(.bss.uwTick)
+200001b4 200001b4        4     1                 uwTick
+200001b8 200001b8        0     1         . = ALIGN(4)
+200001b8 200001b8        0     1         _ebss = .
+       0        0     24ba     1 .debug_loclists
+       0        0      243     1         build/obj/main.o:(.debug_loclists)
+     243      243       91     1         build/obj/startup.o:(.debug_loclists)
+     2d4      2d4       58     1         build/obj/system_stm32f4xx.o:(.debug_loclists)
+     32c      32c       cc     1         build/obj/aeabi_rt.o:(.debug_loclists)
+     3f8      3f8       85     1         build/obj/stm32f4xx_hal.o:(.debug_loclists)
+     47d      47d      2b3     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_loclists)
+     730      730      1eb     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_loclists)
+     91b      91b      141     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_loclists)
+     a5c      a5c      165     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_loclists)
+     bc1      bc1      dac     1         build/obj/stm32f4xx_hal_uart.o:(.debug_loclists)
+    196d     196d      51b     1         build/obj/stm32f4xx_hal_dma.o:(.debug_loclists)
+    1e88     1e88       70     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_loclists)
+    1ef8     1ef8       56     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_loclists)
+    1f4e     1f4e      175     1         build/obj/stm32f4xx_hal_flash.o:(.debug_loclists)
+    20c3     20c3      221     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_loclists)
+    22e4     22e4      1d6     1         build/obj/stm32f4xx_hal_exti.o:(.debug_loclists)
+       0        0     1b2c     1 .debug_abbrev
+       0        0      30f     1         build/obj/main.o:(.debug_abbrev)
+     30f      30f      119     1         build/obj/startup.o:(.debug_abbrev)
+     428      428       da     1         build/obj/system_stm32f4xx.o:(.debug_abbrev)
+     502      502       f9     1         build/obj/aeabi_rt.o:(.debug_abbrev)
+     5fb      5fb      192     1         build/obj/stm32f4xx_hal.o:(.debug_abbrev)
+     78d      78d      2bb     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_abbrev)
+     a48      a48      1d8     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_abbrev)
+     c20      c20      110     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_abbrev)
+     d30      d30      17b     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_abbrev)
+     eab      eab      23f     1         build/obj/stm32f4xx_hal_uart.o:(.debug_abbrev)
+    10ea     10ea      222     1         build/obj/stm32f4xx_hal_dma.o:(.debug_abbrev)
+    130c     130c      145     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_abbrev)
+    1451     1451      11a     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_abbrev)
+    156b     156b      1f9     1         build/obj/stm32f4xx_hal_flash.o:(.debug_abbrev)
+    1764     1764      249     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_abbrev)
+    19ad     19ad      17f     1         build/obj/stm32f4xx_hal_exti.o:(.debug_abbrev)
+       0        0     6baf     1 .debug_info
+       0        0      dcb     1         build/obj/main.o:(.debug_info)
+     dcb      dcb      14f     1         build/obj/startup.o:(.debug_info)
+     f1a      f1a      348     1         build/obj/system_stm32f4xx.o:(.debug_info)
+    1262     1262      162     1         build/obj/aeabi_rt.o:(.debug_info)
+    13c4     13c4      5b2     1         build/obj/stm32f4xx_hal.o:(.debug_info)
+    1976     1976      9ec     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_info)
+    2362     2362      5ff     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_info)
+    2961     2961      35e     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_info)
+    2cbf     2cbf      4d5     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_info)
+    3194     3194     2048     1         build/obj/stm32f4xx_hal_uart.o:(.debug_info)
+    51dc     51dc      631     1         build/obj/stm32f4xx_hal_dma.o:(.debug_info)
+    580d     580d      4b3     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_info)
+    5cc0     5cc0      292     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_info)
+    5f52     5f52      44c     1         build/obj/stm32f4xx_hal_flash.o:(.debug_info)
+    639e     639e      4be     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_info)
+    685c     685c      353     1         build/obj/stm32f4xx_hal_exti.o:(.debug_info)
+       0        0      527     1 .debug_rnglists
+       0        0       7e     1         build/obj/main.o:(.debug_rnglists)
+      7e       7e       1d     1         build/obj/startup.o:(.debug_rnglists)
+      9b       9b       18     1         build/obj/system_stm32f4xx.o:(.debug_rnglists)
+      b3       b3       21     1         build/obj/aeabi_rt.o:(.debug_rnglists)
+      d4       d4       62     1         build/obj/stm32f4xx_hal.o:(.debug_rnglists)
+     136      136       8d     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_rnglists)
+     1c3      1c3       67     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_rnglists)
+     22a      22a       25     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_rnglists)
+     24f      24f       2b     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_rnglists)
+     27a      27a      113     1         build/obj/stm32f4xx_hal_uart.o:(.debug_rnglists)
+     38d      38d       84     1         build/obj/stm32f4xx_hal_dma.o:(.debug_rnglists)
+     411      411       44     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_rnglists)
+     455      455       23     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_rnglists)
+     478      478       3b     1         build/obj/stm32f4xx_hal_flash.o:(.debug_rnglists)
+     4b3      4b3       45     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_rnglists)
+     4f8      4f8       2f     1         build/obj/stm32f4xx_hal_exti.o:(.debug_rnglists)
+       0        0     1c8c     1 .debug_str_offsets
+       0        0      4e0     1         build/obj/main.o:(.debug_str_offsets)
+     4e0      4e0       68     1         build/obj/startup.o:(.debug_str_offsets)
+     548      548      120     1         build/obj/system_stm32f4xx.o:(.debug_str_offsets)
+     668      668       64     1         build/obj/aeabi_rt.o:(.debug_str_offsets)
+     6cc      6cc      2fc     1         build/obj/stm32f4xx_hal.o:(.debug_str_offsets)
+     9c8      9c8      36c     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_str_offsets)
+     d34      d34      208     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_str_offsets)
+     f3c      f3c      12c     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_str_offsets)
+    1068     1068      198     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_str_offsets)
+    1200     1200      338     1         build/obj/stm32f4xx_hal_uart.o:(.debug_str_offsets)
+    1538     1538      1bc     1         build/obj/stm32f4xx_hal_dma.o:(.debug_str_offsets)
+    16f4     16f4      190     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_str_offsets)
+    1884     1884       e8     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_str_offsets)
+    196c     196c      11c     1         build/obj/stm32f4xx_hal_flash.o:(.debug_str_offsets)
+    1a88     1a88      12c     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_str_offsets)
+    1bb4     1bb4       d8     1         build/obj/stm32f4xx_hal_exti.o:(.debug_str_offsets)
+       0        0     31e9     1 .debug_str
+       0        0     31e9     1         <internal>:(.debug_str)
+       0        0      8d4     1 .debug_addr
+       0        0       d4     1         build/obj/main.o:(.debug_addr)
+      d4       d4       24     1         build/obj/startup.o:(.debug_addr)
+      f8       f8       1c     1         build/obj/system_stm32f4xx.o:(.debug_addr)
+     114      114       28     1         build/obj/aeabi_rt.o:(.debug_addr)
+     13c      13c       80     1         build/obj/stm32f4xx_hal.o:(.debug_addr)
+     1bc      1bc       90     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_addr)
+     24c      24c       48     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_addr)
+     294      294       24     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_addr)
+     2b8      2b8       30     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_addr)
+     2e8      2e8      44c     1         build/obj/stm32f4xx_hal_uart.o:(.debug_addr)
+     734      734       44     1         build/obj/stm32f4xx_hal_dma.o:(.debug_addr)
+     778      778       4c     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_addr)
+     7c4      7c4       28     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_addr)
+     7ec      7ec       6c     1         build/obj/stm32f4xx_hal_flash.o:(.debug_addr)
+     858      858       4c     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_addr)
+     8a4      8a4       30     1         build/obj/stm32f4xx_hal_exti.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       49     1 .ARM.attributes
+       0        0       49     1         build/obj/main.o:(.ARM.attributes)
+       0        0     1240     4 .debug_frame
+       0        0       a8     4         build/obj/main.o:(.debug_frame)
+      a8       a8       54     4         build/obj/startup.o:(.debug_frame)
+      fc       fc       3c     4         build/obj/system_stm32f4xx.o:(.debug_frame)
+     138      138       7c     4         build/obj/aeabi_rt.o:(.debug_frame)
+     1b4      1b4      1f8     4         build/obj/stm32f4xx_hal.o:(.debug_frame)
+     3ac      3ac      18c     4         build/obj/stm32f4xx_hal_cortex.o:(.debug_frame)
+     538      538      138     4         build/obj/stm32f4xx_hal_rcc.o:(.debug_frame)
+     670      670       b0     4         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_frame)
+     720      720       c8     4         build/obj/stm32f4xx_hal_gpio.o:(.debug_frame)
+     7e8      7e8      4d4     4         build/obj/stm32f4xx_hal_uart.o:(.debug_frame)
+     cbc      cbc      138     4         build/obj/stm32f4xx_hal_dma.o:(.debug_frame)
+     df4      df4      134     4         build/obj/stm32f4xx_hal_pwr.o:(.debug_frame)
+     f28      f28       9c     4         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_frame)
+     fc4      fc4      11c     4         build/obj/stm32f4xx_hal_flash.o:(.debug_frame)
+    10e0     10e0       a0     4         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_frame)
+    1180     1180       c0     4         build/obj/stm32f4xx_hal_exti.o:(.debug_frame)
+       0        0     5f11     1 .debug_line
+       0        0      5f0     1         build/obj/main.o:(.debug_line)
+     5f0      5f0      128     1         build/obj/startup.o:(.debug_line)
+     718      718       ef     1         build/obj/system_stm32f4xx.o:(.debug_line)
+     807      807      124     1         build/obj/aeabi_rt.o:(.debug_line)
+     92b      92b      382     1         build/obj/stm32f4xx_hal.o:(.debug_line)
+     cad      cad      501     1         build/obj/stm32f4xx_hal_cortex.o:(.debug_line)
+    11ae     11ae      838     1         build/obj/stm32f4xx_hal_rcc.o:(.debug_line)
+    19e6     19e6      497     1         build/obj/stm32f4xx_hal_rcc_ex.o:(.debug_line)
+    1e7d     1e7d      39f     1         build/obj/stm32f4xx_hal_gpio.o:(.debug_line)
+    221c     221c     22fe     1         build/obj/stm32f4xx_hal_uart.o:(.debug_line)
+    451a     451a      8ad     1         build/obj/stm32f4xx_hal_dma.o:(.debug_line)
+    4dc7     4dc7      2a3     1         build/obj/stm32f4xx_hal_pwr.o:(.debug_line)
+    506a     506a      1e2     1         build/obj/stm32f4xx_hal_pwr_ex.o:(.debug_line)
+    524c     524c      4d2     1         build/obj/stm32f4xx_hal_flash.o:(.debug_line)
+    571e     571e      442     1         build/obj/stm32f4xx_hal_flash_ex.o:(.debug_line)
+    5b60     5b60      3b1     1         build/obj/stm32f4xx_hal_exti.o:(.debug_line)
+       0        0      615     1 .debug_line_str
+       0        0      615     1         <internal>:(.debug_line_str)
+       0        0      e20     4 .symtab
+       0        0      e20     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      cbb     1 .strtab
+       0        0      cbb     1         <internal>:(.strtab)

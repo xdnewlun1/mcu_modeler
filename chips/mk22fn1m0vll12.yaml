@@ -1,0 +1,276 @@
+# NXP/Freescale Kinetis MK22FN1M0VLL12 (K22F, 120 MHz, 100-pin LQFP).
+# Sources: K22P100M120SF5 data sheet Rev4 11/2014 (section 5.1 signal multiplexing, transcribed row by row),
+# K22P100M120SF5RM memory map / AIPS slot assignments, MK22F12 device header IRQ numbering.
+name: MK22FN1M0VLL12
+package: LQFP100
+family: kinetis
+regs_file: mk22_regs.yaml
+core: {arch: armv7e-m, backend: unicorn, cpu: cortex-m4, fpu: true, clock_hz: 120000000, addr_unit_bits: 8, num_irqs: 96}
+# SysTick has no external reference on the K22 (K22P100M120SF5V2RM section 3.2.1.2): CLKSOURCE always reads 1,
+# SYST_CALIB NOREF=1, TENMS=0.  0 = no reference (armv7m.scs).
+systick_ext_div: 0
+
+memory:
+  - {name: FLASH, base: 0x00000000, size: 0x100000, kind: flash}
+  - {name: SRAM_L, base: 0x1FFF0000, size: 0x10000, kind: ram}
+  - {name: SRAM_U, base: 0x20000000, size: 0x10000, kind: ram}
+
+# armv7m.scs (0xE000E000, SysTick/NVIC/SCB) is created by the arch layer, not listed here.
+peripherals:
+  - {name: AIPS0, model: stub, base: 0x40000000, size: 0x1000}
+  - {name: AXBS, model: stub, base: 0x40004000, size: 0x1000}
+  - {name: DMA, model: kinetis.dma, base: 0x40008000, size: 0x2000}
+  - {name: FB, model: stub, base: 0x4000C000, size: 0x1000}
+  - {name: MPU, model: stub, base: 0x4000D000, size: 0x1000}
+  - {name: FMC, model: stub, base: 0x4001F000, size: 0x1000}
+  - {name: FTFE, model: kinetis.ftfe, base: 0x40020000, size: 0x1000}
+  - {name: DMAMUX, model: kinetis.dmamux, base: 0x40021000, size: 0x1000}
+  - {name: CAN0, model: stub, base: 0x40024000, size: 0x1000}
+  - {name: SPI0, model: kinetis.dspi, base: 0x4002C000, size: 0x1000, params: {index: 0}}
+  - {name: SPI1, model: kinetis.dspi, base: 0x4002D000, size: 0x1000, params: {index: 1}}
+  - {name: I2S0, model: stub, base: 0x4002F000, size: 0x1000}
+  - {name: CRC, model: stub, base: 0x40032000, size: 0x1000}
+  - {name: USBDCD, model: stub, base: 0x40035000, size: 0x1000}
+  - {name: PDB0, model: kinetis.pdb, base: 0x40036000, size: 0x1000}
+  - {name: PIT, model: kinetis.pit, base: 0x40037000, size: 0x1000}
+  - {name: FTM0, model: stub, base: 0x40038000, size: 0x1000}
+  - {name: FTM1, model: stub, base: 0x40039000, size: 0x1000}
+  - {name: FTM2_ALIAS, model: stub, base: 0x4003A000, size: 0x1000}
+  - {name: ADC0, model: kinetis.adc, base: 0x4003B000, size: 0x1000, params: {index: 0}}
+  - {name: RTC, model: kinetis.rtc, base: 0x4003D000, size: 0x1000}
+  - {name: VBAT, model: kinetis.vbat, base: 0x4003E000, size: 0x1000}
+  - {name: LPTMR0, model: kinetis.lptmr, base: 0x40040000, size: 0x1000}
+  - {name: RFSYS, model: ram, base: 0x40041000, size: 0x1000}
+  - {name: SIM, model: kinetis.sim, base: 0x40047000, size: 0x2000}
+  - {name: PORTA, model: kinetis.port, base: 0x40049000, size: 0x1000, params: {port: A}}
+  - {name: PORTB, model: kinetis.port, base: 0x4004A000, size: 0x1000, params: {port: B}}
+  - {name: PORTC, model: kinetis.port, base: 0x4004B000, size: 0x1000, params: {port: C}}
+  - {name: PORTD, model: kinetis.port, base: 0x4004C000, size: 0x1000, params: {port: D}}
+  - {name: PORTE, model: kinetis.port, base: 0x4004D000, size: 0x1000, params: {port: E}}
+  - {name: WDOG, model: kinetis.wdog, base: 0x40052000, size: 0x1000}
+  - {name: EWM, model: stub, base: 0x40061000, size: 0x1000}
+  - {name: CMT, model: stub, base: 0x40062000, size: 0x1000}
+  - {name: MCG, model: kinetis.mcg, base: 0x40064000, size: 0x1000}
+  - {name: OSC, model: kinetis.osc, base: 0x40065000, size: 0x1000}
+  - {name: I2C0, model: stub, base: 0x40066000, size: 0x1000}
+  - {name: I2C1, model: stub, base: 0x40067000, size: 0x1000}
+  - {name: UART0, model: kinetis.uart, base: 0x4006A000, size: 0x1000, params: {index: 0, fifo_depth: 8}}   # RM §3.9.5.1: 8-entry TX/RX FIFOs
+  - {name: UART1, model: kinetis.uart, base: 0x4006B000, size: 0x1000, params: {index: 1, fifo_depth: 8}}
+  - {name: UART2, model: kinetis.uart, base: 0x4006C000, size: 0x1000, params: {index: 2}}
+  - {name: UART3, model: kinetis.uart, base: 0x4006D000, size: 0x1000, params: {index: 3}}
+  - {name: USB0, model: stub, base: 0x40072000, size: 0x1000}
+  - {name: CMP, model: stub, base: 0x40073000, size: 0x1000}
+  - {name: VREF, model: stub, base: 0x40074000, size: 0x1000}
+  - {name: LLWU, model: kinetis.llwu, base: 0x4007C000, size: 0x1000}
+  - {name: PMC, model: kinetis.pmc, base: 0x4007D000, size: 0x1000}
+  - {name: SMC, model: kinetis.smc, base: 0x4007E000, size: 0x1000}
+  - {name: RCM, model: kinetis.rcm, base: 0x4007F000, size: 0x1000}
+  - {name: AIPS1, model: stub, base: 0x40080000, size: 0x1000}
+  - {name: SPI2, model: kinetis.dspi, base: 0x400AC000, size: 0x1000, params: {index: 2}}
+  - {name: SDHC, model: stub, base: 0x400B1000, size: 0x1000}
+  - {name: FTM2, model: stub, base: 0x400B8000, size: 0x1000}
+  - {name: FTM3, model: stub, base: 0x400B9000, size: 0x1000}
+  - {name: ADC1, model: kinetis.adc, base: 0x400BB000, size: 0x1000, params: {index: 1}}
+  - {name: DAC0, model: stub, base: 0x400CC000, size: 0x1000}
+  - {name: I2C2, model: stub, base: 0x400E6000, size: 0x1000}
+  - {name: UART4, model: kinetis.uart, base: 0x400EA000, size: 0x1000, params: {index: 4}}
+  - {name: GPIOA, model: kinetis.gpio, base: 0x400FF000, size: 0x40, params: {port: A}}
+  - {name: GPIOB, model: kinetis.gpio, base: 0x400FF040, size: 0x40, params: {port: B}}
+  - {name: GPIOC, model: kinetis.gpio, base: 0x400FF080, size: 0x40, params: {port: C}}
+  - {name: GPIOD, model: kinetis.gpio, base: 0x400FF0C0, size: 0x40, params: {port: D}}
+  - {name: GPIOE, model: kinetis.gpio, base: 0x400FF100, size: 0x40, params: {port: E}}
+  - {name: MCM, model: stub, base: 0xE0080000, size: 0x1000}
+
+# External interrupt numbers (exception = 16 + n), MK22F12 header ordering.
+# SVD (MK22F12, which also covers larger K22 packages) peripherals that the 100-pin part does not have.
+# tools/svd2chip.py --check reports these as OMITTED instead of comparing them.
+omitted:
+  - {name: UART5, irqs: [68, 69], reason: "not on the 100-pin K22: 0x400EB000 unassigned (K22P100M120SF5V2RM Table 4-3, 4.5.3), IRQ 68/69 reserved (Table 3-5), no UART5 pins in data sheet 5.1"}
+  - {name: DAC1, irqs: [72], reason: "not on the 100-pin K22: IRQ 72 reserved (K22P100M120SF5V2RM Table 3-5), DMAMUX source 46 reserved (Table 3-25), no DAC1 pin in data sheet 5.1"}
+
+irqs:
+  0: DMA0
+  1: DMA1
+  2: DMA2
+  3: DMA3
+  4: DMA4
+  5: DMA5
+  6: DMA6
+  7: DMA7
+  8: DMA8
+  9: DMA9
+  10: DMA10
+  11: DMA11
+  12: DMA12
+  13: DMA13
+  14: DMA14
+  15: DMA15
+  16: DMA_Error
+  17: MCM
+  18: FTFE
+  19: Read_Collision
+  20: LVD_LVW
+  21: LLWU
+  22: WDOG_EWM
+  23: RNG
+  24: I2C0
+  25: I2C1
+  26: SPI0
+  27: SPI1
+  28: I2S0_Tx
+  29: I2S0_Rx
+  30: UART0_LON
+  31: UART0_RX_TX
+  32: UART0_ERR
+  33: UART1_RX_TX
+  34: UART1_ERR
+  35: UART2_RX_TX
+  36: UART2_ERR
+  37: UART3_RX_TX
+  38: UART3_ERR
+  39: ADC0
+  40: CMP0
+  41: CMP1
+  42: FTM0
+  43: FTM1
+  44: FTM2
+  45: CMT
+  46: RTC
+  47: RTC_Seconds
+  48: PIT0
+  49: PIT1
+  50: PIT2
+  51: PIT3
+  52: PDB0
+  53: USB0
+  54: USBDCD
+  55: Reserved71
+  56: DAC0
+  57: MCG
+  58: LPTMR0
+  59: PORTA
+  60: PORTB
+  61: PORTC
+  62: PORTD
+  63: PORTE
+  64: SWI
+  65: SPI2
+  66: UART4_RX_TX
+  67: UART4_ERR
+  68: Reserved84
+  69: Reserved85
+  70: CMP2
+  71: FTM3
+  72: Reserved88
+  73: ADC1
+  74: I2C2
+  75: CAN0_ORed_Message_buffer
+  76: CAN0_Bus_Off
+  77: CAN0_Error
+  78: CAN0_Tx_Warning
+  79: CAN0_Rx_Warning
+  80: CAN0_Wake_Up
+  81: SDHC
+
+# All 100 LQFP pins (data sheet section 5.1). functions: only columns with a value.
+pins:
+  - {num: 1, name: PTE0, kind: gpio, port: E, bit: 0, default: ADC1_SE4a, functions: {ALT0: ADC1_SE4a, ALT1: PTE0, ALT2: SPI1_PCS1, ALT3: UART1_TX, ALT4: SDHC0_D1, ALT5: TRACE_CLKOUT, ALT6: I2C1_SDA, ALT7: RTC_CLKOUT}}
+  - {num: 2, name: PTE1/LLWU_P0, kind: gpio, port: E, bit: 1, default: ADC1_SE5a, functions: {ALT0: ADC1_SE5a, ALT1: PTE1/LLWU_P0, ALT2: SPI1_SOUT, ALT3: UART1_RX, ALT4: SDHC0_D0, ALT5: TRACE_D3, ALT6: I2C1_SCL, ALT7: SPI1_SIN}}
+  - {num: 3, name: PTE2/LLWU_P1, kind: gpio, port: E, bit: 2, default: ADC0_DP2/ADC1_SE6a, functions: {ALT0: ADC0_DP2/ADC1_SE6a, ALT1: PTE2/LLWU_P1, ALT2: SPI1_SCK, ALT3: UART1_CTS_b, ALT4: SDHC0_DCLK, ALT5: TRACE_D2}}
+  - {num: 4, name: PTE3, kind: gpio, port: E, bit: 3, default: ADC0_DM2/ADC1_SE7a, functions: {ALT0: ADC0_DM2/ADC1_SE7a, ALT1: PTE3, ALT2: SPI1_SIN, ALT3: UART1_RTS_b, ALT4: SDHC0_CMD, ALT5: TRACE_D1, ALT7: SPI1_SOUT}}
+  - {num: 5, name: PTE4/LLWU_P2, kind: gpio, port: E, bit: 4, default: DISABLED, functions: {ALT1: PTE4/LLWU_P2, ALT2: SPI1_PCS0, ALT3: UART3_TX, ALT4: SDHC0_D3, ALT5: TRACE_D0}}
+  - {num: 6, name: PTE5, kind: gpio, port: E, bit: 5, default: DISABLED, functions: {ALT1: PTE5, ALT2: SPI1_PCS2, ALT3: UART3_RX, ALT4: SDHC0_D2, ALT6: FTM3_CH0}}
+  - {num: 7, name: PTE6, kind: gpio, port: E, bit: 6, default: DISABLED, functions: {ALT1: PTE6, ALT2: SPI1_PCS3, ALT3: UART3_CTS_b, ALT4: I2S0_MCLK, ALT6: FTM3_CH1, ALT7: USB_SOF_OUT}}
+  - {num: 8, name: VDD, kind: power, default: VDD, functions: {ALT0: VDD}}
+  - {num: 9, name: VSS, kind: power, default: VSS, functions: {ALT0: VSS}}
+  - {num: 10, name: USB0_DP, kind: special, default: USB0_DP, functions: {ALT0: USB0_DP}}
+  - {num: 11, name: USB0_DM, kind: special, default: USB0_DM, functions: {ALT0: USB0_DM}}
+  - {num: 12, name: VOUT33, kind: power, default: VOUT33, functions: {ALT0: VOUT33}}
+  - {num: 13, name: VREGIN, kind: power, default: VREGIN, functions: {ALT0: VREGIN}}
+  - {num: 14, name: ADC0_DP1, kind: analog, default: ADC0_DP1, functions: {ALT0: ADC0_DP1}}
+  - {num: 15, name: ADC0_DM1, kind: analog, default: ADC0_DM1, functions: {ALT0: ADC0_DM1}}
+  - {num: 16, name: ADC1_DP1, kind: analog, default: ADC1_DP1, functions: {ALT0: ADC1_DP1}}
+  - {num: 17, name: ADC1_DM1, kind: analog, default: ADC1_DM1, functions: {ALT0: ADC1_DM1}}
+  - {num: 18, name: ADC0_DP0/ADC1_DP3, kind: analog, default: ADC0_DP0/ADC1_DP3, functions: {ALT0: ADC0_DP0/ADC1_DP3}}
+  - {num: 19, name: ADC0_DM0/ADC1_DM3, kind: analog, default: ADC0_DM0/ADC1_DM3, functions: {ALT0: ADC0_DM0/ADC1_DM3}}
+  - {num: 20, name: ADC1_DP0/ADC0_DP3, kind: analog, default: ADC1_DP0/ADC0_DP3, functions: {ALT0: ADC1_DP0/ADC0_DP3}}
+  - {num: 21, name: ADC1_DM0/ADC0_DM3, kind: analog, default: ADC1_DM0/ADC0_DM3, functions: {ALT0: ADC1_DM0/ADC0_DM3}}
+  - {num: 22, name: VDDA, kind: power, default: VDDA, functions: {ALT0: VDDA}}
+  - {num: 23, name: VREFH, kind: power, default: VREFH, functions: {ALT0: VREFH}}
+  - {num: 24, name: VREFL, kind: power, default: VREFL, functions: {ALT0: VREFL}}
+  - {num: 25, name: VSSA, kind: power, default: VSSA, functions: {ALT0: VSSA}}
+  - {num: 26, name: VREF_OUT/CMP1_IN5/CMP0_IN5/ADC1_SE18, kind: analog, default: VREF_OUT/CMP1_IN5/CMP0_IN5/ADC1_SE18, functions: {ALT0: VREF_OUT/CMP1_IN5/CMP0_IN5/ADC1_SE18}}
+  - {num: 27, name: DAC0_OUT/CMP1_IN3/ADC0_SE23, kind: analog, default: DAC0_OUT/CMP1_IN3/ADC0_SE23, functions: {ALT0: DAC0_OUT/CMP1_IN3/ADC0_SE23}}
+  - {num: 28, name: XTAL32, kind: special, default: XTAL32, functions: {ALT0: XTAL32}}
+  - {num: 29, name: EXTAL32, kind: special, default: EXTAL32, functions: {ALT0: EXTAL32}}
+  - {num: 30, name: VBAT, kind: power, default: VBAT, functions: {ALT0: VBAT}}
+  - {num: 31, name: PTE24, kind: gpio, port: E, bit: 24, default: ADC0_SE17, functions: {ALT0: ADC0_SE17, ALT1: PTE24, ALT3: UART4_TX, ALT6: EWM_OUT_b}}
+  - {num: 32, name: PTE25, kind: gpio, port: E, bit: 25, default: ADC0_SE18, functions: {ALT0: ADC0_SE18, ALT1: PTE25, ALT3: UART4_RX, ALT6: EWM_IN}}
+  - {num: 33, name: PTE26, kind: gpio, port: E, bit: 26, default: DISABLED, functions: {ALT1: PTE26, ALT3: UART4_CTS_b, ALT6: RTC_CLKOUT, ALT7: USB_CLKIN}}
+  - {num: 34, name: PTA0, kind: gpio, port: A, bit: 0, default: JTAG_TCLK/SWD_CLK/EZP_CLK, functions: {ALT1: PTA0, ALT2: UART0_CTS_b, ALT3: FTM0_CH5, ALT7: JTAG_TCLK/SWD_CLK, EzPort: EZP_CLK}}
+  - {num: 35, name: PTA1, kind: gpio, port: A, bit: 1, default: JTAG_TDI/EZP_DI, functions: {ALT1: PTA1, ALT2: UART0_RX, ALT3: FTM0_CH6, ALT7: JTAG_TDI, EzPort: EZP_DI}}
+  - {num: 36, name: PTA2, kind: gpio, port: A, bit: 2, default: JTAG_TDO/TRACE_SWO/EZP_DO, functions: {ALT1: PTA2, ALT2: UART0_TX, ALT3: FTM0_CH7, ALT7: JTAG_TDO/TRACE_SWO, EzPort: EZP_DO}}
+  - {num: 37, name: PTA3, kind: gpio, port: A, bit: 3, default: JTAG_TMS/SWD_DIO, functions: {ALT1: PTA3, ALT2: UART0_RTS_b, ALT3: FTM0_CH0, ALT7: JTAG_TMS/SWD_DIO}}
+  - {num: 38, name: PTA4/LLWU_P3, kind: gpio, port: A, bit: 4, default: NMI_b/EZP_CS_b, functions: {ALT1: PTA4/LLWU_P3, ALT3: FTM0_CH1, ALT7: NMI_b, EzPort: EZP_CS_b}}
+  - {num: 39, name: PTA5, kind: gpio, port: A, bit: 5, default: DISABLED, functions: {ALT1: PTA5, ALT2: USB_CLKIN, ALT3: FTM0_CH2, ALT5: CMP2_OUT, ALT6: I2S0_TX_BCLK, ALT7: JTAG_TRST_b}}
+  - {num: 40, name: VDD, kind: power, default: VDD, functions: {ALT0: VDD}}
+  - {num: 41, name: VSS, kind: power, default: VSS, functions: {ALT0: VSS}}
+  - {num: 42, name: PTA12, kind: gpio, port: A, bit: 12, default: CMP2_IN0, functions: {ALT0: CMP2_IN0, ALT1: PTA12, ALT2: CAN0_TX, ALT3: FTM1_CH0, ALT5: I2C2_SCL, ALT6: I2S0_TXD0, ALT7: FTM1_QD_PHA}}
+  - {num: 43, name: PTA13/LLWU_P4, kind: gpio, port: A, bit: 13, default: CMP2_IN1, functions: {ALT0: CMP2_IN1, ALT1: PTA13/LLWU_P4, ALT2: CAN0_RX, ALT3: FTM1_CH1, ALT5: I2C2_SDA, ALT6: I2S0_TX_FS, ALT7: FTM1_QD_PHB}}
+  - {num: 44, name: PTA14, kind: gpio, port: A, bit: 14, default: DISABLED, functions: {ALT1: PTA14, ALT2: SPI0_PCS0, ALT3: UART0_TX, ALT5: I2C2_SCL, ALT6: I2S0_RX_BCLK, ALT7: I2S0_TXD1}}
+  - {num: 45, name: PTA15, kind: gpio, port: A, bit: 15, default: DISABLED, functions: {ALT1: PTA15, ALT2: SPI0_SCK, ALT3: UART0_RX, ALT6: I2S0_RXD0}}
+  - {num: 46, name: PTA16, kind: gpio, port: A, bit: 16, default: DISABLED, functions: {ALT1: PTA16, ALT2: SPI0_SOUT, ALT3: UART0_CTS_b, ALT6: I2S0_RX_FS, ALT7: I2S0_RXD1}}
+  - {num: 47, name: PTA17, kind: gpio, port: A, bit: 17, default: ADC1_SE17, functions: {ALT0: ADC1_SE17, ALT1: PTA17, ALT2: SPI0_SIN, ALT3: UART0_RTS_b, ALT6: I2S0_MCLK}}
+  - {num: 48, name: VDD, kind: power, default: VDD, functions: {ALT0: VDD}}
+  - {num: 49, name: VSS, kind: power, default: VSS, functions: {ALT0: VSS}}
+  - {num: 50, name: PTA18, kind: gpio, port: A, bit: 18, default: EXTAL0, functions: {ALT0: EXTAL0, ALT1: PTA18, ALT3: FTM0_FLT2, ALT4: FTM_CLKIN0}}
+  - {num: 51, name: PTA19, kind: gpio, port: A, bit: 19, default: XTAL0, functions: {ALT0: XTAL0, ALT1: PTA19, ALT3: FTM1_FLT0, ALT4: FTM_CLKIN1, ALT6: LPTMR0_ALT1}}
+  - {num: 52, name: RESET_b, kind: special, default: RESET_b, functions: {ALT0: RESET_b}}
+  - {num: 53, name: PTB0/LLWU_P5, kind: gpio, port: B, bit: 0, default: ADC0_SE8/ADC1_SE8, functions: {ALT0: ADC0_SE8/ADC1_SE8, ALT1: PTB0/LLWU_P5, ALT2: I2C0_SCL, ALT3: FTM1_CH0, ALT6: FTM1_QD_PHA}}
+  - {num: 54, name: PTB1, kind: gpio, port: B, bit: 1, default: ADC0_SE9/ADC1_SE9, functions: {ALT0: ADC0_SE9/ADC1_SE9, ALT1: PTB1, ALT2: I2C0_SDA, ALT3: FTM1_CH1, ALT6: FTM1_QD_PHB}}
+  - {num: 55, name: PTB2, kind: gpio, port: B, bit: 2, default: ADC0_SE12, functions: {ALT0: ADC0_SE12, ALT1: PTB2, ALT2: I2C0_SCL, ALT3: UART0_RTS_b, ALT6: FTM0_FLT3}}
+  - {num: 56, name: PTB3, kind: gpio, port: B, bit: 3, default: ADC0_SE13, functions: {ALT0: ADC0_SE13, ALT1: PTB3, ALT2: I2C0_SDA, ALT3: UART0_CTS_b, ALT6: FTM0_FLT0}}
+  - {num: 57, name: PTB9, kind: gpio, port: B, bit: 9, default: DISABLED, functions: {ALT1: PTB9, ALT2: SPI1_PCS1, ALT3: UART3_CTS_b, ALT5: FB_AD20}}
+  - {num: 58, name: PTB10, kind: gpio, port: B, bit: 10, default: ADC1_SE14, functions: {ALT0: ADC1_SE14, ALT1: PTB10, ALT2: SPI1_PCS0, ALT3: UART3_RX, ALT5: FB_AD19, ALT6: FTM0_FLT1}}
+  - {num: 59, name: PTB11, kind: gpio, port: B, bit: 11, default: ADC1_SE15, functions: {ALT0: ADC1_SE15, ALT1: PTB11, ALT2: SPI1_SCK, ALT3: UART3_TX, ALT5: FB_AD18, ALT6: FTM0_FLT2}}
+  - {num: 60, name: VSS, kind: power, default: VSS, functions: {ALT0: VSS}}
+  - {num: 61, name: VDD, kind: power, default: VDD, functions: {ALT0: VDD}}
+  - {num: 62, name: PTB16, kind: gpio, port: B, bit: 16, default: DISABLED, functions: {ALT1: PTB16, ALT2: SPI1_SOUT, ALT3: UART0_RX, ALT4: FTM_CLKIN0, ALT5: FB_AD17, ALT6: EWM_IN}}
+  - {num: 63, name: PTB17, kind: gpio, port: B, bit: 17, default: DISABLED, functions: {ALT1: PTB17, ALT2: SPI1_SIN, ALT3: UART0_TX, ALT4: FTM_CLKIN1, ALT5: FB_AD16, ALT6: EWM_OUT_b}}
+  - {num: 64, name: PTB18, kind: gpio, port: B, bit: 18, default: DISABLED, functions: {ALT1: PTB18, ALT2: CAN0_TX, ALT3: FTM2_CH0, ALT4: I2S0_TX_BCLK, ALT5: FB_AD15, ALT6: FTM2_QD_PHA}}
+  - {num: 65, name: PTB19, kind: gpio, port: B, bit: 19, default: DISABLED, functions: {ALT1: PTB19, ALT2: CAN0_RX, ALT3: FTM2_CH1, ALT4: I2S0_TX_FS, ALT5: FB_OE_b, ALT6: FTM2_QD_PHB}}
+  - {num: 66, name: PTB20, kind: gpio, port: B, bit: 20, default: DISABLED, functions: {ALT1: PTB20, ALT2: SPI2_PCS0, ALT5: FB_AD31, ALT6: CMP0_OUT}}
+  - {num: 67, name: PTB21, kind: gpio, port: B, bit: 21, default: DISABLED, functions: {ALT1: PTB21, ALT2: SPI2_SCK, ALT5: FB_AD30, ALT6: CMP1_OUT}}
+  - {num: 68, name: PTB22, kind: gpio, port: B, bit: 22, default: DISABLED, functions: {ALT1: PTB22, ALT2: SPI2_SOUT, ALT5: FB_AD29, ALT6: CMP2_OUT}}
+  - {num: 69, name: PTB23, kind: gpio, port: B, bit: 23, default: DISABLED, functions: {ALT1: PTB23, ALT2: SPI2_SIN, ALT3: SPI0_PCS5, ALT5: FB_AD28}}
+  - {num: 70, name: PTC0, kind: gpio, port: C, bit: 0, default: ADC0_SE14, functions: {ALT0: ADC0_SE14, ALT1: PTC0, ALT2: SPI0_PCS4, ALT3: PDB0_EXTRG, ALT5: FB_AD14, ALT6: I2S0_TXD1}}
+  - {num: 71, name: PTC1/LLWU_P6, kind: gpio, port: C, bit: 1, default: ADC0_SE15, functions: {ALT0: ADC0_SE15, ALT1: PTC1/LLWU_P6, ALT2: SPI0_PCS3, ALT3: UART1_RTS_b, ALT4: FTM0_CH0, ALT5: FB_AD13, ALT6: I2S0_TXD0}}
+  - {num: 72, name: PTC2, kind: gpio, port: C, bit: 2, default: ADC0_SE4b/CMP1_IN0, functions: {ALT0: ADC0_SE4b/CMP1_IN0, ALT1: PTC2, ALT2: SPI0_PCS2, ALT3: UART1_CTS_b, ALT4: FTM0_CH1, ALT5: FB_AD12, ALT6: I2S0_TX_FS}}
+  - {num: 73, name: PTC3/LLWU_P7, kind: gpio, port: C, bit: 3, default: CMP1_IN1, functions: {ALT0: CMP1_IN1, ALT1: PTC3/LLWU_P7, ALT2: SPI0_PCS1, ALT3: UART1_RX, ALT4: FTM0_CH2, ALT5: CLKOUT, ALT6: I2S0_TX_BCLK}}
+  - {num: 74, name: VSS, kind: power, default: VSS, functions: {ALT0: VSS}}
+  - {num: 75, name: VDD, kind: power, default: VDD, functions: {ALT0: VDD}}
+  - {num: 76, name: PTC4/LLWU_P8, kind: gpio, port: C, bit: 4, default: DISABLED, functions: {ALT1: PTC4/LLWU_P8, ALT2: SPI0_PCS0, ALT3: UART1_TX, ALT4: FTM0_CH3, ALT5: FB_AD11, ALT6: CMP1_OUT}}
+  - {num: 77, name: PTC5/LLWU_P9, kind: gpio, port: C, bit: 5, default: DISABLED, functions: {ALT1: PTC5/LLWU_P9, ALT2: SPI0_SCK, ALT3: LPTMR0_ALT2, ALT4: I2S0_RXD0, ALT5: FB_AD10, ALT6: CMP0_OUT, ALT7: FTM0_CH2}}
+  - {num: 78, name: PTC6/LLWU_P10, kind: gpio, port: C, bit: 6, default: CMP0_IN0, functions: {ALT0: CMP0_IN0, ALT1: PTC6/LLWU_P10, ALT2: SPI0_SOUT, ALT3: PDB0_EXTRG, ALT4: I2S0_RX_BCLK, ALT5: FB_AD9, ALT6: I2S0_MCLK}}
+  - {num: 79, name: PTC7, kind: gpio, port: C, bit: 7, default: CMP0_IN1, functions: {ALT0: CMP0_IN1, ALT1: PTC7, ALT2: SPI0_SIN, ALT3: USB_SOF_OUT, ALT4: I2S0_RX_FS, ALT5: FB_AD8}}
+  - {num: 80, name: PTC8, kind: gpio, port: C, bit: 8, default: ADC1_SE4b/CMP0_IN2, functions: {ALT0: ADC1_SE4b/CMP0_IN2, ALT1: PTC8, ALT3: FTM3_CH4, ALT4: I2S0_MCLK, ALT5: FB_AD7}}
+  - {num: 81, name: PTC9, kind: gpio, port: C, bit: 9, default: ADC1_SE5b/CMP0_IN3, functions: {ALT0: ADC1_SE5b/CMP0_IN3, ALT1: PTC9, ALT3: FTM3_CH5, ALT4: I2S0_RX_BCLK, ALT5: FB_AD6, ALT6: FTM2_FLT0}}
+  - {num: 82, name: PTC10, kind: gpio, port: C, bit: 10, default: ADC1_SE6b, functions: {ALT0: ADC1_SE6b, ALT1: PTC10, ALT2: I2C1_SCL, ALT3: FTM3_CH6, ALT4: I2S0_RX_FS, ALT5: FB_AD5}}
+  - {num: 83, name: PTC11/LLWU_P11, kind: gpio, port: C, bit: 11, default: ADC1_SE7b, functions: {ALT0: ADC1_SE7b, ALT1: PTC11/LLWU_P11, ALT2: I2C1_SDA, ALT3: FTM3_CH7, ALT4: I2S0_RXD1, ALT5: FB_RW_b}}
+  - {num: 84, name: PTC12, kind: gpio, port: C, bit: 12, default: DISABLED, functions: {ALT1: PTC12, ALT3: UART4_RTS_b, ALT5: FB_AD27, ALT6: FTM3_FLT0}}
+  - {num: 85, name: PTC13, kind: gpio, port: C, bit: 13, default: DISABLED, functions: {ALT1: PTC13, ALT3: UART4_CTS_b, ALT5: FB_AD26}}
+  - {num: 86, name: PTC14, kind: gpio, port: C, bit: 14, default: DISABLED, functions: {ALT1: PTC14, ALT3: UART4_RX, ALT5: FB_AD25}}
+  - {num: 87, name: PTC15, kind: gpio, port: C, bit: 15, default: DISABLED, functions: {ALT1: PTC15, ALT3: UART4_TX, ALT5: FB_AD24}}
+  - {num: 88, name: VSS, kind: power, default: VSS, functions: {ALT0: VSS}}
+  - {num: 89, name: VDD, kind: power, default: VDD, functions: {ALT0: VDD}}
+  - {num: 90, name: PTC16, kind: gpio, port: C, bit: 16, default: DISABLED, functions: {ALT1: PTC16, ALT3: UART3_RX, ALT5: FB_CS5_b/FB_TSIZ1/FB_BE23_16_BLS15_8_b}}
+  - {num: 91, name: PTC17, kind: gpio, port: C, bit: 17, default: DISABLED, functions: {ALT1: PTC17, ALT3: UART3_TX, ALT5: FB_CS4_b/FB_TSIZ0/FB_BE31_24_BLS7_0_b}}
+  - {num: 92, name: PTC18, kind: gpio, port: C, bit: 18, default: DISABLED, functions: {ALT1: PTC18, ALT3: UART3_RTS_b, ALT5: FB_TBST_b/FB_CS2_b/FB_BE15_8_BLS23_16_b}}
+  - {num: 93, name: PTD0/LLWU_P12, kind: gpio, port: D, bit: 0, default: DISABLED, functions: {ALT1: PTD0/LLWU_P12, ALT2: SPI0_PCS0, ALT3: UART2_RTS_b, ALT4: FTM3_CH0, ALT5: FB_ALE/FB_CS1_b/FB_TS_b}}
+  - {num: 94, name: PTD1, kind: gpio, port: D, bit: 1, default: ADC0_SE5b, functions: {ALT0: ADC0_SE5b, ALT1: PTD1, ALT2: SPI0_SCK, ALT3: UART2_CTS_b, ALT4: FTM3_CH1, ALT5: FB_CS0_b}}
+  - {num: 95, name: PTD2/LLWU_P13, kind: gpio, port: D, bit: 2, default: DISABLED, functions: {ALT1: PTD2/LLWU_P13, ALT2: SPI0_SOUT, ALT3: UART2_RX, ALT4: FTM3_CH2, ALT5: FB_AD4, ALT7: I2C0_SCL}}
+  - {num: 96, name: PTD3, kind: gpio, port: D, bit: 3, default: DISABLED, functions: {ALT1: PTD3, ALT2: SPI0_SIN, ALT3: UART2_TX, ALT4: FTM3_CH3, ALT5: FB_AD3, ALT7: I2C0_SDA}}
+  - {num: 97, name: PTD4/LLWU_P14, kind: gpio, port: D, bit: 4, default: DISABLED, functions: {ALT1: PTD4/LLWU_P14, ALT2: SPI0_PCS1, ALT3: UART0_RTS_b, ALT4: FTM0_CH4, ALT5: FB_AD2, ALT6: EWM_IN}}
+  - {num: 98, name: PTD5, kind: gpio, port: D, bit: 5, default: ADC0_SE6b, functions: {ALT0: ADC0_SE6b, ALT1: PTD5, ALT2: SPI0_PCS2, ALT3: UART0_CTS_b, ALT4: FTM0_CH5, ALT5: FB_AD1, ALT6: EWM_OUT_b}}
+  - {num: 99, name: PTD6/LLWU_P15, kind: gpio, port: D, bit: 6, default: ADC0_SE7b, functions: {ALT0: ADC0_SE7b, ALT1: PTD6/LLWU_P15, ALT2: SPI0_PCS3, ALT3: UART0_RX, ALT4: FTM0_CH6, ALT5: FB_AD0, ALT6: FTM0_FLT0}}
+  - {num: 100, name: PTD7, kind: gpio, port: D, bit: 7, default: DISABLED, functions: {ALT1: PTD7, ALT2: CMT_IRO, ALT3: UART0_TX, ALT4: FTM0_CH7, ALT6: FTM0_FLT1}}

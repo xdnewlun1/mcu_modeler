@@ -1,0 +1,464 @@
+:root, :root[data-theme=dark] {
+  /* design tokens: two complete sets (dark here, light below). html[data-theme] is set before the first paint by
+     the inline script in index.html (saved choice, else prefers-color-scheme); docs/UI_REVIEW_BOARD.md has the
+     contrast table for both. Rules use tokens only: no colour literals outside these two blocks. */
+  color-scheme: dark;
+  /* surfaces and lines */
+  --bg: #0e1116;
+  --panel: #14181e;
+  --raise: #1a1f26;            /* chip body, hover rows, cards */
+  --line: #2a313a;
+  --line-2: #3d4652;
+  --hover: #222a34;            /* button hover */
+  /* text: 13.8 / 7.8 / 5.1 : 1 on --panel */
+  --fg: #dde3ea;
+  --fg-2: #a3adb9;
+  --fg-3: #808a97;
+  /* one accent, for interaction only (selection, focus, search hit, pending wire, UART links) */
+  --accent: #4c9aff;
+  --accent-weak: rgba(76, 154, 255, .16);
+  --focus: rgba(88, 166, 255, .45);
+  --sel-bg: #1f3a5a;           /* pressed toggle buttons */
+  --sel-fg: #dbeaff;
+  --sel-row: #1d2733;          /* selected list row */
+  --flash: rgba(88, 166, 255, .18);
+  --mark: rgba(210, 153, 34, .35);
+  /* data colours */
+  --own: #3ec4cf;              /* peripheral owner text: UART0_TX, ADC0_SE4b */
+  --lv-h: #3fb950;             /* H: solid */
+  --lv-l: #8b95a3;             /* L: hollow outline */
+  --lv-x: #d29922;             /* X / floating: hatch, dotted */
+  --lv-x-bg: #2c2414;          /* background stripes of the X hatch swatches */
+  --danger: #f85149;
+  --k-power: #6b7581;          /* power pads: neutral, never a level colour */
+  --badge-h: rgba(63, 185, 80, .18);
+  --badge-l: rgba(110, 118, 129, .2);
+  --badge-x: rgba(210, 153, 34, .16);
+  --port: #e3b341;             /* part ports in the nets pane */
+  --chip-a: #79c0ff; --chip-b: #f0883e; --chip-c: #d2a8ff; --chip-d: #7ee787;
+  /* consoles, buttons, messages */
+  --term-bg: #0b0e11;
+  --term-fg: #cfe8d3;
+  --ok-bg: #1f6f3a; --ok-line: #2a8a4a; --ok-hover: #238043; --ok-fg: #eafff0;
+  --err-bg: #3b1d20; --err-line: #7a2c31; --err-fg: #ffd7d9;
+  --press-bg: #7a2c31; --press-line: #c9504b;
+  --shadow: rgba(0, 0, 0, .45);
+  /* LED colours (parts: params.color); the colour is data, the on/off/X state is drawn by fill / hollow / hatch */
+  --led-red: #ff4d4d; --led-green: #3fe06a; --led-blue: #4da3ff; --led-yellow: #ffd23f; --led-orange: #ff9a3c;
+  --led-white: #f4f7fb; --led-amber: #ffbf3c; --led-purple: #c07bff; --led-pink: #ff7bc8; --led-cyan: #3fe0e0;
+}
+:root[data-theme=light] {
+  color-scheme: light;
+  --bg: #f3f5f8;
+  --panel: #ffffff;
+  --raise: #f0f2f5;
+  --line: #d8dde3;
+  --line-2: #aab3bd;
+  --hover: #e4e8ed;
+  /* text: 16.2 / 7.6 / 5.4 : 1 on --panel */
+  --fg: #1b2129;
+  --fg-2: #4a5562;
+  --fg-3: #5f6b78;
+  --accent: #0b5fca;
+  --accent-weak: rgba(11, 95, 202, .12);
+  --focus: rgba(11, 95, 202, .4);
+  --sel-bg: #dbe9fb;
+  --sel-fg: #0a3069;
+  --sel-row: #e7f0fb;
+  --flash: rgba(11, 95, 202, .14);
+  --mark: rgba(212, 167, 44, .38);
+  --own: #00727f;
+  --lv-h: #1a7f37;
+  --lv-l: #687483;
+  --lv-x: #8f5f00;
+  --lv-x-bg: #fff3d6;
+  --danger: #c4202b;
+  --k-power: #8b949e;
+  --badge-h: rgba(26, 127, 55, .12);
+  --badge-l: rgba(101, 109, 118, .12);
+  --badge-x: rgba(143, 95, 0, .12);
+  --port: #8f5f00;
+  --chip-a: #0969da; --chip-b: #b34700; --chip-c: #7a43d1; --chip-d: #1a7f37;
+  --term-bg: #fbfcfd;
+  --term-fg: #1b2129;
+  --ok-bg: #1a7f37; --ok-line: #116329; --ok-hover: #116329; --ok-fg: #ffffff;
+  --err-bg: #ffebe9; --err-line: #ff8182; --err-fg: #82071e;
+  --press-bg: #ffd8d3; --press-line: #c4202b;
+  --shadow: rgba(31, 35, 40, .18);
+  --led-red: #e5322d; --led-green: #2bbd55; --led-blue: #2f7fe6; --led-yellow: #f0c000; --led-orange: #f07f1a;
+  --led-white: #f4f7fb; --led-amber: #f0a500; --led-purple: #9b5de5; --led-pink: #e85aa8; --led-cyan: #1fbfbf;
+}
+:root {
+  /* shape, type, spacing (both themes) */
+  --radius: 3px;
+  --mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 15px;
+  --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px; --sp-5: 12px;
+  /* legacy names (kept so existing rules keep working) */
+  --panel-2: var(--raise);
+  --border: var(--line);
+  --border-2: var(--line-2);
+  --text: var(--fg);
+  --muted: var(--fg-2);
+  --dim: var(--fg-3);
+  --hi: var(--lv-h);
+  --hi-glow: transparent;
+  --lo: var(--raise);
+  --lo-edge: var(--lv-l);
+  --x: var(--lv-x);
+  --power: var(--k-power);
+  --analog: var(--fg-2);
+  --periph: var(--own);
+  --warn: var(--lv-x);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: var(--mono); }
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 28px; flex-wrap: wrap;
+  padding: 12px 22px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 220px; }
+.logo {
+  width: 30px; height: 30px; border-radius: 7px;
+  background:
+    linear-gradient(var(--panel-2), var(--panel-2)) padding-box,
+    linear-gradient(135deg, var(--hi), var(--accent)) border-box;
+  border: 2px solid transparent;
+  position: relative;
+}
+.logo::after {
+  content: ""; position: absolute; left: 5px; top: 5px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+}
+.chip-name { font-weight: 650; letter-spacing: .2px; }
+.chip-meta { color: var(--muted); font-size: 12px; }
+
+.controls { display: flex; align-items: center; gap: 8px; }
+.runfor { display: flex; align-items: center; margin-left: 8px; }
+.runfor input {
+  width: 86px; height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-2); border-right: 0; border-radius: 7px 0 0 7px;
+  background: var(--panel); color: var(--text); font: 13px var(--mono);
+}
+.runfor .btn { border-radius: 0 7px 7px 0; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--border-2); border-radius: 7px;
+  background: var(--panel-2); color: var(--text);
+  font: 500 13px var(--sans); cursor: pointer;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.btn svg { width: 13px; height: 13px; fill: currentColor; }
+.btn:hover { background: var(--hover); border-color: var(--line-2); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok-fg); }
+.btn.primary:hover { background: var(--ok-hover); }
+.btn.small { height: 26px; padding: 0 9px; font-size: 12px; }
+.btn.ghost { background: transparent; }
+
+.readouts { display: flex; align-items: center; gap: 22px; margin-left: auto; }
+.readout { display: flex; flex-direction: column; min-width: 64px; }
+.readout .k { color: var(--dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; }
+.readout .v { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.status { font-weight: 600; }
+.status.running { color: var(--hi); }
+.status.paused { color: var(--muted); }
+.status.fault { color: var(--danger); }
+.conn { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+.conn.ok { background: var(--hi); box-shadow: 0 0 8px var(--hi-glow); }
+.conn.bad { background: var(--danger); }
+
+/* ---------- layout ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.25fr) minmax(380px, 1fr);
+  grid-template-areas: "pkg side" "pins pins";
+  gap: 16px; padding: 16px 22px 26px;
+}
+.package-panel { grid-area: pkg; }
+.side { grid-area: side; display: grid; grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr); gap: 16px; min-height: 0; }
+.pins-panel { grid-area: pins; }
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 1fr; grid-template-areas: "pkg" "side" "pins"; }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+}
+.panel-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.panel-head h2 { margin: 0; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .9px; color: var(--muted); }
+.panel-head .hint { color: var(--dim); font-size: 12px; margin-left: auto; }
+.head-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+select, input[type=text], input[type=search] {
+  height: 28px; padding: 0 9px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border-2); border-radius: 6px;
+  font: 13px var(--sans);
+}
+input[type=search] { width: 220px; }
+input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.toggle { color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+
+/* ---------- package SVG: drawing rules live in board.css (loaded by board.js) ---------- */
+.svg-wrap { padding: 8px; display: flex; justify-content: center; overflow: hidden; }
+#pkg { width: 100%; max-width: 860px; height: auto; max-height: 78vh; display: block; user-select: none; touch-action: none; cursor: grab; }
+
+
+/* ---------- tooltip / toast ---------- */
+.tooltip {
+  position: fixed; z-index: 50; pointer-events: none;
+  max-width: 360px; padding: 10px 12px;
+  background: var(--raise); border: 1px solid var(--line-2); border-radius: var(--radius);
+  font-size: 12.5px;
+}
+.tooltip h3 { margin: 0 0 2px; font-size: 13.5px; font-family: var(--mono); }
+.tooltip .sub { color: var(--muted); margin-bottom: 8px; }
+.tooltip dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
+.tooltip dt { color: var(--dim); }
+.tooltip dd { margin: 0; font-family: var(--mono); }
+.tooltip .alts { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-2); display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-family: var(--mono); font-size: 11.5px; }
+.tooltip .alts .on { color: var(--periph); }
+.tooltip .alts span:nth-child(odd) { color: var(--dim); }
+.tooltip .tip-hint { margin-top: 8px; color: var(--dim); font-size: 11.5px; }
+.lv { font-weight: 700; }
+.lv-H { color: var(--hi); } .lv-L { color: var(--fg-2); } .lv-X { color: var(--x); }
+
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 60;
+  padding: 7px 12px; border-radius: var(--radius); background: var(--raise); border: 1px solid var(--line-2);
+  border-left: 3px solid var(--accent); color: var(--fg); font-size: 13px; box-shadow: 0 6px 18px var(--shadow);
+}
+.toast.toast-error { background: var(--err-bg); border-color: var(--err-line); border-left-color: var(--danger); color: var(--err-fg); }
+
+/* ---------- UART ---------- */
+.term {
+  flex: 1; margin: 0; padding: 10px 14px; overflow: auto; min-height: 120px;
+  font: 12.5px/1.5 var(--mono); color: var(--term-fg); background: var(--term-bg);
+  white-space: pre-wrap; word-break: break-all;
+}
+.term .rx { color: var(--accent); }
+.term:empty::before { content: "no output yet"; color: var(--dim); }
+.uart-input { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.uart-input input { flex: 1; font-family: var(--mono); }
+.uart-drops { align-self: center; font-size: 12px; color: var(--warn); white-space: nowrap; }
+
+/* ---------- events ---------- */
+.events { flex: 1; overflow: auto; font: 12px/1.55 var(--mono); padding: 6px 0; min-height: 120px; }
+.events:empty::before { content: "no events yet"; color: var(--dim); padding: 6px 14px; display: block; font-family: var(--sans); }
+.ev { display: grid; grid-template-columns: 96px 48px 1fr; gap: 10px; padding: 1px 14px; }
+.board-mode .ev { grid-template-columns: 96px 38px 48px 1fr; }
+.ev .c { font-weight: 700; text-align: center; }
+.ev:hover { background: var(--panel-2); }
+.ev .t { color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+.ev .kind { font-weight: 600; }
+.ev .msg { color: var(--text); overflow-wrap: anywhere; }
+.k-pin { color: var(--hi); } .k-uart { color: var(--accent); } .k-irq { color: var(--analog); }
+.k-reset { color: var(--periph); } .k-fault { color: var(--danger); } .k-warn { color: var(--warn); }
+.k-info { color: var(--muted); } .k-mmio { color: var(--dim); }
+.kind-filter { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip-toggle {
+  font: 11px var(--mono); padding: 2px 7px; border-radius: 999px; cursor: pointer; user-select: none;
+  border: 1px solid var(--border-2); color: var(--dim); background: transparent;
+}
+.chip-toggle.on { color: var(--text); background: var(--panel-2); border-color: var(--fg-3); }
+
+/* ---------- pin table ---------- */
+.table-wrap { overflow: auto; max-height: 440px; }
+table.pins { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.pins th {
+  position: sticky; top: 0; background: var(--panel); z-index: 1;
+  text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap;
+}
+table.pins th:hover { color: var(--text); }
+table.pins th.sorted::after { content: " ▲"; font-size: 9px; }
+table.pins th.sorted.desc::after { content: " ▼"; }
+table.pins td { padding: 5px 12px; border-bottom: 1px solid var(--line); font-family: var(--mono); white-space: nowrap; }
+table.pins td.num, table.pins th.num { text-align: right; width: 48px; }
+table.pins td.name { color: var(--dim); white-space: normal; }
+table.pins tr:hover td { background: var(--panel-2); }
+table.pins tr.flash td { animation: rowflash 1s ease-out; }
+@keyframes rowflash { from { background: var(--flash); } to { background: transparent; } }
+table.pins tr.clickable td.ext { cursor: pointer; text-decoration: underline dotted var(--dim); }
+.badge { display: inline-block; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 4px; font-weight: 700; }
+.badge.H { background: var(--badge-h); color: var(--hi); }
+.badge.L { background: var(--badge-l); color: var(--fg-2); }
+.badge.X { background: var(--badge-x); color: var(--x); }
+.owner-periph { color: var(--periph); } .owner-gpio { color: var(--text); } .owner-disabled { color: var(--dim); }
+.owner-analog { color: var(--analog); } .owner-power { color: var(--fg-3); }   /* 5.1 : 1 dark, 5.4 : 1 light */
+
+/* ---------- pins / discovery tabs ---------- */
+[hidden] { display: none !important; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .9px; color: var(--dim);
+}
+.tab:hover { color: var(--muted); }
+.tab.on { color: var(--text); border-color: var(--border-2); background: var(--panel-2); }
+.disc { display: flex; flex-direction: column; min-height: 0; }
+.disc td.notes { color: var(--muted); white-space: normal; }
+.disc td.warn { color: var(--danger); }
+.disc td.mono, .tooltip dd.cfg { font-family: var(--mono); }
+.disc-text { max-height: 360px; border-top: 1px solid var(--border); white-space: pre-wrap; word-break: normal; }
+.disc-text:empty::before { content: "run the firmware, then refresh"; }
+
+/* ---------- board mode (several chips) ---------- */
+.board-only { display: none !important; }
+.board-mode .board-only { display: inline-flex !important; }
+.board-mode .layout {
+  grid-template-columns: minmax(380px, 1fr) minmax(420px, 1.3fr) minmax(280px, 330px);
+  grid-template-areas: "pkg pkg wiring" "side pins pins";
+}
+.board-mode #pkg { max-width: none; max-height: 80vh; }
+.board-mode .side { grid-template-rows: minmax(300px, 1fr) minmax(260px, 1fr); }
+@media (max-width: 1100px) {
+  .board-mode .layout { grid-template-columns: 1fr; grid-template-areas: "pkg" "wiring" "side" "pins"; }
+}
+.board-mode .wiring-panel.board-only { display: flex !important; }
+.zoom-tools { display: flex; gap: 2px; }
+.panel-head .hint + .zoom-tools { margin-left: 8px; }
+
+/* chip selector */
+.chip-sel { display: flex; gap: 4px; }
+.chip-tab {
+  font: 12px var(--sans); color: var(--muted); padding: 4px 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border-2); background: transparent;
+}
+.chip-tab b { font-family: var(--mono); color: var(--text); margin-right: 3px; }
+.chip-tab.on { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+.pins-chip { color: var(--muted); font: 12px var(--mono); }
+
+/* per-chip colours (event log chip column, transcript prefixes) */
+.c-A { color: var(--chip-a); } .c-B { color: var(--chip-b); } .c-C { color: var(--chip-c); } .c-D { color: var(--chip-d); }
+.c-board { color: var(--warn); }
+
+
+/* UART transcript and link monitor */
+.term .ln .who { font-weight: 700; }
+.term .ln.in { color: var(--muted); }
+.link-mon { border-top: 1px solid var(--border); padding: 6px 10px; display: grid; gap: 3px; font: 12px var(--mono); }
+.mon-row { display: grid; grid-template-columns: max-content 1fr max-content; gap: 10px; align-items: center; }
+.mon-dir { color: var(--muted); white-space: nowrap; }
+.mon-bytes { color: var(--term-fg); background: var(--term-bg); padding: 1px 6px; border-radius: 4px; overflow: hidden; white-space: pre; display: flex; justify-content: flex-end; min-width: 0; }
+.mon-bytes i { font-style: normal; color: var(--dim); }
+.mon-n { color: var(--dim); }
+.kind-filter .sep { width: 1px; background: var(--border-2); margin: 0 4px; }
+
+/* ---------- board wiring: wire mode, nets panel, links panel ---------- */
+.wiring-panel { grid-area: wiring; max-height: calc(80vh + 90px); }
+.wiring-panel .sub-head { border-top: 1px solid var(--border); }
+.panel-head h2 .count { color: var(--dim); font-weight: 500; margin-left: 4px; }
+.net-list { flex: 1 1 auto; overflow: auto; min-height: 90px; padding: 4px 0; }
+.net-row {
+  display: grid; grid-template-columns: auto 1fr auto auto; gap: 2px 8px; align-items: center;
+  padding: 4px 12px; border-left: 3px solid transparent; cursor: pointer; font: 12px var(--mono);
+}
+.net-row:hover, .net-row.hl { background: var(--panel-2); }
+.net-row.sel { background: var(--sel-row); border-left-color: var(--accent); }
+.net-row.conflict .net-name { color: var(--danger); }
+.net-row .net-name { font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.net-row .net-conf { color: var(--danger); font-size: 11px; }
+.net-row .net-tools { display: flex; gap: 0; opacity: 0; transition: opacity .1s; }
+.net-row:hover .net-tools, .net-row.sel .net-tools { opacity: 1; }
+.net-row .net-tools .btn { height: 20px; padding: 0 6px; }
+.net-row .net-pins { grid-column: 2 / -1; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.net-row .net-pins i { color: var(--dim); font-style: normal; }
+.net-list .empty, .link-list .empty { color: var(--dim); font-size: 12px; padding: 8px 14px; }
+.link-list { max-height: 30vh; overflow: auto; padding: 4px 0; }
+.link-row { display: flex; align-items: center; gap: 6px; padding: 3px 12px; font: 12px var(--mono); }
+.link-row .btn { margin-left: auto; height: 20px; padding: 0 6px; }
+.auto-tag { margin-left: auto; font: 10.5px var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius); padding: 0 6px; }
+.mon-dir .auto-tag { margin-left: 4px; }
+.link-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px 12px; border-top: 1px solid var(--border); }
+.link-add select { max-width: 120px; font-family: var(--mono); font-size: 12px; }
+.link-add .arrow-txt { color: var(--muted); }
+.wire-btn.on { background: var(--sel-bg); border-color: var(--accent); color: var(--sel-fg); }
+
+/* ---------- board parts (parts.js) ---------- */
+
+/* parts panel */
+.part-list { max-height: 40vh; overflow: auto; padding: 4px 0; flex: 0 1 auto; min-height: 60px; }
+.part-list .empty { color: var(--dim); font-size: 12px; padding: 8px 14px; }
+.part-row {
+  display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 3px 8px; align-items: center;
+  padding: 5px 12px; border-left: 3px solid transparent; font: 12px var(--mono);
+}
+.part-row:hover { background: var(--panel-2); border-left-color: var(--accent); }
+.part-row.flash { animation: rowflash 1.2s ease-out; }
+.part-row .part-name { font-weight: 700; }
+.part-row .part-type { color: var(--muted); }
+.part-row .part-st { color: var(--text); justify-self: end; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.part-row .part-del { height: 20px; padding: 0 6px; opacity: .5; }
+.part-row:hover .part-del { opacity: 1; }
+.part-row .part-ctl { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.part-row .part-ctl:empty { display: none; }
+.part-row .part-ports { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.pport { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.pport .pn { color: var(--dim); }
+.pport input, .part-ctl input[type=text] { height: 22px; width: 86px; padding: 0 6px; font: 11.5px var(--mono); }
+.part-ctl input.pat { width: 170px; }
+.part-ctl .pp { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); }
+.part-ctl .pp input { width: 64px; }
+.part-ico { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--panel); border: 1px solid var(--lv-l); }
+.part-ico.lv-H { background: var(--hi); border-color: var(--hi); }
+.part-ico.lv-X { background: repeating-linear-gradient(45deg, var(--x) 0 2px, var(--lv-x-bg) 2px 4px); border-color: var(--x); }
+.part-ico.lv-none { background: transparent; border-style: dashed; }
+.part-ico.led-ico { border-color: var(--led); background: var(--raise); }
+.part-ico.led-ico.on { background: var(--led); }
+.seg { display: inline-flex; border: 1px solid var(--border-2); border-radius: 6px; overflow: hidden; }
+.seg-b { background: transparent; color: var(--muted); border: 0; padding: 1px 9px; font: 700 11.5px var(--mono); cursor: pointer; }
+.seg-b + .seg-b { border-left: 1px solid var(--border-2); }
+.seg-b:hover { background: var(--panel-2); color: var(--text); }
+.seg-b.on { background: var(--sel-bg); color: var(--sel-fg); }
+.part-press.on { background: var(--press-bg); border-color: var(--press-line); }
+.wiring-panel .net-list { min-height: 70px; }
+
+/* add-part dialog (floats over the right column; the board stays clickable for "pick") */
+.dialog {
+  position: fixed; z-index: 40; top: 76px; right: 22px; width: 360px; max-height: calc(100vh - 100px); overflow: auto;
+  background: var(--raise); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: 0 10px 28px var(--shadow);
+}
+.dlg-head { display: flex; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.dlg-head h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+.dlg-head .btn { margin-left: auto; }
+#partForm { padding: 10px 14px 12px; display: grid; gap: 7px; }
+.pd-row { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--muted); }
+.pd-row > input, .pd-row > select { width: 100%; font: 12px var(--mono); }
+.pd-row > input[type=checkbox] { width: auto; justify-self: start; }
+.pd-row i { color: var(--dim); font-style: normal; font-size: 10.5px; }
+.pd-params, .pd-ports { display: grid; gap: 6px; }
+.pd-sub { color: var(--dim); font-size: 11.5px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.pd-none { color: var(--dim); font-size: 11.5px; }
+.pick.on { background: var(--sel-bg); border-color: var(--accent); color: var(--sel-fg); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 6px; padding-top: 6px; }
+.net-row .net-pins .net-port { color: var(--port); }
+.board-mode .wiring-panel { align-self: start; }
+.board-mode .wiring-panel .net-list { flex: 1 1 0; min-height: 80px; }
+.board-mode .wiring-panel .part-list { flex: 1.3 1 0; min-height: 120px; max-height: none; }
+.board-mode .single-only { display: none !important; }

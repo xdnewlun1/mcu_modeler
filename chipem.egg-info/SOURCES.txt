@@ -1,0 +1,15 @@
+pyproject.toml
+chipem/__init__.py
+chipem/chipdesc.py
+chipem/cli.py
+chipem/firmware.py
+chipem/log.py
+chipem/pins.py
+chipem/regtable.py
+chipem.egg-info/PKG-INFO
+chipem.egg-info/SOURCES.txt
+chipem.egg-info/dependency_links.txt
+chipem.egg-info/entry_points.txt
+chipem.egg-info/requires.txt
+chipem.egg-info/top_level.txt
+tests/test_svd2chip.py

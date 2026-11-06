@@ -1,0 +1,44 @@
+# Three chips, three vendors on one board: a Kinetis K22 talks to an STM32F405 and a TI C2000 at once.
+#   A (MK22FN1M0VLL12)  runs uart_link_sender: "ping N\r\n" every 2 ms on UART0 (PTA2/PTA1), toggles PTC5 per reply line.
+#   B (STM32F405ZG)     runs uart_link_echo:   echoes every USART1 byte uppercased (PA9/PA10), toggles PB0 per byte.
+#   C (TMS320F28232)    runs uart_link_echo:   echoes every SCI-A byte uppercased (GPIO29/GPIO28), toggles GPIO34.
+# Wiring:
+#   * net A_TX fans A's UART0_TX out to B's USART1_RX and C's SCI-A RX (one TX driving two RX pins is electrically
+#     fine). No link entry is needed: the board sees a TX pin and RX pins on one net and creates the automatic byte
+#     links A.UART0 -> B.USART1 (as soon as both are muxed, ~0.1 ms) and A.UART0 -> C.SCIA (when the C28x muxes
+#     GPIO28 after its PLL locks, ~6.6 ms: pings sent before that are lost, as on real hardware).
+#   * B's reply goes back to A's UART0 RX over an explicit one-way link (and the wire B_TX).
+#   * C's reply is wired to A's UART1 RX (PTC3): the sender sample never enables UART1, so an explicit one-way link
+#     C.SCIA -> A.UART1 carries the bytes (see them in the web UI's link monitor).
+#     A never configures UART1 either, so that link logs one "baud mismatch 115741 vs 1875000" warning (the
+#     bytes are still delivered and counted).
+#   * LED_A: A's reply-line LED (PTC5, GPIO output) also drives B.PA0 (an input nobody reads: shows the level);
+#     ACT_C: C's per-byte activity LED (GPIO34) drives A.PTC6.
+# Parts (board components, chipem/parts): LED_A1 shows A's reply LED (net LED_A), LED_C1 C's activity LED (net
+#   ACT_C); switch SW1 drives B.PC13 (net SW_B, an input B's firmware does not read: watch its level in the pin
+#   table), toggled by the stimulus at 2 ms and 4 ms. (B's own toggle pin PB0 stays free for the wiring demo.)
+# Run:   chipem run --board boards/three_chip_demo.yaml --for 20ms
+#        chipem serve --board boards/three_chip_demo.yaml
+# Bauds: K22 115163 (UART0 core-clocked at 120 MHz via clock_hz), STM32 115108 (16 MHz HSI, BRR 139),
+#        C2000 115741 (LSPCLK 25 MHz, BRR 26): all within the links' 3 % tolerance.
+name: three_chip_demo
+quantum: 10us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/uart_link_sender.elf, clock_hz: 120000000}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/uart_link_echo.elf}
+  - {id: C, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/uart_link_echo.c28img}
+nets:
+  - {name: A_TX, pins: [A.PTA2, B.PA10, C.GPIO28]}   # UART0_TX -> USART1_RX + SCIRXDA: two automatic links
+  - {name: B_TX, pins: [B.PA9, A.PTA1]}              # USART1_TX -> UART0_RX (the explicit link below covers it)
+  - {name: C_TX, pins: [C.GPIO29, A.PTC3]}           # SCITXDA -> PTC3 (UART1_RX if A muxed it; it does not)
+  - {name: LED_A, pins: [A.PTC5, B.PA0]}
+  - {name: ACT_C, pins: [C.GPIO34, A.PTC6]}
+  - {name: SW_B, pins: [B.PC13]}
+links:
+  - {type: uart, from: B.USART1, to: A.UART0, dir: tx}
+  - {type: uart, from: C.SCIA, to: A.UART1, dir: tx}
+parts:
+  - {id: LED_A1, type: led, color: green, ports: {in: LED_A}}
+  - {id: LED_C1, type: led, color: yellow, ports: {in: ACT_C}}
+  - {id: SW1, type: switch, level: L, ports: {out: SW_B}}
+stimulus: ["2ms:SW1=H", "4ms:SW1=L"]

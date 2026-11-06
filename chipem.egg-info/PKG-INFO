@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: chipem
+Version: 0.1.0
+Summary: Description-driven microcontroller emulator (Kinetis K22 / Cortex-M4F first)
+Requires-Python: >=3.12
+Requires-Dist: unicorn
+Requires-Dist: capstone
+Requires-Dist: pyelftools
+Requires-Dist: pyyaml
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"

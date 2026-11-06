@@ -1,0 +1,1821 @@
+# TMS320F28232 (C2823x) register table, HAND-WRITTEN: TI publishes no SVD for the C2000 F2833x/F2823x family.
+# Same schema as tools/svd2chip.py output (chips/README.md) so chipem.regtable.regs_for() reads it unchanged.
+# Generated once from a transcription script (register names/offsets/reset values) of:
+#   SPRS439Q TMS320F2833x/F2823x data sheet (section 8: memory map, peripheral frames, Table 8-17 GPIO,
+#   8-27..8-35), SPRUFB0 TMS320x2833x/2823x System Control and Interrupts reference guide (PLL, clocks, watchdog,
+#   CPU timers, PIE, GPIO, XINT), SPRUFZ5 SCI guide, SPRU812 ADC guide, SPRUG04 ePWM, SPRUG79 I2C.
+# Address units are 16-bit words: offsets/sizes/widths count words; a width-2 register is 32 bits with its low
+# word at the lower address. Peripherals not on the F28232 (SCI-C, McBSP-B, eCAP5/6) are omitted.
+device: TMS320F28232
+svd_version: "hand-written"
+address_unit_bits: 16
+cpu: {name: C28x, fpu: false}
+interrupts:                 # PIE vector numbers (INTx.y = 32 + 8(x-1) + (y-1)); 13/14 INT13/INT14, 18 NMI
+  13: INT13
+  14: INT14
+  18: NMI
+  19: ILLEGAL
+  32: SEQ1INT
+  33: SEQ2INT
+  35: XINT1
+  36: XINT2
+  37: ADCINT
+  38: TINT0
+  39: WAKEINT
+  40: EPWM1_TZINT
+  41: EPWM2_TZINT
+  42: EPWM3_TZINT
+  43: EPWM4_TZINT
+  44: EPWM5_TZINT
+  45: EPWM6_TZINT
+  48: EPWM1_INT
+  49: EPWM2_INT
+  50: EPWM3_INT
+  51: EPWM4_INT
+  52: EPWM5_INT
+  53: EPWM6_INT
+  56: ECAP1_INT
+  57: ECAP2_INT
+  58: ECAP3_INT
+  59: ECAP4_INT
+  60: ECAP5_INT
+  61: ECAP6_INT
+  64: EQEP1_INT
+  65: EQEP2_INT
+  72: SPIRXINTA
+  73: SPITXINTA
+  74: MRINTB
+  75: MXINTB
+  76: MRINTA
+  77: MXINTA
+  80: DINTCH1
+  81: DINTCH2
+  82: DINTCH3
+  83: DINTCH4
+  84: DINTCH5
+  85: DINTCH6
+  88: I2CINT1A
+  89: I2CINT2A
+  92: SCIRXINTC
+  93: SCITXINTC
+  96: SCIRXINTA
+  97: SCITXINTA
+  98: SCIRXINTB
+  99: SCITXINTB
+  100: ECAN0_INTA
+  101: ECAN1_INTA
+  102: ECAN0_INTB
+  103: ECAN1_INTB
+  120: XINT3
+  121: XINT4
+  122: XINT5
+  123: XINT6
+  124: XINT7
+  126: LVF
+  127: LUF
+peripherals:
+  DEV_EMU:
+    base: 0x0880
+    size: 0x180
+    derived_from: null
+    description: "Device emulation registers (DEVICECNF, CLASSID, REVID, block protection)"
+    group: DEV_EMU
+    registers:
+      - {name: DEVICECNF, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: VMAPS, lsb: 3, width: 1, access: read-only},
+          {name: XRS, lsb: 5, width: 1, access: read-only},
+          {name: ENPROT, lsb: 19, width: 1},
+        ]}
+      - {name: CLASSID, offset: 0x02, width: 1, reset: 0x00E8, reset_mask: 0xFFFF, access: read-only, description: "F2823x fixed-point class"}
+      - {name: REVID, offset: 0x03, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-only}
+      - {name: PROTSTART, offset: 0x04, width: 1, reset: 0x0100, reset_mask: 0xFFFF, access: read-write}
+      - {name: PROTRANGE, offset: 0x05, width: 1, reset: 0x00FF, reset_mask: 0xFFFF, access: read-write}
+  FLASH:
+    base: 0x0A80
+    size: 0x060
+    derived_from: null
+    description: "Flash configuration registers (EALLOW, CSM protected)"
+    group: FLASH
+    registers:
+      - {name: FOPT, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENPIPE, lsb: 0, width: 1},
+        ]}
+      - {name: FPWR, offset: 0x02, width: 1, reset: 0x0003, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PWR, lsb: 0, width: 2, enum: {0: "sleep", 1: "standby", 3: "active"}},
+        ]}
+      - {name: FSTATUS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PWRS, lsb: 0, width: 2, access: read-only},
+          {name: STDBYWAITS, lsb: 2, width: 1, access: read-only},
+          {name: ACTIVEWAITS, lsb: 3, width: 1, access: read-only},
+          {name: V3STAT, lsb: 8, width: 1},
+        ]}
+      - {name: FSTDBYWAIT, offset: 0x04, width: 1, reset: 0x01FF, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: STDBYWAIT, lsb: 0, width: 9},
+        ]}
+      - {name: FACTIVEWAIT, offset: 0x05, width: 1, reset: 0x01FF, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ACTIVEWAIT, lsb: 0, width: 9},
+        ]}
+      - {name: FBANKWAIT, offset: 0x06, width: 1, reset: 0x0F0F, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RANDWAIT, lsb: 0, width: 4},
+          {name: PAGEWAIT, lsb: 8, width: 4},
+        ]}
+      - {name: FOTPWAIT, offset: 0x07, width: 1, reset: 0x001F, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: OTPWAIT, lsb: 0, width: 5},
+        ]}
+  CSM:
+    base: 0x0AE0
+    size: 0x010
+    derived_from: null
+    description: "Code security module"
+    group: CSM
+    registers:
+      - {name: KEY0, offset: 0x00, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY1, offset: 0x01, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY2, offset: 0x02, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY3, offset: 0x03, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY4, offset: 0x04, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY5, offset: 0x05, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY6, offset: 0x06, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: KEY7, offset: 0x07, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
+      - {name: CSMSCR, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SECURE, lsb: 0, width: 1, access: read-only},
+          {name: FORCESEC, lsb: 15, width: 1},
+        ]}
+  ADCMIRROR:
+    base: 0x0B00
+    size: 0x010
+    derived_from: null
+    description: "ADC result registers, right-justified mirror (0 wait states, read-only)"
+    group: ADC
+    registers:
+      - {name: ADCRESULT0, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT1, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT2, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT3, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT4, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT5, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT6, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT7, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT8, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT9, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT10, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT11, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT12, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT13, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT14, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT15, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+  XINTF:
+    base: 0x0B20
+    size: 0x020
+    derived_from: null
+    description: "External interface configuration"
+    group: XINTF
+    registers:
+      - {name: XTIMING0, offset: 0x00, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: XTIMING6, offset: 0x0C, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: XTIMING7, offset: 0x0E, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: XINTCNF2, offset: 0x14, width: 2, reset: 0x00010D7D, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: XBANK, offset: 0x18, width: 1, reset: 0x0038, reset_mask: 0xFFFF, access: read-write}
+      - {name: XREVISION, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: XRESET, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  CPUTIMER0:
+    base: 0x0C00
+    size: 0x008
+    derived_from: null
+    description: "32-bit CPU timer 0"
+    group: CPUTIMER
+    interrupts: {38: TINT0}
+    registers:
+      - {name: TIM, offset: 0x00, width: 2, reset: 0xFFFFFFFF, reset_mask: 0xFFFFFFFF, access: read-write, description: "counter (TIM low word, TIMH high word)"}
+      - {name: PRD, offset: 0x02, width: 2, reset: 0xFFFFFFFF, reset_mask: 0xFFFFFFFF, access: read-write, description: "period (PRD low word, PRDH high word)"}
+      - {name: TCR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TSS, lsb: 4, width: 1},
+          {name: TRB, lsb: 5, width: 1},
+          {name: SOFT, lsb: 10, width: 1},
+          {name: FREE, lsb: 11, width: 1},
+          {name: TIE, lsb: 14, width: 1},
+          {name: TIF, lsb: 15, width: 1},
+        ]}
+      - {name: TPR, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TDDR, lsb: 0, width: 8},
+          {name: PSC, lsb: 8, width: 8, access: read-only},
+        ]}
+      - {name: TPRH, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TDDRH, lsb: 0, width: 8},
+          {name: PSCH, lsb: 8, width: 8, access: read-only},
+        ]}
+  CPUTIMER1:
+    base: 0x0C08
+    size: 0x008
+    derived_from: null
+    description: "32-bit CPU timer 1"
+    group: CPUTIMER
+    interrupts: {13: INT13}
+    registers:
+      - {name: TIM, offset: 0x00, width: 2, reset: 0xFFFFFFFF, reset_mask: 0xFFFFFFFF, access: read-write, description: "counter (TIM low word, TIMH high word)"}
+      - {name: PRD, offset: 0x02, width: 2, reset: 0xFFFFFFFF, reset_mask: 0xFFFFFFFF, access: read-write, description: "period (PRD low word, PRDH high word)"}
+      - {name: TCR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TSS, lsb: 4, width: 1},
+          {name: TRB, lsb: 5, width: 1},
+          {name: SOFT, lsb: 10, width: 1},
+          {name: FREE, lsb: 11, width: 1},
+          {name: TIE, lsb: 14, width: 1},
+          {name: TIF, lsb: 15, width: 1},
+        ]}
+      - {name: TPR, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TDDR, lsb: 0, width: 8},
+          {name: PSC, lsb: 8, width: 8, access: read-only},
+        ]}
+      - {name: TPRH, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TDDRH, lsb: 0, width: 8},
+          {name: PSCH, lsb: 8, width: 8, access: read-only},
+        ]}
+  CPUTIMER2:
+    base: 0x0C10
+    size: 0x008
+    derived_from: null
+    description: "32-bit CPU timer 2"
+    group: CPUTIMER
+    interrupts: {14: INT14}
+    registers:
+      - {name: TIM, offset: 0x00, width: 2, reset: 0xFFFFFFFF, reset_mask: 0xFFFFFFFF, access: read-write, description: "counter (TIM low word, TIMH high word)"}
+      - {name: PRD, offset: 0x02, width: 2, reset: 0xFFFFFFFF, reset_mask: 0xFFFFFFFF, access: read-write, description: "period (PRD low word, PRDH high word)"}
+      - {name: TCR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TSS, lsb: 4, width: 1},
+          {name: TRB, lsb: 5, width: 1},
+          {name: SOFT, lsb: 10, width: 1},
+          {name: FREE, lsb: 11, width: 1},
+          {name: TIE, lsb: 14, width: 1},
+          {name: TIF, lsb: 15, width: 1},
+        ]}
+      - {name: TPR, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TDDR, lsb: 0, width: 8},
+          {name: PSC, lsb: 8, width: 8, access: read-only},
+        ]}
+      - {name: TPRH, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TDDRH, lsb: 0, width: 8},
+          {name: PSCH, lsb: 8, width: 8, access: read-only},
+        ]}
+  PIE:
+    base: 0x0CE0
+    size: 0x120
+    derived_from: null
+    description: "Peripheral interrupt expansion: control registers + vector table (0x0D00, 256 words)"
+    group: PIE
+    registers:
+      - {name: PIECTRL, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENPIE, lsb: 0, width: 1},
+          {name: PIEVECT, lsb: 1, width: 15, access: read-only},
+        ]}
+      - {name: PIEACK, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ACK1, lsb: 0, width: 1},
+          {name: ACK2, lsb: 1, width: 1},
+          {name: ACK3, lsb: 2, width: 1},
+          {name: ACK4, lsb: 3, width: 1},
+          {name: ACK5, lsb: 4, width: 1},
+          {name: ACK6, lsb: 5, width: 1},
+          {name: ACK7, lsb: 6, width: 1},
+          {name: ACK8, lsb: 7, width: 1},
+          {name: ACK9, lsb: 8, width: 1},
+          {name: ACK10, lsb: 9, width: 1},
+          {name: ACK11, lsb: 10, width: 1},
+          {name: ACK12, lsb: 11, width: 1},
+        ]}
+      - {name: PIEIER1, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR1, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER2, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR2, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER3, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR3, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER4, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR4, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER5, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR5, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER6, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR6, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER7, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR7, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER8, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR8, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER9, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR9, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER10, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR10, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER11, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR11, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIER12, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+      - {name: PIEIFR12, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INTx1, lsb: 0, width: 1},
+          {name: INTx2, lsb: 1, width: 1},
+          {name: INTx3, lsb: 2, width: 1},
+          {name: INTx4, lsb: 3, width: 1},
+          {name: INTx5, lsb: 4, width: 1},
+          {name: INTx6, lsb: 5, width: 1},
+          {name: INTx7, lsb: 6, width: 1},
+          {name: INTx8, lsb: 7, width: 1},
+        ]}
+  DMA:
+    base: 0x1000
+    size: 0x200
+    derived_from: null
+    description: "6-channel DMA controller (storage only)"
+    group: DMA
+    interrupts: {80: DINTCH1, 81: DINTCH2, 82: DINTCH3, 83: DINTCH4, 84: DINTCH5, 85: DINTCH6}
+    registers:
+      - {name: DMACTRL, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: HARDRESET, lsb: 0, width: 1},
+          {name: PRIORITYRESET, lsb: 1, width: 1},
+        ]}
+      - {name: DEBUGCTRL, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: REVISION, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: PRIORITYCTRL1, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PRIORITYSTAT, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: CH1_MODE, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_CONTROL, offset: 0x21, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_BURST_SIZE, offset: 0x22, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_BURST_COUNT, offset: 0x23, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_SRC_BURST_STEP, offset: 0x24, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_DST_BURST_STEP, offset: 0x25, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_TRANSFER_SIZE, offset: 0x26, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_TRANSFER_COUNT, offset: 0x27, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_SRC_TRANSFER_STEP, offset: 0x28, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_DST_TRANSFER_STEP, offset: 0x29, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_SRC_WRAP_SIZE, offset: 0x2A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_SRC_WRAP_COUNT, offset: 0x2B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_SRC_WRAP_STEP, offset: 0x2C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_DST_WRAP_SIZE, offset: 0x2D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_DST_WRAP_COUNT, offset: 0x2E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_DST_WRAP_STEP, offset: 0x2F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH1_SRC_BEG_ADDR_SHADOW, offset: 0x30, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_SRC_ADDR_SHADOW, offset: 0x32, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_SRC_BEG_ADDR_ACTIVE, offset: 0x34, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_SRC_ADDR_ACTIVE, offset: 0x36, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_DST_BEG_ADDR_SHADOW, offset: 0x38, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_DST_ADDR_SHADOW, offset: 0x3A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_DST_BEG_ADDR_ACTIVE, offset: 0x3C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH1_DST_ADDR_ACTIVE, offset: 0x3E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_MODE, offset: 0x40, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_CONTROL, offset: 0x41, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_BURST_SIZE, offset: 0x42, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_BURST_COUNT, offset: 0x43, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_SRC_BURST_STEP, offset: 0x44, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_DST_BURST_STEP, offset: 0x45, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_TRANSFER_SIZE, offset: 0x46, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_TRANSFER_COUNT, offset: 0x47, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_SRC_TRANSFER_STEP, offset: 0x48, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_DST_TRANSFER_STEP, offset: 0x49, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_SRC_WRAP_SIZE, offset: 0x4A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_SRC_WRAP_COUNT, offset: 0x4B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_SRC_WRAP_STEP, offset: 0x4C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_DST_WRAP_SIZE, offset: 0x4D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_DST_WRAP_COUNT, offset: 0x4E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_DST_WRAP_STEP, offset: 0x4F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH2_SRC_BEG_ADDR_SHADOW, offset: 0x50, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_SRC_ADDR_SHADOW, offset: 0x52, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_SRC_BEG_ADDR_ACTIVE, offset: 0x54, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_SRC_ADDR_ACTIVE, offset: 0x56, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_DST_BEG_ADDR_SHADOW, offset: 0x58, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_DST_ADDR_SHADOW, offset: 0x5A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_DST_BEG_ADDR_ACTIVE, offset: 0x5C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH2_DST_ADDR_ACTIVE, offset: 0x5E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_MODE, offset: 0x60, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_CONTROL, offset: 0x61, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_BURST_SIZE, offset: 0x62, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_BURST_COUNT, offset: 0x63, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_SRC_BURST_STEP, offset: 0x64, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_DST_BURST_STEP, offset: 0x65, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_TRANSFER_SIZE, offset: 0x66, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_TRANSFER_COUNT, offset: 0x67, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_SRC_TRANSFER_STEP, offset: 0x68, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_DST_TRANSFER_STEP, offset: 0x69, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_SRC_WRAP_SIZE, offset: 0x6A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_SRC_WRAP_COUNT, offset: 0x6B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_SRC_WRAP_STEP, offset: 0x6C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_DST_WRAP_SIZE, offset: 0x6D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_DST_WRAP_COUNT, offset: 0x6E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_DST_WRAP_STEP, offset: 0x6F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH3_SRC_BEG_ADDR_SHADOW, offset: 0x70, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_SRC_ADDR_SHADOW, offset: 0x72, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_SRC_BEG_ADDR_ACTIVE, offset: 0x74, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_SRC_ADDR_ACTIVE, offset: 0x76, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_DST_BEG_ADDR_SHADOW, offset: 0x78, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_DST_ADDR_SHADOW, offset: 0x7A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_DST_BEG_ADDR_ACTIVE, offset: 0x7C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH3_DST_ADDR_ACTIVE, offset: 0x7E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_MODE, offset: 0x80, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_CONTROL, offset: 0x81, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_BURST_SIZE, offset: 0x82, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_BURST_COUNT, offset: 0x83, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_SRC_BURST_STEP, offset: 0x84, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_DST_BURST_STEP, offset: 0x85, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_TRANSFER_SIZE, offset: 0x86, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_TRANSFER_COUNT, offset: 0x87, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_SRC_TRANSFER_STEP, offset: 0x88, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_DST_TRANSFER_STEP, offset: 0x89, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_SRC_WRAP_SIZE, offset: 0x8A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_SRC_WRAP_COUNT, offset: 0x8B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_SRC_WRAP_STEP, offset: 0x8C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_DST_WRAP_SIZE, offset: 0x8D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_DST_WRAP_COUNT, offset: 0x8E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_DST_WRAP_STEP, offset: 0x8F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH4_SRC_BEG_ADDR_SHADOW, offset: 0x90, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_SRC_ADDR_SHADOW, offset: 0x92, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_SRC_BEG_ADDR_ACTIVE, offset: 0x94, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_SRC_ADDR_ACTIVE, offset: 0x96, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_DST_BEG_ADDR_SHADOW, offset: 0x98, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_DST_ADDR_SHADOW, offset: 0x9A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_DST_BEG_ADDR_ACTIVE, offset: 0x9C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH4_DST_ADDR_ACTIVE, offset: 0x9E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_MODE, offset: 0xA0, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_CONTROL, offset: 0xA1, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_BURST_SIZE, offset: 0xA2, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_BURST_COUNT, offset: 0xA3, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_SRC_BURST_STEP, offset: 0xA4, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_DST_BURST_STEP, offset: 0xA5, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_TRANSFER_SIZE, offset: 0xA6, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_TRANSFER_COUNT, offset: 0xA7, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_SRC_TRANSFER_STEP, offset: 0xA8, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_DST_TRANSFER_STEP, offset: 0xA9, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_SRC_WRAP_SIZE, offset: 0xAA, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_SRC_WRAP_COUNT, offset: 0xAB, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_SRC_WRAP_STEP, offset: 0xAC, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_DST_WRAP_SIZE, offset: 0xAD, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_DST_WRAP_COUNT, offset: 0xAE, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_DST_WRAP_STEP, offset: 0xAF, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH5_SRC_BEG_ADDR_SHADOW, offset: 0xB0, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_SRC_ADDR_SHADOW, offset: 0xB2, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_SRC_BEG_ADDR_ACTIVE, offset: 0xB4, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_SRC_ADDR_ACTIVE, offset: 0xB6, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_DST_BEG_ADDR_SHADOW, offset: 0xB8, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_DST_ADDR_SHADOW, offset: 0xBA, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_DST_BEG_ADDR_ACTIVE, offset: 0xBC, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH5_DST_ADDR_ACTIVE, offset: 0xBE, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_MODE, offset: 0xC0, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_CONTROL, offset: 0xC1, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_BURST_SIZE, offset: 0xC2, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_BURST_COUNT, offset: 0xC3, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_SRC_BURST_STEP, offset: 0xC4, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_DST_BURST_STEP, offset: 0xC5, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_TRANSFER_SIZE, offset: 0xC6, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_TRANSFER_COUNT, offset: 0xC7, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_SRC_TRANSFER_STEP, offset: 0xC8, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_DST_TRANSFER_STEP, offset: 0xC9, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_SRC_WRAP_SIZE, offset: 0xCA, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_SRC_WRAP_COUNT, offset: 0xCB, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_SRC_WRAP_STEP, offset: 0xCC, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_DST_WRAP_SIZE, offset: 0xCD, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_DST_WRAP_COUNT, offset: 0xCE, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_DST_WRAP_STEP, offset: 0xCF, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CH6_SRC_BEG_ADDR_SHADOW, offset: 0xD0, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_SRC_ADDR_SHADOW, offset: 0xD2, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_SRC_BEG_ADDR_ACTIVE, offset: 0xD4, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_SRC_ADDR_ACTIVE, offset: 0xD6, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_DST_BEG_ADDR_SHADOW, offset: 0xD8, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_DST_ADDR_SHADOW, offset: 0xDA, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_DST_BEG_ADDR_ACTIVE, offset: 0xDC, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CH6_DST_ADDR_ACTIVE, offset: 0xDE, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+  ECANA:
+    base: 0x6000
+    size: 0x200
+    derived_from: null
+    description: "eCAN-A (storage only)"
+    group: ECAN
+    registers:
+      - {name: CANME, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMD, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTRS, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTRR, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTA, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANAA, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRMP, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRML, offset: 0x0E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRFP, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGAM, offset: 0x12, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMC, offset: 0x14, width: 2, reset: 0x00000001, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANBTC, offset: 0x16, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANES, offset: 0x18, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTEC, offset: 0x1A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANREC, offset: 0x1C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGIF0, offset: 0x1E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGIM, offset: 0x20, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGIF1, offset: 0x22, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMIM, offset: 0x24, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMIL, offset: 0x26, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANOPC, offset: 0x28, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTIOC, offset: 0x2A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRIOC, offset: 0x2C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTSC, offset: 0x2E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTOC, offset: 0x30, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTOS, offset: 0x32, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+  ECANB:
+    base: 0x6200
+    size: 0x200
+    derived_from: null
+    description: "eCAN-B (storage only)"
+    group: ECAN
+    registers:
+      - {name: CANME, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMD, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTRS, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTRR, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTA, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANAA, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRMP, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRML, offset: 0x0E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRFP, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGAM, offset: 0x12, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMC, offset: 0x14, width: 2, reset: 0x00000001, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANBTC, offset: 0x16, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANES, offset: 0x18, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTEC, offset: 0x1A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANREC, offset: 0x1C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGIF0, offset: 0x1E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGIM, offset: 0x20, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANGIF1, offset: 0x22, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMIM, offset: 0x24, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANMIL, offset: 0x26, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANOPC, offset: 0x28, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTIOC, offset: 0x2A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANRIOC, offset: 0x2C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTSC, offset: 0x2E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTOC, offset: 0x30, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CANTOS, offset: 0x32, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+  EPWM1:
+    base: 0x6800
+    size: 0x040
+    derived_from: null
+    description: "ePWM1 + HRPWM1 (storage only)"
+    group: EPWM
+    interrupts: {40: EPWM1_TZINT, 48: EPWM1_INT}
+    registers:
+      - {name: TBCTL, offset: 0x00, width: 1, reset: 0x0083, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CTRMODE, lsb: 0, width: 2},
+          {name: PHSEN, lsb: 2, width: 1},
+          {name: PRDLD, lsb: 3, width: 1},
+          {name: SYNCOSEL, lsb: 4, width: 2},
+          {name: SWFSYNC, lsb: 6, width: 1},
+          {name: HSPCLKDIV, lsb: 7, width: 3},
+          {name: CLKDIV, lsb: 10, width: 3},
+          {name: PHSDIR, lsb: 13, width: 1},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLB, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQSFRC, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCSFRC, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBCTL, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBRED, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBFED, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZSEL, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZEINT, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFLG, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCLR, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFRC, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETSEL, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETPS, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFLG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EPWM2:
+    base: 0x6840
+    size: 0x040
+    derived_from: null
+    description: "ePWM2 + HRPWM2 (storage only)"
+    group: EPWM
+    interrupts: {41: EPWM2_TZINT, 49: EPWM2_INT}
+    registers:
+      - {name: TBCTL, offset: 0x00, width: 1, reset: 0x0083, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CTRMODE, lsb: 0, width: 2},
+          {name: PHSEN, lsb: 2, width: 1},
+          {name: PRDLD, lsb: 3, width: 1},
+          {name: SYNCOSEL, lsb: 4, width: 2},
+          {name: SWFSYNC, lsb: 6, width: 1},
+          {name: HSPCLKDIV, lsb: 7, width: 3},
+          {name: CLKDIV, lsb: 10, width: 3},
+          {name: PHSDIR, lsb: 13, width: 1},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLB, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQSFRC, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCSFRC, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBCTL, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBRED, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBFED, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZSEL, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZEINT, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFLG, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCLR, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFRC, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETSEL, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETPS, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFLG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EPWM3:
+    base: 0x6880
+    size: 0x040
+    derived_from: null
+    description: "ePWM3 + HRPWM3 (storage only)"
+    group: EPWM
+    interrupts: {42: EPWM3_TZINT, 50: EPWM3_INT}
+    registers:
+      - {name: TBCTL, offset: 0x00, width: 1, reset: 0x0083, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CTRMODE, lsb: 0, width: 2},
+          {name: PHSEN, lsb: 2, width: 1},
+          {name: PRDLD, lsb: 3, width: 1},
+          {name: SYNCOSEL, lsb: 4, width: 2},
+          {name: SWFSYNC, lsb: 6, width: 1},
+          {name: HSPCLKDIV, lsb: 7, width: 3},
+          {name: CLKDIV, lsb: 10, width: 3},
+          {name: PHSDIR, lsb: 13, width: 1},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLB, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQSFRC, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCSFRC, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBCTL, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBRED, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBFED, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZSEL, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZEINT, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFLG, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCLR, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFRC, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETSEL, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETPS, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFLG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EPWM4:
+    base: 0x68C0
+    size: 0x040
+    derived_from: null
+    description: "ePWM4 + HRPWM4 (storage only)"
+    group: EPWM
+    interrupts: {43: EPWM4_TZINT, 51: EPWM4_INT}
+    registers:
+      - {name: TBCTL, offset: 0x00, width: 1, reset: 0x0083, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CTRMODE, lsb: 0, width: 2},
+          {name: PHSEN, lsb: 2, width: 1},
+          {name: PRDLD, lsb: 3, width: 1},
+          {name: SYNCOSEL, lsb: 4, width: 2},
+          {name: SWFSYNC, lsb: 6, width: 1},
+          {name: HSPCLKDIV, lsb: 7, width: 3},
+          {name: CLKDIV, lsb: 10, width: 3},
+          {name: PHSDIR, lsb: 13, width: 1},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLB, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQSFRC, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCSFRC, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBCTL, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBRED, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBFED, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZSEL, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZEINT, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFLG, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCLR, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFRC, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETSEL, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETPS, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFLG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EPWM5:
+    base: 0x6900
+    size: 0x040
+    derived_from: null
+    description: "ePWM5 + HRPWM5 (storage only)"
+    group: EPWM
+    interrupts: {44: EPWM5_TZINT, 52: EPWM5_INT}
+    registers:
+      - {name: TBCTL, offset: 0x00, width: 1, reset: 0x0083, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CTRMODE, lsb: 0, width: 2},
+          {name: PHSEN, lsb: 2, width: 1},
+          {name: PRDLD, lsb: 3, width: 1},
+          {name: SYNCOSEL, lsb: 4, width: 2},
+          {name: SWFSYNC, lsb: 6, width: 1},
+          {name: HSPCLKDIV, lsb: 7, width: 3},
+          {name: CLKDIV, lsb: 10, width: 3},
+          {name: PHSDIR, lsb: 13, width: 1},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLB, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQSFRC, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCSFRC, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBCTL, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBRED, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBFED, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZSEL, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZEINT, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFLG, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCLR, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFRC, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETSEL, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETPS, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFLG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EPWM6:
+    base: 0x6940
+    size: 0x040
+    derived_from: null
+    description: "ePWM6 + HRPWM6 (storage only)"
+    group: EPWM
+    interrupts: {45: EPWM6_TZINT, 53: EPWM6_INT}
+    registers:
+      - {name: TBCTL, offset: 0x00, width: 1, reset: 0x0083, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CTRMODE, lsb: 0, width: 2},
+          {name: PHSEN, lsb: 2, width: 1},
+          {name: PRDLD, lsb: 3, width: 1},
+          {name: SYNCOSEL, lsb: 4, width: 2},
+          {name: SWFSYNC, lsb: 6, width: 1},
+          {name: HSPCLKDIV, lsb: 7, width: 3},
+          {name: CLKDIV, lsb: 10, width: 3},
+          {name: PHSDIR, lsb: 13, width: 1},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCTLB, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQSFRC, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: AQCSFRC, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBCTL, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBRED, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DBFED, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZSEL, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZEINT, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFLG, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZCLR, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TZFRC, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETSEL, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETPS, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFLG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  ECAP1:
+    base: 0x6A00
+    size: 0x020
+    derived_from: null
+    description: "eCAP1 (storage only)"
+    group: ECAP
+    interrupts: {56: ECAP1_INT}
+    registers:
+      - {name: TSCTR, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CTRPHS, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP1, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  ECAP2:
+    base: 0x6A20
+    size: 0x020
+    derived_from: null
+    description: "eCAP2 (storage only)"
+    group: ECAP
+    interrupts: {57: ECAP2_INT}
+    registers:
+      - {name: TSCTR, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CTRPHS, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP1, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  ECAP3:
+    base: 0x6A40
+    size: 0x020
+    derived_from: null
+    description: "eCAP3 (storage only)"
+    group: ECAP
+    interrupts: {58: ECAP3_INT}
+    registers:
+      - {name: TSCTR, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CTRPHS, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP1, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  ECAP4:
+    base: 0x6A60
+    size: 0x020
+    derived_from: null
+    description: "eCAP4 (storage only)"
+    group: ECAP
+    interrupts: {59: ECAP4_INT}
+    registers:
+      - {name: TSCTR, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CTRPHS, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP1, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EQEP1:
+    base: 0x6B00
+    size: 0x040
+    derived_from: null
+    description: "eQEP1 (storage only)"
+    group: EQEP
+    interrupts: {64: EQEP1_INT}
+    registers:
+      - {name: QPOSCNT, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSINIT, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSMAX, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSCMP, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSILAT, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSSLAT, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSLAT, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QUTMR, offset: 0x0E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QUPRD, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QWDTMR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QWDPRD, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QDECCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QEPCTL, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCAPCTL, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QPOSCTL, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QEINT, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QFLG, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCLR, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QFRC, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QEPSTS, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCTMR, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCPRD, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCTMRLAT, offset: 0x1F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCPRDLAT, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  EQEP2:
+    base: 0x6B40
+    size: 0x040
+    derived_from: null
+    description: "eQEP2 (storage only)"
+    group: EQEP
+    interrupts: {65: EQEP2_INT}
+    registers:
+      - {name: QPOSCNT, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSINIT, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSMAX, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSCMP, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSILAT, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSSLAT, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSLAT, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QUTMR, offset: 0x0E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QUPRD, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QWDTMR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QWDPRD, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QDECCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QEPCTL, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCAPCTL, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QPOSCTL, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QEINT, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QFLG, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCLR, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QFRC, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QEPSTS, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCTMR, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCPRD, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCTMRLAT, offset: 0x1F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCPRDLAT, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  MCBSPA:
+    base: 0x5000
+    size: 0x040
+    derived_from: null
+    description: "McBSP-A (storage only)"
+    group: MCBSP
+    registers:
+      - {name: DRR2, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DRR1, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DXR2, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: DXR1, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPCR2, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPCR1, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCR2, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCR1, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCR2, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCR1, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SRGR2, offset: 0x0A, width: 1, reset: 0x2000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SRGR1, offset: 0x0B, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
+      - {name: MCR2, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: MCR1, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERA, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERB, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERA, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERB, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: MFFINT, offset: 0x23, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  GPIO:
+    base: 0x6F80
+    size: 0x080
+    derived_from: null
+    description: "GPIO control, data and interrupt-select registers"
+    group: GPIO
+    registers:
+      - {name: GPACTRL, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: QUALPRD0, lsb: 0, width: 8},
+          {name: QUALPRD1, lsb: 8, width: 8},
+          {name: QUALPRD2, lsb: 16, width: 8},
+          {name: QUALPRD3, lsb: 24, width: 8},
+        ]}
+      - {name: GPAQSEL1, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPAQSEL2, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPAMUX1, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: GPIO0, lsb: 0, width: 2},
+          {name: GPIO1, lsb: 2, width: 2},
+          {name: GPIO2, lsb: 4, width: 2},
+          {name: GPIO3, lsb: 6, width: 2},
+          {name: GPIO4, lsb: 8, width: 2},
+          {name: GPIO5, lsb: 10, width: 2},
+          {name: GPIO6, lsb: 12, width: 2},
+          {name: GPIO7, lsb: 14, width: 2},
+          {name: GPIO8, lsb: 16, width: 2},
+          {name: GPIO9, lsb: 18, width: 2},
+          {name: GPIO10, lsb: 20, width: 2},
+          {name: GPIO11, lsb: 22, width: 2},
+          {name: GPIO12, lsb: 24, width: 2},
+          {name: GPIO13, lsb: 26, width: 2},
+          {name: GPIO14, lsb: 28, width: 2},
+          {name: GPIO15, lsb: 30, width: 2},
+        ]}
+      - {name: GPAMUX2, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: GPIO16, lsb: 0, width: 2},
+          {name: GPIO17, lsb: 2, width: 2},
+          {name: GPIO18, lsb: 4, width: 2},
+          {name: GPIO19, lsb: 6, width: 2},
+          {name: GPIO20, lsb: 8, width: 2},
+          {name: GPIO21, lsb: 10, width: 2},
+          {name: GPIO22, lsb: 12, width: 2},
+          {name: GPIO23, lsb: 14, width: 2},
+          {name: GPIO24, lsb: 16, width: 2},
+          {name: GPIO25, lsb: 18, width: 2},
+          {name: GPIO26, lsb: 20, width: 2},
+          {name: GPIO27, lsb: 22, width: 2},
+          {name: GPIO28, lsb: 24, width: 2},
+          {name: GPIO29, lsb: 26, width: 2},
+          {name: GPIO30, lsb: 28, width: 2},
+          {name: GPIO31, lsb: 30, width: 2},
+        ]}
+      - {name: GPADIR, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPAPUD, offset: 0x0C, width: 2, reset: 0x00000FFF, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBCTRL, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: QUALPRD0, lsb: 0, width: 8},
+          {name: QUALPRD1, lsb: 8, width: 8},
+          {name: QUALPRD2, lsb: 16, width: 8},
+          {name: QUALPRD3, lsb: 24, width: 8},
+        ]}
+      - {name: GPBQSEL1, offset: 0x12, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBQSEL2, offset: 0x14, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBMUX1, offset: 0x16, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: GPIO32, lsb: 0, width: 2},
+          {name: GPIO33, lsb: 2, width: 2},
+          {name: GPIO34, lsb: 4, width: 2},
+          {name: GPIO35, lsb: 6, width: 2},
+          {name: GPIO36, lsb: 8, width: 2},
+          {name: GPIO37, lsb: 10, width: 2},
+          {name: GPIO38, lsb: 12, width: 2},
+          {name: GPIO39, lsb: 14, width: 2},
+          {name: GPIO40, lsb: 16, width: 2},
+          {name: GPIO41, lsb: 18, width: 2},
+          {name: GPIO42, lsb: 20, width: 2},
+          {name: GPIO43, lsb: 22, width: 2},
+          {name: GPIO44, lsb: 24, width: 2},
+          {name: GPIO45, lsb: 26, width: 2},
+          {name: GPIO46, lsb: 28, width: 2},
+          {name: GPIO47, lsb: 30, width: 2},
+        ]}
+      - {name: GPBMUX2, offset: 0x18, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: GPIO48, lsb: 0, width: 2},
+          {name: GPIO49, lsb: 2, width: 2},
+          {name: GPIO50, lsb: 4, width: 2},
+          {name: GPIO51, lsb: 6, width: 2},
+          {name: GPIO52, lsb: 8, width: 2},
+          {name: GPIO53, lsb: 10, width: 2},
+          {name: GPIO54, lsb: 12, width: 2},
+          {name: GPIO55, lsb: 14, width: 2},
+          {name: GPIO56, lsb: 16, width: 2},
+          {name: GPIO57, lsb: 18, width: 2},
+          {name: GPIO58, lsb: 20, width: 2},
+          {name: GPIO59, lsb: 22, width: 2},
+          {name: GPIO60, lsb: 24, width: 2},
+          {name: GPIO61, lsb: 26, width: 2},
+          {name: GPIO62, lsb: 28, width: 2},
+          {name: GPIO63, lsb: 30, width: 2},
+        ]}
+      - {name: GPBDIR, offset: 0x1A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBPUD, offset: 0x1C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPCMUX1, offset: 0x26, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: GPIO64, lsb: 0, width: 2},
+          {name: GPIO65, lsb: 2, width: 2},
+          {name: GPIO66, lsb: 4, width: 2},
+          {name: GPIO67, lsb: 6, width: 2},
+          {name: GPIO68, lsb: 8, width: 2},
+          {name: GPIO69, lsb: 10, width: 2},
+          {name: GPIO70, lsb: 12, width: 2},
+          {name: GPIO71, lsb: 14, width: 2},
+          {name: GPIO72, lsb: 16, width: 2},
+          {name: GPIO73, lsb: 18, width: 2},
+          {name: GPIO74, lsb: 20, width: 2},
+          {name: GPIO75, lsb: 22, width: 2},
+          {name: GPIO76, lsb: 24, width: 2},
+          {name: GPIO77, lsb: 26, width: 2},
+          {name: GPIO78, lsb: 28, width: 2},
+          {name: GPIO79, lsb: 30, width: 2},
+        ]}
+      - {name: GPCMUX2, offset: 0x28, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: GPIO80, lsb: 0, width: 2},
+          {name: GPIO81, lsb: 2, width: 2},
+          {name: GPIO82, lsb: 4, width: 2},
+          {name: GPIO83, lsb: 6, width: 2},
+          {name: GPIO84, lsb: 8, width: 2},
+          {name: GPIO85, lsb: 10, width: 2},
+          {name: GPIO86, lsb: 12, width: 2},
+          {name: GPIO87, lsb: 14, width: 2},
+        ]}
+      - {name: GPCDIR, offset: 0x2A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPCPUD, offset: 0x2C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPADAT, offset: 0x40, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPASET, offset: 0x42, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPACLEAR, offset: 0x44, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPATOGGLE, offset: 0x46, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBDAT, offset: 0x48, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBSET, offset: 0x4A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBCLEAR, offset: 0x4C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPBTOGGLE, offset: 0x4E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPCDAT, offset: 0x50, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPCSET, offset: 0x52, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPCCLEAR, offset: 0x54, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPCTOGGLE, offset: 0x56, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: GPIOXINT1SEL, offset: 0x60, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXINT2SEL, offset: 0x61, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXNMISEL, offset: 0x62, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXINT3SEL, offset: 0x63, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXINT4SEL, offset: 0x64, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXINT5SEL, offset: 0x65, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXINT6SEL, offset: 0x66, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOXINT7SEL, offset: 0x67, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: GPIOSEL, lsb: 0, width: 5},
+        ]}
+      - {name: GPIOLPMSEL, offset: 0x68, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+  SYSCTRL:
+    base: 0x7010
+    size: 0x020
+    derived_from: null
+    description: "System control: PLL, clocks, low-power modes, watchdog"
+    group: SYSCTRL
+    interrupts: {39: WAKEINT}
+    registers:
+      - {name: PLLSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PLLLOCKS, lsb: 0, width: 1, access: read-only},
+          {name: PLLOFF, lsb: 2, width: 1},
+          {name: MCLKSTS, lsb: 3, width: 1, access: read-only},
+          {name: MCLKCLR, lsb: 4, width: 1},
+          {name: OSCOFF, lsb: 5, width: 1},
+          {name: MCLKOFF, lsb: 6, width: 1},
+          {name: DIVSEL, lsb: 7, width: 2},
+        ]}
+      - {name: HISPCP, offset: 0x0A, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: HSPCLK, lsb: 0, width: 3},
+        ]}
+      - {name: LOSPCP, offset: 0x0B, width: 1, reset: 0x0002, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: LSPCLK, lsb: 0, width: 3},
+        ]}
+      - {name: PCLKCR0, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TBCLKSYNC, lsb: 2, width: 1},
+          {name: ADCENCLK, lsb: 3, width: 1},
+          {name: I2CAENCLK, lsb: 4, width: 1},
+          {name: SCICENCLK, lsb: 5, width: 1},
+          {name: SPIAENCLK, lsb: 8, width: 1},
+          {name: SCIAENCLK, lsb: 10, width: 1},
+          {name: SCIBENCLK, lsb: 11, width: 1},
+          {name: MCBSPAENCLK, lsb: 12, width: 1},
+          {name: MCBSPBENCLK, lsb: 13, width: 1},
+          {name: ECANAENCLK, lsb: 14, width: 1},
+          {name: ECANBENCLK, lsb: 15, width: 1},
+        ]}
+      - {name: PCLKCR1, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: EPWM1ENCLK, lsb: 0, width: 1},
+          {name: EPWM2ENCLK, lsb: 1, width: 1},
+          {name: EPWM3ENCLK, lsb: 2, width: 1},
+          {name: EPWM4ENCLK, lsb: 3, width: 1},
+          {name: EPWM5ENCLK, lsb: 4, width: 1},
+          {name: EPWM6ENCLK, lsb: 5, width: 1},
+          {name: ECAP1ENCLK, lsb: 8, width: 1},
+          {name: ECAP2ENCLK, lsb: 9, width: 1},
+          {name: ECAP3ENCLK, lsb: 10, width: 1},
+          {name: ECAP4ENCLK, lsb: 11, width: 1},
+          {name: ECAP5ENCLK, lsb: 12, width: 1},
+          {name: ECAP6ENCLK, lsb: 13, width: 1},
+          {name: EQEP1ENCLK, lsb: 14, width: 1},
+          {name: EQEP2ENCLK, lsb: 15, width: 1},
+        ]}
+      - {name: LPMCR0, offset: 0x0E, width: 1, reset: 0x00FC, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: LPM, lsb: 0, width: 2},
+          {name: QUALSTDBY, lsb: 2, width: 6},
+          {name: WDINTE, lsb: 15, width: 1},
+        ]}
+      - {name: PCLKCR3, offset: 0x10, width: 1, reset: 0x3700, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CPUTIMER0ENCLK, lsb: 8, width: 1},
+          {name: CPUTIMER1ENCLK, lsb: 9, width: 1},
+          {name: CPUTIMER2ENCLK, lsb: 10, width: 1},
+          {name: DMAENCLK, lsb: 11, width: 1},
+          {name: XINTFENCLK, lsb: 12, width: 1},
+          {name: GPIOINENCLK, lsb: 13, width: 1},
+        ]}
+      - {name: PLLCR, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: DIV, lsb: 0, width: 4},
+        ]}
+      - {name: SCSR, offset: 0x12, width: 1, reset: 0x0005, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: WDOVERRIDE, lsb: 0, width: 1},
+          {name: WDENINT, lsb: 1, width: 1},
+          {name: WDINTS, lsb: 2, width: 1, access: read-only},
+        ]}
+      - {name: WDCNTR, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: WDCNTR, lsb: 0, width: 8},
+        ]}
+      - {name: WDKEY, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: WDKEY, lsb: 0, width: 8},
+        ]}
+      - {name: WDCR, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: WDPS, lsb: 0, width: 3},
+          {name: WDCHK, lsb: 3, width: 3},
+          {name: WDDIS, lsb: 6, width: 1},
+          {name: WDFLAG, lsb: 7, width: 1},
+        ]}
+      - {name: MAPCNF, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: MAPEPWM, lsb: 0, width: 1},
+        ]}
+  SPIA:
+    base: 0x7040
+    size: 0x010
+    derived_from: null
+    description: "SPI-A"
+    group: SPI
+    interrupts: {72: SPIRXINTA, 73: SPITXINTA}
+    registers:
+      - {name: SPICCR, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SPICHAR, lsb: 0, width: 4},
+          {name: SPILBK, lsb: 4, width: 1},
+          {name: CLKPOLARITY, lsb: 6, width: 1},
+          {name: SPISWRESET, lsb: 7, width: 1},
+        ]}
+      - {name: SPICTL, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SPIINTENA, lsb: 0, width: 1},
+          {name: TALK, lsb: 1, width: 1},
+          {name: MASTER_SLAVE, lsb: 2, width: 1},
+          {name: CLK_PHASE, lsb: 3, width: 1},
+          {name: OVERRUNINTENA, lsb: 4, width: 1},
+        ]}
+      - {name: SPISTS, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: BUFFULL_FLAG, lsb: 5, width: 1, access: read-only},
+          {name: INT_FLAG, lsb: 6, width: 1, access: read-only},
+          {name: OVERRUN_FLAG, lsb: 7, width: 1},
+        ]}
+      - {name: SPIBRR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SPIBRR, lsb: 0, width: 7},
+        ]}
+      - {name: SPIRXEMU, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: SPIRXBUF, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: SPITXBUF, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPIDAT, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPIFFTX, offset: 0x0A, width: 1, reset: 0xA000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPIFFRX, offset: 0x0B, width: 1, reset: 0x201F, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPIFFCT, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPIPRI, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+  SCIA:
+    base: 0x7050
+    size: 0x010
+    derived_from: null
+    description: "Serial communications interface A (UART)"
+    group: SCI
+    interrupts: {96: SCIRXINTA, 97: SCITXINTA}
+    registers:
+      - {name: SCICCR, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SCICHAR, lsb: 0, width: 3},
+          {name: ADDRIDLE_MODE, lsb: 3, width: 1},
+          {name: LOOPBKENA, lsb: 4, width: 1},
+          {name: PARITYENA, lsb: 5, width: 1},
+          {name: PARITY, lsb: 6, width: 1, enum: {0: "odd", 1: "even"}},
+          {name: STOPBITS, lsb: 7, width: 1, enum: {0: "one", 1: "two"}},
+        ]}
+      - {name: SCICTL1, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RXENA, lsb: 0, width: 1},
+          {name: TXENA, lsb: 1, width: 1},
+          {name: SLEEP, lsb: 2, width: 1},
+          {name: TXWAKE, lsb: 3, width: 1},
+          {name: SWRESET, lsb: 5, width: 1},
+          {name: RXERRINTENA, lsb: 6, width: 1},
+        ]}
+      - {name: SCIHBAUD, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SCILBAUD, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SCICTL2, offset: 0x04, width: 1, reset: 0x00C0, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TXINTENA, lsb: 0, width: 1},
+          {name: RXBKINTENA, lsb: 1, width: 1},
+          {name: TXEMPTY, lsb: 6, width: 1, access: read-only},
+          {name: TXRDY, lsb: 7, width: 1, access: read-only},
+        ]}
+      - {name: SCIRXST, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: RXWAKE, lsb: 1, width: 1},
+          {name: PE, lsb: 2, width: 1},
+          {name: OE, lsb: 3, width: 1},
+          {name: FE, lsb: 4, width: 1},
+          {name: BRKDT, lsb: 5, width: 1},
+          {name: RXRDY, lsb: 6, width: 1},
+          {name: RXERROR, lsb: 7, width: 1},
+        ]}
+      - {name: SCIRXEMU, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: SCIRXBUF, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: RXDT, lsb: 0, width: 8},
+          {name: SCIFFPE, lsb: 14, width: 1},
+          {name: SCIFFFE, lsb: 15, width: 1},
+        ]}
+      - {name: SCITXBUF, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SCIFFTX, offset: 0x0A, width: 1, reset: 0xA000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TXFFIL, lsb: 0, width: 5},
+          {name: TXFFIENA, lsb: 5, width: 1},
+          {name: TXFFINTCLR, lsb: 6, width: 1, access: write-only},
+          {name: TXFFINT, lsb: 7, width: 1, access: read-only},
+          {name: TXFFST, lsb: 8, width: 5, access: read-only},
+          {name: TXFIFOXRESET, lsb: 13, width: 1},
+          {name: SCIFFENA, lsb: 14, width: 1},
+          {name: SCIRST, lsb: 15, width: 1},
+        ]}
+      - {name: SCIFFRX, offset: 0x0B, width: 1, reset: 0x201F, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RXFFIL, lsb: 0, width: 5},
+          {name: RXFFIENA, lsb: 5, width: 1},
+          {name: RXFFINTCLR, lsb: 6, width: 1, access: write-only},
+          {name: RXFFINT, lsb: 7, width: 1, access: read-only},
+          {name: RXFFST, lsb: 8, width: 5, access: read-only},
+          {name: RXFIFORESET, lsb: 13, width: 1},
+          {name: RXFFOVRCLR, lsb: 14, width: 1, access: write-only},
+          {name: RXFFOVF, lsb: 15, width: 1, access: read-only},
+        ]}
+      - {name: SCIFFCT, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: FFTXDLY, lsb: 0, width: 8},
+          {name: CDC, lsb: 13, width: 1},
+          {name: ABDCLR, lsb: 14, width: 1, access: write-only},
+          {name: ABD, lsb: 15, width: 1, access: read-only},
+        ]}
+      - {name: SCIPRI, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: FREE_SOFT, lsb: 3, width: 2},
+        ]}
+  SCIB:
+    base: 0x7750
+    size: 0x010
+    derived_from: null
+    description: "Serial communications interface B (UART)"
+    group: SCI
+    interrupts: {98: SCIRXINTB, 99: SCITXINTB}
+    registers:
+      - {name: SCICCR, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SCICHAR, lsb: 0, width: 3},
+          {name: ADDRIDLE_MODE, lsb: 3, width: 1},
+          {name: LOOPBKENA, lsb: 4, width: 1},
+          {name: PARITYENA, lsb: 5, width: 1},
+          {name: PARITY, lsb: 6, width: 1, enum: {0: "odd", 1: "even"}},
+          {name: STOPBITS, lsb: 7, width: 1, enum: {0: "one", 1: "two"}},
+        ]}
+      - {name: SCICTL1, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RXENA, lsb: 0, width: 1},
+          {name: TXENA, lsb: 1, width: 1},
+          {name: SLEEP, lsb: 2, width: 1},
+          {name: TXWAKE, lsb: 3, width: 1},
+          {name: SWRESET, lsb: 5, width: 1},
+          {name: RXERRINTENA, lsb: 6, width: 1},
+        ]}
+      - {name: SCIHBAUD, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SCILBAUD, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SCICTL2, offset: 0x04, width: 1, reset: 0x00C0, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TXINTENA, lsb: 0, width: 1},
+          {name: RXBKINTENA, lsb: 1, width: 1},
+          {name: TXEMPTY, lsb: 6, width: 1, access: read-only},
+          {name: TXRDY, lsb: 7, width: 1, access: read-only},
+        ]}
+      - {name: SCIRXST, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: RXWAKE, lsb: 1, width: 1},
+          {name: PE, lsb: 2, width: 1},
+          {name: OE, lsb: 3, width: 1},
+          {name: FE, lsb: 4, width: 1},
+          {name: BRKDT, lsb: 5, width: 1},
+          {name: RXRDY, lsb: 6, width: 1},
+          {name: RXERROR, lsb: 7, width: 1},
+        ]}
+      - {name: SCIRXEMU, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: SCIRXBUF, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: RXDT, lsb: 0, width: 8},
+          {name: SCIFFPE, lsb: 14, width: 1},
+          {name: SCIFFFE, lsb: 15, width: 1},
+        ]}
+      - {name: SCITXBUF, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SCIFFTX, offset: 0x0A, width: 1, reset: 0xA000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TXFFIL, lsb: 0, width: 5},
+          {name: TXFFIENA, lsb: 5, width: 1},
+          {name: TXFFINTCLR, lsb: 6, width: 1, access: write-only},
+          {name: TXFFINT, lsb: 7, width: 1, access: read-only},
+          {name: TXFFST, lsb: 8, width: 5, access: read-only},
+          {name: TXFIFOXRESET, lsb: 13, width: 1},
+          {name: SCIFFENA, lsb: 14, width: 1},
+          {name: SCIRST, lsb: 15, width: 1},
+        ]}
+      - {name: SCIFFRX, offset: 0x0B, width: 1, reset: 0x201F, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RXFFIL, lsb: 0, width: 5},
+          {name: RXFFIENA, lsb: 5, width: 1},
+          {name: RXFFINTCLR, lsb: 6, width: 1, access: write-only},
+          {name: RXFFINT, lsb: 7, width: 1, access: read-only},
+          {name: RXFFST, lsb: 8, width: 5, access: read-only},
+          {name: RXFIFORESET, lsb: 13, width: 1},
+          {name: RXFFOVRCLR, lsb: 14, width: 1, access: write-only},
+          {name: RXFFOVF, lsb: 15, width: 1, access: read-only},
+        ]}
+      - {name: SCIFFCT, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: FFTXDLY, lsb: 0, width: 8},
+          {name: CDC, lsb: 13, width: 1},
+          {name: ABDCLR, lsb: 14, width: 1, access: write-only},
+          {name: ABD, lsb: 15, width: 1, access: read-only},
+        ]}
+      - {name: SCIPRI, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: FREE_SOFT, lsb: 3, width: 2},
+        ]}
+  XINT:
+    base: 0x7070
+    size: 0x010
+    derived_from: null
+    description: "External interrupt configuration and counters"
+    group: XINT
+    interrupts: {35: XINT1, 36: XINT2, 120: XINT3, 121: XINT4, 122: XINT5, 123: XINT6, 124: XINT7}
+    registers:
+      - {name: XINT1CR, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XINT2CR, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XINT3CR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XINT4CR, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XINT5CR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XINT6CR, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XINT7CR, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: POLARITY, lsb: 2, width: 2, enum: {0: "falling", 1: "rising", 2: "falling", 3: "both"}},
+        ]}
+      - {name: XNMICR, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: ENABLE, lsb: 0, width: 1},
+          {name: SELECT, lsb: 1, width: 1},
+          {name: POLARITY, lsb: 2, width: 2},
+        ]}
+      - {name: XINT1CTR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: XINT2CTR, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: XNMICTR, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+  ADC:
+    base: 0x7100
+    size: 0x020
+    derived_from: null
+    description: "12-bit ADC (sequencers, left-justified results)"
+    group: ADC
+    interrupts: {32: SEQ1INT, 33: SEQ2INT, 37: ADCINT}
+    registers:
+      - {name: ADCTRL1, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SEQ_CASC, lsb: 4, width: 1},
+          {name: SEQ_OVRD, lsb: 5, width: 1},
+          {name: CONT_RUN, lsb: 6, width: 1},
+          {name: CPS, lsb: 7, width: 1},
+          {name: ACQ_PS, lsb: 8, width: 4},
+          {name: SUSMOD, lsb: 12, width: 2},
+          {name: RESET, lsb: 14, width: 1},
+        ]}
+      - {name: ADCTRL2, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: EPWM_SOCB_SEQ2, lsb: 0, width: 1},
+          {name: INT_MOD_SEQ2, lsb: 2, width: 1},
+          {name: INT_ENA_SEQ2, lsb: 3, width: 1},
+          {name: SOC_SEQ2, lsb: 5, width: 1},
+          {name: RST_SEQ2, lsb: 6, width: 1},
+          {name: EXT_SOC_SEQ1, lsb: 7, width: 1},
+          {name: EPWM_SOCA_SEQ1, lsb: 8, width: 1},
+          {name: INT_MOD_SEQ1, lsb: 10, width: 1},
+          {name: INT_ENA_SEQ1, lsb: 11, width: 1},
+          {name: SOC_SEQ1, lsb: 13, width: 1},
+          {name: RST_SEQ1, lsb: 14, width: 1},
+          {name: EPWM_SOCB_SEQ, lsb: 15, width: 1},
+        ]}
+      - {name: ADCMAXCONV, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: MAX_CONV1, lsb: 0, width: 4},
+          {name: MAX_CONV2, lsb: 4, width: 3},
+        ]}
+      - {name: ADCCHSELSEQ1, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONV00, lsb: 0, width: 4},
+          {name: CONV01, lsb: 4, width: 4},
+          {name: CONV02, lsb: 8, width: 4},
+          {name: CONV03, lsb: 12, width: 4},
+        ]}
+      - {name: ADCCHSELSEQ2, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONV04, lsb: 0, width: 4},
+          {name: CONV05, lsb: 4, width: 4},
+          {name: CONV06, lsb: 8, width: 4},
+          {name: CONV07, lsb: 12, width: 4},
+        ]}
+      - {name: ADCCHSELSEQ3, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONV08, lsb: 0, width: 4},
+          {name: CONV09, lsb: 4, width: 4},
+          {name: CONV10, lsb: 8, width: 4},
+          {name: CONV11, lsb: 12, width: 4},
+        ]}
+      - {name: ADCCHSELSEQ4, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONV12, lsb: 0, width: 4},
+          {name: CONV13, lsb: 4, width: 4},
+          {name: CONV14, lsb: 8, width: 4},
+          {name: CONV15, lsb: 12, width: 4},
+        ]}
+      - {name: ADCASEQSR, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: SEQ1_STATE, lsb: 0, width: 4},
+          {name: SEQ2_STATE, lsb: 4, width: 3},
+          {name: SEQ_CNTR, lsb: 8, width: 4},
+        ]}
+      - {name: ADCRESULT0, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT1, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT2, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT3, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT4, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT5, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT6, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT7, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT8, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT9, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT10, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT11, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT12, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT13, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT14, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCRESULT15, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: ADCTRL3, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: SMODE_SEL, lsb: 0, width: 1},
+          {name: ADCCLKPS, lsb: 1, width: 4},
+          {name: ADCPWDN, lsb: 5, width: 1},
+          {name: ADCBGRFDN, lsb: 6, width: 2},
+        ]}
+      - {name: ADCST, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INT_SEQ1, lsb: 0, width: 1, access: read-only},
+          {name: INT_SEQ2, lsb: 1, width: 1, access: read-only},
+          {name: SEQ1_BSY, lsb: 2, width: 1, access: read-only},
+          {name: SEQ2_BSY, lsb: 3, width: 1, access: read-only},
+          {name: INT_SEQ1_CLR, lsb: 4, width: 1},
+          {name: INT_SEQ2_CLR, lsb: 5, width: 1},
+          {name: EOS_BUF1, lsb: 6, width: 1, access: read-only},
+          {name: EOS_BUF2, lsb: 7, width: 1, access: read-only},
+        ]}
+      - {name: ADCREFSEL, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: REF_SEL, lsb: 14, width: 2},
+        ]}
+      - {name: ADCOFFTRIM, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: OFFSET_TRIM, lsb: 0, width: 9},
+        ]}
+  I2CA:
+    base: 0x7900
+    size: 0x040
+    derived_from: null
+    description: "I2C-A (storage only)"
+    group: I2C
+    interrupts: {88: I2CINT1A, 89: I2CINT2A}
+    registers:
+      - {name: I2COAR, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CIER, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CSTR, offset: 0x02, width: 1, reset: 0x0410, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CCLKL, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CCLKH, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CCNT, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CDRR, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CSAR, offset: 0x07, width: 1, reset: 0x03FF, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CDXR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CMDR, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CISRC, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CPSC, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CFFTX, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: I2CFFRX, offset: 0x21, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}

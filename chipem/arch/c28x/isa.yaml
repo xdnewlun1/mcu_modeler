@@ -1,0 +1,558 @@
+# TMS320C28x (+FPU32) instruction table: the single source of truth for the decoder (chipem/core/c28x/isa.py),
+# the interpreter semantics (chipem/core/c28x/sem.py, fpu.py), the assembler and the disassembler (asm.py).
+#
+# Checked against TI's reference guides (see docs/C28X_CORE.md, "Reference and verification"):
+#   base ISA  SPRU430F (TMS320C28x CPU and Instruction Set, rev. F, April 2015), chapter 6 opcode fields
+#   FPU32     SPRUHS1C (C28x Extended Instruction Sets, chapter 1 FPU) and SPRUEO2B
+# `conf`: ref = opcode checked against those documents; low = not (fully) given by them (see the comment on the
+# entry).  The previous memory-based levels (high/med) are gone.
+#
+# Entry keys
+#   mn    mnemonic
+#   ops   operand pattern, comma separated.  Each operand is a *kind* (below) or literal text (`ACC`, `XAR4`,
+#         `*XAR7++`, `ACC:P`, `#16` ...).  `X<<Y` splits an operand into a value and a shift part.
+#   enc   16 or 32 bit characters (spaces ignored), MSB first, first word then second word.  `0`/`1` are fixed
+#         bits; a letter is a field bit.  A field's value is the concatenation of its bits in string order.
+#   sem   semantics key (a factory in sem.py / fpu.py); `a` = fixed arguments for it.
+#   conf  ref | low.   `norpt: true` = not repeatable under RPT (flow control).
+#   alias true = assembler-only spelling of another entry's encoding (ZAP OVC = CLRC OVC ...); never decoded.
+#   par   parallel instruction `A||B`: the first `par` operands belong to A ("MPYF32 a,b,c || ADDF32 d,e,f").
+#
+# Field letters (operand kind -> letter):
+#   L loc16/loc32 addressing byte        A AX (0=AL 1=AH)        n ARn/XARn       m ARm
+#   C immediate (#u*, #s*, #f16, pma, pa, abs16)                 B #bit           H shift (#sh*)
+#   K COND / CNDF       O branch offset (off8/off16, relative to the branch's own address)
+#   X addr22            P pm (SPM)          M mode (SETC/CLRC)   I intx (INTR)
+#   S RPTB block size (rblock: end label, RSIZE = end - (pc + 2))
+#   a b c d e f  FPU register numbers (RaH..RfH)                  F/V FPU flag mask / values
+#   x  don't-care bits (SPRU430F "xxxx"): ignored by the decoder, assembled as 0
+# Shift fields: #1..16 / #1..8 shifts are stored as shift-1 (SPRU430F gives only "SHFT"; the C27x-mode forms of
+# MOV/MOVH loc16,ACC<<1..8 put 8 values in 3 bits, which fixes the bias at 1).
+version: 1
+instructions:
+# ------------------------------------------------------------------ control, status, misc
+- {mn: NOP,     ops: "",            enc: "0111 0111 0000 0000", sem: nop, conf: ref}
+- {mn: NOP,     ops: "loc16",       enc: "0111 0111 LLLL LLLL", sem: nop_ind, conf: ref}
+- {mn: ABORTI,  ops: "",            enc: "0000 0000 0000 0001", sem: nop, conf: ref}
+- {mn: IDLE,    ops: "",            enc: "0111 0110 0010 0001", sem: idle, conf: ref, norpt: true}
+- {mn: EALLOW,  ops: "",            enc: "0111 0110 0010 0010", sem: st1bit, a: {f: eallow, v: 1}, conf: ref}
+- {mn: EDIS,    ops: "",            enc: "0111 0110 0001 1010", sem: st1bit, a: {f: eallow, v: 0}, conf: ref}
+- {mn: ESTOP0,  ops: "",            enc: "0111 0110 0010 0101", sem: estop, conf: ref, norpt: true}
+- {mn: ESTOP1,  ops: "",            enc: "0111 0110 0010 0100", sem: estop, conf: ref, norpt: true}
+- {mn: IACK,    ops: "#u16",        enc: "0111 0110 0011 1111 CCCC CCCC CCCC CCCC", sem: nop, conf: ref}
+- {mn: DINT,    ops: "",            enc: "0011 1011 0001 0000", sem: setc, a: {m: 0x10}, conf: ref}
+- {mn: EINT,    ops: "",            enc: "0010 1001 0001 0000", sem: clrc, a: {m: 0x10}, conf: ref}
+- {mn: SETC,    ops: "mode",        enc: "0011 1011 MMMM MMMM", sem: setc, conf: ref}
+- {mn: CLRC,    ops: "mode",        enc: "0010 1001 MMMM MMMM", sem: clrc, conf: ref}
+- {mn: SETC,    ops: "XF",          enc: "0101 0110 0010 0110", sem: st1bit, a: {f: xf, v: 1}, conf: ref}
+- {mn: CLRC,    ops: "XF",          enc: "0101 0110 0001 1011", sem: st1bit, a: {f: xf, v: 0}, conf: ref}
+- {mn: CLRC,    ops: "OVC",         enc: "0101 0110 0101 1100", sem: mov, a: {d: ovcu, s: zero}, conf: ref}
+- {mn: ZAP,     ops: "OVC",         enc: "0101 0110 0101 1100", sem: mov, a: {d: ovcu, s: zero}, conf: ref, alias: true}
+- {mn: C28OBJ,  ops: "",            enc: "0101 0110 0001 1111", sem: st1bit, a: {f: objmode, v: 1}, conf: ref}
+- {mn: C27OBJ,  ops: "",            enc: "0101 0110 0011 0110", sem: st1bit, a: {f: objmode, v: 0}, conf: ref}
+- {mn: C28ADDR, ops: "",            enc: "0101 0110 0001 0110", sem: st1bit, a: {f: amode, v: 0}, conf: ref}
+- {mn: LPADDR,  ops: "",            enc: "0101 0110 0001 1110", sem: st1bit, a: {f: amode, v: 1}, conf: ref}
+- {mn: C28MAP,  ops: "",            enc: "0101 0110 0001 1010", sem: st1bit, a: {f: m0m1map, v: 1}, conf: ref}
+- {mn: C27MAP,  ops: "",            enc: "0101 0110 0011 1111", sem: st1bit, a: {f: m0m1map, v: 0}, conf: ref}
+- {mn: CLRC,    ops: "M0M1MAP",     enc: "0101 0110 0011 1111", sem: st1bit, a: {f: m0m1map, v: 0}, conf: ref, alias: true}
+- {mn: SETC,    ops: "M0M1MAP",     enc: "0101 0110 0001 1010", sem: st1bit, a: {f: m0m1map, v: 1}, conf: ref, alias: true}
+- {mn: CLRC,    ops: "OBJMODE",     enc: "0101 0110 0011 0110", sem: st1bit, a: {f: objmode, v: 0}, conf: ref, alias: true}
+- {mn: SETC,    ops: "OBJMODE",     enc: "0101 0110 0001 1111", sem: st1bit, a: {f: objmode, v: 1}, conf: ref, alias: true}
+- {mn: CLRC,    ops: "AMODE",       enc: "0101 0110 0001 0110", sem: st1bit, a: {f: amode, v: 0}, conf: ref, alias: true}
+- {mn: SETC,    ops: "AMODE",       enc: "0101 0110 0001 1110", sem: st1bit, a: {f: amode, v: 1}, conf: ref, alias: true}
+- {mn: SPM,     ops: "pm",          enc: "1111 1111 0110 1PPP", sem: spm, conf: ref}
+- {mn: ASP,     ops: "",            enc: "0111 0110 0001 1011", sem: asp, conf: ref}
+- {mn: NASP,    ops: "",            enc: "0111 0110 0001 0111", sem: nasp, conf: ref}
+- {mn: TRAP,    ops: "#u5",         enc: "0000 0000 001C CCCC", sem: trap, conf: ref, norpt: true}
+- {mn: INTR,    ops: "intx",        enc: "0000 0000 0001 IIII", sem: intr, conf: ref, norpt: true}
+- {mn: INTR,    ops: "NMI",         enc: "0111 0110 0001 0110", sem: intr, a: {vec: 18}, conf: ref, norpt: true}
+- {mn: INTR,    ops: "EMUINT",      enc: "0111 0110 0001 1100", sem: intr, a: {vec: 17}, conf: ref, norpt: true}
+- {mn: IRET,    ops: "",            enc: "0111 0110 0000 0010", sem: iret, conf: ref, norpt: true}
+- {mn: RPT,     ops: "#u8",         enc: "1111 0110 CCCC CCCC", sem: rpt, conf: ref, norpt: true}
+- {mn: RPT,     ops: "loc16",       enc: "1111 0111 LLLL LLLL", sem: rpt, conf: ref, norpt: true}
+- {mn: LOOPNZ,  ops: "loc16, #u16", enc: "0010 1110 LLLL LLLL CCCC CCCC CCCC CCCC", sem: loopnz, a: {z: 0}, conf: ref, norpt: true}
+- {mn: LOOPZ,   ops: "loc16, #u16", enc: "0010 1100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: loopnz, a: {z: 1}, conf: ref, norpt: true}
+- {mn: IN,      ops: "loc16, pa",   enc: "1011 0100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: io, conf: ref}
+- {mn: OUT,     ops: "pa, loc16",   enc: "1011 1100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: io, conf: ref}
+- {mn: UOUT,    ops: "pa, loc16",   enc: "1011 0000 LLLL LLLL CCCC CCCC CCCC CCCC", sem: io, conf: ref}
+# ------------------------------------------------------------------ branches, calls, returns
+- {mn: B,       ops: "off16, COND", enc: "1111 1111 1110 KKKK OOOO OOOO OOOO OOOO", sem: b, conf: ref, norpt: true}
+- {mn: SB,      ops: "off8, COND",  enc: "0110 KKKK OOOO OOOO", sem: b, conf: ref, norpt: true}
+- {mn: BF,      ops: "off16, COND", enc: "0101 0110 1100 KKKK OOOO OOOO OOOO OOOO", sem: b, conf: ref, norpt: true}
+- {mn: SBF,     ops: "off8, EQ",    enc: "1110 1100 OOOO OOOO", sem: b, a: {cond: 1}, conf: ref, norpt: true}
+- {mn: SBF,     ops: "off8, NEQ",   enc: "1110 1101 OOOO OOOO", sem: b, a: {cond: 0}, conf: ref, norpt: true}
+- {mn: SBF,     ops: "off8, TC",    enc: "1110 1110 OOOO OOOO", sem: b, a: {cond: 13}, conf: ref, norpt: true}
+- {mn: SBF,     ops: "off8, NTC",   enc: "1110 1111 OOOO OOOO", sem: b, a: {cond: 12}, conf: ref, norpt: true}
+- {mn: BANZ,    ops: "off16, ARn--", enc: "0000 0000 0000 1nnn OOOO OOOO OOOO OOOO", sem: banz, conf: ref, norpt: true}
+- {mn: BAR,     ops: "off16, ARn, ARm, EQ",  enc: "1000 1111 10nn nmmm OOOO OOOO OOOO OOOO", sem: bar, a: {eq: 1}, conf: ref, norpt: true}
+- {mn: BAR,     ops: "off16, ARn, ARm, NEQ", enc: "1000 1111 11nn nmmm OOOO OOOO OOOO OOOO", sem: bar, a: {eq: 0}, conf: ref, norpt: true}
+- {mn: LB,      ops: "addr22",      enc: "0000 0000 01XX XXXX XXXX XXXX XXXX XXXX", sem: lb, conf: ref, norpt: true}
+- {mn: LB,      ops: "*XAR7",       enc: "0111 0110 0010 0000", sem: lb_xar7, conf: ref, norpt: true}
+- {mn: LC,      ops: "addr22",      enc: "0000 0000 10XX XXXX XXXX XXXX XXXX XXXX", sem: lc, conf: ref, norpt: true}
+- {mn: LC, ops: "*XAR7", enc: "0111 0110 0000 0100", sem: lc, a: {xar7: 1}, conf: ref, norpt: true}
+- {mn: LCR,     ops: "#addr22",     enc: "0111 0110 01XX XXXX XXXX XXXX XXXX XXXX", sem: lcr, conf: ref, norpt: true}
+- {mn: LCR, ops: "*XARn", enc: "0011 1110 0110 0nnn", sem: lcr, a: {ind: 1}, conf: ref, norpt: true}
+- {mn: FFC,     ops: "XAR7, addr22", enc: "0000 0000 11XX XXXX XXXX XXXX XXXX XXXX", sem: ffc, conf: ref, norpt: true}
+- {mn: LRET,    ops: "",            enc: "0111 0110 0001 0100", sem: lret, conf: ref, norpt: true}
+- {mn: LRETE,   ops: "",            enc: "0111 0110 0001 0000", sem: lret, a: {eint: 1}, conf: ref, norpt: true}
+- {mn: LRETR,   ops: "",            enc: "0000 0000 0000 0110", sem: lretr, conf: ref, norpt: true}
+- {mn: XB,      ops: "pma, COND",   enc: "0101 0110 1101 KKKK CCCC CCCC CCCC CCCC", sem: xb, conf: ref, norpt: true}
+- {mn: XB,      ops: "*AL",         enc: "0101 0110 0001 0100", sem: xb, a: {al: 1}, conf: ref, norpt: true}
+- {mn: XB,      ops: "pma, *, ARPn", enc: "0011 1110 0111 0nnn CCCC CCCC CCCC CCCC", sem: xb, a: {arp: 1}, conf: ref, norpt: true}
+- {mn: XCALL,   ops: "pma, COND",   enc: "0101 0110 1110 KKKK CCCC CCCC CCCC CCCC", sem: xcall, conf: ref, norpt: true}
+- {mn: XCALL,   ops: "*AL",         enc: "0101 0110 0011 0100", sem: xcall, a: {al: 1}, conf: ref, norpt: true}
+- {mn: XCALL,   ops: "pma, *, ARPn", enc: "0011 1110 0110 1nnn CCCC CCCC CCCC CCCC", sem: xcall, a: {arp: 1}, conf: ref, norpt: true}
+- {mn: XRETC,   ops: "COND",        enc: "0101 0110 1111 KKKK", sem: xretc, conf: ref, norpt: true}
+- {mn: XRET,    ops: "",            enc: "0101 0110 1111 1111", sem: xretc, a: {cond: 15}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *",       enc: "0101 0110 0000 1100 CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*"}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *++",     enc: "0101 0110 0000 1010 CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*++"}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *--",     enc: "0101 0110 0000 1011 CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*--"}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *0++",    enc: "0101 0110 0000 1110 CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*0++"}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *0--",    enc: "0101 0110 0000 1111 CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*0--"}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *, ARPn",    enc: "0011 1110 0011 0nnn CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*", arp: 1}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *++, ARPn",  enc: "0011 1110 0011 1nnn CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*++", arp: 1}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *--, ARPn",  enc: "0011 1110 0100 0nnn CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*--", arp: 1}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *0++, ARPn", enc: "0011 1110 0100 1nnn CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*0++", arp: 1}, conf: ref, norpt: true}
+- {mn: XBANZ,   ops: "pma, *0--, ARPn", enc: "0011 1110 0101 0nnn CCCC CCCC CCCC CCCC", sem: xbanz, a: {mod: "*0--", arp: 1}, conf: ref, norpt: true}
+# ------------------------------------------------------------------ 16-bit moves
+- {mn: MOV,     ops: "AX, loc16",   enc: "1001 001A LLLL LLLL", sem: mov, a: {d: ax, s: loc16, f: nz16}, conf: ref}
+- {mn: MOV,     ops: "loc16, AX",   enc: "1001 011A LLLL LLLL", sem: mov, a: {d: loc16, s: ax, f: nzd}, conf: ref}
+- {mn: MOV, ops: "loc16, AX, COND", enc: "0101 0110 0010 101A 0000 KKKK LLLL LLLL", sem: movcond, conf: ref}
+- {mn: MOV,     ops: "loc16, #0",   enc: "0010 1011 LLLL LLLL", sem: mov, a: {d: loc16, s: zero, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "loc16, #u16", enc: "0010 1000 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mov, a: {d: loc16, s: imm, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "loc16, ARn",  enc: "0111 1nnn LLLL LLLL", sem: mov, a: {d: loc16, s: ar, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "AR6, loc16",  enc: "0101 1110 LLLL LLLL", sem: mov, a: {d: ar, s: loc16, n: 6}, conf: ref}
+- {mn: MOV,     ops: "AR7, loc16",  enc: "0101 1111 LLLL LLLL", sem: mov, a: {d: ar, s: loc16, n: 7}, conf: ref}
+- {mn: MOVZ,    ops: "AR0, loc16",  enc: "0101 1000 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 0}, conf: ref}
+- {mn: MOVZ,    ops: "AR1, loc16",  enc: "0101 1001 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 1}, conf: ref}
+- {mn: MOVZ,    ops: "AR2, loc16",  enc: "0101 1010 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 2}, conf: ref}
+- {mn: MOVZ,    ops: "AR3, loc16",  enc: "0101 1011 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 3}, conf: ref}
+- {mn: MOVZ,    ops: "AR4, loc16",  enc: "0101 1100 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 4}, conf: ref}
+- {mn: MOVZ,    ops: "AR5, loc16",  enc: "0101 1101 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 5}, conf: ref}
+- {mn: MOVZ,    ops: "AR6, loc16",  enc: "1000 1000 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 6}, conf: ref}
+- {mn: MOVZ,    ops: "AR7, loc16",  enc: "1000 0000 LLLL LLLL", sem: mov, a: {d: arz, s: loc16, n: 7}, conf: ref}
+- {mn: MOV,     ops: "T, loc16",    enc: "0010 1101 LLLL LLLL", sem: mov, a: {d: t, s: loc16}, conf: ref}
+- {mn: MOV,     ops: "loc16, T",    enc: "0010 0001 LLLL LLLL", sem: mov, a: {d: loc16, s: t, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "TL, #0",      enc: "0101 0110 0101 0110", sem: mov, a: {d: tl, s: zero}, conf: ref}
+- {mn: MOV,     ops: "PH, loc16",   enc: "0010 1111 LLLL LLLL", sem: mov, a: {d: ph, s: loc16}, conf: ref}
+- {mn: MOV,     ops: "PL, loc16",   enc: "0010 0111 LLLL LLLL", sem: mov, a: {d: pl, s: loc16}, conf: ref}
+- {mn: MOV,     ops: "loc16, P",    enc: "0011 1111 LLLL LLLL", sem: mov, a: {d: loc16, s: ppm_lo, f: nzd}, conf: ref}
+- {mn: MOVH,    ops: "loc16, P",    enc: "0101 0111 LLLL LLLL", sem: mov, a: {d: loc16, s: ppm_hi, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "IER, loc16",  enc: "0010 0011 LLLL LLLL", sem: mov, a: {d: ier, s: loc16}, conf: ref}
+- {mn: MOV,     ops: "loc16, IER",  enc: "0010 0000 LLLL LLLL", sem: mov, a: {d: loc16, s: ier, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "OVC, loc16",  enc: "0101 0110 0000 0010 0000 0000 LLLL LLLL", sem: mov, a: {d: ovc, s: loc16}, conf: ref}
+- {mn: MOVU,    ops: "OVC, loc16",  enc: "0101 0110 0110 0010 0000 0000 LLLL LLLL", sem: mov, a: {d: ovcu, s: loc16}, conf: ref}
+- {mn: MOV,     ops: "loc16, OVC",  enc: "0101 0110 0010 1001 0000 0000 LLLL LLLL", sem: mov, a: {d: loc16, s: ovc, f: nzd}, conf: ref}
+- {mn: MOVU,    ops: "loc16, OVC",  enc: "0101 0110 0010 1000 0000 0000 LLLL LLLL", sem: mov, a: {d: loc16, s: ovclo, f: nzd}, conf: ref}
+- {mn: MOV,     ops: "loc16, ACC<<#1", enc: "1011 0001 LLLL LLLL", sem: movacc, a: {sh: 1, hi: 0}, conf: ref}
+- {mn: MOV,     ops: "loc16, ACC<<#sh1_8", enc: "0101 0110 0010 1101 0000 0HHH LLLL LLLL", sem: movacc, a: {hi: 0}, conf: ref}
+- {mn: MOVH,    ops: "loc16, ACC<<#1", enc: "1011 0011 LLLL LLLL", sem: movacc, a: {sh: 1, hi: 1}, conf: ref}
+- {mn: MOVH,    ops: "loc16, ACC<<#sh1_8", enc: "0101 0110 0010 1111 0000 0HHH LLLL LLLL", sem: movacc, a: {hi: 1}, conf: ref}
+- {mn: MOV,     ops: "XARn, PC",    enc: "0011 1110 0101 1nnn", sem: movpc, conf: ref}
+- {mn: MOV,     ops: "PM, AX",      enc: "0101 0110 0011 100A", sem: mov, a: {d: pm, s: ax}, conf: ref}
+- {mn: MOVW,    ops: "DP, #u16",    enc: "0111 0110 0001 1111 CCCC CCCC CCCC CCCC", sem: mov, a: {d: dp, s: imm}, conf: ref}
+- {mn: MOV,     ops: "DP, #u10",    enc: "1111 10CC CCCC CCCC", sem: mov, a: {d: dp10, s: imm}, conf: ref}
+- {mn: MOVZ,    ops: "DP, #u10",    enc: "1011 10CC CCCC CCCC", sem: mov, a: {d: dp, s: imm}, conf: ref}
+- {mn: MOVB,    ops: "AX, #u8",     enc: "1001 101A CCCC CCCC", sem: mov, a: {d: ax, s: imm, f: nz16}, conf: ref}
+- {mn: MOVB,    ops: "ACC, #u8",    enc: "0000 0010 CCCC CCCC", sem: mov, a: {d: acc, s: imm, f: nz32}, conf: ref}
+- {mn: MOVB,    ops: "XAR6, #u8",   enc: "1011 1110 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 6}, conf: ref}
+- {mn: MOVB,    ops: "XAR7, #u8",   enc: "1011 0110 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 7}, conf: ref}
+- {mn: MOVB,    ops: "XAR0, #u8",   enc: "1101 0000 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 0}, conf: ref}
+- {mn: MOVB,    ops: "XAR1, #u8",   enc: "1101 0001 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 1}, conf: ref}
+- {mn: MOVB,    ops: "XAR2, #u8",   enc: "1101 0010 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 2}, conf: ref}
+- {mn: MOVB,    ops: "XAR3, #u8",   enc: "1101 0011 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 3}, conf: ref}
+- {mn: MOVB,    ops: "XAR4, #u8",   enc: "1101 0100 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 4}, conf: ref}
+- {mn: MOVB,    ops: "XAR5, #u8",   enc: "1101 0101 CCCC CCCC", sem: mov, a: {d: xar, s: imm, n: 5}, conf: ref}
+- {mn: MOVB,    ops: "AR6, #u8",    enc: "1101 0110 CCCC CCCC", sem: mov, a: {d: ar, s: imm, n: 6}, conf: ref}
+- {mn: MOVB,    ops: "AR7, #u8",    enc: "1101 0111 CCCC CCCC", sem: mov, a: {d: ar, s: imm, n: 7}, conf: ref}
+- {mn: MOVB,    ops: "loc16, #u8, COND", enc: "0101 0110 1011 KKKK CCCC CCCC LLLL LLLL", sem: movcond, conf: ref}
+- {mn: MOVB,    ops: "AX.LSB, loc16", enc: "1100 011A LLLL LLLL", sem: movb_ld, a: {msb: 0}, conf: ref}
+- {mn: MOVB,    ops: "AX.MSB, loc16", enc: "0011 100A LLLL LLLL", sem: movb_ld, a: {msb: 1}, conf: ref}
+- {mn: MOVB,    ops: "loc16, AX.LSB", enc: "0011 110A LLLL LLLL", sem: movb_st, a: {msb: 0}, conf: ref}
+- {mn: MOVB,    ops: "loc16, AX.MSB", enc: "1100 100A LLLL LLLL", sem: movb_st, a: {msb: 1}, conf: ref}
+- {mn: MOV,     ops: "loc16, abs16", enc: "1111 0101 LLLL LLLL CCCC CCCC CCCC CCCC", sem: movabs, a: {ld: 1}, conf: ref}
+- {mn: MOV,     ops: "abs16, loc16", enc: "1111 0100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: movabs, a: {ld: 0}, conf: ref}
+- {mn: DMOV,    ops: "loc16",       enc: "1010 0101 LLLL LLLL", sem: dmov, conf: ref}
+- {mn: PREAD,   ops: "loc16, *XAR7", enc: "0010 0100 LLLL LLLL", sem: pread, conf: ref}
+- {mn: PWRITE,  ops: "*XAR7, loc16", enc: "0010 0110 LLLL LLLL", sem: pwrite, conf: ref}
+- {mn: XPREAD,  ops: "loc16, *AL",  enc: "0101 0110 0011 1100 0000 0000 LLLL LLLL", sem: pread, a: {src: al}, conf: ref}
+- {mn: XPREAD,  ops: "loc16, *pma", enc: "1010 1100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: pread, a: {src: pma}, conf: ref}
+- {mn: XPWRITE, ops: "*AL, loc16",  enc: "0101 0110 0011 1101 0000 0000 LLLL LLLL", sem: pwrite, a: {src: al}, conf: ref}
+# ------------------------------------------------------------------ 32-bit moves
+- {mn: MOVL,    ops: "ACC, loc32",  enc: "0000 0110 LLLL LLLL", sem: mov, a: {d: acc, s: loc32, f: nz32}, conf: ref}
+- {mn: MOVL,    ops: "loc32, ACC",  enc: "0001 1110 LLLL LLLL", sem: mov, a: {d: loc32, s: acc, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, ACC, COND", enc: "0101 0110 0100 1000 0000 KKKK LLLL LLLL", sem: movcond, a: {w32: 1}, conf: ref}
+- {mn: MOVL,    ops: "P, loc32",    enc: "1010 0011 LLLL LLLL", sem: mov, a: {d: p, s: loc32}, conf: ref}
+- {mn: MOVL,    ops: "loc32, P",    enc: "1010 1001 LLLL LLLL", sem: mov, a: {d: loc32, s: p, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "XT, loc32",   enc: "1000 0111 LLLL LLLL", sem: mov, a: {d: xt, s: loc32}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XT",   enc: "1010 1011 LLLL LLLL", sem: mov, a: {d: loc32, s: xt, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "P, ACC",      enc: "1111 1111 0101 1010", sem: mov, a: {d: p, s: acc}, conf: ref}
+- {mn: MOVL,     ops: "ACC, P<<PM",  enc: "0001 0110 1010 1100", sem: mov, a: {d: acc, s: ppm, f: nz32}, conf: ref}
+- {mn: MOVL,    ops: "XAR0, loc32", enc: "1000 1110 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 0}, conf: ref}
+- {mn: MOVL,    ops: "XAR1, loc32", enc: "1000 1011 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 1}, conf: ref}
+- {mn: MOVL,    ops: "XAR2, loc32", enc: "1000 0110 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 2}, conf: ref}
+- {mn: MOVL,    ops: "XAR3, loc32", enc: "1000 0010 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 3}, conf: ref}
+- {mn: MOVL,    ops: "XAR4, loc32", enc: "1000 1010 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 4}, conf: ref}
+- {mn: MOVL,    ops: "XAR5, loc32", enc: "1000 0011 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 5}, conf: ref}
+- {mn: MOVL,    ops: "XAR6, loc32", enc: "1100 0100 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 6}, conf: ref}
+- {mn: MOVL,    ops: "XAR7, loc32", enc: "1100 0101 LLLL LLLL", sem: mov, a: {d: xar, s: loc32, n: 7}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR0", enc: "0011 1010 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 0, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR1", enc: "1011 0010 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 1, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR2", enc: "1010 1010 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 2, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR3", enc: "1010 0010 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 3, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR4", enc: "1010 1000 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 4, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR5", enc: "1010 0000 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 5, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR6", enc: "1100 0010 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 6, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "loc32, XAR7", enc: "1100 0011 LLLL LLLL", sem: mov, a: {d: loc32, s: xar, n: 7, f: nzd}, conf: ref}
+- {mn: MOVL,    ops: "XAR0, #addr22", enc: "1000 1101 00XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 0}, conf: ref}
+- {mn: MOVL,    ops: "XAR1, #addr22", enc: "1000 1101 01XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 1}, conf: ref}
+- {mn: MOVL,    ops: "XAR2, #addr22", enc: "1000 1101 10XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 2}, conf: ref}
+- {mn: MOVL,    ops: "XAR3, #addr22", enc: "1000 1101 11XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 3}, conf: ref}
+- {mn: MOVL,    ops: "XAR4, #addr22", enc: "1000 1111 00XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 4}, conf: ref}
+- {mn: MOVL,    ops: "XAR5, #addr22", enc: "1000 1111 01XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 5}, conf: ref}
+- {mn: MOVL,    ops: "XAR6, #addr22", enc: "0111 0110 10XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 6}, conf: ref}
+- {mn: MOVL,    ops: "XAR7, #addr22", enc: "0111 0110 11XX XXXX XXXX XXXX XXXX XXXX", sem: mov, a: {d: xar, s: addr, n: 7}, conf: ref}
+- {mn: MOVDL,   ops: "XT, loc32",   enc: "1010 0110 LLLL LLLL", sem: movdl, conf: ref}
+- {mn: MOVX, ops: "TL, loc16", enc: "0101 0110 0010 0001 xxxx xxxx LLLL LLLL", sem: mov, a: {d: tlx, s: loc16}, conf: ref}
+# ------------------------------------------------------------------ ACC loads with shift (16-bit operand)
+- {mn: MOV,     ops: "ACC, loc16<<#0",  enc: "1000 0101 LLLL LLLL", sem: accsh, a: {op: mov, s: loc16, sh: 0}, conf: ref}
+- {mn: MOV,     ops: "ACC, loc16<<#16", enc: "0010 0101 LLLL LLLL", sem: accsh, a: {op: mov, s: loc16, sh: 16}, conf: ref}
+- {mn: MOV,     ops: "ACC, loc16<<#sh1_15", enc: "0101 0110 0000 0011 0000 HHHH LLLL LLLL", sem: accsh, a: {op: mov, s: loc16}, conf: ref}
+- {mn: MOV,     ops: "ACC, loc16<<T",   enc: "0101 0110 0000 0110 0000 0000 LLLL LLLL", sem: accsh, a: {op: mov, s: loc16, sh: T}, conf: ref}
+- {mn: MOV,     ops: "ACC, #u16<<#sh0_15", enc: "1111 1111 0010 HHHH CCCC CCCC CCCC CCCC", sem: accsh, a: {op: mov, s: imm}, conf: ref}
+- {mn: MOVU,    ops: "ACC, loc16",      enc: "0000 1110 LLLL LLLL", sem: accsh, a: {op: mov, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: ADD,     ops: "ACC, loc16<<#0",  enc: "1000 0001 LLLL LLLL", sem: accsh, a: {op: add, s: loc16, sh: 0}, conf: ref}
+- {mn: ADD,     ops: "ACC, loc16<<#16", enc: "0000 0101 LLLL LLLL", sem: accsh, a: {op: add, s: loc16, sh: 16}, conf: ref}
+- {mn: ADD,     ops: "ACC, loc16<<#sh1_15", enc: "0101 0110 0000 0100 0000 HHHH LLLL LLLL", sem: accsh, a: {op: add, s: loc16}, conf: ref}
+- {mn: ADD,     ops: "ACC, loc16<<T",   enc: "0101 0110 0010 0011 0000 0000 LLLL LLLL", sem: accsh, a: {op: add, s: loc16, sh: T}, conf: ref}
+- {mn: ADD,     ops: "ACC, #u16<<#sh0_15", enc: "1111 1111 0001 HHHH CCCC CCCC CCCC CCCC", sem: accsh, a: {op: add, s: imm}, conf: ref}
+- {mn: ADDU,    ops: "ACC, loc16",      enc: "0000 1101 LLLL LLLL", sem: accsh, a: {op: add, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: ADDCU,   ops: "ACC, loc16",      enc: "0000 1100 LLLL LLLL", sem: accsh, a: {op: addc, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: SUB, ops: "ACC, loc16<<#0", enc: "1010 1110 LLLL LLLL", sem: accsh, a: {op: sub, s: loc16, sh: 0}, conf: ref}
+- {mn: SUB,     ops: "ACC, loc16<<#16", enc: "0000 0100 LLLL LLLL", sem: accsh, a: {op: sub, s: loc16, sh: 16}, conf: ref}
+- {mn: SUB,     ops: "ACC, loc16<<#sh1_15", enc: "0101 0110 0000 0000 0000 HHHH LLLL LLLL", sem: accsh, a: {op: sub, s: loc16}, conf: ref}
+- {mn: SUB,     ops: "ACC, loc16<<T",   enc: "0101 0110 0010 0111 0000 0000 LLLL LLLL", sem: accsh, a: {op: sub, s: loc16, sh: T}, conf: ref}
+- {mn: SUB,     ops: "ACC, #u16<<#sh0_15", enc: "1111 1111 0000 HHHH CCCC CCCC CCCC CCCC", sem: accsh, a: {op: sub, s: imm}, conf: ref}
+- {mn: SUBU,    ops: "ACC, loc16",      enc: "0000 0001 LLLL LLLL", sem: accsh, a: {op: sub, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: SBBU,    ops: "ACC, loc16",      enc: "0001 1101 LLLL LLLL", sem: accsh, a: {op: subb, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: AND,     ops: "ACC, loc16",      enc: "1000 1001 LLLL LLLL", sem: accsh, a: {op: and, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: AND,     ops: "ACC, #u16<<#sh0_15", enc: "0011 1110 0000 HHHH CCCC CCCC CCCC CCCC", sem: accsh, a: {op: and, s: imm, ext: zero}, conf: ref}
+- {mn: AND,     ops: "ACC, #u16<<#16",  enc: "0101 0110 0000 1000 CCCC CCCC CCCC CCCC", sem: accsh, a: {op: and, s: imm, sh: 16, ext: zero}, conf: ref}
+- {mn: OR,      ops: "ACC, loc16",      enc: "1010 1111 LLLL LLLL", sem: accsh, a: {op: or, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: OR, ops: "ACC, #u16<<#sh0_15", enc: "0011 1110 0001 HHHH CCCC CCCC CCCC CCCC", sem: accsh, a: {op: or, s: imm, ext: zero}, conf: ref}
+- {mn: OR,      ops: "ACC, #u16<<#16",  enc: "0101 0110 0100 1010 CCCC CCCC CCCC CCCC", sem: accsh, a: {op: or, s: imm, sh: 16, ext: zero}, conf: ref}
+- {mn: XOR,     ops: "ACC, loc16",      enc: "1011 0111 LLLL LLLL", sem: accsh, a: {op: xor, s: loc16, sh: 0, ext: zero}, conf: ref}
+- {mn: XOR,     ops: "ACC, #u16<<#sh0_15", enc: "0011 1110 0010 HHHH CCCC CCCC CCCC CCCC", sem: accsh, a: {op: xor, s: imm, ext: zero}, conf: ref}
+- {mn: XOR,     ops: "ACC, #u16<<#16",  enc: "0101 0110 0100 1110 CCCC CCCC CCCC CCCC", sem: accsh, a: {op: xor, s: imm, sh: 16, ext: zero}, conf: ref}
+- {mn: ADDB,    ops: "ACC, #u8",        enc: "0000 1001 CCCC CCCC", sem: accsh, a: {op: add, s: imm, sh: 0, ext: zero}, conf: ref}
+- {mn: SUBB,    ops: "ACC, #u8",        enc: "0001 1001 CCCC CCCC", sem: accsh, a: {op: sub, s: imm, sh: 0, ext: zero}, conf: ref}
+- {mn: SUBCU,   ops: "ACC, loc16",      enc: "0001 1111 LLLL LLLL", sem: subcu, conf: ref}
+- {mn: ZALR,    ops: "ACC, loc16",      enc: "0101 0110 0001 0011 0000 0000 LLLL LLLL", sem: zalr, conf: ref}
+# ------------------------------------------------------------------ 32-bit ACC arithmetic
+- {mn: ADDL,    ops: "ACC, loc32",  enc: "0000 0111 LLLL LLLL", sem: acc32, a: {op: add, s: loc32}, conf: ref}
+- {mn: ADDL,    ops: "ACC, P<<PM",  enc: "0001 0000 1010 1100", sem: acc32, a: {op: add, s: ppm}, conf: ref}
+- {mn: ADDL,    ops: "loc32, ACC",  enc: "0101 0110 0000 0001 0000 0000 LLLL LLLL", sem: loc32op, a: {op: add}, conf: ref}
+- {mn: ADDCL, ops: "ACC, loc32", enc: "0101 0110 0100 0000 xxxx xxxx LLLL LLLL", sem: acc32, a: {op: addc, s: loc32}, conf: ref}
+- {mn: ADDUL, ops: "ACC, loc32", enc: "0101 0110 0101 0011 xxxx xxxx LLLL LLLL", sem: acc32, a: {op: addu, s: loc32}, conf: ref}
+- {mn: ADDUL,   ops: "P, loc32",    enc: "0101 0110 0101 0111 0000 0000 LLLL LLLL", sem: p32, a: {op: addu}, conf: ref}
+- {mn: SUBL,    ops: "ACC, loc32",  enc: "0000 0011 LLLL LLLL", sem: acc32, a: {op: sub, s: loc32}, conf: ref}
+- {mn: SUBL,    ops: "ACC, P<<PM",  enc: "0001 0001 1010 1100", sem: acc32, a: {op: sub, s: ppm}, conf: ref}
+- {mn: SUBL,    ops: "loc32, ACC",  enc: "0101 0110 0100 0001 0000 0000 LLLL LLLL", sem: loc32op, a: {op: sub}, conf: ref}
+- {mn: SUBRL,   ops: "loc32, ACC",  enc: "0101 0110 0100 1001 0000 0000 LLLL LLLL", sem: loc32op, a: {op: subr}, conf: ref}
+- {mn: SUBBL,   ops: "ACC, loc32",  enc: "0101 0110 0101 0100 0000 0000 LLLL LLLL", sem: acc32, a: {op: subb, s: loc32}, conf: ref}
+- {mn: SUBUL,   ops: "ACC, loc32",  enc: "0101 0110 0101 0101 0000 0000 LLLL LLLL", sem: acc32, a: {op: subu, s: loc32}, conf: ref}
+- {mn: SUBUL,   ops: "P, loc32",    enc: "0101 0110 0101 1101 0000 0000 LLLL LLLL", sem: p32, a: {op: subu}, conf: ref}
+- {mn: SUBCUL,  ops: "ACC, loc32",  enc: "0101 0110 0001 0111 0000 0000 LLLL LLLL", sem: subcul, conf: ref}
+- {mn: CMPL,    ops: "ACC, loc32",  enc: "0000 1111 LLLL LLLL", sem: acc32, a: {op: cmp, s: loc32}, conf: ref}
+- {mn: CMPL,    ops: "ACC, P<<PM",  enc: "1111 1111 0101 1001", sem: acc32, a: {op: cmp, s: ppm}, conf: ref}
+- {mn: MAXL,    ops: "ACC, loc32",  enc: "0101 0110 0110 0001 0000 0000 LLLL LLLL", sem: acc32, a: {op: max, s: loc32}, conf: ref}
+- {mn: MINL,    ops: "ACC, loc32",  enc: "0101 0110 0101 0000 0000 0000 LLLL LLLL", sem: acc32, a: {op: min, s: loc32}, conf: ref}
+- {mn: MAXCUL, ops: "P, loc32", enc: "0101 0110 0101 0001 0000 0000 LLLL LLLL", sem: p32, a: {op: maxcu}, conf: ref}
+- {mn: MINCUL, ops: "P, loc32", enc: "0101 0110 0101 1001 xxxx xxxx LLLL LLLL", sem: p32, a: {op: mincu}, conf: ref}
+- {mn: CMP64,   ops: "ACC:P",       enc: "0101 0110 0101 1110", sem: cmp64, conf: ref}
+# ------------------------------------------------------------------ 16-bit arithmetic / logic (AX and loc16)
+- {mn: ADD,     ops: "AX, loc16",   enc: "1001 010A LLLL LLLL", sem: alu16, a: {op: add, d: ax, s: loc16}, conf: ref}
+- {mn: ADD,     ops: "loc16, AX",   enc: "0111 001A LLLL LLLL", sem: alu16, a: {op: add, d: loc16, s: ax}, conf: ref}
+- {mn: ADD,     ops: "loc16, #s16", enc: "0000 1000 LLLL LLLL CCCC CCCC CCCC CCCC", sem: alu16, a: {op: add, d: loc16, s: imm}, conf: ref}
+- {mn: ADDB,    ops: "AX, #s8",     enc: "1001 110A CCCC CCCC", sem: alu16, a: {op: add, d: ax, s: imm}, conf: ref}
+- {mn: SUB,     ops: "AX, loc16",   enc: "1001 111A LLLL LLLL", sem: alu16, a: {op: sub, d: ax, s: loc16}, conf: ref}
+- {mn: SUB,     ops: "loc16, AX",   enc: "0111 010A LLLL LLLL", sem: alu16, a: {op: sub, d: loc16, s: ax}, conf: ref}
+- {mn: SUBR,    ops: "loc16, AX",   enc: "1110 101A LLLL LLLL", sem: alu16, a: {op: subr, d: loc16, s: ax}, conf: ref}
+- {mn: CMP,     ops: "AX, loc16",   enc: "0101 010A LLLL LLLL", sem: alu16, a: {op: cmp, d: ax, s: loc16}, conf: ref}
+- {mn: CMP,     ops: "loc16, #s16", enc: "0001 1011 LLLL LLLL CCCC CCCC CCCC CCCC", sem: alu16, a: {op: cmp, d: loc16, s: imm}, conf: ref}
+- {mn: CMPB,    ops: "AX, #u8",     enc: "0101 001A CCCC CCCC", sem: alu16, a: {op: cmp, d: ax, s: imm}, conf: ref}
+- {mn: AND,     ops: "AX, loc16",   enc: "1100 111A LLLL LLLL", sem: alu16, a: {op: and, d: ax, s: loc16}, conf: ref}
+- {mn: AND,     ops: "loc16, AX",   enc: "1100 000A LLLL LLLL", sem: alu16, a: {op: and, d: loc16, s: ax}, conf: ref}
+- {mn: AND,     ops: "loc16, #u16", enc: "0001 1000 LLLL LLLL CCCC CCCC CCCC CCCC", sem: alu16, a: {op: and, d: loc16, s: imm}, conf: ref}
+- {mn: AND,     ops: "AX, loc16, #u16", enc: "1100 110A LLLL LLLL CCCC CCCC CCCC CCCC", sem: and3, conf: ref}
+- {mn: ANDB,    ops: "AX, #u8",     enc: "1001 000A CCCC CCCC", sem: alu16, a: {op: and, d: ax, s: imm}, conf: ref}
+- {mn: AND,     ops: "IER, #u16",   enc: "0111 0110 0010 0110 CCCC CCCC CCCC CCCC", sem: regop, a: {r: ier, op: and}, conf: ref}
+- {mn: AND,     ops: "IFR, #u16",   enc: "0111 0110 0010 1111 CCCC CCCC CCCC CCCC", sem: regop, a: {r: ifr, op: and}, conf: ref}
+- {mn: OR,      ops: "AX, loc16",   enc: "1100 101A LLLL LLLL", sem: alu16, a: {op: or, d: ax, s: loc16}, conf: ref}
+- {mn: OR,      ops: "loc16, AX",   enc: "1001 100A LLLL LLLL", sem: alu16, a: {op: or, d: loc16, s: ax}, conf: ref}
+- {mn: OR,      ops: "loc16, #u16", enc: "0001 1010 LLLL LLLL CCCC CCCC CCCC CCCC", sem: alu16, a: {op: or, d: loc16, s: imm}, conf: ref}
+- {mn: ORB,     ops: "AX, #u8",     enc: "0101 000A CCCC CCCC", sem: alu16, a: {op: or, d: ax, s: imm}, conf: ref}
+- {mn: OR,      ops: "IER, #u16",   enc: "0111 0110 0010 0011 CCCC CCCC CCCC CCCC", sem: regop, a: {r: ier, op: or}, conf: ref}
+- {mn: OR,      ops: "IFR, #u16",   enc: "0111 0110 0010 0111 CCCC CCCC CCCC CCCC", sem: regop, a: {r: ifr, op: or}, conf: ref}
+- {mn: XOR,     ops: "AX, loc16",   enc: "0111 000A LLLL LLLL", sem: alu16, a: {op: xor, d: ax, s: loc16}, conf: ref}
+- {mn: XOR,     ops: "loc16, AX",   enc: "1111 001A LLLL LLLL", sem: alu16, a: {op: xor, d: loc16, s: ax}, conf: ref}
+- {mn: XOR,     ops: "loc16, #u16", enc: "0001 1100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: alu16, a: {op: xor, d: loc16, s: imm}, conf: ref}
+- {mn: XORB,    ops: "AX, #u8",     enc: "1111 000A CCCC CCCC", sem: alu16, a: {op: xor, d: ax, s: imm}, conf: ref}
+- {mn: INC,     ops: "loc16",       enc: "0000 1010 LLLL LLLL", sem: alu16, a: {op: add, d: loc16, s: one}, conf: ref}
+- {mn: DEC,     ops: "loc16",       enc: "0000 1011 LLLL LLLL", sem: alu16, a: {op: sub, d: loc16, s: one}, conf: ref}
+- {mn: MAX, ops: "AX, loc16", enc: "0101 0110 0111 001A 0000 0000 LLLL LLLL", sem: alu16, a: {op: max, d: ax, s: loc16}, conf: ref}
+- {mn: MIN, ops: "AX, loc16", enc: "0101 0110 0111 010A 0000 0000 LLLL LLLL", sem: alu16, a: {op: min, d: ax, s: loc16}, conf: ref}
+- {mn: TBIT,    ops: "loc16, #bit", enc: "0100 BBBB LLLL LLLL", sem: tbit, conf: ref}
+- {mn: TBIT,    ops: "loc16, T",    enc: "0101 0110 0010 0101 0000 0000 LLLL LLLL", sem: tbit, a: {t: 1}, conf: ref}
+- {mn: TSET,    ops: "loc16, #bit", enc: "0101 0110 0000 1101 0000 BBBB LLLL LLLL", sem: tbit, a: {set: 1}, conf: ref}
+- {mn: TCLR,    ops: "loc16, #bit", enc: "0101 0110 0000 1001 0000 BBBB LLLL LLLL", sem: tbit, a: {set: 0}, conf: ref}
+- {mn: TEST,    ops: "ACC",         enc: "1111 1111 0101 1000", sem: unary, a: {op: test}, conf: ref}
+- {mn: NEG,     ops: "ACC",         enc: "1111 1111 0101 0100", sem: unary, a: {op: neg}, conf: ref}
+- {mn: NEG,     ops: "AX",          enc: "1111 1111 0101 110A", sem: unary16, a: {op: neg}, conf: ref}
+- {mn: NOT,     ops: "ACC",         enc: "1111 1111 0101 0101", sem: unary, a: {op: not}, conf: ref}
+- {mn: NOT,     ops: "AX",          enc: "1111 1111 0101 111A", sem: unary16, a: {op: not}, conf: ref}
+- {mn: ABS,     ops: "ACC",         enc: "1111 1111 0101 0110", sem: unary, a: {op: abs}, conf: ref}
+- {mn: SAT,     ops: "ACC",         enc: "1111 1111 0101 0111", sem: unary, a: {op: sat}, conf: ref}
+- {mn: ABSTC,   ops: "ACC",         enc: "0101 0110 0101 1111", sem: unary, a: {op: abstc}, conf: ref}
+- {mn: NEGTC,   ops: "ACC",         enc: "0101 0110 0011 0010", sem: unary, a: {op: negtc}, conf: ref}
+- {mn: NEG64,   ops: "ACC:P",       enc: "0101 0110 0101 1000", sem: unary64, a: {op: neg}, conf: ref}
+- {mn: SAT64,   ops: "ACC:P",       enc: "0101 0110 0011 1110", sem: unary64, a: {op: sat}, conf: ref}
+- {mn: FLIP,    ops: "AX",          enc: "0101 0110 0111 000A", sem: unary16, a: {op: flip}, conf: ref}
+- {mn: CSB,     ops: "ACC",         enc: "0101 0110 0011 0101", sem: csb, conf: ref}
+- {mn: ZAPA,    ops: "",            enc: "0101 0110 0011 0011", sem: zapa, conf: ref}
+- {mn: SQRA,    ops: "loc16",       enc: "0101 0110 0001 0101 0000 0000 LLLL LLLL", sem: sqr, a: {op: add}, conf: ref}
+- {mn: SQRS, ops: "loc16", enc: "0101 0110 0001 0001 xxxx xxxx LLLL LLLL", sem: sqr, a: {op: sub}, conf: ref}
+# ------------------------------------------------------------------ shifts / rotates / normalize
+- {mn: LSL,     ops: "ACC, #sh1_16", enc: "1111 1111 0011 HHHH", sem: shacc, a: {op: lsl}, conf: ref}
+- {mn: LSL,     ops: "ACC, T",       enc: "1111 1111 0101 0000", sem: shacc, a: {op: lsl, t: 1}, conf: ref}
+- {mn: SFR,     ops: "ACC, #sh1_16", enc: "1111 1111 0100 HHHH", sem: shacc, a: {op: sfr}, conf: ref}
+- {mn: SFR,     ops: "ACC, T",       enc: "1111 1111 0101 0001", sem: shacc, a: {op: sfr, t: 1}, conf: ref}
+- {mn: LSL,     ops: "AX, #sh1_16",  enc: "1111 1111 100A HHHH", sem: shax, a: {op: lsl}, conf: ref}
+- {mn: LSL,     ops: "AX, T",        enc: "1111 1111 0110 011A", sem: shax, a: {op: lsl, t: 1}, conf: ref}
+- {mn: LSR,     ops: "AX, #sh1_16",  enc: "1111 1111 110A HHHH", sem: shax, a: {op: lsr}, conf: ref}
+- {mn: LSR,     ops: "AX, T",        enc: "1111 1111 0110 001A", sem: shax, a: {op: lsr, t: 1}, conf: ref}
+- {mn: ASR,     ops: "AX, #sh1_16",  enc: "1111 1111 101A HHHH", sem: shax, a: {op: asr}, conf: ref}
+- {mn: ASR,     ops: "AX, T",        enc: "1111 1111 0110 010A", sem: shax, a: {op: asr, t: 1}, conf: ref}
+- {mn: LSLL,    ops: "ACC, T",       enc: "0101 0110 0011 1011", sem: shacc, a: {op: lsl, t: 1, l: 1}, conf: ref}
+- {mn: LSRL,    ops: "ACC, T",       enc: "0101 0110 0010 0010", sem: shacc, a: {op: lsr, t: 1, l: 1}, conf: ref}
+- {mn: ASRL,    ops: "ACC, T",       enc: "0101 0110 0001 0000", sem: shacc, a: {op: asr, t: 1, l: 1}, conf: ref}
+- {mn: LSL64,   ops: "ACC:P, #sh1_16", enc: "0101 0110 1010 HHHH", sem: sh64, a: {op: lsl}, conf: ref}
+- {mn: LSL64,   ops: "ACC:P, T",     enc: "0101 0110 0101 0010", sem: sh64, a: {op: lsl, t: 1}, conf: ref}
+- {mn: LSR64,   ops: "ACC:P, #sh1_16", enc: "0101 0110 1001 HHHH", sem: sh64, a: {op: lsr}, conf: ref}
+- {mn: LSR64,   ops: "ACC:P, T",     enc: "0101 0110 0101 1011", sem: sh64, a: {op: lsr, t: 1}, conf: ref}
+- {mn: ASR64,   ops: "ACC:P, #sh1_16", enc: "0101 0110 1000 HHHH", sem: sh64, a: {op: asr}, conf: ref}
+- {mn: ASR64,   ops: "ACC:P, T",     enc: "0101 0110 0010 1100", sem: sh64, a: {op: asr, t: 1}, conf: ref}
+- {mn: ROL,     ops: "ACC",          enc: "1111 1111 0101 0011", sem: rot, a: {op: rol}, conf: ref}
+- {mn: ROR,     ops: "ACC",          enc: "1111 1111 0101 0010", sem: rot, a: {op: ror}, conf: ref}
+- {mn: NORM,    ops: "ACC, XARn++",  enc: "1111 1111 0111 1nnn", sem: norm, a: {inc: 1}, conf: ref}
+- {mn: NORM,    ops: "ACC, XARn--",  enc: "1111 1111 0111 0nnn", sem: norm, a: {inc: -1}, conf: ref}
+- {mn: NORM,    ops: "ACC, *",       enc: "0101 0110 0010 0100", sem: norm, a: {mod: "*"}, conf: ref}
+- {mn: NORM,    ops: "ACC, *++",     enc: "0101 0110 0101 1010", sem: norm, a: {mod: "*++"}, conf: ref}
+- {mn: NORM,    ops: "ACC, *--",     enc: "0101 0110 0010 0000", sem: norm, a: {mod: "*--"}, conf: ref}
+- {mn: NORM,    ops: "ACC, *0++",    enc: "0101 0110 0111 0111", sem: norm, a: {mod: "*0++"}, conf: ref}
+- {mn: NORM,    ops: "ACC, *0--",    enc: "0101 0110 0011 0000", sem: norm, a: {mod: "*0--"}, conf: ref}
+# ------------------------------------------------------------------ address registers, SP, DP
+- {mn: ADDB,    ops: "SP, #u7",      enc: "1111 1110 0CCC CCCC", sem: spadd, a: {sign: 1}, conf: ref}
+- {mn: SUBB,    ops: "SP, #u7",      enc: "1111 1110 1CCC CCCC", sem: spadd, a: {sign: -1}, conf: ref}
+- {mn: ADDB,    ops: "XARn, #u7",    enc: "1101 1nnn 0CCC CCCC", sem: xaradd, a: {sign: 1}, conf: ref}
+- {mn: SUBB,    ops: "XARn, #u7",    enc: "1101 1nnn 1CCC CCCC", sem: xaradd, a: {sign: -1}, conf: ref}
+- {mn: ADRK,    ops: "#u8",          enc: "1111 1100 CCCC CCCC", sem: xaradd, a: {sign: 1, arp: 1}, conf: ref}
+- {mn: SBRK,    ops: "#u8",          enc: "1111 1101 CCCC CCCC", sem: xaradd, a: {sign: -1, arp: 1}, conf: ref}
+- {mn: CMPR,    ops: "0",            enc: "0101 0110 0001 1101", sem: cmpr, a: {k: 0}, conf: ref}
+- {mn: CMPR,    ops: "1",            enc: "0101 0110 0001 1001", sem: cmpr, a: {k: 1}, conf: ref}
+- {mn: CMPR,    ops: "2",            enc: "0101 0110 0001 1000", sem: cmpr, a: {k: 2}, conf: ref}
+- {mn: CMPR,    ops: "3",            enc: "0101 0110 0001 1100", sem: cmpr, a: {k: 3}, conf: ref}
+# ------------------------------------------------------------------ stack
+- {mn: PUSH,    ops: "ACC",          enc: "0001 1110 1011 1101", sem: mov, a: {d: loc32, s: acc, L: 0xBD}, conf: ref}
+- {mn: POP,     ops: "ACC",          enc: "0000 0110 1011 1110", sem: mov, a: {d: acc, s: loc32, f: nz32, L: 0xBE}, conf: ref}
+- {mn: PUSH, ops: "P", enc: "0111 0110 0001 1101", sem: mov, a: {d: loc32, s: p, L: 0xBD}, conf: ref}
+- {mn: POP, ops: "P", enc: "0111 0110 0001 0001", sem: mov, a: {d: p, s: loc32, L: 0xBE}, conf: ref}
+- {mn: PUSH,    ops: "XT",           enc: "1010 1011 1011 1101", sem: mov, a: {d: loc32, s: xt, L: 0xBD}, conf: ref}
+- {mn: POP,     ops: "XT",           enc: "1000 0111 1011 1110", sem: mov, a: {d: xt, s: loc32, L: 0xBE}, conf: ref}
+- {mn: PUSH,    ops: "XAR0",         enc: "0011 1010 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 0, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR1",         enc: "1011 0010 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 1, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR2",         enc: "1010 1010 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 2, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR3",         enc: "1010 0010 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 3, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR4",         enc: "1010 1000 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 4, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR5",         enc: "1010 0000 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 5, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR6",         enc: "1100 0010 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 6, L: 0xBD}, conf: ref}
+- {mn: PUSH,    ops: "XAR7",         enc: "1100 0011 1011 1101", sem: mov, a: {d: loc32, s: xar, n: 7, L: 0xBD}, conf: ref}
+- {mn: POP,     ops: "XAR0",         enc: "1000 1110 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 0, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR1",         enc: "1000 1011 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 1, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR2",         enc: "1000 0110 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 2, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR3",         enc: "1000 0010 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 3, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR4",         enc: "1000 1010 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 4, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR5",         enc: "1000 0011 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 5, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR6",         enc: "1100 0100 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 6, L: 0xBE}, conf: ref}
+- {mn: POP,     ops: "XAR7",         enc: "1100 0101 1011 1110", sem: mov, a: {d: xar, s: loc32, n: 7, L: 0xBE}, conf: ref}
+- {mn: PUSH,    ops: "loc16",        enc: "0010 0010 LLLL LLLL", sem: pushloc, conf: ref}
+- {mn: POP,     ops: "loc16",        enc: "0010 1010 LLLL LLLL", sem: poploc, conf: ref}
+- {mn: PUSH,    ops: "RPC",          enc: "0000 0000 0000 0100", sem: push, a: {r: [rpc32]}, conf: ref}
+- {mn: POP,     ops: "RPC",          enc: "0000 0000 0000 0111", sem: pop, a: {r: [rpc32]}, conf: ref}
+- {mn: PUSH, ops: "AR1:AR0", enc: "0111 0110 0000 1101", sem: push, a: {r: [ar0, ar1]}, conf: ref}
+- {mn: PUSH, ops: "AR3:AR2", enc: "0111 0110 0000 1111", sem: push, a: {r: [ar2, ar3]}, conf: ref}
+- {mn: PUSH, ops: "AR5:AR4", enc: "0111 0110 0000 1100", sem: push, a: {r: [ar4, ar5]}, conf: ref}
+- {mn: PUSH, ops: "AR1H:AR0H", enc: "0000 0000 0000 0101", sem: push, a: {r: [ar0h, ar1h]}, conf: ref}
+- {mn: PUSH, ops: "DBGIER", enc: "0111 0110 0000 1110", sem: push, a: {r: [dbgier]}, conf: ref}
+- {mn: PUSH, ops: "DP", enc: "0111 0110 0000 1011", sem: push, a: {r: [dp]}, conf: ref}
+- {mn: PUSH, ops: "DP:ST1", enc: "0111 0110 0000 1001", sem: push, a: {r: [st1, dp]}, conf: ref}
+- {mn: PUSH, ops: "IFR", enc: "0111 0110 0000 1010", sem: push, a: {r: [ifr]}, conf: ref}
+- {mn: PUSH, ops: "ST0", enc: "0111 0110 0001 1000", sem: push, a: {r: [st0]}, conf: ref}
+- {mn: PUSH, ops: "ST1", enc: "0111 0110 0000 1000", sem: push, a: {r: [st1]}, conf: ref}
+- {mn: PUSH, ops: "T:ST0", enc: "0111 0110 0001 1001", sem: push, a: {r: [st0, t]}, conf: ref}
+- {mn: POP, ops: "AR1:AR0", enc: "0111 0110 0000 0111", sem: pop, a: {r: [ar0, ar1]}, conf: ref}
+- {mn: POP, ops: "AR3:AR2", enc: "0111 0110 0000 0101", sem: pop, a: {r: [ar2, ar3]}, conf: ref}
+- {mn: POP, ops: "AR5:AR4", enc: "0111 0110 0000 0110", sem: pop, a: {r: [ar4, ar5]}, conf: ref}
+- {mn: POP, ops: "AR1H:AR0H", enc: "0000 0000 0000 0011", sem: pop, a: {r: [ar0h, ar1h]}, conf: ref}
+- {mn: POP, ops: "DBGIER", enc: "0111 0110 0001 0010", sem: pop, a: {r: [dbgier]}, conf: ref}
+- {mn: POP, ops: "DP", enc: "0111 0110 0000 0011", sem: pop, a: {r: [dp]}, conf: ref}
+- {mn: POP, ops: "DP:ST1", enc: "0111 0110 0000 0001", sem: pop, a: {r: [st1, dp]}, conf: ref}
+- {mn: POP, ops: "IFR", enc: "0000 0000 0000 0010", sem: pop, a: {r: [ifr]}, conf: ref}
+- {mn: POP, ops: "ST0", enc: "0111 0110 0001 0011", sem: pop, a: {r: [st0]}, conf: ref}
+- {mn: POP, ops: "ST1", enc: "0111 0110 0000 0000", sem: pop, a: {r: [st1]}, conf: ref}
+- {mn: POP, ops: "T:ST0", enc: "0111 0110 0001 0101", sem: pop, a: {r: [st0, t]}, conf: ref}
+# ------------------------------------------------------------------ multiply / MAC
+- {mn: MPY,     ops: "ACC, T, loc16",   enc: "0001 0010 LLLL LLLL", sem: mpy, a: {d: acc, k: ss}, conf: ref}
+- {mn: MPY,     ops: "P, T, loc16",     enc: "0011 0011 LLLL LLLL", sem: mpy, a: {d: p, k: ss}, conf: ref}
+- {mn: MPY,     ops: "ACC, loc16, #s16", enc: "0011 0100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mpy, a: {d: acc, k: ss}, conf: ref}
+- {mn: MPY,     ops: "P, loc16, #s16",  enc: "1000 1100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mpy, a: {d: p, k: ss}, conf: ref}
+- {mn: MPYU,    ops: "ACC, T, loc16",   enc: "0011 0110 LLLL LLLL", sem: mpy, a: {d: acc, k: uu}, conf: ref}
+- {mn: MPYU,    ops: "P, T, loc16",     enc: "0011 0111 LLLL LLLL", sem: mpy, a: {d: p, k: uu}, conf: ref}
+- {mn: MPYXU,   ops: "ACC, T, loc16",   enc: "0011 0000 LLLL LLLL", sem: mpy, a: {d: acc, k: su}, conf: ref}
+- {mn: MPYXU,   ops: "P, T, loc16",     enc: "0011 0010 LLLL LLLL", sem: mpy, a: {d: p, k: su}, conf: ref}
+- {mn: MPYB,    ops: "ACC, T, #u8",     enc: "0011 0101 CCCC CCCC", sem: mpy, a: {d: acc, k: su}, conf: ref}
+- {mn: MPYB,    ops: "P, T, #u8",       enc: "0011 0001 CCCC CCCC", sem: mpy, a: {d: p, k: su}, conf: ref}
+- {mn: MPYA,    ops: "P, T, loc16",     enc: "0001 0111 LLLL LLLL", sem: mpy, a: {d: p, k: ss, acc: add}, conf: ref}
+- {mn: MPYA,    ops: "P, loc16, #s16",  enc: "0001 0101 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mpy, a: {d: p, k: ss, acc: add}, conf: ref}
+- {mn: MPYS,    ops: "P, T, loc16",     enc: "0001 0011 LLLL LLLL", sem: mpy, a: {d: p, k: ss, acc: sub}, conf: ref}
+- {mn: MOVA,    ops: "T, loc16",        enc: "0001 0000 LLLL LLLL", sem: movt, a: {acc: add}, conf: ref}
+- {mn: MOVS,    ops: "T, loc16",        enc: "0001 0001 LLLL LLLL", sem: movt, a: {acc: sub}, conf: ref}
+- {mn: MOVP,    ops: "T, loc16",        enc: "0001 0110 LLLL LLLL", sem: movt, a: {acc: mov}, conf: ref}
+- {mn: MOVAD,   ops: "T, loc16",        enc: "1010 0111 LLLL LLLL", sem: movt, a: {acc: add, dmov: 1}, conf: ref}
+- {mn: MAC,     ops: "P, loc16, pma",   enc: "0001 0100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mac, a: {src: pma}, conf: ref}
+- {mn: MAC, ops: "P, loc16, *XAR7", enc: "0101 0110 0000 0111 1100 0111 LLLL LLLL", sem: mac, a: {src: xar7}, conf: ref}
+- {mn: MAC, ops: "P, loc16, *XAR7++", enc: "0101 0110 0000 0111 1000 0111 LLLL LLLL", sem: mac, a: {src: xar7inc}, conf: ref}
+- {mn: XMAC, ops: "P, loc16, *pma", enc: "1000 0100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mac, a: {src: xpma}, conf: ref}
+- {mn: XMACD, ops: "P, loc16, *pma", enc: "1010 0100 LLLL LLLL CCCC CCCC CCCC CCCC", sem: mac, a: {src: xpma, dmov: 1}, conf: ref}
+- {mn: DMAC, ops: "ACC:P, loc32, *XAR7", enc: "0101 0110 0100 1011 1100 0111 LLLL LLLL", sem: dmac, a: {inc: 0}, conf: ref}
+- {mn: DMAC, ops: "ACC:P, loc32, *XAR7++", enc: "0101 0110 0100 1011 1000 0111 LLLL LLLL", sem: dmac, a: {inc: 1}, conf: ref}
+- {mn: IMPYL, ops: "P, XT, loc32", enc: "0101 0110 0000 0101 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: ss, hi: 0}, conf: ref}
+- {mn: IMPYL,   ops: "ACC, XT, loc32",  enc: "0101 0110 0100 0100 0000 0000 LLLL LLLL", sem: mpyl, a: {d: acc, k: ss, hi: 0}, conf: ref}
+- {mn: QMPYL, ops: "P, XT, loc32", enc: "0101 0110 0110 0111 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: ss, hi: 1}, conf: ref}
+- {mn: QMPYL,   ops: "ACC, XT, loc32",  enc: "0101 0110 0110 0011 0000 0000 LLLL LLLL", sem: mpyl, a: {d: acc, k: ss, hi: 1}, conf: ref}
+- {mn: IMPYXUL, ops: "P, XT, loc32", enc: "0101 0110 0110 0101 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: su, hi: 0}, conf: ref}
+- {mn: QMPYUL, ops: "P, XT, loc32", enc: "0101 0110 0100 0111 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: uu, hi: 1}, conf: ref}
+- {mn: QMPYXUL, ops: "P, XT, loc32",    enc: "0101 0110 0100 0010 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: su, hi: 1}, conf: ref}
+- {mn: IMPYAL,  ops: "P, XT, loc32",    enc: "0101 0110 0100 1100 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: su, hi: 0, acc: addu}, conf: ref}
+- {mn: IMPYSL,  ops: "P, XT, loc32",    enc: "0101 0110 0100 0011 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: su, hi: 0, acc: subu}, conf: ref}
+- {mn: QMPYAL,  ops: "P, XT, loc32",    enc: "0101 0110 0100 0110 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: ss, hi: 1, acc: add}, conf: ref}
+- {mn: QMPYSL,  ops: "P, XT, loc32",    enc: "0101 0110 0100 0101 0000 0000 LLLL LLLL", sem: mpyl, a: {d: p, k: ss, hi: 1, acc: sub}, conf: ref}
+- {mn: IMACL, ops: "P, loc32, *XAR7", enc: "0101 0110 0100 1101 1100 0111 LLLL LLLL", sem: macl, a: {hi: 0, inc: 0}, conf: ref}
+- {mn: IMACL, ops: "P, loc32, *XAR7++", enc: "0101 0110 0100 1101 1000 0111 LLLL LLLL", sem: macl, a: {hi: 0, inc: 1}, conf: ref}
+- {mn: QMACL, ops: "P, loc32, *XAR7", enc: "0101 0110 0100 1111 1100 0111 LLLL LLLL", sem: macl, a: {hi: 1, inc: 0}, conf: ref}
+- {mn: QMACL, ops: "P, loc32, *XAR7++", enc: "0101 0110 0100 1111 1000 0111 LLLL LLLL", sem: macl, a: {hi: 1, inc: 1}, conf: ref}
+# ------------------------------------------------------------------ FPU32 (SPRUEO2B / SPRUHS1C chapter 1)
+# Opcodes are LSW (first word) then MSW.  `conf: ref` = checked against SPRUHS1C (SPRUEO2B where they agree).
+# MOV32 RaH,{ACC|P|XT|XARn} / MOV32 {ACC|P|XT|XARn},RaH (SPRUHS1C: "LSW 1011 1101 loc32 / MSW IIII..." and
+# "1011 1111 loc32 / IIII...") are the MOV32 *(0:16bit),loc32 / MOV32 loc32,*(0:16bit) opcodes whose 16-bit word is
+# the FPU register's internal address 0x0F12 + 4*a (R0H = 0x0F12 ... R7H = 0x0F2E).  Confirmed by cl2000 25.11.1
+# output (RTS fpu32 library: 0xBFAB 0x0F12 = MOV32 @P,R0H, 0xBDA9 0x0F16 = MOV32 R1H,@ACC) and dis2000.  a+4 in bits
+# 6:2 is not a plain field, so there is one entry per register; they precede the mem32 forms so the assembler emits
+# TI's encoding for register operands (memory operands still use 0xE2AF/0xE203).  ACC destination: ST0 N/Z.
+- {mn: MOV32,   ops: "R0H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0001 0010", sem: f_mvloc, a: {ra: 0, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R1H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0001 0110", sem: f_mvloc, a: {ra: 1, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R2H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0001 1010", sem: f_mvloc, a: {ra: 2, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R3H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0001 1110", sem: f_mvloc, a: {ra: 3, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R4H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0010 0010", sem: f_mvloc, a: {ra: 4, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R5H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0010 0110", sem: f_mvloc, a: {ra: 5, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R6H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0010 1010", sem: f_mvloc, a: {ra: 6, to: f}, conf: ref}
+- {mn: MOV32,   ops: "R7H, reg32", enc: "1011 1101 LLLL LLLL 0000 1111 0010 1110", sem: f_mvloc, a: {ra: 7, to: f}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R0H", enc: "1011 1111 LLLL LLLL 0000 1111 0001 0010", sem: f_mvloc, a: {ra: 0, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R1H", enc: "1011 1111 LLLL LLLL 0000 1111 0001 0110", sem: f_mvloc, a: {ra: 1, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R2H", enc: "1011 1111 LLLL LLLL 0000 1111 0001 1010", sem: f_mvloc, a: {ra: 2, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R3H", enc: "1011 1111 LLLL LLLL 0000 1111 0001 1110", sem: f_mvloc, a: {ra: 3, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R4H", enc: "1011 1111 LLLL LLLL 0000 1111 0010 0010", sem: f_mvloc, a: {ra: 4, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R5H", enc: "1011 1111 LLLL LLLL 0000 1111 0010 0110", sem: f_mvloc, a: {ra: 5, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R6H", enc: "1011 1111 LLLL LLLL 0000 1111 0010 1010", sem: f_mvloc, a: {ra: 6, to: r}, conf: ref}
+- {mn: MOV32,   ops: "reg32, R7H", enc: "1011 1111 LLLL LLLL 0000 1111 0010 1110", sem: f_mvloc, a: {ra: 7, to: r}, conf: ref}
+- {mn: MOV32,   ops: "RaH, loc32",       enc: "1110 0010 1010 1111 0000 0aaa LLLL LLLL", sem: f_ld32, conf: ref}
+- {mn: MOV32,   ops: "RaH, loc32, CNDF", enc: "1110 0010 1010 KKKK 0000 0aaa LLLL LLLL", sem: f_ld32, conf: ref}
+- {mn: MOV32,   ops: "loc32, RaH",       enc: "1110 0010 0000 0011 0000 0aaa LLLL LLLL", sem: f_st32, conf: ref}
+- {mn: MOV16,   ops: "loc16, RaH",       enc: "1110 0010 0001 0011 0000 0aaa LLLL LLLL", sem: f_st16, conf: ref}
+- {mn: MOV32,   ops: "loc32, STF",       enc: "1110 0010 0000 0000 0000 0000 LLLL LLLL", sem: f_stf, a: {st: 1}, conf: ref}
+- {mn: MOV32,   ops: "STF, loc32",       enc: "1110 0010 1000 0000 0000 0000 LLLL LLLL", sem: f_stf, a: {st: 0}, conf: ref}
+- {mn: MOVD32,  ops: "RaH, loc32",       enc: "1110 0010 0010 0011 0000 0aaa LLLL LLLL", sem: f_ld32, a: {dmov: 1}, conf: ref}
+- {mn: MOV32,   ops: "abs16, loc32",     enc: "1011 1101 LLLL LLLL CCCC CCCC CCCC CCCC", sem: movabs32, a: {ld: 0}, conf: ref}
+- {mn: MOV32,   ops: "loc32, abs16",     enc: "1011 1111 LLLL LLLL CCCC CCCC CCCC CCCC", sem: movabs32, a: {ld: 1}, conf: ref}
+- {mn: I16TOF32, ops: "RaH, loc16",      enc: "1110 0010 1100 1000 0000 0aaa LLLL LLLL", sem: f_cvtmem, a: {k: i16}, conf: ref}
+- {mn: UI16TOF32, ops: "RaH, loc16",     enc: "1110 0010 1100 0100 0000 0aaa LLLL LLLL", sem: f_cvtmem, a: {k: u16}, conf: ref}
+- {mn: I32TOF32, ops: "RaH, loc32",      enc: "1110 0010 1000 1000 0000 0aaa LLLL LLLL", sem: f_cvtmem, a: {k: i32}, conf: ref}
+- {mn: UI32TOF32, ops: "RaH, loc32",     enc: "1110 0010 1000 0100 0000 0aaa LLLL LLLL", sem: f_cvtmem, a: {k: u32}, conf: ref}
+- {mn: MOV32,   ops: "RaH, RbH",         enc: "1110 0110 1100 1111 0000 0000 00bb baaa", sem: f_mov, conf: ref}
+- {mn: MOV32,   ops: "RaH, RbH, CNDF",   enc: "1110 0110 1100 KKKK 0000 0000 00bb baaa", sem: f_mov, conf: ref}
+- {mn: MOVIZF32, ops: "RaH, #f16",       enc: "1110 1000 0000 0CCC CCCC CCCC CCCC Caaa", sem: f_imm, a: {k: iz}, conf: ref}
+- {mn: MOVIZ,   ops: "RaH, #u16",        enc: "1110 1000 0000 0CCC CCCC CCCC CCCC Caaa", sem: f_imm, a: {k: iz}, conf: ref, alias: true}
+- {mn: MOVXI,   ops: "RaH, #u16",        enc: "1110 1000 0000 1CCC CCCC CCCC CCCC Caaa", sem: f_imm, a: {k: xi}, conf: ref}
+- {mn: CMPF32,    ops: "RaH, #0.0",      enc: "1110 0101 1010 0aaa", sem: f_cmp, a: {zero: 1}, conf: ref}
+- {mn: CMPF32,  ops: "RaH, #f16",        enc: "1110 1000 0001 0CCC CCCC CCCC CCCC Caaa", sem: f_cmp, conf: ref}
+- {mn: MAXF32,  ops: "RaH, #f16",        enc: "1110 1000 0010 0CCC CCCC CCCC CCCC Caaa", sem: f_minmax, a: {op: max}, conf: ref}
+- {mn: MINF32,  ops: "RaH, #f16",        enc: "1110 1000 0011 0CCC CCCC CCCC CCCC Caaa", sem: f_minmax, a: {op: min}, conf: ref}
+- {mn: MPYF32,  ops: "RaH, #f16, RbH",   enc: "1110 1000 01CC CCCC CCCC CCCC CCbb baaa", sem: f_arith, a: {op: mpy}, conf: ref}
+- {mn: MPYF32,  ops: "RaH, RbH, #f16",   enc: "1110 1000 01CC CCCC CCCC CCCC CCbb baaa", sem: f_arith, a: {op: mpy}, conf: ref, alias: true}
+- {mn: ADDF32,  ops: "RaH, #f16, RbH",   enc: "1110 1000 10CC CCCC CCCC CCCC CCbb baaa", sem: f_arith, a: {op: add}, conf: ref}
+- {mn: ADDF32,  ops: "RaH, RbH, #f16",   enc: "1110 1000 10CC CCCC CCCC CCCC CCbb baaa", sem: f_arith, a: {op: add}, conf: ref, alias: true}
+- {mn: SUBF32,  ops: "RaH, #f16, RbH",   enc: "1110 1000 11CC CCCC CCCC CCCC CCbb baaa", sem: f_arith, a: {op: sub}, conf: ref}
+- {mn: MPYF32,  ops: "RaH, RbH, RcH",    enc: "1110 0111 0000 0000 0000 000c ccbb baaa", sem: f_arith, a: {op: mpy}, conf: ref}
+- {mn: ADDF32,  ops: "RaH, RbH, RcH",    enc: "1110 0111 0001 0000 0000 000c ccbb baaa", sem: f_arith, a: {op: add}, conf: ref}
+- {mn: SUBF32,  ops: "RaH, RbH, RcH",    enc: "1110 0111 0010 0000 0000 000c ccbb baaa", sem: f_arith, a: {op: sub}, conf: ref}
+# parallel instructions: mnemonic "A||B", `par` = operands of A; printed and assembled as "A ops || B ops"
+- {mn: "MPYF32||ADDF32", ops: "RaH, RbH, RcH, RdH, ReH, RfH", par: 3, enc: "1110 0111 0100 00ff feee dddc ccbb baaa", sem: f_par, a: {p: mpy_add}, conf: ref}
+- {mn: "MPYF32||SUBF32", ops: "RaH, RbH, RcH, RdH, ReH, RfH", par: 3, enc: "1110 0111 0101 00ff feee dddc ccbb baaa", sem: f_par, a: {p: mpy_sub}, conf: ref}
+# MACF32 R3H,R2H,RdH,ReH,RfH = MPYF32 RdH,ReH,RfH || ADDF32 R3H,R3H,R2H (alias pages in SPRUHS1C; R7H/R6H likewise)
+- {mn: MACF32,  ops: "R3H, R2H, RaH, RbH, RcH", enc: "1110 0111 0100 0001 0011 011c ccbb baaa", sem: f_par, a: {p: mpy_add, rd: 3, re: 3, rf: 2}, conf: ref}
+- {mn: MACF32,  ops: "R7H, R6H, RaH, RbH, RcH", enc: "1110 0111 0100 0011 0111 111c ccbb baaa", sem: f_par, a: {p: mpy_add, rd: 7, re: 7, rf: 6}, conf: ref}
+- {mn: MACF32,  ops: "R7H, R3H, loc32, *XAR7++", enc: "1110 0010 0101 0000 0001 1111 LLLL LLLL", sem: f_macmem, conf: ref}
+- {mn: "MPYF32||MOV32", ops: "RdH, ReH, RfH, RaH, loc32", par: 3, enc: "1110 0011 0000 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: mpy_ld}, conf: ref}
+- {mn: "MPYF32||MOV32", ops: "RdH, ReH, RfH, loc32, RaH", par: 3, enc: "1110 0000 0000 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: mpy_st}, conf: ref}
+- {mn: "ADDF32||MOV32", ops: "RdH, ReH, RfH, RaH, loc32", par: 3, enc: "1110 0011 0001 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: add_ld}, conf: ref}
+- {mn: "ADDF32||MOV32", ops: "RdH, ReH, RfH, loc32, RaH", par: 3, enc: "1110 0000 0001 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: add_st}, conf: ref}
+- {mn: "SUBF32||MOV32", ops: "RdH, ReH, RfH, RaH, loc32", par: 3, enc: "1110 0011 0010 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: sub_ld}, conf: ref}
+- {mn: "SUBF32||MOV32", ops: "RdH, ReH, RfH, loc32, RaH", par: 3, enc: "1110 0000 0010 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: sub_st}, conf: ref}
+- {mn: "MACF32||MOV32", ops: "R3H, R2H, RdH, ReH, RfH, RaH, loc32", par: 5, enc: "1110 0011 0011 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: mac3_ld}, conf: ref}
+- {mn: "MACF32||MOV32", ops: "R7H, R6H, RdH, ReH, RfH, RaH, loc32", par: 5, enc: "1110 0011 1100 fffe eedd daaa LLLL LLLL", sem: f_par, a: {p: mac7_ld}, conf: ref}
+- {mn: "MAXF32||MOV32", ops: "RaH, RbH, RcH, RdH", par: 2, enc: "1110 0110 1001 1100 0000 dddc ccbb baaa", sem: f_par, a: {p: max_mov}, conf: ref}
+- {mn: "MINF32||MOV32", ops: "RaH, RbH, RcH, RdH", par: 2, enc: "1110 0110 1001 1101 0000 dddc ccbb baaa", sem: f_par, a: {p: min_mov}, conf: ref}
+- {mn: F32TOI16,  ops: "RaH, RbH",       enc: "1110 0110 1000 1100 0000 0000 00bb baaa", sem: f_cvt, a: {k: f2i16}, conf: ref}
+- {mn: F32TOI16R, ops: "RaH, RbH",       enc: "1110 0110 1000 1100 1000 0000 00bb baaa", sem: f_cvt, a: {k: f2i16r}, conf: ref}
+- {mn: F32TOUI16, ops: "RaH, RbH",       enc: "1110 0110 1000 1110 0000 0000 00bb baaa", sem: f_cvt, a: {k: f2u16}, conf: ref}
+- {mn: F32TOUI16R, ops: "RaH, RbH",      enc: "1110 0110 1000 1110 1000 0000 00bb baaa", sem: f_cvt, a: {k: f2u16r}, conf: ref}
+- {mn: F32TOI32,  ops: "RaH, RbH",       enc: "1110 0110 1000 1000 0000 0000 00bb baaa", sem: f_cvt, a: {k: f2i32}, conf: ref}
+- {mn: F32TOUI32, ops: "RaH, RbH",       enc: "1110 0110 1000 1010 0000 0000 00bb baaa", sem: f_cvt, a: {k: f2u32}, conf: ref}
+- {mn: I16TOF32,  ops: "RaH, RbH",       enc: "1110 0110 1000 1101 0000 0000 00bb baaa", sem: f_cvt, a: {k: i16}, conf: ref}
+- {mn: UI16TOF32, ops: "RaH, RbH",       enc: "1110 0110 1000 1111 0000 0000 00bb baaa", sem: f_cvt, a: {k: u16}, conf: ref}
+- {mn: I32TOF32,  ops: "RaH, RbH",       enc: "1110 0110 1000 1001 0000 0000 00bb baaa", sem: f_cvt, a: {k: i32}, conf: ref}
+- {mn: UI32TOF32, ops: "RaH, RbH",       enc: "1110 0110 1000 1011 0000 0000 00bb baaa", sem: f_cvt, a: {k: u32}, conf: ref}
+- {mn: FRACF32,   ops: "RaH, RbH",       enc: "1110 0110 1111 0001 0000 0000 00bb baaa", sem: f_cvt, a: {k: frac}, conf: ref}
+- {mn: ABSF32,    ops: "RaH, RbH",       enc: "1110 0110 1001 0101 0000 0000 00bb baaa", sem: f_cvt, a: {k: abs}, conf: ref}
+- {mn: NEGF32,    ops: "RaH, RbH",       enc: "1110 0110 1010 1111 0000 0000 00bb baaa", sem: f_cvt, a: {k: neg}, conf: ref}
+- {mn: NEGF32,    ops: "RaH, RbH, CNDF", enc: "1110 0110 1010 KKKK 0000 0000 00bb baaa", sem: f_cvt, a: {k: neg}, conf: ref}
+- {mn: EINVF32,   ops: "RaH, RbH",       enc: "1110 0110 1001 0011 0000 0000 00bb baaa", sem: f_cvt, a: {k: inv}, conf: ref}
+- {mn: EISQRTF32, ops: "RaH, RbH",       enc: "1110 0110 1001 0010 0000 0000 00bb baaa", sem: f_cvt, a: {k: isqrt}, conf: ref}
+- {mn: SWAPF,     ops: "RaH, RbH",       enc: "1110 0110 1110 1111 0000 0000 00bb baaa", sem: f_swap, conf: ref}
+- {mn: SWAPF,     ops: "RaH, RbH, CNDF", enc: "1110 0110 1110 KKKK 0000 0000 00bb baaa", sem: f_swap, conf: ref}
+- {mn: CMPF32,    ops: "RaH, RbH",       enc: "1110 0110 1001 0100 0000 0000 00bb baaa", sem: f_cmp, conf: ref}
+- {mn: MAXF32,    ops: "RaH, RbH",       enc: "1110 0110 1001 0110 0000 0000 00bb baaa", sem: f_minmax, a: {op: max}, conf: ref}
+- {mn: MINF32,    ops: "RaH, RbH",       enc: "1110 0110 1001 0111 0000 0000 00bb baaa", sem: f_minmax, a: {op: min}, conf: ref}
+- {mn: TESTTF,    ops: "CNDF",           enc: "1110 0101 1000 KKKK", sem: f_testtf, conf: ref}
+- {mn: RESTORE,   ops: "",               enc: "1110 0101 0110 0010", sem: f_restore, conf: ref}
+- {mn: ZEROA,     ops: "",               enc: "1110 0101 0110 0011", sem: f_zero, a: {all: 1}, conf: ref}
+- {mn: ZERO,      ops: "RaH",            enc: "1110 0101 1001 0aaa", sem: f_zero, conf: ref}
+- {mn: SETFLG,    ops: "flagset",        enc: "1110 0110 00FF FFFF FFFF FVVV VVVV VVVV", sem: f_setflg, conf: ref}
+- {mn: SAVE,      ops: "flagset",        enc: "1110 0110 01FF FFFF FFFF FVVV VVVV VVVV", sem: f_setflg, a: {save: 1}, conf: ref}
+- {mn: MOVST0,    ops: "fflags",         enc: "1010 1101 FFFF FFFF", sem: f_movst0, conf: ref}   # FLAG layout from TI's assembler (isa.MOVST0_BITS)
+- {mn: PUSH,      ops: "RB",             enc: "1111 1111 1111 0000", sem: f_rb, a: {push: 1}, conf: ref}
+- {mn: POP,       ops: "RB",             enc: "1111 1111 1111 0001", sem: f_rb, a: {push: 0}, conf: ref}
+# RPTB (SPRUHS1C 1.3.1.2 and the RPTB pages): block of RSIZE words starting after the 2-word RPTB, repeated RC+1
+# times.  The first operand is the label just after the block (the assembler computes RSIZE = label - (pc+2)).
+- {mn: RPTB,      ops: "rblock, loc16",  enc: "1011 0101 0SSS SSSS 0000 0000 LLLL LLLL", sem: f_rptb, conf: ref, norpt: true}
+- {mn: RPTB,      ops: "rblock, #u16",   enc: "1011 0101 1SSS SSSS CCCC CCCC CCCC CCCC", sem: f_rptb, conf: ref, norpt: true}
