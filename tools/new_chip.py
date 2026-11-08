@@ -112,6 +112,7 @@ FAMILIES: dict[str, dict] = {
             Rule(r"OSC0?", "kinetis.osc", ("CR",)),
             Rule(r"WDOG", "kinetis.wdog", ("STCTRLH", "REFRESH", "UNLOCK")),
             Rule(r"PIT", "kinetis.pit", ("MCR", "LDVAL0", "TCTRL0", "TFLG0")),
+            Rule(r"FTM\d+", "kinetis.ftm", ("SC", "CNT", "MOD", "C0SC", "C0V", "CNTIN", "COMBINE")),
             Rule(r"LPTMR0", "kinetis.lptmr", ("CSR", "PSR", "CMR", "CNR")),
             Rule(r"RTC", "kinetis.rtc", ("TSR", "TPR", "SR", "CR")),
             Rule(r"FTF[ELA]", "kinetis.ftfe", ("FSTAT", "FCCOB0")),

@@ -75,17 +75,19 @@ class MCG(MMIOBlock):
     def _osc_hz(self) -> float:
         return SLOW_IRC if self._f("C7", 0, 1) else self.ext_hz
 
-    def fll_hz(self) -> float:
+    def ffclk_hz(self) -> float:
+        """MCGFFCLK, the fixed frequency clock: the FLL reference (slow IRC, or the FRDIV-divided external one)."""
         if self._f("C1", 2, 1):
-            ref = SLOW_IRC
+            return SLOW_IRC
+        frdiv = self._f("C1", 3, 3)
+        if self._f("C2", 4, 2) == 0 or self._f("C7", 0, 1):
+            div = 1 << frdiv
         else:
-            frdiv = self._f("C1", 3, 3)
-            if self._f("C2", 4, 2) == 0 or self._f("C7", 0, 1):
-                div = 1 << frdiv
-            else:
-                div = FRDIV_HIGH[frdiv]
-            ref = self._osc_hz() / div
-        return ref * FLL_FACTORS[self._f("C4", 7, 1)][self._f("C4", 5, 2)]
+            div = FRDIV_HIGH[frdiv]
+        return self._osc_hz() / div
+
+    def fll_hz(self) -> float:
+        return self.ffclk_hz() * FLL_FACTORS[self._f("C4", 7, 1)][self._f("C4", 5, 2)]
 
     def pll_hz(self) -> float:
         return self._osc_hz() / (self._f("C5", 0, 5) + 1) * (self._f("C6", 0, 5) + 24)

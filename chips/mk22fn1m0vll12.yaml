@@ -33,9 +33,9 @@ peripherals:
   - {name: USBDCD, model: stub, base: 0x40035000, size: 0x1000}
   - {name: PDB0, model: kinetis.pdb, base: 0x40036000, size: 0x1000}
   - {name: PIT, model: kinetis.pit, base: 0x40037000, size: 0x1000}
-  - {name: FTM0, model: stub, base: 0x40038000, size: 0x1000}
-  - {name: FTM1, model: stub, base: 0x40039000, size: 0x1000}
-  - {name: FTM2_ALIAS, model: stub, base: 0x4003A000, size: 0x1000}
+  - {name: FTM0, model: kinetis.ftm, base: 0x40038000, size: 0x1000}
+  - {name: FTM1, model: kinetis.ftm, base: 0x40039000, size: 0x1000}
+  - {name: FTM2_ALIAS, model: kinetis.ftm_alias, base: 0x4003A000, size: 0x1000, params: {target: FTM2}}
   - {name: ADC0, model: kinetis.adc, base: 0x4003B000, size: 0x1000, params: {index: 0}}
   - {name: RTC, model: kinetis.rtc, base: 0x4003D000, size: 0x1000}
   - {name: VBAT, model: kinetis.vbat, base: 0x4003E000, size: 0x1000}
@@ -68,8 +68,8 @@ peripherals:
   - {name: AIPS1, model: stub, base: 0x40080000, size: 0x1000}
   - {name: SPI2, model: kinetis.dspi, base: 0x400AC000, size: 0x1000, params: {index: 2}}
   - {name: SDHC, model: stub, base: 0x400B1000, size: 0x1000}
-  - {name: FTM2, model: stub, base: 0x400B8000, size: 0x1000}
-  - {name: FTM3, model: stub, base: 0x400B9000, size: 0x1000}
+  - {name: FTM2, model: kinetis.ftm, base: 0x400B8000, size: 0x1000}
+  - {name: FTM3, model: kinetis.ftm, base: 0x400B9000, size: 0x1000}
   - {name: ADC1, model: kinetis.adc, base: 0x400BB000, size: 0x1000, params: {index: 1}}
   - {name: DAC0, model: stub, base: 0x400CC000, size: 0x1000}
   - {name: I2C2, model: stub, base: 0x400E6000, size: 0x1000}
