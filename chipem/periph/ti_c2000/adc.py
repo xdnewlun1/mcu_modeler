@@ -7,7 +7,10 @@ up to 16 from CONV00; dual mode: up to 8) taken from ADCCHSELSEQ1-4 (0-7 = ADCIN
 (value << 4, Peripheral Frame 2) and right-justified to the 0x0B00 mirror (`ti_c2000.adcmirror`).  At the end of a
 sequence ADCST.INT_SEQx is set (cleared by writing INT_SEQx_CLR) and, with ADCTRL2.INT_ENA_SEQx, SEQ1INT (PIE 1.1) /
 SEQ2INT (1.2) and ADCINT (1.6) are pulsed.  Channel values come from `set_channel("ADCINA3" | "A3", value)`
-(default `params.default`, 0); ePWM SOC triggers and continuous mode are not modelled.
+(default `params.default`, 0).  ePWM start-of-conversion triggers (`epwm_soc("A"|"B")`, called by ti_c2000.epwm):
+ADCTRL2.EPWM_SOCA_SEQ1 lets SOCA start SEQ1, EPWM_SOCB_SEQ2 lets SOCB start SEQ2 (dual mode), EPWM_SOCB_SEQ lets
+SOCB start the cascaded sequencer; a trigger while the sequencer is busy is ignored.  Continuous mode is not
+modelled.
 """
 from __future__ import annotations
 
@@ -87,6 +90,19 @@ class ADC(C2000Block):
         if new & SOC_SEQ2 and not casc:
             self._start(2, 8, ((mx >> 4) & 7) + 1)
         return new & ~(SOC_SEQ1 | SOC_SEQ2 | RST_SEQ1 | RST_SEQ2)
+
+    def epwm_soc(self, which: str) -> None:
+        """An ePWM SOCA/SOCB pulse (SPRU812 ADCTRL2: EPWM_SOCA_SEQ1 bit 8, EPWM_SOCB_SEQ2 bit 0, EPWM_SOCB_SEQ 15)."""
+        c2 = self.get("ADCTRL2")
+        casc = bool(self.get("ADCTRL1") & SEQ_CASC)
+        mx = self.get("ADCMAXCONV")
+        if which == "A" and c2 & (1 << 8):
+            self._start(1, 0, (mx & 0xF) + 1 if casc else (mx & 7) + 1)
+        elif which == "B":
+            if casc and c2 & (1 << 15):
+                self._start(1, 0, (mx & 0xF) + 1)
+            elif not casc and c2 & 1:
+                self._start(2, 8, ((mx >> 4) & 7) + 1)
 
     def _start(self, seq: int, first: int, n: int) -> None:
         if seq in self._ev:

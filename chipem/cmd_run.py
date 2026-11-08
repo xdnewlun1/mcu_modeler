@@ -24,6 +24,9 @@ def add_args(p) -> None:
                    help=f"comma list of event kinds to print live ({','.join(EVENT_KINDS)}; default: all but mmio, "
                         "mmio included with --log-mmio)")
     p.add_argument("--max-slice", type=int, default=None, metavar="N", help="max instructions per core slice")
+    p.add_argument("--all-edges", action="store_true",
+                   help="print every level change of peripheral-driven pins (PWM/timer outputs) instead of one "
+                        "waveform summary per 10 ms")
     p.add_argument("--stop-on-fault", action="store_true",
                    help="stop at the first fault instead of entering the firmware's HardFault handler")
 
@@ -345,7 +348,8 @@ def _main(args) -> int:
                 raise ValueError(f"unknown event kind(s): {', '.join(sorted(bad))} (known: {', '.join(EVENT_KINDS)})")
         else:
             kinds = set(PinEventPrinter.DEFAULT_KINDS) | {"part"} | ({"mmio"} if args.log_mmio else set())
-        printer = PinEventPrinter(sys.stdout, kinds, pin_width=8 if multi else 5)
+        printer = PinEventPrinter(sys.stdout, kinds, pin_width=8 if multi else 5,
+                                  collapse_ns=None if getattr(args, "all_edges", False) else 10e6)
         if not multi and session.board is not None:
             printer = _NoChipTag(printer)
         # replay what happened during construction/reset (e.g. reset event, stimulus at t=0)

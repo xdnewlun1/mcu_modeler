@@ -49,6 +49,9 @@ class SysCtrl(C2000Block):
             "WDCNTR": {"on_read": self._wdcntr_read},
             "WDKEY": {"on_write": self._wdkey_write, "on_read": lambda b, r: 0},
             "WDCR": {"on_write": self._wdcr_write},
+            "PCLKCR0": {"on_write": self._pclk_write},
+            "PCLKCR1": {"on_write": self._pclk_write},
+            "PCLKCR3": {"on_write": self._pclk_write},
         }
         regs = build_regs((name, "SYSCTRL"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
@@ -56,6 +59,7 @@ class SysCtrl(C2000Block):
         self.boot_divsel = int(params.get("boot_divsel", 2))
         self.pll_lock_ns = params.get("pll_lock_ns")
         self.frozen = False                 # set by the session for --clock
+        self.pclk_listeners: list = []      # cb() after a PCLKCRx write (ePWM: TBCLKSYNC / EPWMxENCLK)
         self._lock_ev = None
         self._wd_ev = None
         self._wd_base_t = 0.0               # wall time at which WDCNTR was _wd_base_cnt
@@ -63,6 +67,13 @@ class SysCtrl(C2000Block):
         self._wd_key55 = False
         self._wd_reset_flag = False         # survives the watchdog reset → WDFLAG
         self._locked_div = 0                # PLLCR.DIV currently in effect (bypass while relocking)
+
+    def _pclk_write(self, blk, reg, old, new):
+        if old != new:
+            self._store(reg, new)
+            for cb in list(self.pclk_listeners):
+                cb()
+        return None
 
     # ------------------------------------------------------------------ clocks
     def osc_hz(self) -> float:

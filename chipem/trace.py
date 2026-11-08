@@ -14,8 +14,11 @@ PinEventPrinter(out): subscribe to a chip's EventLog (`printer.attach(log)`), pr
     [   100.000 ms] UART0 TX: "hello\\r\\n"
     [  1200.000 ms] RESET watchdog
 Consecutive UART bytes of one UART within the same millisecond are coalesced into one line; an owner change
-and the direction/pull changes that accompany it (same pin, same instant) are merged too.  Call `flush()` at
-the end of a run.
+and the direction/pull changes that accompany it (same pin, same instant) are merged too.  Level changes of a pin
+owned by a peripheral (a PWM / timer channel output) are summarised per `collapse_ns` window (default 10 ms of
+virtual time): one line with the edge count, frequency, duty cycle and current level; a window with one or two
+edges prints them as usual, and a summary identical to the previous one is not repeated (one "unchanged" line at
+the end).  `collapse_ns=None` prints every edge.  Call `flush()` at the end of a run.
 """
 from __future__ import annotations
 
@@ -327,10 +330,16 @@ def format_part_event(f: dict) -> str:
 class PinEventPrinter:
     DEFAULT_KINDS = frozenset({"pin", "uart", "irq", "reset", "fault", "warn", "info"})
 
-    def __init__(self, out: TextIO | None = None, kinds: Iterable[str] | None = None, *, pin_width: int = 5):
+    NOT_PERIPHERAL = frozenset({"GPIO", "disabled", "analog", "power", "special", None})
+
+    def __init__(self, out: TextIO | None = None, kinds: Iterable[str] | None = None, *, pin_width: int = 5,
+                 collapse_ns: float | None = 10e6):
         self.out = out if out is not None else sys.stdout
         self.kinds = frozenset(kinds) if kinds is not None else self.DEFAULT_KINDS
         self.pin_width = pin_width
+        self.collapse_ns = collapse_ns
+        self._owner: dict[str, str] = {}     # pin -> current owner (from owner events)
+        self._wave: dict[str, dict] = {}     # pin -> edge statistics of the open window
         self._uart: tuple[str, str, int, float, bytearray] | None = None   # (uart, dir, ms bucket, t0, bytes)
         self._cfg: dict | None = None        # pending pin configuration line
         self._unsub = None
@@ -376,9 +385,79 @@ class PinEventPrinter:
                 parts.append(f"pull {o or 'none'} -> {n or 'none'}")
             self._emit(f"{fmt_t(c['t'])} {c['pin']:<{self.pin_width}} " + ", ".join(parts))
 
+    # ---------------------------------------------------------------- peripheral waveforms
+    def _wave_edge(self, pin: str, t: float, old: Any, new: Any) -> None:
+        w = self._wave.get(pin)
+        if w is None or t - w["t0"] >= self.collapse_ns:
+            if w is not None:
+                self._flush_wave(pin)
+            w = self._wave[pin] = {"t0": t, "edges": [], "same": 0, "same_t": None, "last": w["last"] if w else None,
+                                   "lvl": old, "lvl_t": t}
+        w["lvl"], w["lvl_t"] = new, t
+        w["edges"].append((t, old, new))
+
+    def _wave_stats(self, w: dict) -> tuple[int, float | None, float | None]:
+        e = w["edges"]
+        rises = [t for t, _o, n in e if n == "H"]
+        if len(rises) < 2 or rises[-1] <= rises[0]:
+            return len(e), None, None
+        freq = (len(rises) - 1) * 1e9 / (rises[-1] - rises[0])
+        high, t_up = 0.0, None                  # duty over whole periods: first rise .. last rise
+        for t, _o, n in e:
+            if t > rises[-1]:
+                break
+            if n == "H":
+                t_up = t
+            elif t_up is not None:
+                high += t - t_up
+                t_up = None
+        return len(e), freq, 100.0 * high / (rises[-1] - rises[0])
+
+    def _flush_wave(self, pin: str, final: bool = False) -> None:
+        w = self._wave.get(pin)
+        if w is None:
+            return
+        e = w["edges"]
+        if e:
+            n, freq, duty = self._wave_stats(w)
+            key = (round(freq, 1) if freq else None, round(duty, 1) if duty is not None else None)
+            if n <= 2:
+                for t, o, nw in e:
+                    self._emit(f"{fmt_t(t)} {pin:<{self.pin_width}} {o} -> {nw}")
+                w["last"] = None
+            elif key == w["last"]:
+                w["same"] += n                       # same waveform as the last summary: say so once at the end
+                w["same_t"] = e[-1][0]
+            else:
+                self._flush_same(pin, w)
+                own = self._owner.get(pin, "")
+                f = f"{freq / 1e3:.3f} kHz" if freq and freq >= 1e3 else (f"{freq:.1f} Hz" if freq else "? Hz")
+                d = f"duty {duty:.1f} %" if duty is not None else ""
+                span = (e[-1][0] - e[0][0]) / 1e6
+                self._emit(f"{fmt_t(e[0][0])} {pin:<{self.pin_width}} {own} waveform: {n} edges in {span:.3f} ms, "
+                           f"{f}, {d}, now {e[-1][2]}".replace(", ,", ","))
+                w["last"] = key
+            w["edges"] = []
+            w["lvl_t"] = e[-1][0]
+        if final:
+            self._flush_same(pin, w)
+            self._wave.pop(pin, None)
+
+    def _flush_same(self, pin: str, w: dict) -> None:
+        if w["same"]:
+            self._emit(f"{fmt_t(w['same_t'])} {pin:<{self.pin_width}} waveform unchanged ({w['same']} more edges), "
+                       f"now {w['lvl']}")
+            w["same"] = 0
+
+    def _expire_waves(self, t: float) -> None:
+        for pin in [p for p, w in self._wave.items() if w["edges"] and t - w["t0"] >= self.collapse_ns]:
+            self._flush_wave(pin)
+
     def flush(self) -> None:
         self._flush_cfg()
         self._flush_uart()
+        for pin in list(self._wave):
+            self._flush_wave(pin, final=True)
         try:
             self.out.flush()
         except Exception:
@@ -391,6 +470,8 @@ class PinEventPrinter:
         f = ev.fields
         cid = f.get("chip")                  # board sessions: events carry the chip id ("board" for the board)
         tag = f"{cid}: " if cid else ""
+        if self._wave:
+            self._expire_waves(ev.t_ns)
         if kind == "uart":
             uart = str(f.get("uart") or f.get("name") or "UART")
             if cid:
@@ -412,6 +493,10 @@ class PinEventPrinter:
             pin = f.get("pin")
             if cid:
                 pin = f"{cid}.{pin}"
+            if fld == "owner":
+                if pin in self._wave:
+                    self._flush_wave(pin, final=True)
+                self._owner[pin] = f.get("new")
             if fld in ("owner", "direction", "pull"):
                 c = self._cfg
                 if c is not None and (c["pin"] != pin or c["t"] != ev.t_ns or fld in c):
@@ -421,6 +506,10 @@ class PinEventPrinter:
                 if c is None:
                     c = self._cfg = {"pin": pin, "t": ev.t_ns}
                 c[fld] = (f.get("old"), f.get("new"))
+                return
+            if self.collapse_ns and self._owner.get(pin) not in self.NOT_PERIPHERAL:
+                self._flush_cfg()
+                self._wave_edge(pin, ev.t_ns, f.get("old"), f.get("new"))
                 return
             self.flush_pending()
             self._emit(f"{fmt_t(ev.t_ns)} {pin:<{self.pin_width}} {f.get('old')} -> {f.get('new')}")

@@ -234,3 +234,30 @@ def test_board_vcd_part_change_from_a_chip_behind_keeps_its_time(tmp_path):
             at = t
     assert at == 3000
 
+
+
+def test_printer_summarises_peripheral_waveforms():
+    """PWM edges on a timer-owned pin become one summary per 10 ms window (unchanged windows are not repeated);
+    GPIO edges and slow peripheral pins still print one line per edge; collapse_ns=None prints everything."""
+    def feed(collapse):
+        log, out = EventLog(), io.StringIO()
+        pr = PinEventPrinter(out, collapse_ns=collapse).attach(log)
+        log.event("pin", 0.0, pin="PA6", field="owner", old="GPIO", new="TIM3_CH1")
+        t, period = 1000.0, 62500.0                       # 16 kHz, 25 % duty, for 35 ms
+        while t < 35e6:
+            log.event("pin", t, pin="PA6", field="level", old="L", new="H")
+            log.event("pin", t + 0.25 * period, pin="PA6", field="level", old="H", new="L")
+            t += period
+        log.event("pin", 36e6, pin="PB0", field="level", old="L", new="H")    # a GPIO pin
+        log.event("pin", 0.0, pin="PA7", field="owner", old="GPIO", new="TIM3_CH2")
+        log.event("pin", 37e6, pin="PA7", field="level", old="L", new="H")   # one slow edge
+        pr.detach()                                        # end of the run: flushes the open windows
+        return out.getvalue()
+    txt = feed(10e6)
+    lines = txt.splitlines()
+    summ = [l for l in lines if "waveform:" in l]
+    assert len(summ) == 1 and "TIM3_CH1" in summ[0] and "16.000 kHz" in summ[0] and "duty 25.0 %" in summ[0]
+    assert any("waveform unchanged" in l for l in lines)
+    assert any("PB0" in l and "L -> H" in l for l in lines) and any("PA7" in l and "L -> H" in l for l in lines)
+    assert len(lines) < 12
+    assert len(feed(None).splitlines()) > 1000                 # --all-edges

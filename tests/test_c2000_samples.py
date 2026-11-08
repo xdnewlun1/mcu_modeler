@@ -181,3 +181,23 @@ def test_c2000_stm32_board(tmp_path):
     replies = s.ctxs["A"].chip.bus.read(0x0101, 1)                                     # REPLIES counter in M0
     assert replies == out_b.count(b"\n")
     assert not [e for e in s.events(kinds={"warn"}) if "link" in (e.get("msg") or "")]
+
+
+def test_epwm_complementary_pair_with_dead_band(tmp_path):
+    """epwm.asm: 20 kHz up-down PWM on GPIO0/GPIO1, A high 30 % minus the 0.5 us dead band, B its complement; the
+    two outputs are never high together."""
+    s = session("epwm", tmp_path)
+    s.run_for(PLL_LOCK_NS + 1e6)
+    a0, b0 = len(edges(s, "GPIO0")), len(edges(s, "GPIO1"))
+    s.run_for(1e6)                                              # 1 ms = 20 periods
+    ea, eb = edges(s, "GPIO0")[a0:], edges(s, "GPIO1")[b0:]
+    rises = [t for t, lvl in ea if lvl == "H"]
+    falls = [t for t, lvl in ea if lvl == "L"]
+    assert len(rises) == 20 and all(abs((b - a) - 50e3) < 1 for a, b in zip(rises, rises[1:]))   # 50 us period
+    highs = [f - r for r, f in zip(rises, [f for f in falls if f > rises[0]])]
+    assert all(abs(h - 14.5e3) < 20 for h in highs)                 # 15 us (30 %) - 0.5 us rising-edge delay
+    merged = sorted([(t, "A", v) for t, v in ea] + [(t, "B", v) for t, v in eb])
+    lv = {"A": s.chip.pins.get("GPIO0").level(), "B": s.chip.pins.get("GPIO1").level()}
+    for t, side, v in merged:
+        lv[side] = v
+        assert not (lv["A"] == "H" and lv["B"] == "H"), t

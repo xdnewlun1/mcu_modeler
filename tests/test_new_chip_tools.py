@@ -134,7 +134,11 @@ def test_model_rule_requires_matching_registers():
     assert new_chip.map_model("kinetis", "UART3", ["BDH", "BDL", "C2", "S1", "D"])[:2] == ("kinetis.uart", {"index": 3})
     assert new_chip.map_model("kinetis", "RFVBAT", [])[0:3:2] == ("kinetis.vbat", "VBAT")
     assert new_chip.map_model("ti_c2000", "SCIB", ["SCICCR", "SCICTL1", "SCITXBUF", "SCIRXBUF"])[0] == "ti_c2000.sci"
-    assert new_chip.map_model("ti_c2000", "EPWM3", [])[:2] == ("ti_c2000.storage", {"gate": "EPWM3ENCLK"})
+    epwm_regs = ["TBCTL", "TBPRD", "CMPA", "AQCTLA", "DBCTL", "ETSEL"]
+    assert new_chip.map_model("ti_c2000", "EPWM3", epwm_regs)[:2] == ("ti_c2000.epwm",
+                                                                      {"gate": "EPWM3ENCLK", "index": 3})
+    assert new_chip.map_model("ti_c2000", "EPWM3", [])[0] == "stub"         # a different register layout
+    assert new_chip.map_model("ti_c2000", "ECAP2", [])[:2] == ("ti_c2000.storage", {"gate": "ECAP2ENCLK"})
     assert new_chip.map_model("ti_c2000", "FLASH", ["FOPT"])[:3] == ("ti_c2000.flash", {"regs": "FLASH"}, "FLASHREGS")
 
 
