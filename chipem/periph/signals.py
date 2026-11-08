@@ -13,8 +13,10 @@ Roles (see docs/CONTRACTS.md, "Peripheral-owned pins"):
   ANALOG  analog input/output (ADC, CMP, DAC)
   NONE    unknown signal: direction "none", level X
 
-This module has no vendor knowledge; it only interprets a table supplied by a family package. The emulator does not
-toggle peripheral-owned pins with traffic (UART bytes, SPI frames, PWM): the pin shows the signal's idle level.
+This module has no vendor knowledge; it only interprets a table supplied by a family package. Serial traffic (UART
+bytes, SPI frames) does not toggle peripheral-owned pins: the pin shows the signal's idle level. Models that drive a
+signal edge by edge (timer/PWM channels, e.g. stm32.tim) call `PinBoard.drive_signal(name, level)`; a pin owned by
+that signal then shows the live level instead of the idle one (also when it is muxed to the signal later).
 """
 from __future__ import annotations
 

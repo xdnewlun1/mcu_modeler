@@ -7,6 +7,7 @@ Every observable change is published as a `PinEvent` to subscribers. See docs/CO
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any, Callable, Iterator, Literal
 
 from .chipdesc import DEFAULT_GPIO_NAME_FORMAT, format_gpio_name
@@ -64,10 +65,11 @@ class Pin:
         """Short GPIO name from the chip's `gpio_name_format`: Kinetis "PTC5", STM32 "PC5", C2000 "GPIO34"."""
         return format_gpio_name(self.gpio_name_format, self.port, self.bit)
 
-    @property
+    @cached_property
     def id(self) -> str:
         """Short identifier used in events and listener maps: the GPIO name ("PTC5", "PA5") for GPIO pins, else
-        the first name part."""
+        the first name part. Cached: name, port and bit never change after construction (hot path: every pin
+        event)."""
         return self.gpio_name or self.name.split("/")[0]
 
     @property
@@ -161,6 +163,10 @@ class PinBoard:
             for a in p.aliases:
                 self._by_name.setdefault(a.upper(), p)
         self._initial = {p.num: (p.owner, p.direction, p.drive, p.pull) for p in self.pins}
+        # live levels of peripheral output signals (timer/PWM channels): a pin owned by such a signal drives this
+        # level instead of the signal's idle level (drive_signal / release_signal)
+        self.signal_levels: dict[str, Level] = {}
+        self._signal_pins: dict[str, list[Pin]] = {}
 
     # --- construction --------------------------------------------------
     @classmethod
@@ -259,6 +265,10 @@ class PinBoard:
             o, pin.direction = pin.direction, direction
             self._emit(pin, "direction", o, direction, t)
         if drive is not _KEEP:
+            if self.signal_levels and pin.direction == "out" and pin.owner not in ("GPIO", "disabled"):
+                lvl = self._signal_level(pin.owner)
+                if lvl is not None:
+                    drive = lvl                  # a driven peripheral signal: its live level, not the idle one
             pin.drive = _norm_level(drive)
         if pull is not _KEEP and pull != pin.pull:
             if pull not in ("up", "down", None):
@@ -268,8 +278,58 @@ class PinBoard:
         self._level_changed(pin, old_level, t)
         return pin
 
+    # --- peripheral output signals (generic: names only, no vendor knowledge) --------------------------------------
+    @staticmethod
+    def signal_matches(owner: str | None, name: str) -> bool:
+        """Does pin owner `owner` carry signal `name`? Exact, a '/'-part of a shared function ("A/B"), or a function
+        that bundles more signals on one pin ("TIM2_CH1_ETR" carries "TIM2_CH1")."""
+        if not owner:
+            return False
+        for part in str(owner).split("/"):
+            part = part.strip()
+            if part == name or part.startswith(name + "_"):
+                return True
+        return False
+
+    def _signal_level(self, owner: str) -> Level | None:
+        for name, lvl in self.signal_levels.items():
+            if self.signal_matches(owner, name):
+                return lvl
+        return None
+
+    def signal_pins(self, name: str) -> list[Pin]:
+        """Pins that offer signal `name` in any of their functions (static, from the chip description)."""
+        pins = self._signal_pins.get(name)
+        if pins is None:
+            pins = [p for p in self.pins if any(self.signal_matches(f, name) for f in p.functions.values())]
+            self._signal_pins[name] = pins
+        return pins
+
+    def drive_signal(self, name: str, level: Level) -> None:
+        """A peripheral output signal (e.g. "TIM2_CH1", "FTM0_CH3", "EPWM1A") is now at `level`: every pin currently
+        owned by it as an output follows (instruction-precise time, like any MCU drive change)."""
+        lvl = _norm_level(level)
+        if self.signal_levels.get(name) == lvl:
+            return
+        self.signal_levels[name] = lvl
+        for p in self.signal_pins(name):
+            if p.direction == "out" and p.drive != lvl and self.signal_matches(p.owner, name):
+                self.mcu_update(p, drive=lvl)
+
+    def release_signal(self, name: str, idle: Level | None = None) -> None:
+        """The peripheral no longer drives `name` (output disabled, module off): its pins show `idle` (default: the
+        signal's idle level as the mux model last reported it, i.e. unchanged until the next mux update)."""
+        if self.signal_levels.pop(name, None) is None:
+            return
+        if idle is None:
+            return
+        for p in self.signal_pins(name):
+            if p.direction == "out" and self.signal_matches(p.owner, name) and p.drive != idle:
+                self.mcu_update(p, drive=idle)
+
     def reset(self):
         """MCU reset: restore power-on owner/direction/drive/pull (external stimulus is kept). Emits events."""
+        self.signal_levels.clear()
         for p in self.pins:
             owner, direction, drive, pull = self._initial[p.num]
             self.mcu_update(p, owner=owner, direction=direction, drive=drive, pull=pull)
