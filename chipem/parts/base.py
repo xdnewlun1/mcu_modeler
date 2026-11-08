@@ -111,11 +111,23 @@ class Part:
         self.board = None
 
     def reset(self) -> None:
-        """Power-on state: cancel timers, forget input levels (the board re-delivers them), restart."""
+        """Power-on state: cancel timers, forget input levels (the board re-delivers them), restart. Outputs and
+        LED state that the reset changes are reported like any other change (`part` event with action=reset,
+        listeners such as the VCD writer); the caller re-resolves the nets."""
         self._cancel_all()
+        out0, on0 = dict(self._out), getattr(self, "on", None)
         for k in self.inputs:
             self.inputs[k] = None
         self._reset_state()
+        if self.board is None:
+            return
+        for port, old in out0.items():
+            new = self._out.get(port)
+            if new != old:
+                self.emit(port=port, level=new if new is not None else "Z", action="reset")
+        on = getattr(self, "on", None)
+        if on0 is not None and on != on0:
+            self.emit(port="in", on=on, action="reset")
 
     def _reset_state(self) -> None:
         for k in self._out:

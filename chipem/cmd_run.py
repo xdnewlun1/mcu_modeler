@@ -70,7 +70,7 @@ def _prefixed(text: str, prefix: str) -> str:
 
 
 def print_summary(session: Session, *, reason: StopReason | None, wall_s: float, t0_ns: float, c0: int,
-                  out=None, i0: int | None = None, chip: str | None = None) -> None:
+                  out=None, i0: int | None = None, chip: str | None = None, stop_note: str = "") -> None:
     out = out or sys.stdout
     w = out.write
     ctx = session._ctx(chip)
@@ -91,7 +91,7 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
     w(f"instructions : {insns:,} executed (1 cycle/insn model)\n")
     w(f"wall time    : {wall_s:.3f} s, {speed / 1e6:.2f} M insn/s, {ratio:.3g}x real time"
       f"{' (board wall time)' if multi else ''}\n")
-    w(f"stop         : {reason.name if reason is not None else 'interrupted'}; pc=0x{st['pc']:08X} "
+    w(f"stop         : {reason.name if reason is not None else 'interrupted'}{stop_note}; pc=0x{st['pc']:08X} "
       f"mode={st['mode']}{' (' + st['active_name'] + ')' if st.get('active_name') else ''}"
       f"{' sleeping' if st.get('sleeping') else ''}{' LOCKUP' if st.get('lockup') else ''}\n")
     if chip.last_fault:
@@ -371,12 +371,17 @@ def _main(args) -> int:
     wall = time.perf_counter() - wall0
     if printer is not None:
         printer.detach()
+    stopper = getattr(session.board, "last_stop_chip", None) if multi else None
     for cid in chips:
         t0, c0, i0 = start[cid]
         if multi:
             import io
             buf = io.StringIO()
-            print_summary(session, reason=reason, wall_s=wall, t0_ns=t0, c0=c0, i0=i0, chip=cid, out=buf)
+            r, note = reason, ""
+            if stopper is not None and cid != stopper:       # this chip was only halted with the board
+                r, note = StopReason.USER, f" (board stopped by {stopper}: {reason.name})"
+            print_summary(session, reason=r, wall_s=wall, t0_ns=t0, c0=c0, i0=i0, chip=cid, out=buf,
+                          stop_note=note)
             sys.stdout.write(_prefixed(buf.getvalue(), f"{cid}| "))
         else:
             print_summary(session, reason=reason, wall_s=wall, t0_ns=t0, c0=c0, i0=i0)

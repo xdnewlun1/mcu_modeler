@@ -483,3 +483,29 @@ def test_quiet_part_logs_no_per_change_events_but_follows_state():
     assert all(c["common_params"] == {"quiet": False} for c in catalog())
     with pytest.raises(ValueError, match="quiet"):
         create("led", "L9", {"quiet": "maybe"})
+
+
+@pytest.mark.skipif(not (MIRROR.exists() and PORTIRQ.exists()), reason="sample firmware not built")
+def test_session_reset_reports_part_state_changes(tmp_path):
+    """Session.reset puts parts back to power-on state; outputs that change must be logged and traced (the VCD used
+    to keep CLK1.out at 1 after the reset)."""
+    s = Session.from_board(LOGIC, vcd_path=tmp_path / "ld.vcd")
+    b = s.board
+    s.run_for(0.7e6)                                    # CLK1 (1 ms pulse) went H at 0.5 ms
+    assert b.part("CLK1").drive("out") == "H"
+    n0 = len(b.log.filter("part"))
+    s.reset()
+    evs = [e.fields for e in b.log.filter("part")[n0:]]
+    assert {"part": "CLK1", "port": "out", "level": "L", "action": "reset"}.items() <= next(
+        f for f in evs if f.get("part") == "CLK1" and f.get("action") == "reset").items()
+    s.run_for(0.2e6)
+    s.close()
+    txt = (tmp_path / "ld.A.vcd").read_text()
+    vid = next(l.split()[3] for l in txt.splitlines() if l.startswith("$var") and "CLK1.out" in l)
+    t, last = None, {}
+    for line in txt.splitlines():
+        if line.startswith("#"):
+            t = int(line[1:])
+        elif line[1:] == vid:
+            last[t] = line[0]
+    assert last[max(last)] == "0" and max(last) == 700000

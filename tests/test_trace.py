@@ -202,3 +202,35 @@ def test_vcd_part_added_mid_run_and_quiet_parts(tmp_path):
     assert led_vals == [v for t, v in edges if t <= t_rm]
     assert [v for t, v in probe if t > t_led] == [v for _, v in edges]
     assert led[-1] == (led[-1][0], "x") and abs(led[-1][0] - t_rm) < 1000          # removed -> x
+
+
+
+def test_board_vcd_part_change_from_a_chip_behind_keeps_its_time(tmp_path):
+    """The view chip (A) is ahead of B and has already written a change at 5 us; a probe on B's pin then sees B's
+    edge at 3 us. The VCD must show the probe edge at 3 us (it used to be pushed to 5 us)."""
+    from chipem.board import Board
+    from chipem.chip import Chip
+    from chipem.cli import load_desc
+    desc = load_desc("mk22fn1m0vll12")
+    b = Board({"A": Chip(desc, clock_hz=100e6), "B": Chip(desc, clock_hz=100e6)})
+    A, B = b.chips["A"], b.chips["B"]
+    b.add_part("P1", "probe", {}, {"in": "B.PTC5"})
+    w = VcdWriter(tmp_path / "a.vcd", list(A.pins.pins), A.clock, board=A.pins)
+    w.add_parts(b)
+    B.pins.mcu_update("PTC5", owner="GPIO", direction="out", drive="L")
+    A.clock.advance(500)                                   # A at 5 us
+    A.pins.mcu_update("PTC5", owner="GPIO", direction="out", drive="H")
+    B.clock.advance(300)                                   # B at 3 us
+    B.pins.mcu_update("PTC5", drive="H")                   # probe sees H at 3 us
+    B.clock.advance(300)
+    w.close()
+    txt = (tmp_path / "a.vcd").read_text()
+    vid = next(l.split()[3] for l in txt.splitlines() if l.startswith("$var") and l.split()[4] == "P1.in")
+    t, at = None, None
+    for line in txt.split("$enddefinitions")[1].splitlines():
+        if line.startswith("#"):
+            t = int(line[1:])
+        elif line == "1" + vid:
+            at = t
+    assert at == 3000
+

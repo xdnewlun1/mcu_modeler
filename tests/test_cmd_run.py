@@ -66,3 +66,28 @@ def test_run_fault_exit_code(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 3
     assert "FAULT" in out and "stop         : FAULT" in out
+
+
+def test_board_summary_names_the_chip_that_stopped_the_run(tmp_path):
+    """Chip B faults (--stop-on-fault): only B reports FAULT; A was halted with the board."""
+    import struct
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    blinky = root / "firmware/samples/build/blinky.elf"
+    if not blinky.exists():
+        import pytest
+        pytest.skip("sample firmware not built")
+    (tmp_path / "bad.bin").write_bytes(struct.pack("<II", 0x20010000, 0x0FFFFFF1) + bytes(248))
+    (tmp_path / "b.yaml").write_text(f"""name: badb
+chips:
+  - {{id: A, chip: mk22fn1m0vll12, firmware: {blinky}}}
+  - {{id: B, chip: mk22fn1m0vll12, firmware: bad.bin, load_addr: 0}}
+""")
+    r = subprocess.run([sys.executable, "-m", "chipem.cli", "run", "--board", str(tmp_path / "b.yaml"), "--for", "1ms",
+                        "--stop-on-fault", "--summary-only"], cwd=root, capture_output=True, text=True, timeout=60)
+    stops = [l for l in r.stdout.splitlines() if "stop         :" in l]
+    assert any(l.startswith("A|") and "USER (board stopped by B: FAULT)" in l for l in stops), r.stdout
+    assert any(l.startswith("B|") and "stop         : FAULT" in l for l in stops), r.stdout
+    assert r.returncode == 3

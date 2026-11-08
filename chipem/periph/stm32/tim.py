@@ -3,13 +3,15 @@
 Registers from the SVD; behaviour (RM0090 ch. 17-20, time base unit only):
 * Counter clock = timer kernel clock / (PSC + 1); kernel clock = RCC timer clock of the timer's APB bus (APB2 for
   TIM1/8/9/10/11, APB1 otherwise; x2 when the APB prescaler is not 1), consistent with the actual core clock.
-* CR1: CEN starts/stops, DIR down-counting, CMS (center-aligned: counts up and down, period 2 x ARR), OPM (CEN
-  clears at the update event), ARPE (ARR preload), UDIS (no update events), URS (UG sets no UIF).
+* CR1: CEN starts/stops, DIR down-counting, CMS (center-aligned: 0 -> ARR -> 0, period 2 x ARR, DIR is read-only
+  and reads the current direction), OPM (CEN clears at the update event), ARPE (ARR preload), UDIS (no update
+  events: shadows keep their value; UG only re-initialises the counter), URS (UG sets no UIF).
 * PSC is always preloaded and ARR when ARPE=1: the active values load at each update event (and on EGR.UG).  A
-  non-preloaded ARR write takes effect immediately.
-* Update event when the counter wraps (up: ARR -> 0, down: 0 -> ARR): SR.UIF is set; the IRQ line (TIM2, TIM3,
-  TIM4, TIM5, TIM6_DAC, TIM7, TIM1_UP_TIM10, TIM8_UP_TIM13; `params.irq` overrides) is UIF & DIER.UIE, level.
-  The repetition counter (RCR, TIM1/8) divides update events.  One scheduler event per update (wall-clock).
+  non-preloaded ARR write takes effect immediately; a counter already above the new ARR runs on to the wrap-around.
+* Counter overflow/underflow (up: ARR -> 0, down: 0 -> ARR, center-aligned: at ARR and at 0, so twice per period)
+  decrements the repetition counter (RCR, TIM1/8); an update event (UEV) happens only when it is 0 and UDIS=0:
+  SR.UIF is set and the shadows load.  The IRQ line (TIM2, TIM3, TIM4, TIM5, TIM6_DAC, TIM7, TIM1_UP_TIM10,
+  TIM8_UP_TIM13; `params.irq` overrides) is UIF & DIER.UIE, level.  One scheduler event per overflow (wall-clock).
 * CNT reads are live (instruction-exact mid-slice); CNT writes restart the count from the written value.
 * SR flags are rc_w0 (write 0 to clear).  CCRx/CCMRx/CCER/BDTR are storage: no compare flags, no input capture and
   no PWM/output-compare on pins (a `warn` is logged once when firmware enables a CCxE output).
@@ -41,7 +43,7 @@ class TIM(GatedBlock):
         self.cmask = (1 << self.bits) - 1
         self.apb = int(params.get("apb", 2 if name in APB2_TIMERS else 1))
         ov: dict[str, dict] = {
-            "CR1": {"on_write": self._cr1_write},
+            "CR1": {"on_write": self._cr1_write, "on_read": self._cr1_read},
             "PSC": {"on_write": self._psc_write},
             "ARR": {"on_write": self._arr_write},
             "CNT": {"on_read": self._cnt_read, "on_write": self._cnt_write},
@@ -60,7 +62,7 @@ class TIM(GatedBlock):
         self.arr = 0                 # active (shadow) auto-reload
         self.rep = 0                 # repetition down-counter
         self._start_ns = 0.0         # time of the last (re)start from _start_cnt
-        self._start_cnt = 0
+        self._start_cnt = 0          # counter value at _start_ns; center-aligned: phase in [0, 2*ARR) (>= ARR: down)
         self._tick_ns = 0.0          # counter clock period
         self._warned_out = False
         self.updates = 0
@@ -121,8 +123,9 @@ class TIM(GatedBlock):
         """Counter clocks from `cnt` (just counted) until the next update event."""
         arr = self.arr
         if self._cms():
-            # count up 0..ARR then down ARR..0; model as a phase in [0, 2*ARR)
-            return max(2 * arr - (cnt % max(2 * arr, 1)), 1)
+            # phase in [0, 2*ARR): up 0..ARR (overflow at ARR), down ARR..0 (underflow at 0)
+            p = cnt % max(2 * arr, 1)
+            return max((arr - p) if p < arr else (2 * arr - p), 1)
         if self._down():
             return cnt + 1
         if cnt > arr:                    # counter above ARR (ARR lowered without preload): runs to wrap-around
@@ -143,37 +146,64 @@ class TIM(GatedBlock):
         dt = self._ticks_to_update(cnt) * self._tick_ns
         self._ev = self.chip.sched.at_ns(self._start_ns + dt, self._update_event)
 
-    def cnt(self) -> int:
+    def _phase(self, cnt: int, down: bool) -> int:
+        """Center-aligned phase of counter value `cnt` counting in direction `down` (current ARR)."""
+        arr = self.arr
+        cnt = min(cnt, arr)
+        return (2 * arr - cnt) % max(2 * arr, 1) if down and cnt else cnt
+
+    def _cnt_dir(self) -> tuple[int, bool]:
+        """(counter value, counting down) now."""
+        cr1 = self.get("CR1")
         if not self.running:
-            return self.get("CNT") & self.cmask
+            return self.get("CNT") & self.cmask, bool(cr1 & DIR)
         el = int((self._now() - self._start_ns) / self._tick_ns + 1e-6)
         c = self._start_cnt
-        if self._cms():
-            ph = (c + el) % max(2 * self.arr, 1)
-            return ph if ph <= self.arr else 2 * self.arr - ph
-        if self._down():
-            return max(c - el, 0)
+        if (cr1 >> CMS_SHIFT) & 3:
+            arr = self.arr
+            ph = (c + el) % max(2 * arr, 1)
+            return (ph, False) if ph < arr else (2 * arr - ph, True)
+        if cr1 & DIR:
+            return max(c - el, 0), True
         v = c + el
-        return v if c > self.arr else min(v, self.arr)
+        return (v if c > self.arr else min(v, self.arr)), False
+
+    def cnt(self) -> int:
+        return self._cnt_dir()[0]
+
+    def _restart_pos(self) -> int:
+        """Start position (counter value, or phase when center-aligned) from the current CNT/direction."""
+        c, down = self._cnt_dir()
+        return self._phase(c, down) if self._cms() else c
 
     def _update_event(self) -> None:
+        """Counter overflow/underflow; an update event (UEV) only when the repetition counter is 0 and UDIS=0."""
         self._ev = None
-        t = self._start_ns + self._ticks_to_update(self._start_cnt) * self._tick_ns
-        self._load_shadows()
-        restart = 0 if not self._down() or self._cms() else self.arr
+        ticks = self._ticks_to_update(self._start_cnt)
+        t = self._start_ns + ticks * self._tick_ns
+        cms = self._cms()
+        if cms:                         # where the counter is at this overflow (ARR, going down) or underflow (0)
+            at_top = (self._start_cnt + ticks) % max(2 * self.arr, 1) == self.arr
+            cnt, down = (self.arr, True) if at_top else (0, False)
+        uev = False
         if self.rep > 0:
             self.rep -= 1
-        else:
+        elif not self.get("CR1") & UDIS:
+            uev = True
+            self._load_shadows()
             self.rep = self.get("RCR") & 0xFF if "RCR" in self.regs else 0
-            if not self.get("CR1") & UDIS:
-                self.updates += 1
-                self.set("SR", self.get("SR") | UIF)
-                self._update_line()
-            if self.get("CR1") & OPM:
-                self.set("CR1", self.get("CR1") & ~CEN)
-                self.set("CNT", restart)
-                self._stop()
-                return
+            self.updates += 1
+            self.set("SR", self.get("SR") | UIF)
+            self._update_line()
+        if cms:
+            restart = self._phase(cnt, down)
+        else:
+            restart = self.arr if self._down() else 0
+        if uev and self.get("CR1") & OPM:
+            self.set("CR1", self.get("CR1") & ~CEN)
+            self.set("CNT", cnt if cms else restart)
+            self._stop()
+            return
         self._start(restart, t)
 
     def _load_shadows(self) -> None:
@@ -183,8 +213,7 @@ class TIM(GatedBlock):
 
     def _clock_changed(self) -> None:
         if self.running:
-            c = self.cnt()
-            self._start(c)
+            self._start(self._restart_pos())
 
     # ------------------------------------------------------------ IRQ
     def _update_line(self) -> None:
@@ -195,29 +224,49 @@ class TIM(GatedBlock):
                 self.irq(self._irqn, lvl)
 
     # ------------------------------------------------------------ register hooks
+    def _cr1_read(self, blk, reg):
+        v = int.from_bytes(self.mem[reg.boff:reg.boff + reg.bw], "little")
+        if self.running and (v >> CMS_SHIFT) & 3:          # center-aligned: DIR is read-only status
+            v = (v | DIR) if self._cnt_dir()[1] else (v & ~DIR)
+        return v
+
     def _cr1_write(self, blk, reg, old, new):
+        if (old >> CMS_SHIFT) & 3 and (new >> CMS_SHIFT) & 3:
+            new = (new & ~DIR) | (old & DIR)              # DIR is read-only while center-aligned
+        if self.running and (old ^ new) & (CEN | DIR | (3 << CMS_SHIFT)):
+            self._store(reg, old)                         # counter and direction in the old mode
+            c, down = self._cnt_dir()
+        else:
+            c, down = self.get("CNT") & self.cmask, bool(old & DIR)
         self._store(reg, new)
         if (old ^ new) & CEN:
             if new & CEN:
-                self._start(self.get("CNT") & self.cmask)
+                if (new >> CMS_SHIFT) & 3:
+                    self._start(self._phase(c, bool(new & DIR)))
+                else:
+                    self._start(c)
                 self.emit("info", block=self.name, msg=f"{self.name} started: update every "
                           f"{self.period_ns() / 1e3:.3f} us ({self.counter_hz() / 1e6:.6g} MHz counter clock, "
                           f"PSC={self.psc}, ARR={self.arr})")
             else:
-                self.set("CNT", self.cnt())
+                self.set("CNT", c)
+                if (old >> CMS_SHIFT) & 3:                # keep the direction for the restart
+                    new = (new | DIR) if down else (new & ~DIR)
                 self._stop()
+                return new
         elif self.running and (old ^ new) & (DIR | (3 << CMS_SHIFT)):
-            self._start(self.cnt())
-        return None
+            self._start(self._phase(c, down) if (new >> CMS_SHIFT) & 3 else c)
+        return new
 
     def _psc_write(self, blk, reg, old, new):
         return None                      # preloaded: active at the next update event
 
     def _arr_write(self, blk, reg, old, new):
         if not self.get("CR1") & ARPE:
+            c, down = self._cnt_dir()                  # where the counter is under the old ARR
             self.arr = new & self.cmask
             if self.running:
-                self._start(self.cnt())
+                self._start(self._phase(c, down) if self._cms() else c)
         return None
 
     def _cnt_read(self, blk, reg):
@@ -225,19 +274,24 @@ class TIM(GatedBlock):
 
     def _cnt_write(self, blk, reg, old, new):
         if self.running:
-            self._start(new & self.cmask)
+            c = new & self.cmask
+            self._start(self._phase(c, self._cnt_dir()[1]) if self._cms() else c)
         return None
 
     def _egr_write(self, blk, reg, old, new):
         if new & UG:
-            self.psc = self.get("PSC") & 0xFFFF
-            self.arr = self.get("ARR") & self.cmask
-            self.rep = self.get("RCR") & 0xFF if "RCR" in self.regs else 0
+            cr1 = self.get("CR1")
+            if not cr1 & UDIS:                 # UDIS: the counter re-initialises, the shadows keep their value
+                self.psc = self.get("PSC") & 0xFFFF
+                self.arr = self.get("ARR") & self.cmask
+                self.rep = self.get("RCR") & 0xFF if "RCR" in self.regs else 0
+                if not cr1 & URS:
+                    self.set("SR", self.get("SR") | UIF)
+                    self._update_line()
             start = self.arr if (self._down() and not self._cms()) else 0
             self.set("CNT", start)
-            if not self.get("CR1") & (URS | UDIS):
-                self.set("SR", self.get("SR") | UIF)
-                self._update_line()
+            if self._cms():
+                self.set("CR1", self.get("CR1") & ~DIR)   # restarts counting up from 0
             if self.running:
                 self._start(start)
         return 0

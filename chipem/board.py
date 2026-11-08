@@ -390,7 +390,9 @@ class Net:
         self.conflicts = 0                  # number of conflict episodes so far
         self._busy = False
         self._dirty = False
-        self._pending: dict[int, Any] = {}  # member index -> scheduled Event (deferred delivery)
+        # member index -> deferred deliveries [(t_ns, Event)] in time order: a chip behind the source receives
+        # every level change at its source time, so a pulse shorter than the board quantum is not lost
+        self._pending: dict[int, list[tuple[float, Any]]] = {}
 
     def label(self, i: int) -> str:
         cid, _chip, pin = self.members[i]
@@ -444,14 +446,33 @@ class Net:
         self.conflict = conflict
         self.level = lvl
         for i, (_cid, chip, pin) in enumerate(self.members):
-            ev = self._pending.pop(i, None)
-            if ev is not None:
-                chip.sched.cancel(ev)
+            q = self._pending.get(i)
             if t is None or chip is src_chip or chip.now_ns() >= t:
+                if q:
+                    now = chip.now_ns()
+                    while q and q[0][0] <= now:             # overdue: deliver in order
+                        _tq, ev = q.pop(0)
+                        chip.sched.cancel(ev)
+                        if pin.external != ev.args[1]:
+                            chip.pins.set_external(pin, ev.args[1])
+                    if q:
+                        # deliveries from a source further ahead are still queued: `lvl` reflects that source's
+                        # later state, so it belongs at the last queued time, not at this chip's (earlier) now
+                        tq, ev = q[-1]
+                        if ev.args[1] != lvl:
+                            chip.sched.cancel(ev)
+                            q[-1] = (tq, chip.sched.at_ns(tq, self._apply, i, lvl))
+                        continue
+                    del self._pending[i]
                 if pin.external != lvl:
                     chip.pins.set_external(pin, lvl)
             else:                           # this chip is behind the source: deliver at the source's time
-                self._pending[i] = chip.sched.at_ns(t, self._apply, i, lvl)
+                if q:                       # a resolution at t replaces what was queued for t or later only
+                    while q and q[-1][0] >= t:
+                        chip.sched.cancel(q.pop()[1])
+                else:
+                    q = self._pending[i] = []
+                q.append((t, chip.sched.at_ns(t, self._apply, i, lvl)))
         if self.ports:
             tp = t if t is not None else self.board.part_now_ns()
             for part, port in list(self.ports):
@@ -459,8 +480,20 @@ class Net:
                     part.inputs[port] = lvl
                     part.on_input(port, lvl, tp)
 
+    def cancel_pending(self, i: int) -> None:
+        """Drop every deferred delivery to member i."""
+        q = self._pending.pop(i, None)
+        if q:
+            chip = self.members[i][1]
+            for _t, ev in q:
+                chip.sched.cancel(ev)
+
     def _apply(self, i: int, lvl: str) -> None:
-        self._pending.pop(i, None)
+        q = self._pending.get(i)
+        if q:
+            q.pop(0)                        # deliveries fire in time order: this is the oldest
+            if not q:
+                del self._pending[i]
         _cid, chip, pin = self.members[i]
         if pin.external != lvl:
             chip.pins.set_external(pin, lvl)
@@ -487,6 +520,7 @@ class UartLink:
         self.warned = False
         self.auto = False                   # created from a net (TX pin and RX pin on the same net)
         self.net: str | None = None         # that net's name
+        self._last_rx: dict[int, float] = {}    # id(receiver block) -> arrival time of its last byte (ns)
         self._hooks = [(self.blk_a, self._a_tx)]
         self.blk_a.tx_listeners.append(self._a_tx)
         if bidir:
@@ -522,11 +556,20 @@ class UartLink:
 
     def _send(self, src_chip, src, dst_chip, dst, byte: int) -> None:
         self._check(src_chip, src, dst)
-        t = src_chip.now_ns() + (src.char_ns() if hasattr(src, "char_ns") else 0.0)
+        char = src.char_ns() if hasattr(src, "char_ns") else 0.0
+        t = src_chip.now_ns() + char
+        # a receiver ahead of the sender cannot get the byte at its stop bit any more; it gets it now, but never
+        # sooner than one character after the previous byte (back-to-back bytes must not arrive together)
+        last = self._last_rx.get(id(dst))
+        if last is not None and t < last + char:
+            t = last + char
         data = bytes([byte])
-        if dst_chip.now_ns() >= t:
+        now = dst_chip.now_ns()
+        if now >= t:
+            self._last_rx[id(dst)] = now
             dst.receive(data)
         else:
+            self._last_rx[id(dst)] = t
             dst_chip.sched.at_ns(t, dst.receive, data)
 
     def _check(self, src_chip, src, dst) -> None:
@@ -572,6 +615,8 @@ class Board:
         self.parts: dict[str, Any] = {}
         self._port_net: dict[tuple[str, str], Net] = {}
         self.clock_chip: Any = next(iter(self.chips.values()))
+        self._timed: set = set()                    # live board-clock events (timed parts, scheduled stimulus):
+                                                    # run_for stops every chip at the next one (sync point)
         self._wave: list[Net] | None = None         # nets queued for the next propagation wave
         self._src: Any = None                       # chip whose event is being propagated
         self._loop_warned: set = set()
@@ -580,8 +625,12 @@ class Board:
         for cid, chip in self.chips.items():
             for ev in list(getattr(chip.log, "_events", []) or []):
                 backlog.append((ev.t_ns, ev.seq, cid, ev))
+        # (chip id, seq in the chip's log, seq in the merged log) of each copied event: a front end that already
+        # showed the chip's log up to seq N continues the merged log after the copy of N (web: first part added)
+        self.backlog_seqs: list[tuple[str, int, int]] = []
         for _t, _s, cid, ev in sorted(backlog, key=lambda x: (x[0], x[1])):
             self._mirror(cid, ev)
+            self.backlog_seqs.append((cid, ev.seq, getattr(self.log, "_seq", 0)))
         for cid, chip in self.chips.items():
             if hasattr(chip.log, "subscribe"):
                 self._unsubs.append(chip.log.subscribe(lambda ev, _c=cid: self._mirror(_c, ev)))
@@ -671,6 +720,8 @@ class Board:
             for m in members:
                 net.members.append(m)
                 self._net_of[(m[0], m[2].id)] = net
+            if members:                      # the user wired more pins onto it: no longer a part's implicit net
+                net.anon = net.by_part = False
             if pull is not None:
                 net.pull = pull
             if drive is not None:
@@ -707,23 +758,28 @@ class Board:
         for other in found[1:]:
             if keep.pull is None and other.pull is not None:
                 keep.pull = other.pull
+            if keep.drive is None and other.drive is not None:
+                keep.drive = other.drive
+            if keep.stimulus is None and other.stimulus is not None:
+                keep.stimulus = other.stimulus
             for part, port in other.ports:          # part endpoints move to the merged net
                 keep.ports.append((part, port))
                 self._port_net[(part.id, port)] = keep
             other.ports = []
-            self.remove_net(other.name)
+            self.remove_net(other.name, float_pins=False)   # its pins join `keep` at once: no glitch to open
+        if len(found) > 1:
+            keep.anon = keep.by_part = False
         net = self.add_net(keep.name, list(pins) + extra, pull=pull, extend=True)
         if name and name != net.name:
             self.rename_net(net.name, name)
         return net
 
-    def remove_net(self, name: str) -> None:
-        """Remove a net: its pins float again (external = open) and its auto UART links go away."""
+    def remove_net(self, name: str, *, float_pins: bool = True) -> None:
+        """Remove a net: its pins float again (external = open) and its auto UART links go away. `float_pins=False`
+        (merging into another net) leaves the pins' levels for the caller to re-resolve."""
         net = self.net(name)
         for i, (cid, chip, pin) in enumerate(net.members):
-            ev = net._pending.pop(i, None)
-            if ev is not None:
-                chip.sched.cancel(ev)
+            net.cancel_pending(i)
             self._net_of.pop((cid, pin.id), None)
         ports, net.ports = net.ports, []
         for part, port in ports:
@@ -732,9 +788,10 @@ class Board:
         self.nets.remove(net)
         self._drop_auto(net.name)
         self._changed()
-        for _cid, chip, pin in net.members:
-            if pin.external is not None:
-                chip.pins.set_external(pin, None)
+        if float_pins:
+            for _cid, chip, pin in net.members:
+                if pin.external is not None:
+                    chip.pins.set_external(pin, None)
         self._refresh_auto()                # an auto link this net suppressed? (none today; cheap)
 
     def rename_net(self, old: str, new: str) -> Net:
@@ -760,6 +817,8 @@ class Board:
 
     def add_uart_link(self, a: tuple[str, str], b: tuple[str, str], *, bidir: bool = True) -> UartLink:
         a, b = self._uart_ep(a), self._uart_ep(b)
+        if a == b:
+            raise ValueError(f"board: a uart link needs two different endpoints (got {a[0]}.{a[1]} twice)")
         for ln in self.links:
             if not ln.auto and (ln.covers(a, b) or (bidir and ln.covers(b, a))):
                 raise ValueError(f"board: uart link {ln.describe()} already connects these endpoints")
@@ -1008,6 +1067,7 @@ class Board:
         target = min(c.clock.now_ns() for _i, c in chips) + float(ns)
         q = self.quantum_ns
         self._stop = False
+        self.last_stop_chip = None
         eps = 1e-6
         while True:
             if self._stop:
@@ -1023,6 +1083,18 @@ class Board:
                 return StopReason.COUNT
             others = min(c.clock.now_ns() for i, c in chips if i != cid)
             limit = min(target, others + q)
+            # board-clock events (pulse/pattern parts, part stimulus) are known in advance: no chip runs past the
+            # next one, so every chip is at or behind it when it fires and receives the edge at its exact time
+            if self._timed:
+                nxt = self.next_timed_ns()
+                if nxt is not None and t + eps < nxt <= limit:
+                    limit = nxt
+                    if chip is self.clock_chip and others < nxt - eps:
+                        # the event fires on this chip's scheduler: stop just short of it and let the others
+                        # catch up first, so they see the drivers as they were before the edge
+                        short = nxt - 2e9 / chip.clock.hz
+                        if short > t + eps:
+                            limit = short
             dt = limit - t
             if dt <= eps:
                 dt = min(q, target - t)
@@ -1061,8 +1133,23 @@ class Board:
 
     def sched_at_ns(self, t_ns: float, cb: Callable, *args: Any):
         """Board clock domain (wall-clock ns on the first chip's scheduler). Returns the Event (cancel with
-        sched_cancel)."""
-        return self.clock_chip.sched.at_ns(float(t_ns), cb, *args)
+        sched_cancel). These events are sync points of the lockstep loop (run_for)."""
+        box: list = []
+        ev = self.clock_chip.sched.at_ns(float(t_ns), self._fire_timed, box, cb, args)
+        box.append(ev)
+        self._timed.add(ev)
+        return ev
+
+    def _fire_timed(self, box: list, cb: Callable, args: tuple) -> None:
+        self._timed.discard(box[0])
+        cb(*args)
+
+    def next_timed_ns(self) -> float | None:
+        """Time of the earliest pending board-clock event, or None."""
+        live = [ev for ev in self._timed if not ev.cancelled]
+        if len(live) != len(self._timed):
+            self._timed = set(live)
+        return min(ev.t_ns for ev in live) if live else None
 
     def sched_in_ns(self, dt_ns: float, cb: Callable, *args: Any):
         return self.sched_at_ns(self.part_now_ns() + float(dt_ns), cb, *args)
@@ -1070,6 +1157,7 @@ class Board:
     def sched_cancel(self, ev: Any) -> None:
         if ev is not None:
             self.clock_chip.sched.cancel(ev)
+            self._timed.discard(ev)
 
     def part(self, part_id: str) -> Any:
         p = self.parts.get(part_id)

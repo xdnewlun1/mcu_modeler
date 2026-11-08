@@ -173,3 +173,13 @@ def test_static_js_parses(tmp_path):
         dst.write_bytes((static / f).read_bytes())
         r = subprocess.run([node, "--check", str(dst)], capture_output=True, text=True, timeout=30)
         assert r.returncode == 0, f"{f}: {r.stderr}"
+
+
+def test_link_remove_index_and_self_link_are_checked(app):
+    n = len(get_json(app, "/api/board")["links"])
+    for i in (-1, n, 99):
+        code, r = post(app, "/api/link/remove", {"index": i})
+        assert code == 400 and "out of range" in r["error"], (i, r)
+    assert len(get_json(app, "/api/board")["links"]) == n
+    code, r = post(app, "/api/link", {"from": "A.UART1", "to": "A.UART1"})
+    assert code == 400 and "two different endpoints" in r["error"]

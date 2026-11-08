@@ -5,3 +5,4 @@ pyyaml
 
 [test]
 pytest
+keystone-engine

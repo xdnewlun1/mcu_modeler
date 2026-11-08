@@ -96,15 +96,20 @@ def decode_escapes(text: str) -> bytes:
     return bytes(out)
 
 
+# one UART-name syntax for --uart-in and --set/--at (Chip.find_uart resolves it): UARTn, USARTn, LPUARTn, UARTA
+# (= SCIA on a C2000), SCIA, SCI-A, each optionally chip-qualified ("B.SCI-A")
+_UART_NAME = r"(?:[A-Za-z0-9_]+\.)?(?:(?:LP)?US?ART(?:\d+|[A-D])|SCI-?[A-D]\d*)"
+_UART_IN_RE = re.compile(r"^(" + _UART_NAME + r"):(.*)$", re.S | re.I)
+
+
 def parse_uart_in(spec: str, default: str = "UART0") -> tuple[str, bytes]:
     """'[CHIP.][UARTn:]TEXT' with escapes -> (uart name, bytes), e.g. 'B.UART0:hi\\n' -> ('B.UART0', b'hi\\n')."""
-    m = re.match(r"^((?:[A-Za-z0-9_]+\.)?(?:(?:LP)?US?ART\d+|SCI[A-D]\d*)):(.*)$", spec, re.S | re.I)
+    m = _UART_IN_RE.match(spec)
     if m:
         return m.group(1).upper(), decode_escapes(m.group(2))
     return default, decode_escapes(spec)
 
 
-_UART_NAME = r"(?:[A-Za-z0-9_]+\.)?(?:(?:LP)?US?ART\d+|SCI[A-D]\d*|SCI-[A-D])"
 _UART_STIM_RE = re.compile(r"^\s*(?:([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?\s*(?:ns|us|µs|ms|s)?)\s*:)?\s*(" + _UART_NAME
                            + r")\s*=(.*)$", re.S | re.I)
 

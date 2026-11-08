@@ -1,0 +1,29 @@
+# Two STM32 package variants from DS8626 wired TX-to-RX: a 64-pin STM32F405RG and a 176-pin STM32F407IG.
+#   A (STM32F405RG, LQFP64)  runs link_requester: PLL 168 MHz (HSE 8 MHz), USART2 on PA2 (TX) / PA3 (RX) at 230400
+#                            baud from PCLK1 = 42 MHz; every 2 ms (TIM2 IRQ) it sends "REQ <n>\r\n" and checks the answer;
+#                            PB0 toggles per correct ACK, PB1 goes high on a wrong one, PC13 high at the first good ACK.
+#   B (STM32F407IG, LQFP176) runs link_responder: 16 MHz HSI, USART6 on PG14 (TX) / PG9 (RX) at 230400 baud from
+#                            PCLK2 = 16 MHz; answers "ACK <n> <n*n>\r\n" and toggles PI1 per request.
+# Wiring: the UART lines are ordinary nets (TX pin + RX pin): the board sees a muxed USARTx_TX and USARTy_RX on one
+# net and creates the byte link A.USART2 <-> B.USART6 automatically once both pins are muxed. Port G and port I
+# only exist on the 144/176-pin packages, USART2 on PA2/PA3 on every package.
+# Bauds: A 230769 (42 MHz / BRR 182), B 231884 (16 MHz / BRR 69): 0.5 % apart, inside the links' 3 % tolerance.
+# Parts: LED_A shows A's ACK LED (PB0), LED_B B's request LED (PI1), LINK_UP A's PC13.
+# Run:   chipem run --board boards/stm32f405rg_f407ig_uart.yaml --for 20ms
+#        chipem serve --board boards/stm32f405rg_f407ig_uart.yaml
+# Build: firmware/samples_stm32_variants/build.sh
+name: stm32f405rg_f407ig_uart
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f405rg, firmware: ../firmware/samples_stm32_variants/build/link_requester.elf}
+  - {id: B, chip: stm32f407ig, firmware: ../firmware/samples_stm32_variants/build/link_responder.elf}
+nets:
+  - {name: A_TX, pins: [A.PA2, B.PG9]}       # USART2_TX -> USART6_RX
+  - {name: B_TX, pins: [B.PG14, A.PA3]}      # USART6_TX -> USART2_RX
+  - {name: ACK_LED, pins: [A.PB0]}
+  - {name: REQ_LED, pins: [B.PI1]}
+  - {name: LINK_UP, pins: [A.PC13]}
+parts:
+  - {id: LED_A, type: led, color: green, ports: {in: ACK_LED}}
+  - {id: LED_B, type: led, color: yellow, ports: {in: REQ_LED}}
+  - {id: LED_UP, type: led, color: blue, ports: {in: LINK_UP}}

@@ -42,5 +42,5 @@ def main(args) -> int:
     try:
         app.serve_forever()
     finally:
-        session.close()
+        app.session.close()          # the board editor may have replaced the session it started with
     return 0

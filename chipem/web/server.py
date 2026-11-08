@@ -46,7 +46,9 @@ Board parts (switches, LEDs, gates, ...; chipem/parts; board sessions only):
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
+import uuid
 import queue
 import threading
 import time
@@ -66,6 +68,8 @@ from .evfmt import describe_event, event_line, text_matcher
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MAX_EVENTS = 20000          # events kept for /api/events and the SSE stream
 MAX_EVENTS_PER_POLL = 4000  # if the chip logs more than this per chunk, only the newest are published
+MAX_STEPS = 1_000_000       # /api/step n limit (single steps run at ~1e5/s; use /api/run for more)
+BODY_TIMEOUT_S = 10.0       # a request body that does not arrive within this is answered 408
 
 
 class Worker:
@@ -87,6 +91,7 @@ class Worker:
         self.version = 0
         self.events: deque[dict] = deque(maxlen=MAX_EVENTS)
         self.event_seq = 0              # seq of the newest published event
+        self._cmd_gen = 0               # bumped by pause(): queued run/step commands from before it are void
         self._last_log_seq = 0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="chipem-worker", daemon=True)
@@ -130,7 +135,9 @@ class Worker:
         return fut.result(timeout)
 
     def pause(self) -> None:
-        """Thread-safe: stop free-running immediately (cuts the current chunk short)."""
+        """Thread-safe: stop free-running immediately (cuts the current chunk short). A run or step command queued
+        before the pause (still waiting behind a busy worker) is cancelled, and a step loop in progress ends."""
+        self._cmd_gen += 1
         self.running = False
         self.run_target_ns = None
         try:
@@ -240,8 +247,12 @@ class Worker:
                 self.full_info = chip_info(s)
             log = getattr(s, "log", None)
             if log is not self._log_obj:
+                # the single chip's log became a board's merged log, which starts with a copy of the chip's events:
+                # continue after the copy of the last event already published (not from 0, which re-sent them all)
+                done = self._last_log_seq if self._log_obj is not None else 0
                 self._log_obj = log
-                self._last_log_seq = 0
+                self._last_log_seq = max([new for _cid, old, new in getattr(b, "backlog_seqs", ()) if old <= done],
+                                         default=0) if done else 0
             st = jsonable(s.state())
             pins = jsonable(all_pins(s))
             new = s.events(self._last_log_seq)
@@ -294,6 +305,15 @@ class Worker:
         return self._uart_names
 
     # ---- helpers for HTTP threads ------------------------------------------------------------------------
+    def events_page(self, since: int, kinds: set[str] | None = None, limit: int = 2000,
+                    pred: Callable[[dict], bool] | None = None) -> tuple[list[dict], int]:
+        """(events_since(...), seq to resume from): both read under the same lock, so an event published in
+        between is neither lost nor counted twice."""
+        with self.cond:
+            evs = self.events_since(since, kinds, limit, pred)
+            last = evs[-1].get("seq", self.event_seq) if limit and len(evs) == limit else self.event_seq
+        return evs, last
+
     def events_since(self, since: int, kinds: set[str] | None = None, limit: int = 2000,
                      pred: Callable[[dict], bool] | None = None) -> list[dict]:
         with self.cond:
@@ -303,7 +323,11 @@ class Worker:
 
     # ---- commands (closures executed on the worker) ------------------------------------------------------
     def cmd_run(self, ms: float | None) -> dict:
+        gen = self._cmd_gen
+
         def fn():
+            if self._cmd_gen != gen:              # paused after this run was requested
+                return {"running": False, "cancelled": True}
             self.error = None
             self.last_stop = None
             self._rt_anchor = None
@@ -313,17 +337,51 @@ class Worker:
         return self.call(fn)
 
     def cmd_step(self, n: int) -> dict:
+        n = int(n)
+        if not 1 <= n <= MAX_STEPS:
+            raise ValueError(f"n must be 1..{MAX_STEPS} (use /api/run for longer)")
+        gen = self._cmd_gen
+
         def fn():
             self.running = False
             self.run_target_ns = None
             r = None
-            for _ in range(max(1, int(n))):
+            for _ in range(n):
+                if self._cmd_gen != gen:          # pause/reset requested meanwhile
+                    break
                 r = self.s.step()
                 if getattr(r, "name", "") == "FAULT":
                     break
             self.last_stop = "STEP"
             return {"stop": getattr(r, "name", str(r)), "pc": self.s.chip.core.pc}
         return self.call(fn)
+
+    def replace_session(self, new: Any, on_swap: Callable[[], None] | None = None) -> Any:
+        """Board editor: run `new` instead of the current session (structural change: MCUs added/removed, firmware
+        changed, other board opened). Returns the old session (the caller closes it). Event numbering continues;
+        the event buffer starts empty for the new setup."""
+        def fn():
+            self._cmd_gen += 1
+            self.running = False
+            self.run_target_ns = None
+            old, self.s = self.s, new
+            self._log_obj = None
+            self._last_log_seq = 0
+            self._had_board = _is_board(new)
+            self.full_info = None
+            self._uart_names = None
+            self._wiring_seen = None
+            self.wiring_info = {}
+            self._last_pins = []
+            self.last_stop = "RESET"
+            self.error = None
+            with self.cond:
+                self.events.clear()
+            if on_swap is not None:
+                on_swap()
+            self._publish(force=True)
+            return old
+        return self.call(fn, timeout=30)
 
     def cmd_reset(self) -> dict:
         def fn():
@@ -649,10 +707,24 @@ class _Handler(BaseHTTPRequestHandler):
         self._json({"ok": False, "error": msg}, code)
 
     def _body(self) -> dict:
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            self.close_connection = True         # the chunk data would be read as the next request
+            raise ValueError("chunked request bodies are not supported (send Content-Length)")
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0:
             return {}
-        raw = self.rfile.read(n)
+        sock = self.connection
+        sock.settimeout(BODY_TIMEOUT_S)
+        try:
+            raw = self.rfile.read(n)
+        except TimeoutError:
+            self.close_connection = True
+            raise ValueError(f"request body incomplete after {BODY_TIMEOUT_S:.0f} s") from None
+        finally:
+            sock.settimeout(None)
+        if len(raw) < n:
+            self.close_connection = True
+            raise ValueError("request body shorter than Content-Length")
         try:
             v = json.loads(raw or b"{}")
         except json.JSONDecodeError as e:
@@ -661,8 +733,43 @@ class _Handler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return v
 
+    # ---- board editor (chipem/boardedit.py) ----------------------------------------------------------------
+    def _board_edit(self, path: str, body: dict) -> dict:
+        """Structural board changes build a new Session from the edited board description and swap it in (the
+        page reloads on the new boot id). Saving writes boards/<name>.yaml."""
+        from .. import boardedit as be
+        app, w = self.app, self.app.worker
+        cur = lambda: w.call(lambda: be.board_dict(app.session))      # noqa: E731
+        opt = lambda k: body[k] if k in body else ...                  # noqa: E731
+        if path == "/api/board/save":
+            d = cur()
+            name = str(body.get("name") or d.get("name") or "").strip()
+            p = be.save_board(d, name, overwrite=bool(body.get("overwrite")))
+            b = app.session.board
+            if b is not None:
+                w.call(lambda: setattr(b, "name", p.stem))
+            return {"saved": str(p), "name": p.stem}
+        if path == "/api/board/chip/add":
+            d, cid = be.add_chip(cur(), str(body.get("chip") or ""), cid=body.get("id"), firmware=body.get("firmware"),
+                                 clock_hz=body.get("clock_hz"), load_addr=body.get("load_addr"))
+            return {**app.swap_session(d), "id": cid}
+        if path == "/api/board/chip/set":
+            d = be.set_chip(cur(), str(body.get("id") or ""), chip=body.get("chip") or None,
+                            firmware=opt("firmware"), clock_hz=opt("clock_hz"), load_addr=opt("load_addr"))
+            return app.swap_session(d)
+        if path == "/api/board/chip/remove":
+            return app.swap_session(be.remove_chip(cur(), str(body.get("id") or "")))
+        if path == "/api/board/new":
+            return app.swap_session(be.new_board(str(body.get("name") or "board"), str(body.get("chip") or ""),
+                                                 firmware=body.get("firmware"), clock_hz=body.get("clock_hz")))
+        if path == "/api/board/open":
+            return app.swap_session(be.open_board(str(body.get("path") or body.get("name") or "")))
+        raise ValueError(f"unknown board command {path}")
+
     # ---- GET ---------------------------------------------------------------------------------------------
     def do_HEAD(self) -> None:
+        if urlparse(self.path).path == "/api/stream":     # headers only: never start the endless stream
+            return self._send(200, b"", "text/event-stream")
         self.do_GET()
 
     def do_GET(self) -> None:
@@ -678,7 +785,13 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
             if path == "/api/chip":
-                return self._json(app.live_chip_info())
+                return self._json({**app.live_chip_info(), "boot": app.boot})
+            if path == "/api/catalog":
+                from .. import boardedit
+                return self._json(boardedit.catalog())
+            if path == "/api/board/setup":            # the board editor's view: chips with chip YAML + firmware paths
+                from .. import boardedit
+                return self._json(app.worker.call(lambda: boardedit.board_dict(app.session)))
             if path == "/api/state":
                 snap = app.worker.snapshot
                 return self._json({**snap.get("state", {}), "pins": snap.get("pins", []),
@@ -693,7 +806,7 @@ class _Handler(BaseHTTPRequestHandler):
                 board = _is_board(app.session)
                 chip0 = _chip_ids(app.session)[0]
                 pred = event_filter(qs.get("chip", [""])[0], qs.get("q", [""])[0], board, chip0)
-                evs = app.worker.events_since(since, ks, limit, pred)
+                evs, last = app.worker.events_page(since, ks, limit, pred)
                 if fmt in ("txt", "csv"):
                     body = events_text(evs, board, chip0) if fmt == "txt" else events_csv(evs)
                     return self._send(200, body.encode(), ("text/plain" if fmt == "txt" else "text/csv") +
@@ -701,7 +814,6 @@ class _Handler(BaseHTTPRequestHandler):
                                       {"Content-Disposition": f'attachment; filename="chipem_events.{fmt}"'})
                 if fmt != "json":
                     raise ValueError(f"format must be json, txt or csv, not {fmt!r}")
-                last = evs[-1].get("seq", app.worker.event_seq) if limit and len(evs) == limit else app.worker.event_seq
                 return self._json({"events": evs, "last": last})
             if path == "/api/uart":
                 name = (qs.get("uart", ["UART0"])[0] or "UART0").upper()
@@ -803,19 +915,18 @@ class _Handler(BaseHTTPRequestHandler):
                     w.cond.wait(timeout=1.0)
                 version, evseq, snap = w.version, w.event_seq, w.snapshot
             if evseq != last_seq:
-                evs = w.events_since(last_seq, None, 500)
+                evs, last_seq = w.events_page(last_seq, None, 500)                  # rest on the next pass
                 for ev in evs:
                     if ev.get("kind") == "mmio" and not include_mmio:
                         continue
                     send("event", ev, ev.get("seq"))
-                last_seq = evs[-1].get("seq", evseq) if len(evs) == 500 else evseq   # rest on the next pass
             now = time.monotonic()
             due = (version != last_version and now - last_sent >= 0.05) or now - last_sent >= 1.0
             if due:
                 # pins only when they changed since the last frame of this stream (big boards: ~500 rows)
                 pv = snap.get("pins_version", 0)
                 frame = {**snap.get("state", {}), "version": version, "pins_version": pv,
-                         "event_seq": snap.get("event_seq", 0)}
+                         "event_seq": snap.get("event_seq", 0), "boot": app.boot}
                 if pv != last_pins:
                     frame["pins"] = snap.get("pins", [])
                     last_pins = pv
@@ -838,8 +949,8 @@ class _Handler(BaseHTTPRequestHandler):
                 ms = body.get("ms")
                 if ms is not None:
                     ms = float(ms)
-                    if ms <= 0:
-                        raise ValueError("ms must be > 0")
+                    if not math.isfinite(ms) or ms <= 0:
+                        raise ValueError("ms must be a finite number > 0")
                 return self._json({"ok": True, **w.cmd_run(ms)})
             if path == "/api/pause":
                 w.pause()
@@ -848,6 +959,7 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/api/step":
                 return self._json({"ok": True, **w.cmd_step(int(body.get("n", 1)))})
             if path == "/api/reset":
+                w.pause()                            # also ends a step loop the reset would wait behind
                 return self._json({"ok": True, **w.cmd_reset()})
             if path == "/api/pin":
                 from ..cmd_shell import parse_level
@@ -887,12 +999,16 @@ class _Handler(BaseHTTPRequestHandler):
             if path in ("/api/net", "/api/net/rename", "/api/net/remove", "/api/link", "/api/link/remove",
                         "/api/part", "/api/part/set", "/api/part/remove", "/api/part/port"):
                 return self._json({"ok": True, **w.call(lambda: self._wiring(path, body))})
+            if path.startswith("/api/board/"):
+                return self._json({"ok": True, **self._board_edit(path, body)})
             self._error(404, f"not found: {path}")
         except (BrokenPipeError, ConnectionResetError):
             pass
         except FutureTimeout:
             self._error(503, "emulator busy (timeout)")
-        except (ValueError, KeyError, TypeError) as e:
+        except FileExistsError as e:
+            self._error(409, str(e))
+        except (ValueError, KeyError, TypeError, FileNotFoundError) as e:
             self._error(400, str(e.args[0] if e.args else e))
         except Exception as e:
             self._error(500, f"{type(e).__name__}: {e}")
@@ -943,7 +1059,10 @@ class _Handler(BaseHTTPRequestHandler):
             return {"link": ln.to_dict(), "wiring": b.wiring}
         if path == "/api/link/remove":
             if body.get("index") is not None:
-                ln = b.links[int(body["index"])]
+                i = int(body["index"])
+                if not 0 <= i < len(b.links):
+                    raise ValueError(f"link index {i} out of range (0..{len(b.links) - 1})")
+                ln = b.links[i]
             else:
                 ln = b.find_link(_endpoint(b, body.get("from")), _endpoint(b, body.get("to")))
             desc = ln.describe()
@@ -1000,6 +1119,7 @@ class WebApp:
                  chunk_ms: float = 5.0, verbose: bool = False):
         self.session = session
         self.verbose = verbose
+        self.boot = uuid.uuid4().hex[:12]        # changes on every server start: an open page reloads on a new one
         self.chip_info = chip_info(session)
         self.worker = Worker(session, chunk_ns=chunk_ms * 1e6, realtime=realtime)
         handler = type("Handler", (_Handler,), {"app": self})
@@ -1033,7 +1153,32 @@ class WebApp:
         host = self.httpd.server_address[0]
         return f"http://{host}:{self.port}/"
 
+    def swap_session(self, d: dict) -> dict:
+        """Build a Session from board mapping `d` (chipem.boardedit) and run it instead of the current one. On a
+        build error the current session keeps running untouched."""
+        from .. import boardedit
+        new = boardedit.build_session(d, like=self.session)
+
+        def on_swap():                          # on the worker thread, before the first snapshot of `new`
+            self.session = new
+            self.chip_info = chip_info(new)
+            self.boot = uuid.uuid4().hex[:12]
+        old = self.worker.replace_session(new, on_swap)
+        try:
+            old.close()
+        except Exception:
+            pass
+        return {"board": d.get("name"), "chips": [c["id"] for c in d.get("chips") or []], "boot": self.boot}
+
+    def _warm_catalog(self) -> None:
+        try:
+            from .. import boardedit
+            boardedit.catalog()                 # loads every chip YAML once (~2 s); the Board dialog is then instant
+        except Exception:
+            pass
+
     def start(self) -> "WebApp":
+        threading.Thread(target=self._warm_catalog, name="chipem-catalog", daemon=True).start()
         self.serving = True
         self.worker.start()
         self._http_thread = threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.2},
@@ -1043,6 +1188,7 @@ class WebApp:
 
     def serve_forever(self) -> None:
         """Blocking variant (main thread runs HTTP); Ctrl-C returns."""
+        threading.Thread(target=self._warm_catalog, name="chipem-catalog", daemon=True).start()
         self.serving = True
         self.worker.start()
         try:

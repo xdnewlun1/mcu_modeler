@@ -96,8 +96,16 @@ class SCSBlock(MMIOBlock):
         else:
             self.ext_div = div
             csr._raw = (0, CSR_COUNTFLAG, 0)
-            hz = getattr(chip.clock, "hz", 0) or 0
-            calib = 0x40000000 | (max(int(hz / 100) - 1, 0) & 0xFFFFFF)
+            # TENMS: reload for 10 ms of the CLKSOURCE=0 reference, which runs at core/div. It is a fixed per-product
+            # value (PM0214: "HCLK max/8"), so use the nominal (maximum) core clock of the chip description, not
+            # the clock at attach time; `systick_calib` (chip YAML) overrides the whole register.
+            fixed = (self.params or {}).get("systick_calib", extra.get("systick_calib"))
+            if fixed is not None:
+                calib = int(fixed, 0) if isinstance(fixed, str) else int(fixed)
+            else:
+                core = getattr(desc, "core", None)
+                hz = getattr(core, "clock_hz", 0) or getattr(chip.clock, "hz", 0) or 0
+                calib = 0x40000000 | (max(int(hz / div / 100) - 1, 0) & 0xFFFFFF)
         csr.set_unit_bits(csr.unit_bits)
         self.set("SYST_CSR", csr.reset)
         self.regs["SYST_CALIB"].reset = calib

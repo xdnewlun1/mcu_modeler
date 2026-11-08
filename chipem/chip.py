@@ -320,6 +320,8 @@ class Chip:
                     self.reset(arch.reset_requested)
                 if sched._heap and sched._heap[0].cycles <= clock.cycles:
                     sched.run_due()
+                    if arch.reset_requested:          # an event requested a reset (watchdog): before any more code
+                        self.reset(arch.reset_requested)
                 if target_ns is not None and clock.hz != hz:      # core clock changed: keep the ns window
                     hz = clock.hz
                     target = clock.cycles + clock.ns_to_cycles(target_ns - clock.now_ns())

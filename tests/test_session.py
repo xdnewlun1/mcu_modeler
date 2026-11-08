@@ -45,6 +45,9 @@ def test_parse_stimulus_and_uart_in():
     assert decode_escapes(r"gpio get\r\n\x41\\") == b"gpio get\r\nA\\"
     assert parse_uart_in(r"UART1:hi\n") == ("UART1", b"hi\n")
     assert parse_uart_in("hello") == ("UART0", b"hello")
+    # every UART spelling Chip.find_uart accepts (CLAUDE.md), also chip-qualified
+    assert parse_uart_in("SCI-A:hi") == ("SCI-A", b"hi") and parse_uart_in("B.SCI-A:hi") == ("B.SCI-A", b"hi")
+    assert parse_uart_in("UARTA:x") == ("UARTA", b"x") and parse_uart_in("hello:world") == ("UART0", b"hello:world")
     assert parse_uart_stimulus(r"100ms:UART2=help\r\n") == (1e8, "UART2", b"help\r\n")
     assert parse_uart_stimulus("B.usart1=a=b:c") == (None, "B.USART1", b"a=b:c")
     assert parse_uart_stimulus("5ms:SCIA=ok") == (5e6, "SCIA", b"ok")

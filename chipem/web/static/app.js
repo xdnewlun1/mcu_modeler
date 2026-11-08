@@ -4,11 +4,13 @@
 import { ownerCategory } from "./package.js";
 import { BoardView, fmtRate } from "./board.js";
 import { stateText, counterValue, ledColor, LED_COLORS, partCategory, portList } from "./parts.js";
+import { initBoardDialog, boardDialogOpen, closeBoardDialog } from "./boarddlg.js";
 
 const $ = (id) => document.getElementById(id);
 const KINDS = ["pin", "part", "uart", "irq", "reset", "fault", "warn", "info", "mmio"];
 const MAX_EVENT_ROWS = 1500;
 const MAX_LINES = 5000;           // UART transcript lines kept
+const MAX_LINE_CHARS = 2000;      // a line without a line ending (binary data) is wrapped into a new one here
 const RAW_KEEP = 1 << 20;         // raw UART text kept in the browser (chars); the full output is a download away
 const RAW_SHOW = 200000;          // raw UART text kept in the DOM
 const MON_BYTES = 64;             // link monitor: last bytes per direction
@@ -44,6 +46,7 @@ const ui = {
   uartLen: {},
   lines: [],                      // transcript [{uart, chip, text, open, input}]
   openLine: new Map(),            // uart -> open line object
+  afterCR: new Map(),             // uart -> last byte was CR (the LF of CRLF then adds no empty line)
   linkMon: new Map(),             // "A.UART0" -> {bytes: [], n}
   lastEventSeq: 0,
   es: null,
@@ -386,6 +389,7 @@ function drag(handle, dir, start, move, end) {
 async function boot() {
   const info = await api("/api/chip");
   ui.info = info;
+  ui.boot = info.boot;
   ui.chips = info.chips && info.chips.length ? info.chips
     : [{ ...info, id: "A", uart_ids: info.uarts || [], pin_count: (info.pins || []).length }];
   ui.isBoard = !!info.board;
@@ -498,6 +502,7 @@ function connect() {
   // handlers only queue work; rendering happens once per animation frame
   es.addEventListener("state", (m) => {
     const st = JSON.parse(m.data);
+    if (st.boot && ui.boot && st.boot !== ui.boot) { location.reload(); return; }   // the server was restarted
     if (!st.pins && ui.pendingState && ui.pendingState.pins) st.pins = ui.pendingState.pins;   // keep unrendered pins
     ui.pendingState = st;
     schedule();
@@ -814,7 +819,7 @@ function eventsUrl(fmt) {
   const p = new URLSearchParams({ since: "0", format: fmt, limit: "0", kinds: [...ui.kindsOn].join(",") });
   if (ui.isBoard) p.set("chip", [...ui.chipsOn].join(","));
   const m = $("evFilter")._m;
-  if (m) p.set("q", m.server);
+  if (m && !m.bad) p.set("q", m.server);       // an invalid /regex/ filters nothing in the view either
   return `/api/events?${p}`;
 }
 
@@ -893,9 +898,14 @@ function uartEvent(ev, live) {
       if (ui.lines.length > MAX_LINES) ui.lines.splice(0, ui.lines.length - MAX_LINES);
     }
     const b = ev.byte;
-    if (b === 10) ui.openLine.delete(u);
-    else if (b === 13) { /* CR of CRLF */ }
-    else ln.text += b >= 32 && b < 127 ? String.fromCharCode(b) : `\\x${b.toString(16).padStart(2, "0")}`;
+    // LF, CR and CRLF each end a line (the LF of a CRLF only closes what the CR already closed)
+    if (b === 10) { if (!ui.afterCR.get(u)) ui.openLine.delete(u); }
+    else if (b === 13) ui.openLine.delete(u);
+    else {
+      ln.text += b >= 32 && b < 127 ? String.fromCharCode(b) : `\\x${b.toString(16).padStart(2, "0")}`;
+      if (ln.text.length >= MAX_LINE_CHARS) ui.openLine.delete(u);        // binary stream: bound each line
+    }
+    ui.afterCR.set(u, b === 13);
     let m = ui.linkMon.get(u);
     if (!m) { m = { bytes: [] }; ui.linkMon.set(u, m); }
     m.bytes.push(b);
@@ -1444,6 +1454,7 @@ async function partParamChanged(row, input) {
 }
 
 function wirePartDialog() {
+  initBoardDialog({ api, toast, toastErr });
   $("btnAddPart").addEventListener("click", openPartDialog);
   $("btnAddPart0").addEventListener("click", openPartDialog);
   $("pdClose").addEventListener("click", closePartDialog);
@@ -1960,7 +1971,7 @@ function wireControls() {
     ui.uartSkip = ui.uartSkip || {};
     ui.uartSkip[ui.uart] = ui.uartLen[ui.uart] || 0;
     ui.lines.length = 0;
-    ui.openLine.clear();
+    ui.openLine.clear(); ui.afterCR.clear();
     $("uartOut").textContent = "";
     $("uartOut")._html = "";
     $("uartOut")._rawShown = null;
@@ -2006,10 +2017,12 @@ function wireControls() {
     else if (e.key === "s") act("/api/step", { n: 1 });
     else if (e.key === "r") { act("/api/reset"); ui.baseline = null; }
     else if (e.key === "f") ui.board.fit();
+    else if (e.key === "b" || e.key === "B") $("btnBoard").click();
     else if (ui.isBoard && (e.key === "w" || e.key === "W")) setWireMode(!ui.wireMode);
     else if (e.key === "Escape") {
       if (ui.pickTarget) pickDone(null);
       else if (!$("partDlg").hidden) closePartDialog();
+      else if (boardDialogOpen()) closeBoardDialog();
       else if (ui.pendingPin) { ui.pendingPin = null; ui.board.setPending(null); }
       else if (ui.wireMode) setWireMode(false);
       else if (ui.selNet) selectNet(null);

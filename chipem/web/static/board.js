@@ -1350,6 +1350,11 @@ export class BoardView {
       const last = evs[evs.length - 1];
       Object.assign(h, { n: evs.length, t: last ? last.t_ns : null, last: last ? `${last.old}→${last.new}` : "",
                          seq: d.last ?? 0, loading: false });
+      // live events that arrived while the history was loading: count those the history did not include
+      for (const e of h.buf || []) {
+        if (e.seq > h.seq) { h.n++; h.t = e.t_ns; h.last = `${e.old}→${e.new}`; h.seq = e.seq; }
+      }
+      delete h.buf;
     } catch (err) {
       Object.assign(h, { err: `event log: ${err.message}`, loading: false });
       setTimeout(() => { if (this.pinLog.get(key) === h) this.pinLog.delete(key); }, 5000);   // retry later
@@ -1366,7 +1371,8 @@ export class BoardView {
       const cid = this.isBoard ? (e.chip ?? this.ids[0]) : this.ids[0];
       const pin = this.lookups.get(cid)?.get(String(e.pin || "").toUpperCase());
       const h = pin && this.pinLog.get(`${cid}:${pin.num}`);
-      if (!h || h.loading || h.err || !(e.seq > h.seq)) continue;
+      if (h && h.loading) { (h.buf ||= []).push(e); continue; }     // applied when the history has loaded
+      if (!h || h.err || !(e.seq > h.seq)) continue;
       h.n++; h.t = e.t_ns; h.last = `${e.old}→${e.new}`; h.seq = e.seq;
       touched = true;
     }

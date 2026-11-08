@@ -18,6 +18,8 @@ Always use the venv; there is no system install.
 .venv/bin/chipem run s1_off000084_503080.bin --chip mk22fx512vll12 --for 2s --summary-only
 firmware/samples/build.sh                           # rebuild samples (clang + ld.lld; no GNU arm toolchain here)
 firmware/samples_stm32/build.sh; firmware/samples_c2000/build.sh   # STM32 (clang) / C28x (tools/c28x_asm.py)
+firmware/samples_stm32_variants/build.sh           # STM32F405/F407 package-variant samples (needs ld.lld)
+.venv/bin/chipem run --board boards/stm32f405rg_f407ig_uart.yaml --for 20ms   # LQFP64 F405RG <-> LQFP176 F407IG
 firmware/samples_c2000_c/build.sh                   # C28x C with TI cl2000 (found under toolchains/; EABI + COFF .out)
 .venv/bin/chipem run --board boards/c2000_stm32_uart.yaml --for 20ms --pin-report
 .venv/bin/chipem info firmware/samples_c2000/build/blinky.c28img --chip tms320f28232
@@ -107,7 +109,7 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 | Kinetis system models | `periph/kinetis/{sim,mcg,port,gpio,wdog,power,ftfe,adc,_util}.py`; `test_kinetis_system`, `test_samples_system` |
 | Kinetis timers / UART | `periph/kinetis/{pit,lptmr,rtc,uart,clockutil}.py`; `test_kinetis_timers`, `test_kinetis_uart`, `test_samples_timers` |
 | Kinetis DMA / SPI | `periph/kinetis/{dma,dspi}.py` (added late; check their tests before editing) |
-| STM32 family | `chips/stm32f405*`, `periph/stm32/*`, `firmware/samples_stm32/*`, `firmware/samples_stm32_hal/*` (ST HAL; vendor code in `firmware/vendor/`), `boards/k22_stm32_uart.yaml`, `boards/c2000_stm32_chat_hal.yaml`; `test_stm32*` |
+| STM32 family | `chips/stm32f405*`, `chips/stm32f407*` (package variants, include `stm32f405zg.yaml`), `periph/stm32/*`, `firmware/samples_stm32/*`, `firmware/samples_stm32_variants/*`, `boards/stm32f405rg_f407ig_uart.yaml`, `firmware/samples_stm32_hal/*` (ST HAL; vendor code in `firmware/vendor/`), `boards/k22_stm32_uart.yaml`, `boards/c2000_stm32_chat_hal.yaml`; `test_stm32*` (variants: `test_stm32_variants`) |
 | C2000 family | `chips/tms320f28232*` (register table hand-written), `periph/ti_c2000/*`, `arch/c28x/{arch,pie}.py`, `firmware/samples_c2000/*`, `boards/c2000_*.yaml`; `test_c2000_*`, `test_engine_units` |
 | C2000 C samples (TI compiler) | `firmware/samples_c2000_c/*` (C, `codestart.asm`, `f28232.cmd`, `build.sh`), `boards/c2000_stm32_chat_c.yaml`; `test_c2000_compiled` (skips if not built) |
 | C28x core / ISA | `core/c28x/*` (interpreter, assembler, disassembler), `arch/c28x/isa.yaml` (instruction table), `tools/c28x_asm.py`; `test_c28x_*`. Encodings are verified against TI's manuals and cl2000/dis2000 25.11.1: see `docs/C28X_CORE.md` before editing |
@@ -160,6 +162,11 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
   bus-faults.
 - **`regs_file` at the top of a chip YAML is informational.** Kinetis models take
   `params.regs_file` (resolved against the current directory) or fall back to `chips/mk22_regs.yaml`.
+- **STM32F405/F407 variants share one die.** `chips/stm32f40[57]*.yaml` `include:` `stm32f405zg.yaml` and override
+  only name, package, memory and pins (include is one level deep, so a variant cannot include another variant). The
+  pin tables were generated from DS8626 Table 7/9 and checked against ST's open pin data (`chips/README.md`);
+  `tests/test_stm32_variants.py` asserts every shared pin equals the LQFP144 file, so fix a pin in all files. BGA/WLCSP files use a row-major ball index as `num` plus a `ball:` key; the UFBGA176 files have 201
+  balls (`pin_table_check.py --expect 201`).
 - **Pin ids come from `gpio_name_format`** in the chip YAML: Kinetis `PT{port}{bit}` (default), STM32
   `P{port}{bit}`, C2000 `GPIO{num}`. Generic code (web `isGpioFunction`, pin report, firmware pin roles) must not
   assume the `PT` prefix.

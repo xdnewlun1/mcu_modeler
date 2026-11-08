@@ -501,3 +501,100 @@ def test_events_carry_desc_on_stream(app):
     evs = get_json(app, "/api/events?since=0&limit=50")["events"]
     from chipem.web.evfmt import describe_event
     assert evs and all(e["desc"] == describe_event(e) for e in evs)
+
+
+def test_first_part_does_not_duplicate_earlier_events(app):
+    """Adding the first part turns the single chip into a one-chip board whose merged log starts with a copy of the
+    chip's events: the event stream must continue after them, not publish them all again."""
+    code, r = post(app, "/api/run", {"ms": 1})
+    assert code == 200
+    wait_for(lambda: get_json(app, "/api/state").get("last_stop") == "DONE")
+    before = get_json(app, "/api/events?since=0")["events"]
+    assert any(e["kind"] == "reset" for e in before)
+    code, r = post(app, "/api/part", {"type": "led", "params": {}, "ports": {"in": "PTC5"}})
+    assert code == 200 and r["ok"], r
+    post(app, "/api/step", {"n": 1})                       # force a publish after the switch
+    after = wait_for(lambda: (lambda ev: ev if len(ev) > len(before) else None)(
+        get_json(app, "/api/events?since=0")["events"]))
+    assert sum(e["kind"] == "reset" for e in after) == 1
+    descs = [e["desc"] for e in after if e["kind"] == "pin"]
+    assert len(descs) == len([e for e in before if e["kind"] == "pin"]) + \
+        len([e for e in after[len(before):] if e["kind"] == "pin"])
+
+
+def test_api_input_validation(app):
+    """Bad run/step arguments are 400s instead of a frozen UI (NaN in the JSON stream) or a worker stuck for hours."""
+    for ms in ("nan", "inf", 1e400, -1, 0):
+        code, r = post(app, "/api/run", {"ms": ms})
+        assert code == 400 and not r["ok"], (ms, r)
+    st = get_json(app, "/api/state")
+    assert st["running"] is False and st["run_target_ns"] is None
+    for n in (0, -5, 10**9):
+        code, r = post(app, "/api/step", {"n": n})
+        assert code == 400, (n, r)
+
+
+def test_pause_cancels_a_queued_run(app):
+    """A run requested while the worker is busy, then a pause: the run must not start afterwards."""
+    import threading
+    w = app.worker
+    gate = threading.Event()
+    w.q.put((lambda: gate.wait(5), __import__("concurrent.futures").futures.Future()))    # keep the worker busy
+    t = threading.Thread(target=lambda: post(app, "/api/run", {}))
+    t.start()
+    time.sleep(0.2)                                          # the run closure is queued behind the busy one
+    w.pause()
+    gate.set()
+    t.join(10)
+    time.sleep(0.2)
+    assert get_json(app, "/api/state")["running"] is False
+
+
+def test_http_edge_cases(app):
+    import socket
+    # HEAD on the event stream: headers only, the connection does not stream
+    c = http.client.HTTPConnection("127.0.0.1", app.port, timeout=5)
+    c.request("HEAD", "/api/stream")
+    r = c.getresponse()
+    assert r.status == 200 and r.read() == b""
+    c.close()
+    # chunked bodies are refused (they used to be ignored and parsed as the next request)
+    s = socket.create_connection(("127.0.0.1", app.port), timeout=5)
+    s.sendall(b"POST /api/run HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n{\"ms\":1}\r\n0\r\n\r\n")
+    assert b" 400 " in s.recv(4096).split(b"\r\n")[0]
+    s.close()
+
+
+def test_board_editor_add_remove_save_open(app, tmp_path, monkeypatch):
+    """Board dialog API: catalog, add an MCU (session rebuilt, new boot id), wire it, save to boards/, open it
+    again, remove the MCU, and errors leave the running session untouched."""
+    from chipem import boardedit
+    monkeypatch.setattr(boardedit, "BOARDS_DIR", tmp_path)
+    cat = get_json(app, "/api/catalog")
+    assert any(c["id"] == "stm32f405zg" for c in cat["chips"]) and any(f["name"] == "blinky.elf" for f in cat["firmware"])
+    boot0 = get_json(app, "/api/chip")["boot"]
+    stm_fw = next(f["path"] for f in cat["firmware"] if f["dir"] == "samples_stm32" and f["name"] == "blinky.elf")
+    code, r = post(app, "/api/board/chip/add", {"chip": "stm32f405zg", "firmware": stm_fw})
+    assert code == 200 and r["id"] == "B" and r["chips"] == ["A", "B"], r
+    info = get_json(app, "/api/chip")
+    assert info["boot"] != boot0 and [c["id"] for c in info["chips"]] == ["A", "B"]
+    code, r = post(app, "/api/net", {"pins": ["A.PTC5", "B.PA0"], "name": "LNK"})
+    assert code == 200, r
+    code, r = post(app, "/api/board/save", {"name": "edit_test"})
+    assert code == 200 and (tmp_path / "edit_test.yaml").exists(), r
+    assert post(app, "/api/board/save", {"name": "edit_test"})[0] == 409            # no silent overwrite
+    assert post(app, "/api/board/save", {"name": "../evil"})[0] == 400
+    code, r = post(app, "/api/board/chip/remove", {"id": "B"})
+    assert code == 200 and r["chips"] == ["A"]
+    assert not get_json(app, "/api/board")["nets"] or all("B." not in " ".join(n["pins"])
+                                                           for n in get_json(app, "/api/board")["nets"])
+    code, r = post(app, "/api/board/open", {"path": str(tmp_path / "edit_test.yaml")})
+    assert code == 200 and r["chips"] == ["A", "B"], r
+    nets = get_json(app, "/api/board")["nets"]
+    assert any(n["name"] == "LNK" and set(n["pins"]) == {"A.PTC5", "B.PA0"} for n in nets)
+    boot1 = get_json(app, "/api/chip")["boot"]
+    code, r = post(app, "/api/board/chip/add", {"chip": "no_such_chip"})
+    assert code == 400 and get_json(app, "/api/chip")["boot"] == boot1              # untouched on error
+    code, r = post(app, "/api/run", {"ms": 1})
+    assert code == 200
+    assert wait_for(lambda: get_json(app, "/api/state").get("last_stop") == "DONE")

@@ -418,7 +418,8 @@ class Probe(Part):
     def on_input(self, port: str, level: str, t_ns: float) -> None:
         prev = getattr(self, "_prev", None)
         self._prev = level
-        if prev is None:
+        if prev is None:                        # first level (after attach/reset): no edge, but tracers follow
+            self._notify({"port": "in", "level": level})
             return
         self.last_change_ns = t_ns
         if prev == "L" and level == "H":

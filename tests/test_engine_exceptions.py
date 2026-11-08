@@ -732,3 +732,17 @@ def test_systick_no_external_reference_k22():
     chip.run_cycles(100 * 5 + 50)
     assert word(chip, DATA + 0x80) == 5                      # one count per core cycle despite the write of 0
     assert chip.bus.read(SYST, 4) & 7 == 7
+
+
+def test_systick_calib_tenms_counts_the_external_reference():
+    """TENMS is the 10 ms reload of the CLKSOURCE=0 reference (core / systick_ext_div), from the chip's nominal
+    clock; `systick_calib` in the chip YAML overrides the register."""
+    from chipem.chip import Chip
+    from engine_util import make_desc
+    desc = make_desc()
+    desc.core.clock_hz = 16e6
+    desc.extra["systick_ext_div"] = 8
+    chip = Chip(desc, clock_hz=48e6)                           # running clock is not the reference
+    assert chip.bus.read(SYST + 0xC, 4) == 0x40000000 | 19999  # 16 MHz / 8 = 2 MHz -> 20000 counts per 10 ms
+    desc.extra["systick_calib"] = "0x00002903"
+    assert Chip(desc).bus.read(SYST + 0xC, 4) == 0x2903

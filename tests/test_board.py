@@ -256,3 +256,124 @@ def test_cli_run_board_shows_both_chips():
     r2 = subprocess.run([sys.executable, "-m", "chipem.cli", "run", "--for", "1ms"], capture_output=True,
                         text=True, cwd=ROOT, timeout=60)
     assert r2.returncode != 0 and "firmware" in r2.stderr
+
+
+# ------------------------------------------------------------------------------------- timing across chips
+def _at(chip, ns):
+    """Move a chip without firmware to absolute time `ns`, firing its events at their own cycles (like the slice
+    loop)."""
+    end = chip.clock.abs_ns_to_cycles(ns)
+    while True:
+        nd = chip.sched.next_due()
+        to = end if nd is None or nd > end else nd
+        chip.clock.advance(max(to - chip.clock.cycles, 0))
+        chip.sched.run_due()
+        if to == end:
+            return
+
+
+def test_net_delivers_every_edge_to_a_chip_behind():
+    """A pulse shorter than the quantum from a chip ahead reaches a chip behind with both edges at their times."""
+    b = _bare_board()
+    A, B = b.chips["A"], b.chips["B"]
+    b.add_net("N", [("A", "PTC5"), ("B", "PTC6")])
+    A.pins.mcu_update("PTC5", owner="GPIO", direction="out", drive="L")
+    seen = []
+    B.pins.subscribe(lambda ev: ev.pin == "PTC6" and ev.field == "level" and seen.append((round(ev.t_ns), ev.new)))
+    _at(A, 1000)
+    A.pins.mcu_update("PTC5", drive="H")
+    _at(A, 1500)
+    A.pins.mcu_update("PTC5", drive="L")
+    assert B.pins.get("PTC6").level() == "L" and not seen          # B (at t=0) has not got there yet
+    _at(B, 3000)
+    cyc = 1e9 / B.clock.hz                              # times are whole cycles of each chip
+    assert [lvl for _t, lvl in seen] == ["H", "L"]
+    assert abs(seen[0][0] - 1000) <= cyc and abs(seen[1][0] - 1500) <= cyc
+
+
+def test_chip_behind_reconfiguring_its_pin_does_not_see_a_future_level():
+    """B (behind) changes its own pin before A's edge: B must not receive A's later level early."""
+    b = _bare_board()
+    A, B = b.chips["A"], b.chips["B"]
+    b.add_net("N", [("A", "PTC5"), ("B", "PTC6")])
+    A.pins.mcu_update("PTC5", owner="GPIO", direction="out", drive="L")
+    _at(A, 2000)
+    A.pins.mcu_update("PTC5", drive="H")
+    _at(B, 500)
+    B.pins.mcu_update("PTC6", owner="GPIO", direction="in", pull="up")   # net re-resolves at B's t=500
+    assert B.pins.get("PTC6").level() == "L"
+    _at(B, 2500)
+    assert B.pins.get("PTC6").level() == "H"
+
+
+@pytest.mark.skipif(not (BUILD / "port_irq.elf").exists(), reason="sample firmware not built")
+def test_pulse_part_shorter_than_quantum_reaches_other_chip_exactly():
+    """A 4 us clock part on B's interrupt pin, 10 us board quantum: every edge arrives at its time, every falling
+    edge runs B's port ISR (which toggles PTC5)."""
+    bd = _two(MIRROR, BUILD / "port_irq.elf", quantum="10us",
+              parts=[{"id": "CLK", "type": "pulse", "period": "4us", "ports": {"out": "B.PTC6"}}])
+    s = Session.from_board(bd)
+    edges = []
+    s.board.chips["B"].pins.subscribe(
+        lambda ev: ev.pin == "PTC6" and ev.field == "level" and edges.append((round(ev.t_ns), ev.new)))
+    s.run_for(200e3)
+    assert len(edges) == 100
+    assert edges[:3] == [(2000, "H"), (4000, "L"), (6000, "H")] and edges[-1] == (200000, "L")
+    isr = [e for e in s.board.log.filter("pin") if e.fields.get("chip") == "B" and e.fields.get("pin") == "PTC5"
+           and e.fields.get("field") == "level"]
+    assert len(isr) == 50
+
+
+def test_uart_link_bytes_stay_one_character_apart_when_receiver_is_ahead():
+    """3 Mbaud (3.33 us/char) and a receiver 9 us ahead: back-to-back bytes must still arrive one character apart
+    (they used to arrive together, overrunning single-buffer receivers)."""
+    from chipem.board import UartLink
+    from chipem.time import Clock, Scheduler
+
+    class _Chip:
+        def __init__(self, t_ns):
+            self.clock = Clock(1e8)
+            self.clock.cycles = int(t_ns / 10)
+            self.sched = Scheduler(self.clock)
+
+        def now_ns(self):
+            return self.clock.now_ns()
+
+    class _Uart:
+        def __init__(self, chip):
+            self.chip, self.tx_listeners, self.got = chip, [], []
+
+        def receive(self, d):
+            self.got.append((round(self.chip.now_ns()), d))
+
+        def baud(self):
+            return 3e6
+
+        def char_bits(self):
+            return 10
+
+        def char_ns(self):
+            return 1e10 / 3e6
+
+    class _Board:
+        def __init__(self):
+            self.chips = {"A": _Chip(0), "B": _Chip(9000)}
+            self.u = {"A": _Uart(self.chips["A"]), "B": _Uart(self.chips["B"])}
+
+        def peripheral(self, cid, _name):
+            return self.u[cid]
+
+        def warn(self, *a, **k):
+            pass
+
+    b = _Board()
+    UartLink(b, ("A", "UART0"), ("B", "UART0"), bidir=False)
+    A, ua, ub = b.chips["A"], b.u["A"], b.u["B"]
+    for i in range(3):
+        A.clock.cycles = int(i * 1e10 / 3e6 / 10)
+        for cb in ua.tx_listeners:
+            cb(ua, 0x41 + i)
+    _at(b.chips["B"], 20000)
+    assert [d for _t, d in ub.got] == [b"A", b"B", b"C"]
+    t = [t for t, _d in ub.got]
+    assert t[0] == 9000 and all(abs((t2 - t1) - 1e10 / 3e6) <= 10 for t1, t2 in zip(t, t[1:]))   # 10 ns = 1 cycle

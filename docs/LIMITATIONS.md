@@ -141,6 +141,27 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
   The checkout has no libc/compiler-rt for Cortex-M, so HAL builds must bring `memset`/`memcpy`, `__aeabi_memclr*`
   and `__aeabi_uldivmod` themselves (`firmware/samples_stm32_hal/aeabi_rt.c`, `startup.c`).
 
+## STM32F405xx / STM32F407xx package variants
+
+Everything in the STM32F405ZG section applies to every `chips/stm32f405*.yaml` and `chips/stm32f407*.yaml` file (same
+die, same peripheral list and models). In addition:
+
+- **The peripheral map is the die's, not the package's.** Blocks that a smaller package cannot use are still
+  mapped: the STM32F405RG (LQFP64) has no FSMC per DS8626 Table 2 but its FSMC registers are a RAM-like stub, and
+  GPIOD..GPIOI registers exist on every package (writes reach no pin when the port is not bonded out, which matches
+  silicon). The F405 files keep the Ethernet and DCMI stubs (F407-only blocks), the F407 files keep the CRYP/HASH
+  stubs (F415/F417-only blocks).
+- **Ethernet and DCMI are stubs** on the F407 parts: the `ETH_*`/`DCMI_*` alternate functions show as pin owners,
+  but no MAC, PHY or camera data path is modelled.
+- **No flash-size register.** The F405OE/F407xE files map 512 KB of flash, but the flash-size data register
+  (0x1FFF7A22, system memory) and the unique ID are not mapped (bus fault), so firmware that sizes flash at run time
+  faults. Flash beyond 512 KB on an "E" part is unmapped, not an alias.
+- **BGA / WLCSP drawings**: the web UI draws every package as a quad package; `num` is a row-major ball index and the
+  ball name is only in the YAML (`ball:`). On the UFBGA176 files `VREF-` (ball N1) is drawn at level H, because the
+  generic power-pin rule ties only names with `VSS`/`VREFL` low.
+- **UFBGA176+25 pin count**: the files list all 201 balls (176 + 25 thermal VSS balls F6..K10), so
+  `tools/pin_table_check.py` needs `--expect 201` (its default takes the count from the package name).
+
 ## TMS320F28232 (C2000)
 
 - **ISA checked against TI's tools**: every `isa.yaml` entry assembles to the same words as TI's cl2000 25.11.1

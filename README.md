@@ -8,7 +8,8 @@ ADC readings.
 New here? Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
 Three families are supported: NXP/Freescale Kinetis K22F (Cortex-M4F, LQFP100: `MK22FN1M0VLL12`,
-`MK22FX512VLL12`), ST STM32F405ZG (Cortex-M4F, LQFP144) and TI C2000 TMS320F28232 (C28x, LQFP176). ARM
+`MK22FX512VLL12`), ST STM32F405xx/STM32F407xx (Cortex-M4F: every part and package of data sheet DS8626, from the
+64-pin STM32F405RG to the 176-pin STM32F407IG/IE in LQFP176 and UFBGA176) and TI C2000 TMS320F28232 (C28x, LQFP176). ARM
 instructions run on [Unicorn](https://www.unicorn-engine.org/) (QEMU TCG); the C28x runs on a pure-Python
 interpreter (`chipem/core/c28x`). CHIP_EM itself implements the ARMv7-M exception model (SysTick/NVIC/SCB), the
 C28x PIE interrupt architecture and the vendor peripherals. Several chips can share a board (nets and UART links),
@@ -476,6 +477,7 @@ Board files in `boards/`:
 | `c2000_stm32_chat.yaml` | TMS320F28232 + STM32F405ZG | two-way "chat" protocol (HELLO/PING/PONG) between the F28232 (`uart_chat.asm`) and the bare-metal STM32 `uart_chat` sample, nets only (auto links); the STM32's first lines are lost while the F28232 relocks its PLL |
 | `c2000_stm32_chat_hal.yaml` | TMS320F28232 + STM32F405ZG | "chat" protocol (HELLO/PING/PONG) between the F28232 and an STM32 running ST's STM32CubeF4 HAL at 168 MHz, nets only (auto links) |
 | `c2000_stm32_chat_c.yaml` | TMS320F28232 + STM32F405ZG | the same chat with the F28232 running TI-compiled C (`firmware/samples_c2000_c`, cl2000 EABI, built by its `build.sh` when TI's compiler is installed) |
+| `stm32f405rg_f407ig_uart.yaml` | STM32F405RG (LQFP64) + STM32F407IG (LQFP176) | two package variants with their UART lines wired TX→RX on nets (auto link USART2 ↔ USART6, 230400 baud): the RG at 168 MHz sends `REQ n` every 2 ms, the IG on its 16 MHz HSI answers `ACK n n²` (see "STM32F405xx / STM32F407xx variants") |
 | `three_chip_demo.yaml` | K22 + STM32F405ZG + TMS320F28232 | one K22 TX net fans out to the STM32 and C2000 RX pins (two automatic links), replies over explicit links, GPIO nets, LEDs on the activity nets and a switch |
 | `logic_demo.yaml` | K22 + K22 | board parts: a switch and LED around `button_mirror`, a 1 kHz clock through an inverter into `port_irq`, an AND gate, a D flip-flop, probes and a counter (see "Parts" below) |
 
@@ -626,6 +628,8 @@ selects chip B at start. Each event has a `chip` field.
 | MK22FN1M0VLL12 | `chips/mk22fn1m0vll12.yaml` | 1 MB flash @0x0; SRAM_L 64 KB @0x1FFF0000; SRAM_U 64 KB @0x20000000 |
 | MK22FX512VLL12 | `chips/mk22fx512vll12.yaml` | 512 KB flash @0x0; FlexNVM 128 KB @0x10000000; FlexRAM 4 KB @0x14000000; same SRAM |
 | STM32F405ZG | `chips/stm32f405zg.yaml` | 1 MB flash @0x08000000; SRAM 128 KB @0x20000000; CCM 64 KB @0x10000000; backup SRAM 4 KB @0x40024000 |
+| STM32F405RG/VG/OG, STM32F407VG/ZG/IG/IGH | `chips/stm32f405rg.yaml`, ... (table below) | as the STM32F405ZG |
+| STM32F405OE, STM32F407VE/ZE/IE/IEH | `chips/stm32f405oe.yaml`, ... (table below) | 512 KB flash @0x08000000; RAM as the STM32F405ZG |
 | TMS320F28232 | `chips/tms320f28232.yaml` | 16-bit words: flash 64K @0x330000; M0/M1 1K+1K @0x0; L0-L5 SARAM 24K @0x8000 (L0-L3 also @0x3F8000); OTP @0x380400; boot ROM @0x3FE000 |
 
 The two K22 parts are 120 MHz Cortex-M4F parts in LQFP100. `mk22fx512vll12.yaml` includes the FN1M0 file and overrides
@@ -664,6 +668,43 @@ vendor family. It reuses `arch/armv7m` unchanged; everything vendor-specific is 
   `chipem run firmware/samples_stm32_hal/build/uart_chat_hal.elf --chip stm32f405zg --for 30ms --at
   '1ms:USART1=HELLO C2000\r\nPING 1\r\n'`; with the C2000: `chipem run --board boards/c2000_stm32_chat_hal.yaml --for 30ms`.
   Tests: `tests/test_stm32_hal.py`.
+
+### STM32F405xx / STM32F407xx variants
+
+Every part number and package of DS8626 Rev 12 (Table 1, Table 2) has a chip file. They are the same die as the
+STM32F405ZG (DEV_ID 0x413, same memory map, peripherals, IRQs and models): each file `include:`s
+`chips/stm32f405zg.yaml` and overrides only the name, package, flash size and pin table.
+
+| `--chip` | part | package | pins / GPIOs | flash | Ethernet + DCMI functions |
+|---|---|---|---|---|---|
+| `stm32f405rg` | STM32F405RG | LQFP64 | 64 / 51 | 1 MB | no |
+| `stm32f405og` | STM32F405OG | WLCSP90 | 90 / 72 | 1 MB | no |
+| `stm32f405oe` | STM32F405OE | WLCSP90 | 90 / 72 | 512 KB | no |
+| `stm32f405vg` | STM32F405VG | LQFP100 | 100 / 82 | 1 MB | no |
+| `stm32f405zg` | STM32F405ZG | LQFP144 | 144 / 114 | 1 MB | no |
+| `stm32f407vg` / `stm32f407ve` | STM32F407VG / VE | LQFP100 | 100 / 82 | 1 MB / 512 KB | yes |
+| `stm32f407zg` / `stm32f407ze` | STM32F407ZG / ZE | LQFP144 | 144 / 114 | 1 MB / 512 KB | yes |
+| `stm32f407ig` / `stm32f407ie` | STM32F407IG / IE | LQFP176 | 176 / 140 | 1 MB / 512 KB | yes |
+| `stm32f407igh` / `stm32f407ieh` | STM32F407IG / IE (H suffix = BGA) | UFBGA176+25 | 201 / 140 | 1 MB / 512 KB | yes |
+
+- **Pins**: Table 7 (the package's column) and Table 9 (AF0..AF15), cross-checked against ST's STM32_open_pin_data
+  for every package (0 differences in positions and AF numbers). The F407 files add AF11 `ETH_*` and AF13 `DCMI_*`.
+  Pins the package does not bond out do not exist: on the LQFP64 part `--set PE2=1` is an unknown pin, and firmware
+  writing GPIOE..GPIOI there changes no pin (the registers still exist, as on silicon).
+- **BGA / WLCSP numbering**: `num` is the row-major ball index (UFBGA176: rows A..R without I and O, A1 = 1 ..
+  R15 = 201, including the 25 centre VSS balls; WLCSP90: A1 = 1 .. J10 = 90). Each pin also carries its ball name
+  as `ball:` in the YAML. Use pin names (`PA9`) everywhere; the web UI draws these packages as quad packages.
+- **Samples**: everything in `firmware/samples_stm32/` runs unchanged on every variant (PA9/PA10, PB0 are bonded
+  in every package). `firmware/samples_stm32_variants/` (`build.sh`, shares startup/linker script with
+  `samples_stm32`) adds `port_walk` (toggles all 16 bits of GPIOA..GPIOI: exactly the package's GPIOs toggle),
+  `link_requester` (STM32F405RG: PLL 168 MHz, USART2 PA2/PA3 230400 baud, TIM2 2 ms → `REQ n`, checks `ACK n n²`,
+  PB0 per good ACK, PB1 on error, PC13 = link up) and `link_responder` (STM32F407IG: HSI 16 MHz, USART6 PG14/PG9,
+  answers `ACK n n²`, toggles PI1).
+- **Board**: `chipem run --board boards/stm32f405rg_f407ig_uart.yaml --for 20ms` (or `chipem serve --board ...`).
+  The UART lines are plain nets (`A.PA2`–`B.PG9`, `B.PG14`–`A.PA3`), so the link is created automatically.
+- Checks: `.venv/bin/python -I tools/pin_table_check.py chips/stm32f407ig.yaml --strict` (add `--expect 201` for
+  the UFBGA files), `tools/svd2chip.py ... --check` (0 mismatches against both STM32F405.svd and STM32F407.svd).
+  Tests: `tests/test_stm32_variants.py`.
 
 ### TMS320F28232
 
@@ -1022,9 +1063,10 @@ chipem/
 chips/                chip descriptions (hand-written) and register tables (generated); README.md
 boards/               board descriptions (several chips + nets/links), e.g. two_k22_uart.yaml
 tools/svd2chip.py     CMSIS-SVD → chips/<family>_regs.yaml; --check compares a chip YAML with the SVD
-svd/                  cached SVD downloads (untrusted data)
+svd/                  cached SVD and vendor pin-data downloads (untrusted data)
 firmware/samples/     Kinetis sample C programs, startup, linker script, build.sh, build/
 firmware/samples_stm32/  STM32 samples (C, clang); firmware/samples_c2000/  C28x samples (assembly, tools/c28x_asm.py)
+firmware/samples_stm32_variants/  STM32F405/F407 package-variant samples (port walk, two-chip UART link)
 firmware/samples_stm32_hal/  STM32 sample on ST's STM32CubeF4 HAL; firmware/vendor/  fetched vendor sources (HAL, CMSIS)
 tests/                pytest suite
 docs/                 design and reference documents
@@ -1039,7 +1081,7 @@ docs/                 design and reference documents
 The suite covers the pin model, MMIO sub-word semantics, the bus, virtual time, the exception model
 (priorities, BASEPRI/PRIMASK, SVC/PendSV, FP frames, EXC_RETURN forms), every Kinetis model, the SVD
 importer, the loaders, each sample firmware end to end, `chipem run`, the shell, and the web API, plus the STM32
-models (`test_stm32*`), the C2000 chip/models/samples (`test_c2000_*`), the C28x core and assembler (`test_c28x_*`),
+models (`test_stm32*`, package variants in `test_stm32_variants`), the C2000 chip/models/samples (`test_c2000_*`), the C28x core and assembler (`test_c28x_*`),
 16-bit address units (`test_engine_units`) and the cross-family boards (`test_integration_families`). Sample
 tests are skipped if the `build/` outputs are missing.
 

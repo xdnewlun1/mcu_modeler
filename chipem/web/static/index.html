@@ -46,6 +46,7 @@
         <input id="runFor" type="text" value="100ms" spellcheck="false" aria-label="Run duration" title="Duration, e.g. 500us, 10ms, 1.5s (Enter runs)">
         <button id="btnRunFor" class="btn" title="Run for the given virtual time">Run for</button>
       </div>
+      <button id="btnBoard" class="btn" title="Board setup (B): add or remove MCUs, choose firmware, new / open / save a board">Board</button>
     </div>
 
     <div class="chip-sel" id="chipSel" role="tablist" aria-label="Selected chip (1-9)" hidden></div>
@@ -73,6 +74,7 @@
       <tr><th>S</th><td>step one instruction</td></tr>
       <tr><th>R</th><td>reset</td></tr>
       <tr><th>F</th><td>fit the board</td></tr>
+      <tr><th>B</th><td>board setup (MCUs, firmware, open / save)</td></tr>
       <tr class="board-row"><th>W</th><td>wire mode (click two pins)</td></tr>
       <tr class="board-row"><th>1–9</th><td>select chip</td></tr>
       <tr class="board-row"><th>Del</th><td>remove the selected net</td></tr>
@@ -308,6 +310,36 @@
         <button type="submit" class="btn small primary">Add part</button>
       </div>
     </form>
+  </div>
+
+  <div id="boardDlg" class="dialog board-dlg" role="dialog" aria-labelledby="bdTitle" hidden>
+    <div class="dlg-head">
+      <h3 id="bdTitle">Board setup</h3>
+      <span id="bdBusy" class="bd-busy" aria-live="polite"></span>
+      <button type="button" id="bdClose" class="btn small ghost" title="Close (Esc)">×</button>
+    </div>
+    <div class="bd-body">
+      <p class="bd-note">Changing MCUs or firmware rebuilds the board: virtual time restarts at 0; nets, links and parts
+        are kept. Wire pins in the board view (wire mode <kbd>W</kbd>, links panel, + part).</p>
+      <div class="pd-sub">MCUs</div>
+      <div id="bdChips" class="bd-chips"></div>
+      <div class="pd-sub">Add MCU</div>
+      <div id="bdAddRow" class="bd-chip">
+        <label class="pd-row"><span>id</span><input type="text" id="bdAddId" placeholder="automatic (B, C, ...)" spellcheck="false" size="6"></label>
+        <label class="pd-row"><span>chip</span><select id="bdAddChip" data-f="chip"></select></label>
+        <label class="pd-row"><span>firmware</span><select id="bdAddFw" data-f="firmware"></select></label>
+        <label class="pd-row bd-path" id="bdAddPathRow" hidden><span>path</span><input type="text" data-f="path" spellcheck="false" placeholder="/path/to/firmware.elf"></label>
+        <label class="pd-row"><span>clock MHz</span><input type="text" id="bdAddClock" placeholder="reset default" size="8"></label>
+        <div class="dlg-foot"><button type="button" id="bdAdd" class="btn small primary">Add MCU</button></div>
+      </div>
+      <div class="pd-sub">File (boards/)</div>
+      <label class="pd-row"><span>name</span><input type="text" id="bdName" spellcheck="false" placeholder="my_board"></label>
+      <div class="dlg-foot">
+        <button type="button" id="bdNew" class="btn small" title="Discard this setup and start a board with the MCU chosen under Add MCU">New board</button>
+        <button type="button" id="bdSave" class="btn small primary" title="Write boards/&lt;name&gt;.yaml">Save</button>
+      </div>
+      <label class="pd-row"><span>open</span><select id="bdOpenSel"></select><button type="button" id="bdOpen" class="btn small">Open</button></label>
+    </div>
   </div>
 
   <div id="tooltip" class="tooltip" role="tooltip" hidden></div>

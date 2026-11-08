@@ -110,6 +110,8 @@ up as `chips/NAME.yaml`) or `--chip path/to/file.yaml`. The default is `mk22fn1m
 | NXP Kinetis MK22FN1M0VLL12 | `mk22fn1m0vll12` (default) | Cortex-M4F | 20.97 MHz (FEI) | `PTC5`, `PTA2` |
 | NXP Kinetis MK22FX512VLL12 | `mk22fx512vll12` | Cortex-M4F | 20.97 MHz | `PTD2` |
 | ST STM32F405ZG | `stm32f405zg` | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PB0` |
+| ST STM32F405RG / OG / OE / VG | `stm32f405rg` (LQFP64), `stm32f405og`, `stm32f405oe` (WLCSP90), `stm32f405vg` (LQFP100) | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PB0` |
+| ST STM32F407VG / VE / ZG / ZE / IG / IE | `stm32f407vg`, `stm32f407ve` (LQFP100), `stm32f407zg`, `stm32f407ze` (LQFP144), `stm32f407ig`, `stm32f407ie` (LQFP176), `stm32f407igh`, `stm32f407ieh` (UFBGA176) | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PI1` |
 | TI TMS320F28232 | `tms320f28232` | C28x (16-bit words) | 10 MHz | `GPIO34` |
 
 **Firmware formats.** The format is sniffed; `--format` forces it.

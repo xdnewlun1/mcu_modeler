@@ -235,9 +235,12 @@ class C28xArch:
             pend = pie.ifr[n] & pie.ier[n]
             if not pend:
                 # the flag was cleared after INTn reached the CPU: the hardware fetches an unpredictable vector;
-                # we drop the request (the group stays acknowledged until the ISR... there is none: unblock it)
+                # we drop the request. No ISR runs to write PIEACKn, so release the group here, otherwise every
+                # later interrupt of group n would stay latched in PIEIFRn for good
                 self._warn_once(f"spurious{n}", f"INT{n} reached the CPU but no enabled PIEIFR{n} flag is pending "
                                 "(flag cleared in between): interrupt dropped")
+                pie.clear_ack(n)
+                self.pie_group_changed(n)
                 return False
             ch = (pend & -pend).bit_length()
             pie.clear_flag(n, ch)

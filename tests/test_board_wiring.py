@@ -206,3 +206,28 @@ def test_three_chip_lockstep_and_byte_flow():
     assert set(st["chips"]) == {"A", "B", "C"} and len(st["board"]["links"]) == 4
     assert wall < 30
     s.close()
+
+
+def test_removing_a_part_keeps_a_net_the_user_wired_onto_its_pin():
+    b = _bare()
+    b.add_part("LED9", "led", {}, {"in": "A.PTB2"})          # anonymous net LED9_in holding A.PTB2
+    net = b.connect([("A", "PTB2"), ("B", "PTB2")])         # the user extends it to B
+    assert net.name == "LED9_in"
+    b.remove_part("LED9")
+    assert b.net_of("A", "PTB2") is net and b.net_of("B", "PTB2") is net
+
+
+def test_merging_nets_keeps_drive_and_stimulus_without_glitches():
+    b = _bare()
+    b.add_net("X", [("A", "PTB0")], drive="H")
+    b.add_net("Y", [("B", "PTB0")])
+    edges = []
+    b.chips["A"].pins.subscribe(lambda ev: ev.pin == "PTB0" and ev.field == "level" and edges.append(ev.new))
+    net = b.connect([("B", "PTB0"), ("A", "PTB0")])          # Y first: X is merged into Y
+    assert net.name == "Y" and net.drive == "H" and net.level == "H"
+    assert edges == []                                       # A.PTB0 stayed H throughout (no float to X)
+    b.add_net("S", [("A", "PTB1")])
+    b.set_pin("A", "PTB1", "L")                              # stimulus on S
+    b.add_net("T", [("B", "PTB1")], pull="up")
+    net = b.connect([("B", "PTB1"), ("A", "PTB1")])
+    assert net.stimulus == "L" and net.level == "L"

@@ -89,6 +89,10 @@ class VcdWriter:
         self._part_hdr: list[str] = []
         self._init = init
         self._body_started = False
+        self._order_fn = None                            # board: earliest chip time (see _emit)
+        self._pending: list = []
+        import itertools
+        self._pseq = itertools.count()
         self._t0 = int(round(clock.now_ns())) if clock is not None else 0
         self._last_t = self._t0
         if board is not None:
@@ -114,6 +118,9 @@ class VcdWriter:
                 self._unsub_parts()
             self._parts_board = board
             self._unsub_parts = board.log.subscribe(self.on_part_event, "part")
+            chips = list(getattr(board, "chips", {}).values())
+            if len(chips) > 1:
+                self._order_fn = lambda: min(c.clock.now_ns() for c in chips)
         t = board.part_now_ns() if hasattr(board, "part_now_ns") else (self.clock.now_ns() if self.clock else 0)
         for part in list(board.parts.values()):
             self._declare_part(part, t)
@@ -151,8 +158,7 @@ class VcdWriter:
                     self._init.append(f"{val}{vid}\n")
                     continue
                 self._init.append(f"x{vid}\n")          # did not exist yet
-            self._time(t_ns)
-            self._w(f"{val}{vid}\n")
+            self._emit(t_ns, f"{val}{vid}\n")
 
     def _undeclare_part(self, pid: str, t_ns: float) -> None:
         part = self._watched.pop(pid, None)
@@ -160,11 +166,30 @@ class VcdWriter:
             part.listeners.remove(self.on_part_change)
         for (p, _), vid in self.part_ids.items():
             if p == pid:
-                self._time(t_ns)
-                self._w(f"x{vid}\n")
+                self._emit(t_ns, f"x{vid}\n")
 
     def seal(self) -> None:
         """(Compatibility no-op: the header is written by close(), so parts may still be added.)"""
+
+    def _emit(self, t_ns: float, line: str) -> None:
+        """One value change at t_ns. On a board (`_order_fn` set by add_parts) changes come from several chips whose
+        clocks differ by up to a quantum (a part change carries its source chip's time), so they are held in a heap
+        and written in time order once every chip has passed them (`_order_fn()` = earliest chip time)."""
+        if self._order_fn is None:
+            self._time(t_ns)
+            self._w(line)
+            return
+        import heapq
+        heapq.heappush(self._pending, (float(t_ns), next(self._pseq), line))
+        self._flush_pending(self._order_fn())
+
+    def _flush_pending(self, limit: float) -> None:
+        import heapq
+        q = self._pending
+        while q and q[0][0] <= limit:
+            t, _n, line = heapq.heappop(q)
+            self._time(t)
+            self._w(line)
 
     def _time(self, t_ns: float) -> None:
         t = int(round(t_ns))
@@ -181,14 +206,12 @@ class VcdWriter:
             vid = self.ids.get(ev.pin)
             if vid is None:
                 return
-            self._time(ev.t_ns)
-            self._w(f"{_VCD_VAL.get(ev.new, 'x')}{vid}\n")
+            self._emit(ev.t_ns, f"{_VCD_VAL.get(ev.new, 'x')}{vid}\n")
         elif ev.field == "owner" and self.owners:
             vid = self.owner_ids.get(ev.pin)
             if vid is None:
                 return
-            self._time(ev.t_ns)
-            self._w(f"s{self._vstr(ev.new)} {vid}\n")
+            self._emit(ev.t_ns, f"s{self._vstr(ev.new)} {vid}\n")
 
     def on_part_event(self, ev: Any) -> None:
         """Board log `part` events: parts appearing / disappearing (value changes come from part listeners)."""
@@ -210,13 +233,11 @@ class VcdWriter:
         pid = part.id
         t = part.now()
         if "on" in f and (pid, "on") in self.part_ids:
-            self._time(t)
-            self._w(f"{'1' if f['on'] else '0'}{self.part_ids[(pid, 'on')]}\n")
+            self._emit(t, f"{'1' if f['on'] else '0'}{self.part_ids[(pid, 'on')]}\n")
         port = f.get("port")
         if port is not None and "level" in f and (pid, port) in self.part_ids:
-            self._time(t)
             lvl = f["level"]
-            self._w(f"{'z' if lvl == 'Z' else _VCD_VAL.get(lvl, 'x')}{self.part_ids[(pid, port)]}\n")
+            self._emit(t, f"{'z' if lvl == 'Z' else _VCD_VAL.get(lvl, 'x')}{self.part_ids[(pid, port)]}\n")
 
     def close(self) -> None:
         if self.f is None:
@@ -229,6 +250,8 @@ class VcdWriter:
             if self.on_part_change in part.listeners:
                 part.listeners.remove(self.on_part_change)
         self._watched = {}
+        self._flush_pending(float("inf"))
+        self._order_fn = None
         if self.clock is not None:
             self._time(self.clock.now_ns())       # mark the end of the trace
         f, sp = self.f, self._spool

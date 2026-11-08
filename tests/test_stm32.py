@@ -441,6 +441,64 @@ def test_tim_period_irq_and_cnt(desc):
     assert chip.peripherals["TIM2"].bits == 32 and chip.peripherals["TIM3"].bits == 16
 
 
+def _tim3(desc):
+    """TIM3 clocked at the 16 MHz HSI with PSC=0: one counter tick per core cycle."""
+    chip = spin_chip(desc, clock_hz=16e6)
+    wr(chip, RCC + 0x40, 1 << 1)                                 # APB1ENR.TIM3EN
+    wr(chip, TIM3 + 0x28, 0)
+    return chip, chip.peripherals["TIM3"]
+
+
+def test_tim_arr_lowered_below_cnt_counts_on_to_wrap(desc):
+    """RM0090: ARR written (no preload) below the running counter: the counter goes on to 0xFFFF and wraps."""
+    chip, t = _tim3(desc)
+    wr(chip, TIM3 + 0x2C, 1000)
+    wr(chip, TIM3, 1)                                            # CEN
+    chip.run_cycles(500)
+    c = rd(chip, TIM3 + 0x24)
+    wr(chip, TIM3 + 0x2C, 100)
+    assert abs(rd(chip, TIM3 + 0x24) - c) <= 2                   # no jump to the new ARR
+    chip.run_cycles(1000)
+    assert not rd(chip, TIM3 + 0x10) & 1 and t.updates == 0
+    chip.run_cycles(0x10000)
+    assert t.updates >= 1
+
+
+def test_tim_center_aligned_updates_twice_per_period_and_keeps_direction(desc):
+    chip, t = _tim3(desc)
+    wr(chip, TIM3 + 0x2C, 100)
+    wr(chip, TIM3, 1 | (1 << 5))                                 # CEN, CMS=01
+    chip.run_cycles(2000)
+    assert t.updates == 20                                       # overflow at ARR and underflow at 0
+    chip, t = _tim3(desc)
+    wr(chip, TIM3 + 0x2C, 100)
+    wr(chip, TIM3, 1 | (1 << 5))
+    chip.run_cycles(150)                                         # counting down, CNT ~ 50
+    assert rd(chip, TIM3 + 0x00) & (1 << 4)                      # DIR reads 1 while down-counting
+    wr(chip, TIM3 + 0x2C, 100)                                   # re-anchor (non-preloaded ARR write)
+    u = t.updates
+    chip.run_cycles(60)
+    assert t.updates - u == 1                                    # the underflow ~50 ticks later still happens
+    assert not rd(chip, TIM3 + 0x00) & (1 << 4)                  # counting up again
+
+
+def test_tim_udis_and_repetition_keep_shadow_registers(desc):
+    """RM0090: no update event (UDIS=1) -> PSC/ARR shadows keep their value; UG only re-initialises the counter."""
+    chip, t = _tim3(desc)
+    wr(chip, TIM3 + 0x2C, 100)
+    wr(chip, TIM3 + 0x14, 1)                                     # UG: load ARR=100
+    wr(chip, TIM3 + 0x10, 0)                                     # clear that UIF
+    wr(chip, TIM3, 1 | (1 << 7) | (1 << 1))                      # CEN, ARPE, UDIS
+    wr(chip, TIM3 + 0x2C, 50)                                    # preloaded
+    chip.run_cycles(500)
+    assert t.arr == 100 and t.updates == 0
+    wr(chip, TIM3 + 0x14, 1)                                     # UG with UDIS: no shadow load, no UIF
+    assert t.arr == 100 and not rd(chip, TIM3 + 0x10) & 1
+    wr(chip, TIM3, 1 | (1 << 7))                                 # UDIS off: next overflow loads ARR=50
+    chip.run_cycles(200)
+    assert t.arr == 50 and t.updates >= 1
+
+
 def test_tim_preload_downcount_opm_and_clock_change(desc):
     chip = spin_chip(desc)
     t6 = chip.peripherals["TIM6"]

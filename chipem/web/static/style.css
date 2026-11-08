@@ -462,3 +462,15 @@ table.pins tr.clickable td.ext { cursor: pointer; text-decoration: underline dot
 .board-mode .wiring-panel .net-list { flex: 1 1 0; min-height: 80px; }
 .board-mode .wiring-panel .part-list { flex: 1.3 1 0; min-height: 120px; max-height: none; }
 .board-mode .single-only { display: none !important; }
+
+/* board setup dialog (boarddlg.js) */
+.board-dlg { width: 420px; }
+.bd-body { padding: 10px 14px 12px; display: grid; gap: 7px; }
+.bd-note { margin: 0; color: var(--dim); font-size: 11.5px; line-height: 1.45; }
+.bd-busy { margin-left: 10px; color: var(--muted); font: 11.5px var(--mono); }
+.bd-chips { display: grid; gap: 8px; }
+.bd-chip { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); }
+.bd-chip-head { display: flex; align-items: center; gap: 6px; font: 12px var(--mono); }
+.bd-chip-head b { margin-right: auto; }
+.btn.danger { color: var(--err-fg); }
+.btn.danger:hover { background: var(--err-bg); border-color: var(--err-line); }

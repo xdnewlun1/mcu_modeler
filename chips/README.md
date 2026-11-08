@@ -86,6 +86,42 @@ Documents used for `mk22fn1m0vll12.yaml` / `mk22fx512vll12.yaml` (PDFs in the ch
   `USB_OTG_HS_*`, `RCC_MCO_1`; the data sheet `OTG_HS_*`, `MCO1`, used here) and the data sheet typo PG13 AF8
   `UART6_CTS` (corrected to `USART6_CTS`).
 
+## STM32F405xx / STM32F407xx package variants (`chips/stm32f405{rg,og,oe,vg}.yaml`, `chips/stm32f407*.yaml`)
+
+- Same die as the STM32F405ZG: each file `include:`s `stm32f405zg.yaml` (core, memory map, peripherals, IRQs,
+  `regs_file: stm32f405_regs.yaml`) and overrides `name`, `package`, `memory` (512 KB flash for the "E" parts,
+  DS8626 Table 2) and `pins`.
+- Pin tables: generated from DS8626 Rev 12 (`DS_dm00037051.pdf`, identical to `DS_stm32f405zg.pdf`) with
+  `pdftotext -bbox` word coordinates: Table 7 (the six package columns LQFP64, WLCSP90, LQFP100, LQFP144, UFBGA176,
+  LQFP176; note 1 for the 25 UFBGA thermal VSS balls F6..K10) and Table 9 (AF0..AF15 per GPIO, including AF11
+  `ETH_*` and AF13 `DCMI_*`, which only the F407 files keep). Checks run on the generated tables:
+  - the LQFP144 table regenerated this way equals `chips/stm32f405zg.yaml` (0 differences in 144 pins);
+  - pin/ball positions equal ST's STM32_open_pin_data at commit `7d1f1514ed5583ec5007ad91236b4e1d377295b1`
+    (`mcu/STM32F405RGTx.xml`, `STM32F405O(E-G)Yx.xml`, `STM32F407V(E-G)Tx.xml`, `STM32F407Z(E-G)Tx.xml`,
+    `STM32F407I(E-G)Tx.xml`, `STM32F407I(E-G)Hx.xml`): 0 differences for every package;
+  - AF numbers equal `mcu/IP/GPIO-STM32F417_gpio_v1_0_Modes.xml` for all 140 GPIOs (ST lists RTC/oscillator/WKUP
+    as pseudo-AF0 entries; here they are `additional`/`analog` keys, as in the F405ZG file);
+  - pin and GPIO counts equal DS8626 Table 2 (51/72/82/114/140 GPIOs).
+  Signal names follow the data sheet (`ETH_MII_RX_CLK/ETH_RMII_REF_CLK`, ST's XML says `ETH_RX_CLK`/`ETH_REF_CLK`).
+  Typo fixed as in the F405ZG: PG13 AF8 `USART6_CTS`.
+- Downloads (untrusted data, parsed with `xml.etree` only), cached under `svd/dl-open-pin-data/` (sha256):
+  `STM32F405RGTx.xml` 3e965c28403876ea586deaf403f5cff069bb127341913fadb58985ddc135b6d3,
+  `STM32F405O(E-G)Yx.xml` 2723954f4dbe2fefcd76444f566acf4ccbf94347e0118ad983f9a9aafef10f0f,
+  `STM32F405VGTx.xml` 0d1c19c7af7bdbc84a358607f5e2a5e628d64b67eb66c397bb85c1667a11cb4f,
+  `STM32F405ZGTx.xml` b40bfb0e439c8c6e4bc57a1fd5c0c2facf45d96682cf44b06124d57b9925abfa,
+  `STM32F407V(E-G)Tx.xml` 3771e470e578568e70ee9c10af40173641c29c6e267cf5b268204a8b8aefbea7,
+  `STM32F407Z(E-G)Tx.xml` 6638c54654455bd7e1e7ef4f8408c0daf08aea0537ce9c54a51550cdaf419dc4,
+  `STM32F407I(E-G)Tx.xml` b708c3eb9b0225050f33ee24db00f394b98d58286a15f2d3a608fc0829c86bd9,
+  `STM32F407I(E-G)Hx.xml` 86a6f7e93741748bdc50ea02f272efce452ce074354fe1f7ba581d3ff80ca9ef,
+  `GPIO-STM32F417_gpio_v1_0_Modes.xml` 8ccd37f14a82da3b2acbe858e687f8e8b2df8b18fd8e5a711cfff11ad834ee6e
+  (`https://raw.githubusercontent.com/STMicroelectronics/STM32_open_pin_data/7d1f1514/mcu/<name>`).
+- Second SVD for the F407 parts: cmsis-svd-data `data/STMicro/STM32F407.svd` at `c65f8551e57c770344d229dcaa0bf838fa29aff4`
+  (sha256 `e2afca4f03f654225886d8508551cb7ac8f3c95ee28f18953aad466ecb56e6d6`), cached as `svd/dl-stm32f407/STM32F407.svd`.
+  `svd2chip --check` gives 0 mismatches for every variant against both STM32F405.svd and STM32F407.svd (same
+  superset quirks as above). The register table stays `stm32f405_regs.yaml`.
+- Ball numbering (UFBGA176, WLCSP90): `num` = row-major index over the existing balls (rows without I/O), `ball:` =
+  the ball name. `tools/pin_table_check.py chips/stm32f407igh.yaml --expect 201` (176 + 25 balls).
+
 ## svd2chip usage
 
 ```

@@ -10,6 +10,8 @@ Register map (16-bit units, offsets from 0x0CE0; TMS320x2833x System Control and
   +0x20..+0x11F  PIE vector table: 128 vectors × 2 words (22-bit address, low word at the lower address); vector n
                  lives at 0x0D00 + 2n.  0-31 mirror the CPU vectors (RESET, INT1-14, DLOGINT, RTOSINT, EMUINT, NMI,
                  ILLEGAL, USER1-12), INTx.y is n = 32 + 8(x-1) + (y-1) (INT1.1 = 0x0D40).
+                 EALLOW-protected (SPRUFB0 6.3.4): a CPU write with ST1.EALLOW clear is ignored (one `warn`); the
+                 firmware loader and debugger writes (core not running) are not CPU writes and always land.
 
 The block only stores state; the group/ACK/IFR propagation lives in `C28xArch` (arch.py), which this block calls
 on every write that may change what the CPU sees.
@@ -23,6 +25,7 @@ from ...periph.base import MMIOBlock, Reg
 PIE_BASE = 0x0CE0
 PIE_SIZE = 0x120                 # registers (0x20) + vector table (0x100)
 VEC_OFF = 0x20                   # offset of the vector table inside the block
+ST1_EALLOW = 1 << 6
 
 
 class PIEBlock(MMIOBlock):
@@ -43,6 +46,8 @@ class PIEBlock(MMIOBlock):
         self.ack = 0
         self.ier = [0] * 13          # index 1..12
         self.ifr = [0] * 13
+        self.enforce_eallow = True
+        self._eallow_warned = False
 
     def reset(self) -> None:
         vt = bytes(self.mem[VEC_OFF * 2:])           # the vector RAM is not initialised by a reset
@@ -60,8 +65,29 @@ class PIEBlock(MMIOBlock):
             return int.from_bytes(self.mem[o:o + 2 * size], "little")
         return MMIOBlock.read(self, offset, size)
 
+    def _cpu_write_blocked(self) -> bool:
+        """A CPU store into the vector table without EALLOW (ignored on silicon)."""
+        core = self.arch.core
+        if not self.enforce_eallow or not getattr(core, "running", False):
+            return False
+        try:
+            if core.read_reg("st1") & ST1_EALLOW:
+                return False
+        except Exception:
+            return False
+        if not self._eallow_warned:
+            self._eallow_warned = True
+            self.emit("warn", block=self.name, msg=f"{self.name} vector table: write ignored, the table is "
+                      "EALLOW-protected and EALLOW is not set")
+        return True
+
     def write(self, offset: int, size: int, value: int) -> None:
-        if offset >= VEC_OFF and not self.log_all:
+        if offset >= VEC_OFF:
+            if self._cpu_write_blocked():
+                return
+            if self.log_all:
+                MMIOBlock.write(self, offset, size, value)
+                return
             o = offset * 2
             self.mem[o:o + 2 * size] = (value & ((1 << (16 * size)) - 1)).to_bytes(2 * size, "little")
             return
@@ -88,6 +114,10 @@ class PIEBlock(MMIOBlock):
 
     def set_ack(self, group: int) -> None:
         self.ack |= 1 << (group - 1)
+        self._store(self.regs["PIEACK"], self.ack)
+
+    def clear_ack(self, group: int) -> None:
+        self.ack &= ~(1 << (group - 1))
         self._store(self.regs["PIEACK"], self.ack)
 
     def set_pievect(self, vec_addr: int) -> None:
