@@ -58,10 +58,10 @@ peripherals:
   - {name: EPWM4, model: ti_c2000.epwm, base: 0x68C0, size: 0x40, params: {gate: EPWM4ENCLK, index: 4}}
   - {name: EPWM5, model: ti_c2000.epwm, base: 0x6900, size: 0x40, params: {gate: EPWM5ENCLK, index: 5}}
   - {name: EPWM6, model: ti_c2000.epwm, base: 0x6940, size: 0x40, params: {gate: EPWM6ENCLK, index: 6}}
-  - {name: ECAP1, model: ti_c2000.storage, base: 0x6A00, size: 0x20, params: {gate: ECAP1ENCLK}}
-  - {name: ECAP2, model: ti_c2000.storage, base: 0x6A20, size: 0x20, params: {gate: ECAP2ENCLK}}
-  - {name: ECAP3, model: ti_c2000.storage, base: 0x6A40, size: 0x20, params: {gate: ECAP3ENCLK}}
-  - {name: ECAP4, model: ti_c2000.storage, base: 0x6A60, size: 0x20, params: {gate: ECAP4ENCLK}}
+  - {name: ECAP1, model: ti_c2000.ecap, base: 0x6A00, size: 0x20, params: {gate: ECAP1ENCLK, index: 1}}
+  - {name: ECAP2, model: ti_c2000.ecap, base: 0x6A20, size: 0x20, params: {gate: ECAP2ENCLK, index: 2}}
+  - {name: ECAP3, model: ti_c2000.ecap, base: 0x6A40, size: 0x20, params: {gate: ECAP3ENCLK, index: 3}}
+  - {name: ECAP4, model: ti_c2000.ecap, base: 0x6A60, size: 0x20, params: {gate: ECAP4ENCLK, index: 4}}
   - {name: EQEP1, model: ti_c2000.storage, base: 0x6B00, size: 0x40, params: {gate: EQEP1ENCLK}}
   - {name: EQEP2, model: ti_c2000.storage, base: 0x6B40, size: 0x40, params: {gate: EQEP2ENCLK}}
   - {name: GPIO, model: ti_c2000.gpio, base: 0x6F80, size: 0x80}

@@ -84,10 +84,17 @@ CRC result) loops forever. The chip YAML's `model:` fields are the authoritative
 (`kinetis.ftm`, below).
 
 **FTM (`kinetis.ftm`)** models the counter, output compare, EPWM/CPWM, combine with dead time and the output path
-onto FTMx_CHn pins. Not modelled: input capture and dual-edge capture, quadrature decoder, fault inputs
-(FLTCTRL/FMS fault flags), external trigger outputs to PDB/ADC (EXTTRIG), write protection (WPEN reads back, but
-protected registers stay writable), the external clock (CLKS=11, one `warn`), the hardware sync triggers and most
-SYNCONF options (software sync and LDOK work), and DMA requests (DMAMUX sources 20–39).
+onto FTMx_CHn pins; input capture and dual edge capture (one-shot and continuous, with the C(n)V/C(n+1)V read
+coherency) from FTMx_CHn pin edges (`--at`, board nets, other outputs), fault control (FTMx_FLTn pins, FLTPOL,
+manual and automatic clearing, safe values), the quadrature decoder (FTM1/FTM2 QD_PHA/PHB pins, both encodings), the
+external clock (FTM_CLKIN0/1 via SIM_SOPT4), write protection (WPEN), the EXTTRIG channel and initialization
+triggers into PDB0 (TRGSEL 8–11) and channel DMA requests (DMAMUX sources 20–39, CHnF cleared by the DMA). Input
+edges take effect 3 system clocks after the pin edge (the synchronizer). Approximations and gaps: the input filters
+(FILTER, FLTCTRL.FFVAL, QDCTRL.PHxFLTREN) are ignored as if disabled; the external clock and quadrature inputs are
+not synchronized and the "at most system clock / 4" input rate is not checked; CMP / USB SOF sources selected in
+SIM_SOPT4 (fault inputs, FTM1/FTM2 channel 0) give no edges. Not modelled: INVCTRL, the hardware sync triggers
+(TRIG0–2) and most SYNCONF options (software sync and LDOK work), capture test mode, the FTM trigger to the ADC through
+SIM_SOPT7, the global time base and debug mode.
 
 Notes on the modelled peripherals:
 
@@ -134,11 +141,17 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
 - **USART** is single-buffered like silicon: a byte arriving while RXNE is set sets ORE and is lost; bytes arriving
   with UE/RE clear, the RCC enable off, the RCC reset bit set or no pin in AF mode for USARTn_RX are dropped; no
   parity/framing/noise errors, no LIN, smartcard, IrDA or hardware flow control; DMA requests are not generated.
-- **Timers** (TIM1–8) model the time base, the update interrupt, output compare and PWM1/PWM2 on channels 1–4
-  driving TIMx_CHn / TIMx_CHnN pins (TIM1/8 complementary outputs, MOE/OSSI/OSSR idle states). Not modelled: dead
-  time (BDTR.DTG), the break input, AOE, OCxCE / ETR clear, OCxFE fast enable, input capture (a channel with
-  CCxS ≠ 00 releases its pin, one `warn`), encoder mode, master/slave triggers (TRGO/ITRx) and DMA. TIM9–14 are
-  stubs (tools/new_chip.py also maps them to `stub`).
+- **Timers** (TIM1–14, one `stm32.tim` model; TIM9–14 get 1–2 channels, up-counting and 16 bits from their SVD
+  registers) model the time base, the update interrupt, output compare and PWM1/PWM2 driving TIMx_CHn / TIMx_CHnN
+  pins (TIM1/8 complementary outputs, MOE/OSSI/OSSR idle states), input capture from pin edges (CCxS 01/10, edge
+  polarity, ICxPSC, CCxOF, CCRx read clears CCxIF), slave reset mode on TI1F_ED/TI1FP1/TI2FP2 (so PWM input mode
+  works), the encoder interface (SMS 001–011), TIM1/8 dead time (BDTR.DTG with CR1.CKD) and break (BKIN pin with
+  BKE/BKP, EGR.BG, BIF/BIE, AOE). Shared vectors (TIM1_UP_TIM10, ...) are ORed. Captures latch CNT at the
+  instruction-exact edge time with no input resynchronisation delay; a TI or BKIN input with no pin muxed to it sees
+  nothing (an unmuxed BKIN is inactive). Not modelled: the ICxF input filter (no-op), CR2.TI1S XOR input, CCxS=11
+  (TRC, one `warn`), gated/trigger/external-clock slave modes, ITRx/ETR and timer chaining (TRGO), OCxCE/ETR clear,
+  OCxFE (no-op: no trigger inputs), compare flags while in encoder mode, dead time on the break transition, the
+  CCPC/COM preload, BDTR.LOCK write protection (stored only) and DMA requests.
 - **WWDG** is storage only (a `warn` when enabled); IWDG is modelled.
 - RCC clock switches and PLL lock complete instantly; clock gates only `warn` on access to a gated-off block.
 - ADC, DAC, SPI, I2C, CAN, DMA, SDIO, USB, FSMC, RTC, RNG and CRC are RAM-like stubs.
@@ -190,14 +203,31 @@ die, same peripheral list and models). In addition:
   `.ebss`/`.bss` are not zeroed by the loader (RAM resets to 0 anyway).
 - **EALLOW protection is enforced**: a write to a protected register without EALLOW is ignored (one `warn` per
   block), like silicon. Missing `EALLOW` in firmware shows up as configuration that does nothing.
-- **Storage only**: HRPWM, eCAP, eQEP, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
-  no behaviour; the ADC supports software start and ePWM SOCA/SOCB triggers (no continuous mode); SPI MISO reads
-  0xFFFF.
-- **ePWM** (`ti_c2000.epwm`) models time base, compare, action qualifier, dead band, software trip zone, event
-  trigger (INT, SOCA/SOCB) and the EPWMxA/B pins. Not modelled: the TZ1–TZ6 trip pins and the high-impedance trip
-  state (shows as L), external EPWMSYNCI / EPWMSYNCO and ADCSOCAO / ADCSOCBO pins, HRPWM (MEP), the PWM chopper
-  (PCCTL, one `warn`), emulation FREE_SOFT, TBCTR above TBPRD (clamped instead of counting to 0xFFFF; TBSTS.CTRMAX
-  never set) and the ePWM → eCAP sync chain.
+- **Storage only**: HRPWM, eQEP, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
+  no behaviour; SPI MISO reads 0xFFFF.
+- **ADC** (`ti_c2000.adc`) models the dual / cascaded sequencers with start/stop and continuous run (SEQ_OVRD),
+  SEQ1-before-SEQ2 arbitration of the one converter, pending / lost triggers, software, ePWM SOCA/SOCB and external
+  (XINT2 pin rising edge) starts, INT_MOD (every other end of sequence), simultaneous sampling, and conversion timing
+  from HSPCLK / ADCCLKPS / CPS / ACQ_PS (SPRS439 latencies). Channel values come from `--adc` / `set_channel`, not
+  pin voltages. Not modelled: SUSMOD, the DMA sync of SEQ_OVRD + CONT_RUN, the few SYSCLKOUT between the last result
+  and the interrupt flag, the ADCCLK phase. Every ePWM SOCA / SOCB also pulses a pin muxed to ADCSOCAO / ADCSOCBO
+  low for 32 HSPCLK cycles.
+- **ePWM** (`ti_c2000.epwm`) models time base (including TBCTR above TBPRD counting to 0xFFFF with TBSTS.CTRMAX),
+  compare, action qualifier, dead band, PWM chopper (every carrier edge is an event: slow, one `warn`), trip zone
+  (software and TZ1–TZ6 pins, one-shot and cycle-by-cycle), event trigger (INT, SOCA/SOCB), the F2833x sync scheme
+  (ePWM1 → 2 → 3, ePWM1 → 4 → 5 → 6, ePWM1 → eCAP1; 2-SYSCLKOUT / next-TBCLK load latency), the EPWMSYNCI /
+  EPWMSYNCO pins and the EPWMxA/B pins. A high-impedance trip releases the pin: it becomes an input whose level
+  comes from the pull-up or a net, else X. Not modelled: HRPWM (MEP), emulation FREE_SOFT (no emulation-suspend
+  state), GPIO input qualification of TZn / EPWMSYNCI, compare events while TBCTR is above TBPRD.
+- **eCAP** (`ti_c2000.ecap`, eCAP1-4, SPRUFG4A) models the 32-bit TSCTR at SYSCLKOUT, capture from the ECAPx pin
+  (event prescaler, CAPxPOL, CTRRSTx, CAPLDEN, Mod4 sequencer, continuous / one-shot with STOP_WRAP and REARM),
+  CTROVF, CTRPHS loads by SWSYNC / SYNCI (eCAP1 from ePWM1 SYNCO when the ePWM model offers `sync_listeners`, then
+  eCAP1 → 2 → 3 → 4), APWM mode (CAP1/CAP2 active, CAP3/CAP4 shadows loaded at CTR=PRD, APWMPOL, output on the pin)
+  and the ECFLG / ECEINT / ECCLR / ECFRC interrupt logic (ECAPx_INT, PIE 4.x). None of its registers is
+  EALLOW-protected. Not modelled: emulation FREE_SOFT (always free-running), GPIO input qualification and
+  synchronization delay (an edge is captured on the cycle it reaches the pin), CTR=PRD sync-out / comparators in
+  capture mode; the prescaler state is cleared on a PRESCALE change and on REARM (our choice: the guide does not
+  say), and a TSCTR load (write or sync) produces no CTR=0 / compare event at the load instant.
 - **Clock gates only warn** (PCLKCR); silicon ignores accesses to an unclocked peripheral.
 - SCI: overrun is modelled (OE/RXERROR without FIFO: the unread character is overwritten; RXFFOVF with the FIFO:
   the 17th character is not stored, our reading of the guide's ambiguous wording); bytes arriving in SW RESET, with
@@ -212,8 +242,9 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
 
 - Levels are digital (H/L/X). There are no voltages, so analog pins do not feed the ADC.
 - Serial peripherals (UART, SPI, I2C) do not toggle pin levels with their traffic. Timer/PWM channels (STM32 TIM,
-  Kinetis FTM, C2000 ePWM) do: they drive their signal edge by edge through `PinBoard.drive_signal`, and the pin
-  shows the live level. Otherwise a peripheral-owned pin shows the **idle** state of its signal from the family signal table (`chipem/periph/<family>/signals.py`, rule
+  Kinetis FTM, C2000 ePWM, eCAP in APWM mode) do: they drive their signal edge by edge through
+  `PinBoard.drive_signal`, and the pin shows the live level. Timer inputs (input capture, eCAP, FTM faults and
+  quadrature, TIM break, ePWM trip zones) are pin inputs and see every edge of their pin (`--at`, nets, parts). Otherwise a peripheral-owned pin shows the **idle** state of its signal from the family signal table (`chipem/periph/<family>/signals.py`, rule
   in `docs/CONTRACTS.md`): UART/SCI TX is an output at H, RX an input, SPI SCK/MOSI an output at L (CPOL is not
   looked at), chip selects an output at H, I2C pins open-drain (H only when pulled), timer/PWM channels and clock
   outputs an output at L, ADC/CMP/DAC analog, JTAG/SWD TCK/TMS/TDI inputs and TDO/SWO an output at H. Signals
@@ -248,7 +279,7 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   new value depending on wiring order). Combinational loops are detected (16 re-resolutions of a net in one event),
   warned once and left at their last level, so ring oscillators do not oscillate.
 - No bus-level parts (I2C/SPI/UART devices are `devices:`/`links:`, not parts), and parts cannot carry UART bytes
-  (peripheral pins do not toggle with traffic).
+  (serial peripheral pins do not toggle with traffic).
 - Timed parts (pulse, pattern) run on the first chip's scheduler; other chips see their edges with the usual board
   lockstep latency (up to one quantum). A pulse faster than the board quantum still works but costs a slice cut per
   edge.

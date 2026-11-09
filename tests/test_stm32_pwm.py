@@ -401,8 +401,10 @@ def test_capture_channel_pin_is_an_input_on_a_net(desc):
     chip.pins.set_external("PA6", "L")                           # external drive (e.g. a net) is seen
     assert pa6.level() == "L"
     chip.pins.set_external("PA6", None)
-    wr(chip, TIM3 + CCR1, 50)
-    wr(chip, TIM3 + CCMR1, PWM1)                              # output compare again: REF = 0 < 50
+    wr(chip, TIM3 + CCR1, 50)                                 # read-only while the channel is an input
+    assert rd(chip, TIM3 + CCR1) == 0
+    wr(chip, TIM3 + CCMR1, PWM1)                              # output compare again
+    wr(chip, TIM3 + CCR1, 50)                                 # REF = 0 < 50
     assert pa6.direction == "out" and pa6.level() == "H"
 
 

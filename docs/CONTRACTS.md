@@ -287,8 +287,8 @@ All address/offset/size numbers stay in the chip's address units (`desc.core.add
   (`fpu: true` only for FPU32 parts such as the F28335 at 150 MHz), `family: ti_c2000`, memory in words,
   `peripherals` with model names `ti_c2000.sysctrl`, `ti_c2000.gpio`, `ti_c2000.pie` (arch-owned, like armv7m.scs),
   `ti_c2000.cputimer`, `ti_c2000.sci`, `ti_c2000.xint`, `ti_c2000.flash`, `ti_c2000.csm`, `ti_c2000.spi`,
-  `ti_c2000.adc`, `ti_c2000.adcmirror`, `ti_c2000.alias` and `ti_c2000.storage` (register storage for ePWM, eCAP, eQEP,
-  eCAN, I2C, McBSP, XINTF, DMA). `irqs` are keyed by PIE **vector number**, not by "x.y":
+  `ti_c2000.adc`, `ti_c2000.adcmirror`, `ti_c2000.alias`, `ti_c2000.epwm` (ePWM1-6), `ti_c2000.ecap` (eCAP1-4) and
+  `ti_c2000.storage` (register storage for HRPWM, eQEP, eCAN, I2C, McBSP, XINTF, DMA). `irqs` are keyed by PIE **vector number**, not by "x.y":
   ```yaml
   irqs:
     13: INT13          # CPU timer 1

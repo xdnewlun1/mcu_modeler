@@ -9,6 +9,8 @@ Pin board interaction (the PinBoard is generic; this model is the only place tha
 * MUX=2..7 -> the function name from the chip description (e.g. "UART1_TX"); direction and idle drive from the
   Kinetis signal table (`signals.py`: UART TX -> output idling H, RX -> input, I2C -> open-drain, ...; unknown
   signals -> "none"). Traffic does not toggle the pin. The JTAG/SWD pins (ALT7 out of reset) are covered too.
+  A peripheral whose pin direction depends on its mode registers `signal_dir_hooks` (the FTM: FTMx_CHn is an input
+  in input capture / dual edge capture) and calls `refresh_function` when its answer changes.
 * pull = "up"/"down" when PE (digital modes only), else None.
 * Pin interrupts: one PinBoard input listener per pin. IRQC 1/2/3 = DMA request on rising/falling/either
   edge (flag only), 8 = logic 0, 9 = rising, 10 = falling, 11 = either edge, 12 = logic 1. A detected event
@@ -63,6 +65,9 @@ class PORT(GatedBlock):
         self.isf_count = [0] * 32
         self.pcr_writes = [0] * 32
         self.x_irq_mask = 0
+        # peripheral models whose pin direction depends on their mode (FTM channel in input capture: an input, not
+        # the signal table's output): hook(owner) -> (direction, drive) or None. `refresh_function` re-applies them.
+        self.signal_dir_hooks: list = []
 
     # ------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
@@ -150,6 +155,11 @@ class PORT(GatedBlock):
                 kw["drive"] = None
             else:
                 kw["direction"], kw["drive"] = SIGNALS.pin_state(owner if owner != "disabled" else None)
+                for hook in self.signal_dir_hooks:
+                    st = hook(owner)
+                    if st is not None:
+                        kw["direction"], kw["drive"] = st
+                        break
         self.chip.pins.mcu_update(pin, **kw)
         if mux_changed and not quiet:
             owner = kw["owner"]
@@ -161,6 +171,13 @@ class PORT(GatedBlock):
             if pull:
                 extra += f" (pull-{pull})"
             self.emit("info", block=self.name, pin=pin.id, msg=f"{pin.id} → {owner}{extra}")
+
+    def refresh_function(self, pred) -> None:
+        """Re-derive owner/direction/drive of the pins muxed to a peripheral function (ALT2..7) for which
+        pred(owner) is true (a `signal_dir_hooks` answer changed)."""
+        for i, pin in enumerate(self.pins):
+            if pin is not None and self.mux(i) >= 2 and pred(pin.owner):
+                self._sync_pin(i, mux_changed=True, quiet=True)
 
     # ------------------------------------------------------------ register hooks
     def _pcr_write(self, blk, reg, old, new):

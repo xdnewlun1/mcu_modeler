@@ -94,3 +94,61 @@ def test_board_run_summary_and_pin_report(capsys):
     assert "GPIO34" in a and "GPIO out" in a and "SCITXDA" in a and "SCIRXDA" in a
     assert "SCIA: GPIO29 TXD, GPIO28 RXD" in a
     assert "USART1_TX" in b and "USART1_RX" in b and "PB0" in b and "GPIO out" in b
+
+
+CAPTURE_BOARD = ROOT / "boards" / "pwm_capture_3way.yaml"
+need_capture = pytest.mark.skipif(not ((STM / "tim_pwm.elf").exists() and (K22 / "ftm_capture.elf").exists()
+                                       and (C2K / "ecap.c28img").exists()), reason="PWM / capture samples not built")
+
+
+@need_capture
+def test_pwm_capture_3way_board():
+    """boards/pwm_capture_3way.yaml: the STM32 TIM3 CH1 PWM (PA6, 1 kHz, 25 %) is measured by a probe, by the K22
+    FTM1 input capture (PTA12, rising edges, 60 MHz: 1 ms = 60000 ticks) and by the F28232 eCAP1 (GPIO24, CAP1 =
+    period, CAP2 = high time in SYSCLKOUT cycles at 100 MHz: 100000 / 25000)."""
+    import json
+
+    from chipem.session import Session
+    sym = json.loads((C2K / "ecap.c28img").read_text())["symbols"]
+    s = Session.from_board(CAPTURE_BOARD, quiet=True)
+    try:
+        s.run_for(12e6)                                         # C28x PLL locks at ~6.6 ms: 5 eCAP periods after it
+        st = s.board.parts["P"].state()
+        out = s.uart_output("B.UART0").decode()
+        c = s.ctxs["C"].chip
+        period, high, n = c.bus.read(sym["ecap_period"], 2), c.bus.read(sym["ecap_high"], 2), \
+            c.bus.read(sym["ecap_count"], 1)
+        pins = {(cid, p): s.ctxs[cid].chip.pins.get(p) for cid, p in (("A", "PA6"), ("B", "PTA12"), ("C", "GPIO24"))}
+        warns = [e.fields["msg"] for e in s.events(kinds={"warn"})]
+    finally:
+        s.close()
+    assert st["freq_hz"] is not None and abs(st["freq_hz"] - 1000) < 0.5, st
+    # K22: the period is a difference of two captures, so the 3-bus-clock synchroniser delay cancels. PTA12 muxed to
+    # FTM1_CH0 before C0SC is set is an input (ELS = 00: pin not used by the FTM), so no spurious first edge.
+    lines = out.split("\r\n")
+    assert lines[0] == "ftm_capture" and len(lines) == 7 and lines[-1] == "", out
+    vals = [int(l.split()[1]) for l in lines[1:6]]
+    assert all(l.startswith("period ") for l in lines[1:6]), out
+    assert vals == [60000] * 5, vals
+    # F28232 eCAP: 1 ms period and 25 % high time at SYSCLKOUT 100 MHz (board quantum 1 us keeps the edges exact)
+    assert c.clock.hz == 100e6
+    assert period == 100000 and high == 25000, (period, high)
+    assert 4 <= n <= 6, n
+    assert pins["A", "PA6"].owner == "TIM3_CH1" and pins["A", "PA6"].direction == "out"
+    assert pins["B", "PTA12"].owner == "FTM1_CH0" and pins["B", "PTA12"].direction == "in"
+    assert pins["C", "GPIO24"].owner == "ECAP1" and pins["C", "GPIO24"].direction == "in"
+    assert not [w for w in warns if "conflict" not in w], warns
+
+
+@need_capture
+def test_pwm_capture_3way_cli_pin_report(capsys):
+    from chipem.cli import main
+    assert main(["run", "--board", str(CAPTURE_BOARD), "--for", "12ms", "--pin-report"]) == 0
+    out = capsys.readouterr().out
+    events = out.split("\nA| === summary chip A")[0].splitlines()
+    assert len(events) < 120, len(events)                       # PWM edges collapsed into waveform summaries
+    assert sum("waveform:" in l and "1.000 kHz" in l and "duty 25.0 %" in l for l in events) >= 3
+    assert "B|   PTA12   42  FTM1_CH0       in" in out
+    assert "C|   GPIO24  68  ECAP1          in" in out
+    assert "A|   PA6     42  TIM3_CH1       out" in out
+    assert "=== pin report chip C ===" in out and "GPIO24" in out.split("=== pin report chip C ===")[1]

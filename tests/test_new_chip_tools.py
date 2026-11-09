@@ -70,7 +70,7 @@ def test_scaffold_yaml_loads_and_maps_models(scaffold):
     assert models["USART1"].model == "stm32.usart" and models["USART1"].params == {"index": 1, "kind": "usart"}
     assert models["UART4"].params == {"index": 4, "kind": "uart"}
     assert models["RCC"].model == "stm32.rcc" and models["IWDG"].model == "stm32.iwdg"
-    assert models["TIM2"].model == "stm32.tim" and models["TIM9"].model == "stub"
+    assert models["TIM2"].model == "stm32.tim" and models["TIM9"].model == "stm32.tim"
     assert models["EXTI"].model == "stm32.exti" and models["SPI1"].model == "stub"
     assert models["ADC1"].size == 0x100                              # clamped to the next block (ADC2)
     assert not any(0xE000E000 <= p.base < 0xE000F000 for p in desc.peripherals)   # SCS is arch-owned
@@ -138,12 +138,16 @@ def test_model_rule_requires_matching_registers():
     assert new_chip.map_model("ti_c2000", "EPWM3", epwm_regs)[:2] == ("ti_c2000.epwm",
                                                                       {"gate": "EPWM3ENCLK", "index": 3})
     assert new_chip.map_model("ti_c2000", "EPWM3", [])[0] == "stub"         # a different register layout
-    assert new_chip.map_model("ti_c2000", "ECAP2", [])[:2] == ("ti_c2000.storage", {"gate": "ECAP2ENCLK"})
+    ecap_regs = ["TSCTR", "CTRPHS", "CAP1", "CAP2", "ECCTL1", "ECCTL2", "ECEINT", "ECFLG", "ECCLR", "ECFRC"]
+    assert new_chip.map_model("ti_c2000", "ECAP2", ecap_regs)[:2] == ("ti_c2000.ecap",
+                                                                      {"gate": "ECAP2ENCLK", "index": 2})
+    assert new_chip.map_model("ti_c2000", "ECAP2", [])[0] == "stub"         # a different register layout
+    assert new_chip.map_model("ti_c2000", "EQEP1", [])[:2] == ("ti_c2000.storage", {"gate": "EQEP1ENCLK"})
     assert new_chip.map_model("ti_c2000", "FLASH", ["FOPT"])[:3] == ("ti_c2000.flash", {"regs": "FLASH"}, "FLASHREGS")
-    # TIM9-14 have no model yet (stm32.tim covers TIM1-8): explicit stub with a TODO note
+    # TIM9-14 (1-2 channels, up-counting only) use stm32.tim too; their features follow from the SVD registers
     for t in ("TIM9", "TIM12", "TIM14"):
-        model, _params, _name, note = new_chip.map_model("stm32", t, ["CR1", "PSC", "ARR", "SR", "DIER"])
-        assert model == "stub" and "TIM1-8" in note, t
+        model, _params, _name, _note = new_chip.map_model("stm32", t, ["CR1", "PSC", "ARR", "SR", "DIER"])
+        assert model == "stm32.tim", t
     assert new_chip.map_model("stm32", "TIM8", ["CR1", "PSC", "ARR", "SR", "DIER"])[0] == "stm32.tim"
 
 

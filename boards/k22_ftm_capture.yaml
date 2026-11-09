@@ -1,0 +1,12 @@
+# One K22 measuring its own PWM: ftm_capture drives FTM0 CH0 edge-aligned PWM (10 kHz, 25 %) on PTC1; the net wires
+# it to PTA12 = FTM1_CH0, where FTM1 input capture (rising edges, free running from the 60 MHz bus) measures the period.
+# The FTM1 interrupt computes it and main prints "period 6000" (ticks = 100 us) on UART0 for the first 5 periods.
+# Run:   chipem run --board boards/k22_ftm_capture.yaml --for 3ms
+# Build: firmware/samples/build.sh
+name: k22_ftm_capture
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/ftm_capture.elf, clock_hz: 60000000}
+nets:
+  - {name: PWM_LOOP, pins: [A.PTC1, A.PTA12]}
+parts:
+  - {id: P, type: probe, ports: {in: PWM_LOOP}}

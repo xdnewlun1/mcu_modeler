@@ -157,7 +157,8 @@ def test_sync_chain_loads_phase(chip):
     start(chip)
     chip.run_cycles(330)
     c1, c2 = r(chip, E1 + TBCTR), r(chip, E2 + TBCTR)
-    assert (c2 - c1) % 200 == 50                                     # ePWM2 runs 50 counts ahead of ePWM1
+    # TBPHS is loaded 2 SYSCLKOUT after ePWM1's CTR=ZERO (SPRUG04 2.2.3.2, TBCLK = SYSCLKOUT): 50 - 2 ahead
+    assert (c2 - c1) % 200 == 48
 
 
 def test_software_trip_forces_output_until_cleared(chip):
@@ -313,15 +314,15 @@ def test_cmpa_load_at_zero_is_the_default(chip):
     assert cyc(chip, e, t0)[:3] == [(40, "H"), (160, "L"), (220, "H")]
 
 
-@pytest.mark.parametrize("prdld,rises", [(0, [0, 100, 150, 200]), (1, [0, 51, 101, 151])])
+@pytest.mark.parametrize("prdld,rises", [(0, [0, 100, 161, 222]), (1, [0, 61, 122, 183])])
 def test_tbprd_shadow_vs_immediate(chip, prdld, rises):
     pwm_up(chip, prd=99, cmpa=25, prdld=prdld)
     e = edges(chip, "GPIO0")
     t0 = start(chip)
     chip.run_cycles(50)
-    w(chip, E1 + TBPRD, 49)          # shadow: active from the next CTR=0; PRDLD: now (TBCTR 50 clamped to 49)
-    assert r(chip, E1 + TBPRD) == 49
-    chip.run_cycles(160)
+    w(chip, E1 + TBPRD, 60)          # shadow: active from the next CTR=0; PRDLD: now (TBCTR 50 runs on to 60)
+    assert r(chip, E1 + TBPRD) == 60
+    chip.run_cycles(200)
     assert [c for c, lvl in cyc(chip, e, t0) if lvl == "H"][:4] == rises
 
 
@@ -447,7 +448,7 @@ def test_adc_start_stop_continues_and_holds_one_pending_soc(chip):
     w(chip, ADCTRL2, 1 << 13)                                        # busy: held pending
     assert r(chip, ADCTRL2) & (1 << 13)
     w(chip, ADCTRL2, 1 << 13)                                        # busy and pending: lost
-    chip.run_for(1000)
+    chip.run_for(5000)                                               # 2 sessions x 15 SYSCLKOUT (ADCCLK = HSPCLK)
     assert adc.conversions == 2 and adc.soc_lost == 1 and not r(chip, ADCTRL2) & (1 << 13)
     assert [r(chip, ADCRESULT0 + k) >> 4 for k in range(3)] == [0x100, 0x200, 0]   # continued at CONV01
     assert r(chip, ADCASEQSR) & 0xF == 2
@@ -455,7 +456,7 @@ def test_adc_start_stop_continues_and_holds_one_pending_soc(chip):
     assert r(chip, ADCASEQSR) & 0xF == 0
     adc.set_channel("A0", 0x7)
     w(chip, ADCTRL2, 1 << 13)
-    chip.run_for(1000)
+    chip.run_for(5000)
     assert r(chip, ADCRESULT0) >> 4 == 0x7
 
 
@@ -502,3 +503,312 @@ def test_tbprd_zero_with_events_warns_once(chip):
     start(chip)
     chip.run_cycles(200)
     assert sum("TBPRD = 0" in m for m in warns(chip)) == 1
+
+
+# ------------------------------------------------------------------ TBCTR above TBPRD, CTRMAX
+GPAMUX1_32, GPAMUX2_32, GPBMUX1_32, GPIOXINT2SEL = 0x6F86, 0x6F88, 0x6F96, 0x6FE1
+CTRMAX, SYNCI = 1 << 2, 1 << 1
+TZSEL = 0x12
+ZRO_CLR, CBU_CLR = 1, 1 << 8
+
+
+def w32(ch, a, v):
+    ch.bus.write(a, 2, v)
+
+
+def test_tbctr_above_tbprd_up_count_runs_to_ffff_and_wraps(chip):
+    pwm_up(chip, prd=99, cmpa=25)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(10)
+    w(chip, E1 + TBCTR, 0xFFF0)                       # above TBPRD: counts on to 0xFFFF, wraps to 0 at +16
+    chip.run_cycles(5)
+    assert r(chip, E1 + TBCTR) == 0xFFF5 and not r(chip, E1 + TBSTS) & CTRMAX
+    chip.run_cycles(150)
+    assert r(chip, E1 + TBSTS) & CTRMAX               # 0xFFFF reached at cycle 25
+    # no CAU at 25 (the counter was above TBPRD); CTR=ZERO at the wrap (26), CAU 25 counts later
+    assert cyc(chip, e, t0) == [(0, "H"), (51, "L"), (126, "H"), (151, "L")]
+    w(chip, E1 + TBSTS, CTRMAX)                       # write 1 to clear; not reached again (TBPRD = 99)
+    chip.run_cycles(300)
+    assert not r(chip, E1 + TBSTS) & CTRMAX
+
+
+def test_tbprd_lowered_below_tbctr_with_prdld_counts_through_ffff(chip):
+    pwm_up(chip, prd=99, cmpa=25, prdld=1)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(50)
+    w(chip, E1 + TBPRD, 49)                           # TBCTR 50 > TBPRD 49: on to 0xFFFF, CTR=ZERO at 65536
+    chip.run_cycles(65536 + 60 - 50)
+    assert [c for c, lvl in cyc(chip, e, t0) if lvl == "H"] == [0, 65536, 65586]
+    assert r(chip, E1 + TBSTS) & CTRMAX
+
+
+def test_tbctr_above_tbprd_down_count_counts_down_to_tbprd(chip):
+    pwm_up(chip, prd=99, cmpa=25, aq=PRD_SET | CAD_CLR, mode=DOWN)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(10)
+    w(chip, E1 + TBCTR, 150)                          # 150 .. 100, TBPRD (99) at cycle 61, CAD (25) at 135
+    chip.run_cycles(20)
+    assert r(chip, E1 + TBCTR) == 130
+    chip.run_cycles(150)
+    assert cyc(chip, e, t0) == [(1, "H"), (135, "L"), (161, "H")]
+    assert not r(chip, E1 + TBSTS) & CTRMAX
+
+
+def test_tbctr_above_tbprd_up_down(chip):
+    pwm_up(chip, prd=100, cmpa=40, aq=CAU_SET | CAD_CLR, mode=UPDOWN)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(10)                               # counting up at 10
+    w(chip, E1 + TBCTR, 0xFFFE)                       # up: 0xFFFF at 11, wraps to 0 at 12, up to 100 at 112
+    chip.run_cycles(138)                              # cycle 148: counting down at 64
+    assert r(chip, E1 + TBCTR) == 64 and r(chip, E1 + TBSTS) & (CTRMAX | 1) == CTRMAX
+    w(chip, E1 + TBCTR, 130)                          # down from above: 130 .. 101, TBPRD at 178, 40 at 238
+    chip.run_cycles(52)
+    assert r(chip, E1 + TBCTR) == 78 and not r(chip, E1 + TBSTS) & 1
+    chip.run_cycles(100)
+    assert cyc(chip, e, t0) == [(52, "H"), (238, "L")]       # CAU at 12 + 40; CAD at 40 while counting down
+
+
+def test_tbctr_write_keeps_the_tbclk_phase(chip):
+    w(chip, E1 + TBPRD, 999)
+    w(chip, E1 + CMPA, 102)
+    w(chip, E1 + AQCTLA, ZRO_CLR | CAU_SET)
+    w(chip, E1 + TBCTL, tbctl(UP) | (2 << 10))        # TBCLK = SYSCLKOUT / 4
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(6)                                # mid-TBCLK (edges at 0, 4, 8, ...)
+    w(chip, E1 + TBCTR, 100)                          # 100 now, 101 at the next edge (8), 102 at 12
+    assert r(chip, E1 + TBCTR) == 100
+    chip.run_cycles(20)
+    assert cyc(chip, e, t0) == [(12, "H")]
+
+
+# ------------------------------------------------------------------ synchronization
+@pytest.mark.parametrize("clkdiv,exp", [(0, [(12, "H"), (22, "L"), (112, "H"), (122, "L")]),
+                                        (1, [(22, "H"), (42, "L"), (222, "H"), (242, "L")])])
+def test_sync_loads_at_the_next_tbclk_edge(chip, clkdiv, exp):
+    """SPRUG04 2.2.3.2: TBPHS is loaded at the next TBCLK edge, 2 SYSCLKOUT after the master's SYNCO when TBCLK =
+    SYSCLKOUT, 1 TBCLK otherwise."""
+    w32(chip, GPAMUX1_32, 0x15)                       # GPIO2 = EPWM2A
+    w(chip, E1 + TBPRD, 99)
+    w(chip, E1 + TBCTL, tbctl(UP, synco=1) | (clkdiv << 10))
+    w(chip, E2 + TBPRD, 999)
+    w(chip, E2 + TBPHS, 10)
+    w(chip, E2 + CMPA, 20)
+    w(chip, E2 + CMPB, 30)
+    w(chip, E2 + AQCTLA, CAU_SET | CBU_CLR)
+    w(chip, E2 + TBCTL, tbctl(UP, phsen=1) | (clkdiv << 10))
+    e = edges(chip, "GPIO2")
+    t0 = start(chip)
+    chip.run_cycles(260)
+    assert cyc(chip, e, t0)[:4] == exp
+    assert r(chip, E2 + TBSTS) & SYNCI
+
+
+def test_swfsync_loads_two_cycles_later(chip):
+    pwm_up(chip, prd=999, cmpa=60, aq=CAU_SET, phsen=1)
+    w(chip, E1 + TBPHS, 50)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(10)
+    w(chip, E1 + TBCTL, tbctl(UP, phsen=1) | (1 << 6))      # SWFSYNC: TBCTR = 50 at 12, CAU (60) at 22
+    assert not r(chip, E1 + TBCTL) & (1 << 6)
+    chip.run_cycles(30)
+    assert cyc(chip, e, t0) == [(22, "H")]
+
+
+def test_sync_scheme_3_epwm1_feeds_epwm2_and_epwm4(chip):
+    """F2833x (SPRS439 Figure 8-4): EPWM1SYNCO -> ePWM2 and ePWM4; ePWM2 -> ePWM3; ePWM4 -> ePWM5 -> ePWM6."""
+    base = {n: 0x6800 + 0x40 * (n - 1) for n in range(1, 7)}
+    w(chip, base[1] + TBPRD, 199)
+    w(chip, base[1] + TBCTL, tbctl(UP, synco=1))
+    for n, ph, so in ((2, 20, 3), (3, 30, 3), (4, 40, 0), (5, 50, 3)):
+        w(chip, base[n] + TBPRD, 199)
+        w(chip, base[n] + TBPHS, ph)
+        w(chip, base[n] + TBCTL, tbctl(UP, phsen=1, synco=so))
+    start(chip)
+    chip.run_cycles(330)
+    c = {n: r(chip, base[n] + TBCTR) for n in range(1, 6)}
+    assert (c[2] - c[1]) % 200 == 18 and (c[4] - c[1]) % 200 == 38       # 2 SYSCLKOUT sync latency
+    assert (c[5] - c[1]) % 200 == 48                  # ePWM4 passes SYNCI through (SYNCOSEL = 00) to ePWM5
+    assert c[3] == c[1]                               # ePWM2's SYNCO is off: ePWM3 never loads
+
+
+def test_sync_listeners_get_every_synco(chip):
+    got = []
+    chip.peripherals["EPWM1"].sync_listeners.append(got.append)
+    w(chip, E1 + TBPRD, 99)
+    w(chip, E1 + TBCTL, tbctl(UP, synco=1))
+    start(chip)
+    c0 = chip.now_cycles()
+    chip.run_cycles(250)
+    assert got == [c0, c0 + 100, c0 + 200]
+    w(chip, E1 + TBCTL, tbctl(UP, synco=0) | (1 << 6))       # SWFSYNC passed through with SYNCOSEL = 00
+    assert got[-1] == chip.now_cycles() and len(got) == 4
+
+
+def test_epwmsynci_pin_rising_edge_syncs_epwm1(chip):
+    w32(chip, GPAMUX1_32, 0x5 | (2 << 12))            # GPIO6 = EPWMSYNCI
+    chip.pins.set_external("GPIO6", "L")
+    pwm_up(chip, prd=999, cmpa=50, aq=CAU_SET, phsen=1)
+    w(chip, E1 + TBPHS, 40)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(30)
+    chip.pins.set_external("GPIO6", "H")              # SYNCI: TBCTR = 40 at 32, CAU (50) at 42
+    assert r(chip, E1 + TBSTS) & SYNCI
+    chip.run_cycles(30)
+    assert cyc(chip, e, t0) == [(42, "H")]
+    w(chip, E1 + TBSTS, SYNCI)
+    w32(chip, GPBMUX1_32, 2)                          # GPIO32 = EPWMSYNCI too: two pins -> input 0, no sync
+    chip.pins.set_external("GPIO6", "L")
+    chip.pins.set_external("GPIO6", "H")
+    assert not r(chip, E1 + TBSTS) & SYNCI
+
+
+def test_epwmsynco_pin_pulses_8_cycles(chip):
+    w32(chip, GPAMUX1_32, 0x5 | (3 << 12))            # GPIO6 = EPWMSYNCO
+    w(chip, E1 + TBPRD, 99)
+    w(chip, E1 + TBCTL, tbctl(UP, synco=1))
+    e = edges(chip, "GPIO6")
+    t0 = start(chip)
+    chip.run_cycles(150)
+    assert cyc(chip, e, t0) == [(0, "H"), (8, "L"), (100, "H"), (108, "L")]
+
+
+# ------------------------------------------------------------------ trip-zone pins
+def tz1_pin(ch):
+    w32(ch, GPAMUX1_32, 0x5 | (1 << 24))              # GPIO12 = TZ1 (pull-up on by default)
+
+
+def test_tz1_pin_one_shot_trip(chip):
+    tz1_pin(chip)
+    pwm_up(chip, prd=99, cmpa=50)
+    w(chip, E1 + TZSEL, 1 << 8)                       # OSHT1
+    w(chip, E1 + TZCTL, 2)                            # TZA force low
+    w(chip, E1 + TZEINT, 1 << 2)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(30)
+    chip.pins.set_external("GPIO12", "L")
+    assert r(chip, E1 + TZFLG) == 5 and chip.arch.pie.ifr[2] & 1
+    chip.run_cycles(20)
+    chip.pins.set_external("GPIO12", "H")             # latched: stays tripped
+    chip.run_cycles(100)
+    assert cyc(chip, e, t0) == [(0, "H"), (30, "L")]
+    chip.pins.set_external("GPIO12", "L")
+    w(chip, E1 + TZCLR, 5)                            # pin still low: OST set again at once
+    assert r(chip, E1 + TZFLG) & 4
+    chip.pins.set_external("GPIO12", "H")
+    w(chip, E1 + TZCLR, 5)
+    assert r(chip, E1 + TZFLG) == 0
+    chip.run_cycles(100)                              # the AQ output (ZRO set at 200) shows again
+    assert [x for x in cyc(chip, e, t0)][2:] == [(200, "H"), (250, "L")]
+
+
+def test_tz1_pin_cycle_by_cycle_trip_held_while_low(chip):
+    tz1_pin(chip)
+    pwm_up(chip, prd=99, cmpa=50)
+    w(chip, E1 + TZSEL, 1)                            # CBC1
+    w(chip, E1 + TZCTL, 2)
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(30)
+    chip.pins.set_external("GPIO12", "L")             # trip at 30, still low at CTR=ZERO 100: held
+    chip.run_cycles(120)
+    w(chip, E1 + TZCLR, 2)                            # flag set again: the pin is still low
+    assert r(chip, E1 + TZFLG) & 2
+    chip.pins.set_external("GPIO12", "H")             # at 150; released at the next CTR=ZERO (200)
+    chip.run_cycles(100)
+    assert cyc(chip, e, t0) == [(0, "H"), (30, "L"), (200, "H"), (250, "L")]
+
+
+def test_tz_pin_muxed_while_low_trips(chip):
+    pwm_up(chip, prd=99, cmpa=50)
+    w(chip, E1 + TZSEL, 1 << 8)
+    w(chip, E1 + TZCTL, 2)
+    start(chip)
+    chip.run_cycles(10)
+    chip.pins.set_external("GPIO12", "L")             # GPIO12 is a GPIO: TZ1 reads 1 (not muxed)
+    assert not r(chip, E1 + TZFLG) & 4
+    tz1_pin(chip)                                     # muxed to TZ1 while low: trip
+    assert r(chip, E1 + TZFLG) & 4 and chip.pins.get("GPIO0").level() == "L"
+
+
+def test_tz5_on_gpio16_mux3(chip):
+    w32(chip, GPAMUX2_32, 3)                          # GPIO16 = TZ5
+    pwm_up(chip, prd=99, cmpa=50)
+    w(chip, E1 + TZSEL, 1 << 12)                      # OSHT5
+    w(chip, E1 + TZCTL, 1 | (1 << 2))                 # A and B forced high
+    start(chip)
+    chip.run_cycles(60)
+    chip.pins.set_external("GPIO16", "L")
+    assert chip.pins.get("GPIO0").level() == "H" and chip.pins.get("GPIO1").level() == "H"
+    assert r(chip, E1 + TZFLG) & 4
+
+
+def test_tz_high_impedance_releases_the_signal(chip):
+    ep = chip.peripherals["EPWM1"]
+    pwm_up(chip, prd=99, cmpa=50)
+    w(chip, E1 + TZCTL, 3 << 2)                       # TZA high impedance, TZB no change
+    start(chip)
+    chip.run_cycles(10)
+    assert ep.signal_driven("A") and chip.pins.signal_levels.get("EPWM1A") == "H"
+    e = edges(chip, "GPIO0")
+    t0 = chip.now_ns()
+    w(chip, E1 + TZFRC, 1 << 2)
+    assert not ep.signal_driven("A") and "EPWM1A" not in chip.pins.signal_levels
+    p0 = chip.pins.get("GPIO0")
+    assert p0.direction == "in" and p0.drive is None and p0.level() == "X"      # released, pull-up off: floats
+    assert [lvl for _, lvl in e] == ["X"]                                      # H -> X directly, no L blip
+    chip.bus.write(0x6F8C, 2, 0x0FFE)                                          # GPAPUD: pull-up on GPIO0
+    assert p0.level() == "H"
+    assert ep.signal_driven("B") and chip.pins.get("GPIO1").direction == "out"
+    w(chip, E1 + TZCLR, 5)                                                     # trip cleared at 10: driven again
+    assert ep.signal_driven("A") and p0.direction == "out" and p0.level() == "H"
+    assert cyc(chip, e, t0)[0] == (0, "X")
+
+
+# ------------------------------------------------------------------ PWM chopper
+def test_chopper_one_shot_then_carrier(chip):
+    pwm_up(chip, prd=99, cmpa=25)
+    w(chip, E1 + PCCTL, 1 | (1 << 1) | (0 << 5) | (3 << 8))     # CHPEN, OSHTWTH 1 (16 cyc), /8 carrier, duty 4/8
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(130)
+    # input high 0-25 and 100-125; one-shot 16 cycles; carrier period 8, high 4 (phase from the PCCTL write)
+    assert cyc(chip, e, t0) == [(0, "H"), (20, "L"), (24, "H"), (25, "L"), (100, "H"), (116, "L"), (120, "H"),
+                                (124, "L")]
+    assert sum("chopper" in m for m in warns(chip)) == 1
+    w(chip, E1 + PCCTL, 0)
+    assert chip.peripherals["EPWM1"]._chop_ev is None
+
+
+def test_chopper_frequency_and_duty(chip):
+    pwm_up(chip, prd=199, cmpa=100)
+    w(chip, E1 + PCCTL, 1 | (0 << 1) | (1 << 5) | (0 << 8))     # one-shot 8, carrier /16 (period 16), duty 1/8
+    e = edges(chip, "GPIO0")
+    t0 = start(chip)
+    chip.run_cycles(60)
+    # one-shot 0-8; carrier high 2 cycles every 16 (0-2, 16-18, 32-34, 48-50)
+    assert cyc(chip, e, t0) == [(0, "H"), (8, "L"), (16, "H"), (18, "L"), (32, "H"), (34, "L"), (48, "H"),
+                                (50, "L")]
+
+
+# ------------------------------------------------------------------ ADCSOCxO pin signal
+def test_soca_pulses_the_adcsocao_signal(chip):
+    w(chip, E1 + TBPRD, 99)
+    w(chip, E1 + TBCTL, tbctl(UP))
+    w(chip, E1 + ETSEL, (1 << 11) | (1 << 8))         # SOCA at CTR=ZERO
+    w(chip, E1 + ETPS, 1 << 8)
+    w32(chip, GPAMUX1_32, 0x5 | (3 << 16))            # GPIO8 = ADCSOCAO
+    pin = chip.pins.get("GPIO8")
+    assert pin.direction == "out" and pin.level() == "H"      # ADCSOCxO: output idling high (active-low pulses)
+    e = edges(chip, "GPIO8")
+    t0 = start(chip)
+    chip.run_cycles(170)
+    hsp = chip.peripherals["ADC"].hspclk_cycles()
+    assert cyc(chip, e, t0) == [(0, "L"), (32 * hsp, "H"), (100, "L"), (100 + 32 * hsp, "H")]

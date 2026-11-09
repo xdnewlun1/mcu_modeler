@@ -447,20 +447,9 @@ class PinEventPrinter:
         return v in ("H", "ON", True, 1)
 
     def _wave_stats(self, edges: list) -> tuple[int, float | None, float | None]:
-        rises = [t for t, _o, n, _l in edges if self._is_high(n)]
-        if len(rises) < 2 or rises[-1] <= rises[0]:
-            return len(edges), None, None
-        freq = (len(rises) - 1) * 1e9 / (rises[-1] - rises[0])
-        high, t_up = 0.0, None                  # duty over whole periods: first rise .. last rise
-        for t, _o, n, _l in edges:
-            if t > rises[-1]:
-                break
-            if self._is_high(n):
-                t_up = t
-            elif t_up is not None:
-                high += t - t_up
-                t_up = None
-        return len(edges), freq, 100.0 * high / (rises[-1] - rises[0])
+        from .log import wave_stats
+        freq, duty = wave_stats((t, n) for t, _o, n, _l in edges)
+        return len(edges), freq, duty
 
     @staticmethod
     def _same_wave(a: tuple | None, b: tuple) -> bool:

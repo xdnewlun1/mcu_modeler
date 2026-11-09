@@ -24,10 +24,14 @@ Behaviour:
 * MOD, IDLY and CHnDLYm are buffered: written values take effect when loaded. LDMOD=0 loads when LDOK is written
   (PDBEN must be 1); LDMOD=1/2/3 load at the next counter wrap or trigger (best-effort). LDOK reads 1 until loaded.
 * PDBEN=0 stops the counter, clears CNT and LDOK.
-* TRGSEL other than 15 (external pin, CMP, PIT, FTM, ... sources) is logged once and never triggers.
+* TRGSEL 8..11 (K22P100M120SF5V2RM Table 3-51): the FTM0..FTM3 trigger output (initialization trigger and channel
+  triggers as enabled in FTMx_EXTTRIG, kinetis.ftm `trigger_listeners`) restarts the counter like a software trigger
+  while PDBEN=1. Other TRGSEL values (external pin PDB0_EXTRG, CMP, PIT, RTC, LPTMR) are logged once and never
+  trigger.
 """
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from ..registry import register
@@ -38,6 +42,7 @@ from .dma import dma_request
 LDOK, CONT, PDBIE, PDBIF, PDBEN = 1, 2, 1 << 5, 1 << 6, 1 << 7
 DMAEN, SWTRIG, PDBEIE = 1 << 15, 1 << 16, 1 << 17
 TRG_SOFTWARE = 15
+TRG_FTM = {"FTM0": 8, "FTM1": 9, "FTM2": 10, "FTM3": 11}     # Table 3-51 "PDB Input Trigger Options"
 MULTS = (1, 10, 20, 40)
 NCH = 2
 DMA_SOURCE = 48
@@ -83,6 +88,11 @@ class PDB(GatedBlock):
         for b in chip.peripherals.values():
             if getattr(b, "model", None) == "kinetis.dmamux":
                 b.register_source(int(self.params.get("dma_source", DMA_SOURCE)), self._dma_active)
+        for nm, sel in TRG_FTM.items():
+            ftm = chip.peripherals.get(nm)
+            lst = getattr(ftm, "trigger_listeners", None)
+            if lst is not None:
+                lst.append(partial(self._input_trigger, sel))
         for n in range(self.nch):
             adc = find_model(chip, "kinetis.adc", f"ADC{n}")
             if adc is not None and getattr(adc, "index", n) != n:
@@ -224,6 +234,12 @@ class PDB(GatedBlock):
         self.running = False
         self.frozen_cnt = 0
 
+    def _input_trigger(self, sel: int, source: Any = None) -> None:
+        """A hardware trigger input (TRGSEL `sel`) fired: restarts the counter when selected and PDBEN=1."""
+        sc = self.get("SC")
+        if sc & PDBEN and (sc >> 8) & 0xF == sel:
+            self._start_cycle(now_ns(self.chip))
+
     # ------------------------------------------------------------------ ADC side
     def _pretrigger(self, n: int, m: int) -> None:
         adc = self._adcs[n] if n < len(self._adcs) else None
@@ -286,10 +302,11 @@ class PDB(GatedBlock):
             return new
         self._store(reg, new)
         trgsel = (new >> 8) & 0xF
-        if trgsel != TRG_SOFTWARE and new & LDOK and not self._warned_trg:      # configuration finished
+        if trgsel != TRG_SOFTWARE and trgsel not in TRG_FTM.values() and new & LDOK and not self._warned_trg:
             self._warned_trg = True
             self.emit("info", block=self.name, msg=f"{self.name}: trigger source TRGSEL={trgsel} is not modelled "
-                      "(only the software trigger, TRGSEL=15); the counter will not start")
+                      "(only the software trigger, TRGSEL=15, and the FTM triggers, 8-11); the counter will not "
+                      "start")
         if new & LDOK and not (new >> 18) & 3:
             self._load()
             self._resync()

@@ -4,8 +4,10 @@ DMAMUX (`kinetis.dmamux`): CHCFGn (n = 0..15, one byte each): ENBL (7), TRIG (6,
 modelled, logged once; the channel then behaves as untriggered), SOURCE (5..0).  Request sources are numbered
 as in the K22 RM DMAMUX table (`SOURCES`); 54..63 are "always enabled".  Peripherals that can request DMA call
 `dma_request(chip, source)` when their request condition becomes true (e.g. UART RDRF with C5.RDMAS, ADC COCO
-with SC2.DMAEN) and register `dmamux.register_source(source, active_fn)` so a channel enabled later (SERQ,
-CHCFG.ENBL) picks up a request that is already pending.
+with SC2.DMAEN, FTM CHnF with CnSC.DMA and CHIE) and register `dmamux.register_source(source, active_fn)` so a
+channel enabled later (SERQ, CHCFG.ENBL) picks up a request that is already pending. Sources whose request flag
+is cleared by the DMA's acknowledge (FTM CHnF) also register `register_ack(source, done_fn)`: it is called after
+each minor loop serviced while the source was requesting.
 
 DMA (`kinetis.dma`): 16 channels, TCDs at 0x1000 + 32*ch (SADDR, SOFF, ATTR, NBYTES, SLAST, DADDR, DOFF, CITER,
 DLAST_SGA, CSR, BITER), control registers CR, ES, ERQ, EEI, the byte-wide set/clear registers CEEI/SEEI/CERQ/
@@ -32,8 +34,8 @@ NCH = 16
 TCD_BASE = 0x1000
 ALWAYS_ON = range(54, 64)
 # K22 DMA request sources (subset), K22P100M120SF5V2RM Table 3-25 "DMA request sources - MUX 0" (section 3.3.9.1).
-# 11 and 46 are Reserved there (no UART5 / DAC1 on the 100-pin K22); 20-39 are FTM channels
-# (the FTM model does not raise DMA requests: CnSC.DMA is stored only).
+# 11 and 46 are Reserved there (no UART5 / DAC1 on the 100-pin K22); 20-39 are FTM channels (FTM0 CH0-7 = 20-27,
+# FTM1 CH0/1 = 28/29, FTM2 CH0/1 = 30/31, FTM3 CH0-7 = 32-39; requested by kinetis.ftm with CnSC.DMA = CHIE = 1).
 SOURCES = {"UART0_RX": 2, "UART0_TX": 3, "UART1_RX": 4, "UART1_TX": 5, "UART2_RX": 6, "UART2_TX": 7,
            "UART3_RX": 8, "UART3_TX": 9, "UART4": 10, "I2S0_RX": 12, "I2S0_TX": 13,
            "SPI0_RX": 14, "SPI0_TX": 15, "SPI1": 16, "SPI2": 17, "I2C0": 18, "I2C1": 19, "I2C2": 19,
@@ -81,6 +83,7 @@ class DMAMUX(GatedBlock):
         self.dma_name = params.get("dma", "DMA")
         self.dma: Any = None
         self._sources: dict[int, Callable[[], bool]] = {}
+        self._acks: dict[int, Callable[[], None]] = {}
         self._warned_trig = False
 
     def attach(self, chip: Any) -> None:
@@ -92,6 +95,18 @@ class DMAMUX(GatedBlock):
     # ------------------------------------------------------------------ routing
     def register_source(self, source: int, active: Callable[[], bool]) -> None:
         self._sources[int(source)] = active
+
+    def register_ack(self, source: int, done: Callable[[], None]) -> None:
+        """`done()` is called when the DMA has serviced a request of `source` (one minor loop) while the source was
+        requesting: peripherals whose request flag is cleared by the DMA acknowledge (FTM CHnF, Table 38-312)."""
+        self._acks[int(source)] = done
+
+    def acknowledge(self, ch: int) -> None:
+        s = self.source_of(ch)
+        if s is not None:
+            done = self._acks.get(s)
+            if done is not None and self.source_active(s):
+                done()
 
     def source_of(self, ch: int) -> int | None:
         """Request source routed to DMA channel ch (None if the channel is disabled)."""
@@ -325,8 +340,11 @@ class DMA(GatedBlock):
                 c = self._queue.pop(0)
                 if self.get("CR") & CR_HALT:
                     continue
+                n0 = self.transfers
                 more = self._service(c)
                 guard += 1
+                if self.transfers != n0 and self.mux is not None and self.mux._acks:
+                    self.mux.acknowledge(c)
                 # a still-active hardware request (always-on source, or a peripheral that still has data)
                 if more and self._bit("ERQ", c) and self.mux is not None:
                     s = self.mux.source_of(c)

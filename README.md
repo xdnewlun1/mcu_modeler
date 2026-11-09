@@ -402,6 +402,7 @@ exceptions taken:
 | `uart_link_sender` | board chip A: UART0 115200 at a 120 MHz core, sends `ping N\r\n` every 2 ms (SysTick, polled); toggles PTC5 per received `\n` |
 | `uart_link_echo` | board chip B: UART0 115200 at a 120 MHz core, echoes bytes uppercased; toggles PTC5 per byte |
 | `ftm_pwm` | FTM0 CH0 edge-aligned PWM on PTC1 (ALT4), 1 kHz, 25 % high, from a 60 MHz bus (`--clock 60e6`) |
+| `ftm_capture` | FTM1 CH0 input capture (rising edges, PTA12 ALT3) measures a period and prints `period <ticks>` on UART0; FTM0 CH0 makes a 10 kHz PWM on PTC1 to measure (`boards/k22_ftm_capture.yaml` wires PTC1 to PTA12: `period 6000`), or use `--at` edges on PTA12; `--clock 60e6` |
 
 `startup.c` holds the vector table (SP, 15 system exceptions, 82 IRQs), the Kinetis flash configuration
 field at 0x400, and a `Reset_Handler` that enables the FPU, copies `.data`, zeroes `.bss` and calls `main`.
@@ -482,7 +483,10 @@ Board files in `boards/`:
 | `stm32f405rg_f407ig_uart.yaml` | STM32F405RG (LQFP64) + STM32F407IG (LQFP176) | two package variants with their UART lines wired TX→RX on nets (auto link USART2 ↔ USART6, 230400 baud): the RG at 168 MHz sends `REQ n` every 2 ms, the IG on its 16 MHz HSI answers `ACK n n²` (see "STM32F405xx / STM32F407xx variants") |
 | `three_chip_demo.yaml` | K22 + STM32F405ZG + TMS320F28232 | one K22 TX net fans out to the STM32 and C2000 RX pins (two automatic links), replies over explicit links, GPIO nets, LEDs on the activity nets and a switch |
 | `logic_demo.yaml` | K22 + K22 | board parts: a switch and LED around `button_mirror`, a 1 kHz clock through an inverter into `port_irq`, an AND gate, a D flip-flop, probes and a counter (see "Parts" below) |
+| `k22_ftm_capture.yaml` | K22 | `ftm_capture` measuring its own PWM: a net from PTC1 (FTM0 CH0 PWM) to PTA12 (FTM1 CH0 input capture), prints `period 6000` (100 us at 60 MHz) |
 | `pwm_led.yaml` | STM32F405 + K22 | timer PWM outputs (`tim_pwm` TIM3 CH1 on PA6, `ftm_pwm` FTM0 CH0 on PTC1, 1 kHz 25 %) each driving an LED and a probe; the live output summarises the waveforms |
+| `c2000_ecap_loopback.yaml` | TMS320F28232 | `ecap` measuring its own ePWM1A: a net from GPIO0 (20 kHz, 30 %) to GPIO24 (eCAP1); the ISR stores period 5000 / high time 1500 SYSCLKOUT cycles |
+| `pwm_capture_3way.yaml` | STM32F405 + K22 + TMS320F28232 | one PWM, three vendors: the STM32 `tim_pwm` output (PA6, 1 kHz 25 %) on a net to the K22 FTM1 capture (`ftm_capture` on PTA12: `period 60000`) and the F28232 eCAP1 (`ecap` on GPIO24: 100000 / 25000 cycles), plus a probe; quantum 1 us so the cross-chip edges stay exact |
 
 ### Parts: switches, LEDs, logic
 
@@ -658,8 +662,10 @@ vendor family. It reuses `arch/armv7m` unchanged; everything vendor-specific is 
 - **Samples**: `firmware/samples_stm32/` (`build.sh`): `blinky` (PB0/PB7), `button_mirror` (PA0 pull-down → PB0),
   `uart_echo` (USART1 PA9/PA10 AF7, 115200 at HSI; `--at 1ms:USART1=text`), `uart_link_echo`, `exti_irq` (PA0
   rising edge → EXTI0 → toggles PB0), `tim_irq` (PLL to 168 MHz, then TIM2 at 1 ms → toggles PB0) and `tim_pwm`
-  (TIM3 CH1 PWM mode 1 on PA6, 1 kHz, 25 %, at the 16 MHz reset clock). `boards/pwm_led.yaml` runs `tim_pwm` and the
-  K22 `ftm_pwm` side by side, each PWM pin lighting an LED and watched by a probe (1 kHz).
+  (TIM3 CH1 PWM mode 1 on PA6, 1 kHz, 25 %, at the 16 MHz reset clock), `tim_capture` (TIM3 CH2 input capture on PA7,
+  rising edges at 1 MHz, prints `period <n> us` on USART1; drive PA7 with `--at` or a net). `boards/pwm_led.yaml` runs
+  `tim_pwm` and the K22 `ftm_pwm` side by side, each PWM pin lighting an LED and watched by a probe (1 kHz);
+  `boards/pwm_capture_3way.yaml` feeds the `tim_pwm` output to a K22 FTM capture and a C2000 eCAP.
 - **Board**: `chipem run --board boards/k22_stm32_uart.yaml --for 20ms` connects a K22 (`uart_link_sender` on UART0)
   to the STM32 (`uart_link_echo` on USART1). The K22 sends `ping N` and the STM32 answers `PING N`.
 - **Vendor HAL sample**: `firmware/samples_stm32_hal/` builds `uart_chat_hal.elf` from ST's own STM32CubeF4 HAL
@@ -731,15 +737,21 @@ interpreter). The first non-ARM chip: details and limitations in `docs/C2000_ROA
   (TINT0 = 38 = INT1.7) and the run summary labels them `PIE 1.7`.
 - **Models**: `sysctrl` (PLL, clock gates, watchdog), `gpio`, `xint`, `cputimer`, `sci` (SCI-A/B with FIFOs and
   interrupts; board-link endpoint; `--at 7ms:SCIA=text` once the PLL has locked), `adc` (software start; `--adc ADCINA3=2048`),
-  `spi`/`flash`/`csm` (minimal), `epwm` (ePWM1-6: time base, compare, action qualifier, dead band, software trip
-  zone, event trigger with INT and SOCA/SOCB into the ADC sequencers, EPWMxA/B pins), storage for
-  HRPWM/eCAP/eQEP/eCAN/I2C/McBSP/XINTF/DMA. EALLOW protection is enforced
+  `spi`/`flash`/`csm` (minimal), `adc` (dual/cascaded sequencers, start/stop and continuous run, SEQ1/SEQ2
+  arbitration, software / ePWM SOCA/SOCB / XINT2-pin starts, ADCCLK/ACQ_PS conversion timing, simultaneous sampling),
+  `epwm` (ePWM1-6: time base incl. TBCTR above TBPRD and CTRMAX, compare, action qualifier, dead band, PWM chopper,
+  trip zone (software and TZ1-TZ6 pins), event trigger with INT and SOCA/SOCB into the ADC sequencers, sync chain with
+  the EPWMSYNCI/EPWMSYNCO pins, EPWMxA/B pins), `ecap` (eCAP1-4: capture of pin edges with prescaler, polarity,
+  absolute/delta mode, continuous/one-shot, counter overflow, sync from ePWM1, APWM output, ECAPx_INT), storage for
+  HRPWM/eQEP/eCAN/I2C/McBSP/XINTF/DMA. EALLOW protection is enforced
   (an unprotected write is ignored with a warning). Unmodelled addresses in 0x0800-0x0FFF and 0x5000-0x7FFF become
   RAM-like stubs (`auto_stub_ranges` in the chip YAML).
 - **Samples**: `firmware/samples_c2000/` (`build.sh` → `build/*.c28img`): `blinky` (GPIO34, 1 ms), `button_mirror`
   (GPIO12 → GPIO34), `timer_irq` (CPU timer 0 at 1 ms → PIE 1.7 ISR toggles GPIO34, main loop in `IDLE`),
   `sci_echo` (SCI-A on GPIO28/29, 115200), `uart_link_echo` / `uart_link_sender` (the K22 link protocol), `epwm`
-  (ePWM1 20 kHz complementary pair with dead band on GPIO0/GPIO1).
+  (ePWM1 20 kHz complementary pair with dead band on GPIO0/GPIO1), `ecap` (ePWM1A 20 kHz 30 % on GPIO0 measured by
+  eCAP1 on GPIO24: `boards/c2000_ecap_loopback.yaml`). TI-compiled C in `firmware/samples_c2000_c/` (`build.sh`, needs
+  cl2000): `blinky`, `uart_chat`, `selftest` and `epwm` (ePWM1 20 kHz 25 % on GPIO0 with EPWM1_INT and an ADC SOCA).
   ```sh
   chipem run firmware/samples_c2000/build/timer_irq.c28img --chip tms320f28232 --for 12ms
   chipem run firmware/samples_c2000/build/sci_echo.c28img --chip tms320f28232 --for 10ms --at '7ms:SCIA=hi\n'
@@ -776,18 +788,18 @@ Modelled (behaviour beyond register storage):
 | STM32 GPIOA–I | `stm32.gpio` | MODER/OTYPER/PUPDR/AFRL/AFRH → pin owner (AF function names from the pin table), pulls, open-drain; ODR/BSRR drive the pin board; IDR from resolved pin levels; LCKR lock sequence; SWD/JTAG pins owned by AF0 after reset |
 | STM32 SYSCFG, EXTI | `stm32.syscfg`, `stm32.exti` | EXTICR port selection; rising/falling edge detection, SWIER, PR w1c, level IRQs EXTI0–4, EXTI9_5, EXTI15_10 (+ lines 16–22 via SWIER) |
 | STM32 USART1–3/6, UART4/5 | `stm32.usart` | BRR baud (OVER8), M/PCE/STOP framing, TX capture, RX queue, character-time pacing of TXE/TC/RXNE, IDLE, rc_w0 flags, TXE/TC/RXNE/IDLE IRQ; board-link endpoint |
-| STM32 TIM1–8 | `stm32.tim` | time base: PSC/ARR preload, up/down/center-aligned counting, live CNT, UG, OPM, URS/UDIS, RCR, UIF/UIE IRQ (TIM2/5 32-bit); output compare and PWM1/PWM2 on channels 1–4 (CCRx preload, CCxIF/CCxIE, CCxP/CCxNP, TIM1/8 complementary outputs with MOE/OSSI/OSSR) driving TIMx_CHn / TIMx_CHnN pins; no input capture, dead time, break or DMA (TIM9–14 are stubs) |
-| Kinetis FTM0–3 | `kinetis.ftm` (+ `kinetis.ftm_alias` for FTM2 at 0x4003A000) | 16-bit counter (bus or MCGFFCLK, prescaler, CNTIN/MOD, up and up-down, free running), TOF/CHnF IRQs, output compare, edge- and center-aligned PWM, combine with dead time, SWOCTRL/POL/OUTMASK/OUTINIT, software sync and LDOK, driving FTMx_CHn pins; no input capture, quadrature, faults or triggers |
+| STM32 TIM1–14 | `stm32.tim` | time base: PSC/ARR preload, up/down/center-aligned counting, live CNT, UG, OPM, URS/UDIS, RCR, UIF/UIE IRQ (TIM2/5 32-bit; TIM9–14 up-only with 1–2 channels); output compare and PWM1/PWM2 (CCRx preload, CCxIF/CCxIE, CCxP/CCxNP, TIM1/8 complementary outputs with MOE/OSSI/OSSR, dead time, break input/BG/AOE) driving TIMx_CHn / TIMx_CHnN pins; input capture from pin edges (direct/indirect, polarity, prescaler, overcapture), slave reset mode (PWM input), encoder mode; no input filter, gated/trigger/external-clock modes, TRGO/ITRx/ETR or DMA |
+| Kinetis FTM0–3 | `kinetis.ftm` (+ `kinetis.ftm_alias` for FTM2 at 0x4003A000) | 16-bit counter (bus or MCGFFCLK, prescaler, CNTIN/MOD, up and up-down, free running), TOF/CHnF IRQs, output compare, edge- and center-aligned PWM, combine with dead time, SWOCTRL/POL/OUTMASK/OUTINIT, software sync and LDOK, driving FTMx_CHn pins; input capture and dual edge capture from pin edges, fault inputs, quadrature decoder (FTM1/2), external clock (FTM_CLKINx), write protection, EXTTRIG triggers into PDB0, channel DMA requests; no input filters, INVCTRL or hardware sync triggers |
 | STM32 IWDG, WWDG | `stm32.iwdg`, `stm32.wwdg` | IWDG keys 0xCCCC/0xAAAA/0x5555, LSI 32 kHz prescaler/reload, timeout → chip reset + CSR.IWDGRSTF; WWDG is storage (warns when enabled) |
 | STM32 FLASH, PWR, DBGMCU | `stm32.flash`, `stm32.pwr`, `stm32.dbgmcu` | ACR latency readback, KEYR unlock/CR.LOCK, sector/mass erase; VOSRDY=1; IDCODE 0x413 |
 
 Stubs (RAM-like storage, first access to each word logged): AIPS0/1, AXBS, FB, MPU, FMC, CAN0, I2S0, CRC,
-USBDCD, EWM, CMT, I2C0–2, USB0, CMP, VREF, SDHC, DAC0, MCM (STM32: TIM9–14 among others). Any
+USBDCD, EWM, CMT, I2C0–2, USB0, CMP, VREF, SDHC, DAC0, MCM (STM32: see below). Any
 access to an unlisted address in 0x40000000–0x400FFFFF or 0xE0000000–0xE00FFFFF (DWT, ITM, FPB, TPIU, ...)
 creates a 4 KB RAM-like stub on first touch and logs `access to unmodelled region`. Other unmapped addresses
 bus-fault.
 
-STM32F405ZG stubs: TIM9–14, RTC, SPI1–3/I2S2ext/I2S3ext, I2C1–3, CAN1/2, DAC, ADC1–3, SDIO, CRC, DMA1/2, USB OTG
+STM32F405ZG stubs: RTC, SPI1–3/I2S2ext/I2S3ext, I2C1–3, CAN1/2, DAC, ADC1–3, SDIO, CRC, DMA1/2, USB OTG
 FS/HS, FSMC, RNG, and (F407/F415/F417-only blocks, kept so family code does not fault) Ethernet, DCMI, CRYP, HASH.
 SysTick `CLKSOURCE=0` counts at core clock / `systick_ext_div` (chip YAML, default 8 = STM32 HCLK/8). The K22
 YAMLs do not set it, so Kinetis also uses /8 (not confirmed against the K22 reference manual).
@@ -1066,9 +1078,9 @@ chipem/
   arch/c28x/          C28x interrupt architecture: PIE (pie.py), CPU vectors, interrupt entry (arch.py)
   periph/base.py      Reg / MMIOBlock
   periph/registry.py  model-name registry, `stub` and `ram` models
-  periph/kinetis/     Kinetis models (sim, mcg, port, gpio, wdog, pit, lptmr, uart, dspi, dma, rtc, adc, ftfe, power)
+  periph/kinetis/     Kinetis models (sim, mcg, port, gpio, wdog, pit, lptmr, uart, dspi, dma, rtc, adc, pdb, ftm, ftfe, power)
   periph/stm32/       STM32F4 models (rcc, gpio, exti/syscfg, usart, tim, system: iwdg/wwdg/flash/pwr/dbgmcu)
-  periph/ti_c2000/    TI C2000 models (sysctrl, gpio, xint, cputimer, sci, adc, misc: flash/csm/spi/storage)
+  periph/ti_c2000/    TI C2000 models (sysctrl, gpio, xint, cputimer, sci, adc, epwm, ecap, misc: flash/csm/spi/storage)
 chips/                chip descriptions (hand-written) and register tables (generated); README.md
 boards/               board descriptions (several chips + nets/links), e.g. two_k22_uart.yaml
 tools/svd2chip.py     CMSIS-SVD → chips/<family>_regs.yaml; --check compares a chip YAML with the SVD
@@ -1084,7 +1096,7 @@ docs/                 design and reference documents
 ## Tests
 
 ```sh
-.venv/bin/python -m pytest -q          # about 1400 tests, about 45 s
+.venv/bin/python -m pytest -q          # about 1800 tests, about 70 s
 ```
 
 The suite covers the pin model, MMIO sub-word semantics, the bus, virtual time, the exception model

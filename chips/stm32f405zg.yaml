@@ -37,9 +37,9 @@ peripherals:
   - {name: TIM5, model: stm32.tim, base: 0x40000C00, size: 0x400}
   - {name: TIM6, model: stm32.tim, base: 0x40001000, size: 0x400}
   - {name: TIM7, model: stm32.tim, base: 0x40001400, size: 0x400}
-  - {name: TIM12, model: stub, base: 0x40001800, size: 0x400}
-  - {name: TIM13, model: stub, base: 0x40001C00, size: 0x400}
-  - {name: TIM14, model: stub, base: 0x40002000, size: 0x400}
+  - {name: TIM12, model: stm32.tim, base: 0x40001800, size: 0x400}
+  - {name: TIM13, model: stm32.tim, base: 0x40001C00, size: 0x400}
+  - {name: TIM14, model: stm32.tim, base: 0x40002000, size: 0x400}
   - {name: RTC, model: stub, base: 0x40002800, size: 0x400}   # RTC and backup registers
   - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400}
   - {name: IWDG, model: stm32.iwdg, base: 0x40003000, size: 0x400}
@@ -71,9 +71,9 @@ peripherals:
   - {name: SPI1, model: stub, base: 0x40013000, size: 0x400}
   - {name: SYSCFG, model: stm32.syscfg, base: 0x40013800, size: 0x400}
   - {name: EXTI, model: stm32.exti, base: 0x40013C00, size: 0x400}
-  - {name: TIM9, model: stub, base: 0x40014000, size: 0x400}
-  - {name: TIM10, model: stub, base: 0x40014400, size: 0x400}
-  - {name: TIM11, model: stub, base: 0x40014800, size: 0x400}
+  - {name: TIM9, model: stm32.tim, base: 0x40014000, size: 0x400}
+  - {name: TIM10, model: stm32.tim, base: 0x40014400, size: 0x400}
+  - {name: TIM11, model: stm32.tim, base: 0x40014800, size: 0x400}
   # AHB1
   - {name: GPIOA, model: stm32.gpio, base: 0x40020000, size: 0x400, params: {port: A}}
   - {name: GPIOB, model: stm32.gpio, base: 0x40020400, size: 0x400, params: {port: B}}

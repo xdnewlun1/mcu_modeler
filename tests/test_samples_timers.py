@@ -70,3 +70,38 @@ def test_ftm_pwm_sample_1khz_25_percent():
     assert len(periods) >= 19, edges[:6]
     assert all(abs(p - 1e6) < 50 for p in periods), periods[:5]          # 60000 bus ticks
     assert all(abs(h - 250e3) < 50 for h in highs), highs[:5]            # C0V = 15000 ticks
+
+
+ROOT = Path(__file__).resolve().parent.parent
+_CAPTURE_FW = BUILD / "ftm_capture.elf"
+
+
+@pytest.mark.skipif(not _CAPTURE_FW.exists(), reason="ftm_capture sample not built (firmware/samples/build.sh)")
+def test_ftm_capture_sample_measures_its_own_pwm_through_a_board_net():
+    """boards/k22_ftm_capture.yaml: FTM0 CH0 PWM on PTC1 (MOD 5999, 10 kHz) wired to PTA12 = FTM1_CH0; FTM1 input
+    capture (free running at 60 MHz) measures 6000 ticks per period and the sample prints it on UART0."""
+    from chipem.board import load_board
+    s = Session.from_board(load_board(ROOT / "boards/k22_ftm_capture.yaml"))
+    try:
+        s.run_for(8e6)
+        out = s.uart_output("A.UART0").decode()
+        counts = {name: n for _, name, n in s.irq_summary()}
+    finally:
+        s.close()
+    assert out.startswith("ftm_capture\r\n") and out.count("period 6000\r\n") == 5, out
+    assert "period" not in out.replace("period 6000\r\n", "")
+
+
+@pytest.mark.skipif(not _CAPTURE_FW.exists(), reason="ftm_capture sample not built (firmware/samples/build.sh)")
+def test_ftm_capture_sample_measures_injected_edges():
+    """Without the wire: rising edges injected on PTA12 (like --at) at 1 ms, 1.25 ms and 2.2 ms -> 250 us = 15000
+    ticks, then 950 us = 57000 ticks."""
+    s = Session("mk22fn1m0vll12", _CAPTURE_FW, clock_hz=60e6)
+    try:
+        for t, lvl in ((1e6, 1), (1.1e6, 0), (1.25e6, 1), (1.3e6, 0), (2.2e6, 1)):
+            s.schedule_pin(t, "PTA12", lvl)
+        s.run_for(4e6)
+        out = s.uart_output("UART0").decode()
+    finally:
+        s.close()
+    assert out == "ftm_capture\r\nperiod 15000\r\nperiod 57000\r\n", out

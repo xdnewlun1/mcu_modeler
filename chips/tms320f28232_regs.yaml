@@ -3,7 +3,7 @@
 # Generated once from a transcription script (register names/offsets/reset values) of:
 #   SPRS439Q TMS320F2833x/F2823x data sheet (section 8: memory map, peripheral frames, Table 8-17 GPIO,
 #   8-27..8-35), SPRUFB0 TMS320x2833x/2823x System Control and Interrupts reference guide (PLL, clocks, watchdog,
-#   CPU timers, PIE, GPIO, XINT), SPRUFZ5 SCI guide, SPRU812 ADC guide, SPRUG04 ePWM, SPRUG79 I2C.
+#   CPU timers, PIE, GPIO, XINT), SPRUFZ5 SCI guide, SPRU812 ADC guide, SPRUG04 ePWM, SPRUFG4A eCAP, SPRUG79 I2C.
 # Address units are 16-bit words: offsets/sizes/widths count words; a width-2 register is 32 bits with its low
 # word at the lower address. Peripherals not on the F28232 (SCI-C, McBSP-B, eCAP5/6) are omitted.
 device: TMS320F28232
@@ -1039,7 +1039,7 @@ peripherals:
     base: 0x6A00
     size: 0x020
     derived_from: null
-    description: "eCAP1 (storage only)"
+    description: "eCAP1 (modelled by ti_c2000.ecap; SPRUFG4A Table 13)"
     group: ECAP
     interrupts: {56: ECAP1_INT}
     registers:
@@ -1049,17 +1049,73 @@ peripherals:
       - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CAP1POL, lsb: 0, width: 1},
+          {name: CTRRST1, lsb: 1, width: 1},
+          {name: CAP2POL, lsb: 2, width: 1},
+          {name: CTRRST2, lsb: 3, width: 1},
+          {name: CAP3POL, lsb: 4, width: 1},
+          {name: CTRRST3, lsb: 5, width: 1},
+          {name: CAP4POL, lsb: 6, width: 1},
+          {name: CTRRST4, lsb: 7, width: 1},
+          {name: CAPLDEN, lsb: 8, width: 1},
+          {name: PRESCALE, lsb: 9, width: 5},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONT_ONESHT, lsb: 0, width: 1},
+          {name: STOP_WRAP, lsb: 1, width: 2},
+          {name: REARM, lsb: 3, width: 1},
+          {name: TSCTRSTOP, lsb: 4, width: 1},
+          {name: SYNCI_EN, lsb: 5, width: 1},
+          {name: SYNCO_SEL, lsb: 6, width: 2},
+          {name: SWSYNC, lsb: 8, width: 1},
+          {name: CAP_APWM, lsb: 9, width: 1},
+          {name: APWMPOL, lsb: 10, width: 1},
+        ]}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
   ECAP2:
     base: 0x6A20
     size: 0x020
     derived_from: null
-    description: "eCAP2 (storage only)"
+    description: "eCAP2 (modelled by ti_c2000.ecap; SPRUFG4A Table 13)"
     group: ECAP
     interrupts: {57: ECAP2_INT}
     registers:
@@ -1069,17 +1125,73 @@ peripherals:
       - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CAP1POL, lsb: 0, width: 1},
+          {name: CTRRST1, lsb: 1, width: 1},
+          {name: CAP2POL, lsb: 2, width: 1},
+          {name: CTRRST2, lsb: 3, width: 1},
+          {name: CAP3POL, lsb: 4, width: 1},
+          {name: CTRRST3, lsb: 5, width: 1},
+          {name: CAP4POL, lsb: 6, width: 1},
+          {name: CTRRST4, lsb: 7, width: 1},
+          {name: CAPLDEN, lsb: 8, width: 1},
+          {name: PRESCALE, lsb: 9, width: 5},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONT_ONESHT, lsb: 0, width: 1},
+          {name: STOP_WRAP, lsb: 1, width: 2},
+          {name: REARM, lsb: 3, width: 1},
+          {name: TSCTRSTOP, lsb: 4, width: 1},
+          {name: SYNCI_EN, lsb: 5, width: 1},
+          {name: SYNCO_SEL, lsb: 6, width: 2},
+          {name: SWSYNC, lsb: 8, width: 1},
+          {name: CAP_APWM, lsb: 9, width: 1},
+          {name: APWMPOL, lsb: 10, width: 1},
+        ]}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
   ECAP3:
     base: 0x6A40
     size: 0x020
     derived_from: null
-    description: "eCAP3 (storage only)"
+    description: "eCAP3 (modelled by ti_c2000.ecap; SPRUFG4A Table 13)"
     group: ECAP
     interrupts: {58: ECAP3_INT}
     registers:
@@ -1089,17 +1201,73 @@ peripherals:
       - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CAP1POL, lsb: 0, width: 1},
+          {name: CTRRST1, lsb: 1, width: 1},
+          {name: CAP2POL, lsb: 2, width: 1},
+          {name: CTRRST2, lsb: 3, width: 1},
+          {name: CAP3POL, lsb: 4, width: 1},
+          {name: CTRRST3, lsb: 5, width: 1},
+          {name: CAP4POL, lsb: 6, width: 1},
+          {name: CTRRST4, lsb: 7, width: 1},
+          {name: CAPLDEN, lsb: 8, width: 1},
+          {name: PRESCALE, lsb: 9, width: 5},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONT_ONESHT, lsb: 0, width: 1},
+          {name: STOP_WRAP, lsb: 1, width: 2},
+          {name: REARM, lsb: 3, width: 1},
+          {name: TSCTRSTOP, lsb: 4, width: 1},
+          {name: SYNCI_EN, lsb: 5, width: 1},
+          {name: SYNCO_SEL, lsb: 6, width: 2},
+          {name: SWSYNC, lsb: 8, width: 1},
+          {name: CAP_APWM, lsb: 9, width: 1},
+          {name: APWMPOL, lsb: 10, width: 1},
+        ]}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
   ECAP4:
     base: 0x6A60
     size: 0x020
     derived_from: null
-    description: "eCAP4 (storage only)"
+    description: "eCAP4 (modelled by ti_c2000.ecap; SPRUFG4A Table 13)"
     group: ECAP
     interrupts: {59: ECAP4_INT}
     registers:
@@ -1109,12 +1277,68 @@ peripherals:
       - {name: CAP2, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP3, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: CAP4, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: ECCTL1, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CAP1POL, lsb: 0, width: 1},
+          {name: CTRRST1, lsb: 1, width: 1},
+          {name: CAP2POL, lsb: 2, width: 1},
+          {name: CTRRST2, lsb: 3, width: 1},
+          {name: CAP3POL, lsb: 4, width: 1},
+          {name: CTRRST3, lsb: 5, width: 1},
+          {name: CAP4POL, lsb: 6, width: 1},
+          {name: CTRRST4, lsb: 7, width: 1},
+          {name: CAPLDEN, lsb: 8, width: 1},
+          {name: PRESCALE, lsb: 9, width: 5},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: ECCTL2, offset: 0x15, width: 1, reset: 0x0006, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CONT_ONESHT, lsb: 0, width: 1},
+          {name: STOP_WRAP, lsb: 1, width: 2},
+          {name: REARM, lsb: 3, width: 1},
+          {name: TSCTRSTOP, lsb: 4, width: 1},
+          {name: SYNCI_EN, lsb: 5, width: 1},
+          {name: SYNCO_SEL, lsb: 6, width: 2},
+          {name: SWSYNC, lsb: 8, width: 1},
+          {name: CAP_APWM, lsb: 9, width: 1},
+          {name: APWMPOL, lsb: 10, width: 1},
+        ]}
+      - {name: ECEINT, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFLG, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECCLR, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
+      - {name: ECFRC, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CEVT1, lsb: 1, width: 1},
+          {name: CEVT2, lsb: 2, width: 1},
+          {name: CEVT3, lsb: 3, width: 1},
+          {name: CEVT4, lsb: 4, width: 1},
+          {name: CTROVF, lsb: 5, width: 1},
+          {name: CTR_EQ_PRD, lsb: 6, width: 1},
+          {name: CTR_EQ_CMP, lsb: 7, width: 1},
+        ]}
   EQEP1:
     base: 0x6B00
     size: 0x040

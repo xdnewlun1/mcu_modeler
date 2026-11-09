@@ -95,3 +95,30 @@ def test_pin_burst_none_stores_everything():
     log = EventLog(pin_burst=None)
     n = _pwm(log, "PA6", 0, 100e6, 50e3)
     assert len(log) == n
+
+
+def _glitch_then_1khz(t0=0.0, periods=20):
+    """A start-up glitch (short pulse 30 us after t0) then a clean 1 kHz, 25 % train from t0 + 100 us."""
+    e = [(t0 + 30e3, "H"), (t0 + 31e3, "L")]
+    t = t0 + 100e3
+    for _ in range(periods):
+        e += [(t, "H"), (t + 250e3, "L")]
+        t += 1e6
+    return e
+
+
+def test_wave_stats_ignores_startup_glitch():
+    from chipem.log import wave_stats
+    f, d = wave_stats(_glitch_then_1khz())
+    assert round(f, 3) == 1000.0 and round(d, 1) == 25.0
+    assert wave_stats([(0, "H"), (5, "L")]) == (None, None)
+
+
+def test_stored_wave_event_uses_median_period():
+    log = EventLog(pin_burst=0, pin_dense_edges=3)
+    for t, v in _glitch_then_1khz(periods=8):
+        log.event("pin", t, pin="PA6", field="level", old=None, new=v)
+    log.flush_waves()
+    w = [e for e in log if e.get("field") == "wave"]
+    assert len(w) == 1 and round(w[0].freq_hz, 3) == 1000.0 and round(w[0].duty, 1) == 25.0
+    assert w[0].edges + len([e for e in log if e.get("field") == "level"]) == 18

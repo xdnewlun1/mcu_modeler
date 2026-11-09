@@ -233,3 +233,25 @@ def test_tim_pwm_sample_first_period_exact(desc):
     assert falls[0] - t_cen == pytest.approx(250e3, abs=1)
     assert rises[1] - t_cen == pytest.approx(1e6, abs=1)
     assert rises[2] - rises[1] == pytest.approx(1e6, abs=1)
+
+
+def test_tim_capture_sample_measures_injected_period():
+    """tim_capture: TIM3 CH2 (PA7) input capture at 1 MHz; the ISR reads CCR2 and the main loop prints the period
+    between rising edges.  Edges come from Session stimulus ("TIME:PA7=LEVEL", the `--at` syntax): five rising
+    edges 2000 us apart, then one 2500 us later, then 1750 us later (each line takes ~1.4 ms to print)."""
+    elf = BUILD / "tim_capture.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    rises = [1000 + 2000 * k for k in range(5)] + [11500, 13250]
+    for t in rises:
+        s.apply_stimulus(f"{t}us:PA7=1")
+        s.apply_stimulus(f"{t + 300}us:PA7=0")
+    s.run_for(16e6)
+    out = s.uart_output("USART1").decode()
+    assert out == "capture ready\r\n" + "period 2000 us\r\n" * 4 + "period 2500 us\r\nperiod 1750 us\r\n", out
+    sym = lambda n: s.chip.bus.read(data_symbol(elf, n), 4)                     # noqa: E731
+    assert sym("captures") == 7 and sym("overcaptures") == 0
+    pa7 = s.chip.pins.get("PA7")
+    assert (pa7.owner, pa7.direction, pa7.pull) == ("TIM3_CH2", "in", "down")
+    s.close()

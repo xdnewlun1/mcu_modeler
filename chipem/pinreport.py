@@ -298,8 +298,9 @@ WAVE_EDGES = 65                 # edges looked at for the frequency / duty of a 
 
 def wave_of(rec: PinRecord | None, now: float | None = None) -> dict | None:
     """{"edges", "freq_hz", "duty", "last_ns"} of a pin from its recent edges (any driver: PWM channel, GPIO, net),
-    or None without edges. Frequency from the rising edges, duty (% high) over whole periods; both None with fewer
-    than three rising edges or once the pin has been still for more than 4 periods (`now`)."""
+    or None without edges. `edges` is exact (all level changes); frequency and duty come from log.wave_stats over the
+    last WAVE_EDGES edges (median period, so a start-up glitch does not skew them); both None with fewer than three
+    rising edges or once the pin has been still for more than 4 periods (`now`)."""
     if rec is None or not rec.level_events:
         return None
     ts, lv = rec.edge_times, rec.edge_levels
@@ -309,23 +310,16 @@ def wave_of(rec: PinRecord | None, now: float | None = None) -> dict | None:
         return out
     k0 = len(ts) - n
     e = [(ts[k0 + i], lv[len(lv) - n + i]) for i in range(n)]
-    rises = [t for t, v in e if v == "H"]
-    if len(rises) < 3 or rises[-1] <= rises[0]:
+    if sum(1 for _t, v in e if v == "H") < 3:
         return out
-    per = (rises[-1] - rises[0]) / (len(rises) - 1)
-    if now is not None and now - e[-1][0] > 4 * per:
+    from .log import wave_stats
+    freq, duty = wave_stats(e)
+    if freq is None:
+        return out
+    if now is not None and now - e[-1][0] > 4e9 / freq:
         return out                                      # stopped
-    high, t_up = 0.0, None
-    for t, v in e:
-        if t > rises[-1]:
-            break
-        if v == "H":
-            t_up = t
-        elif t_up is not None and t >= rises[0]:
-            high += t - t_up
-            t_up = None
-    out["freq_hz"] = round(1e9 / per, 3)
-    out["duty"] = round(100.0 * high / (rises[-1] - rises[0]), 1)
+    out["freq_hz"] = round(freq, 3)
+    out["duty"] = None if duty is None else round(duty, 1)
     return out
 
 

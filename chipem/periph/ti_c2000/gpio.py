@@ -17,6 +17,7 @@ counters returned by `pin_stats()`.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..registry import register
@@ -28,6 +29,7 @@ _PORT_NPINS = {"A": 32, "B": 32, "C": 24}
 _CTRL_BASE = {"A": 0x00, "B": 0x10, "C": 0x20}
 _DATA_BASE = {"A": 0x40, "B": 0x48, "C": 0x50}
 _DATA_OFF = {0x40: "A", 0x48: "B", 0x50: "C"}
+_EPWM_SIG = re.compile(r"^EPWM(\d+)([AB])$")
 
 
 def _zero(blk, reg):
@@ -149,20 +151,50 @@ class GPIO(C2000Block):
             sel = (self.get(f"GPIOXINT{n}SEL") & 0x1F) + 32
         return self.pin_for(sel)
 
-    def _sync_pin(self, port: str, i: int, quiet: bool = False) -> None:
-        pin = self.pins[port][i]
-        if pin is None or self.chip is None or self.chip.pins is None:
-            return
+    def pin_config(self, port: str, i: int) -> tuple[str, str, str | None, str | None]:
+        """(owner, direction, drive, pull) of pin `port`/`i` from the current registers.  A peripheral output whose
+        block says it does not drive the signal now (`signal_driven`, e.g. an ePWM tripped to high impedance) is
+        reported as an input with no drive (level from the pull-up, a net or X)."""
         fn = self.pin_function(port, i)
         pull = None if self.get(f"GP{port}PUD") >> i & 1 else "up"
         if fn == "GPIO":
             if self.get(f"GP{port}DIR") >> i & 1:
-                kw = dict(owner="GPIO", direction="out", drive="H" if self.latch[port] >> i & 1 else "L")
-            else:
-                kw = dict(owner="GPIO", direction="in", drive=None)
-        else:
-            d, drv = SIGNALS.pin_state(fn if fn != "reserved" else None)
-            kw = dict(owner=fn, direction=d, drive=drv)
+                return "GPIO", "out", ("H" if self.latch[port] >> i & 1 else "L"), pull
+            return "GPIO", "in", None, pull
+        d, drv = SIGNALS.pin_state(fn if fn != "reserved" else None)
+        if d == "out" and self._signal_released(fn):
+            d, drv = "in", None
+        return fn, d, drv, pull
+
+    def _signal_released(self, fn: str) -> bool:
+        """Pin function `fn` (or one of its '/'-parts): does the owning block say it does not drive it now?"""
+        periphs = getattr(self.chip, "peripherals", None) or {}
+        for part in fn.split("/"):
+            m = _EPWM_SIG.match(part.strip())
+            if m is None:
+                continue
+            f = getattr(periphs.get(f"EPWM{m[1]}"), "signal_driven", None)
+            if f is not None:
+                return not f(m[2])
+        return False
+
+    def resync_signal(self, sig: str) -> None:
+        """A peripheral started or stopped driving `sig`: re-evaluate the pins muxed to it."""
+        board = getattr(self.chip, "pins", None)
+        if board is None:
+            return
+        for p in PORTS:
+            for i, pin in enumerate(self.pins[p]):
+                if pin is not None and self.mux(p, i) and board.signal_matches(pin.owner, sig):
+                    self._sync_pin(p, i, quiet=True)
+                    self._dat[p] = None
+
+    def _sync_pin(self, port: str, i: int, quiet: bool = False) -> None:
+        pin = self.pins[port][i]
+        if pin is None or self.chip is None or self.chip.pins is None:
+            return
+        owner, d, drv, pull = self.pin_config(port, i)
+        kw = dict(owner=owner, direction=d, drive=drv)
         old = (pin.owner, pin.direction, pin.pull)
         self.chip.pins.mcu_update(pin, pull=pull, **kw)
         if not quiet and old != (pin.owner, pin.direction, pin.pull):

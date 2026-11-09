@@ -16,6 +16,7 @@ TABLE = SignalTable([
     (r"CANTX[AB]", OUT_H),
     (r"CANRX[AB]", IN),
     (r"EPWM\d+[AB]|EPWMSYNCO", OUT_L),
+    (r"ADCSOC[AB]O", OUT_H),                 # active-low start-of-conversion pulses
     (r"EPWMSYNCI|TZ\d+|EQEP\d+[ABIS]", IN),
     (r"XCLKOUT", OUT_L),
     (r"ADCIN[AB]\d+", ANALOG),

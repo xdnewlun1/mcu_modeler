@@ -410,12 +410,174 @@ def test_adc_software_conversion(chip):
     wr(chip, 0x7103, 0x0093)                              # CONV00 = A3, CONV01 = B1
     wr(chip, 0x0CE2, 1)                                   # PIEIER1.1 SEQ1INT
     wr(chip, 0x7101, 0x2800)                              # SOC_SEQ1 | INT_ENA_SEQ1
-    chip.run_for(1000)
+    chip.run_for(3000)                                    # ADCCLK = HSPCLK = 5 MHz here: results at 15, 19 cycles
     assert rd(chip, 0x7108) == 0x800 << 4 and rd(chip, 0x7109) == 0x123 << 4
     assert rd(chip, 0x0B00) == 0x800 and rd(chip, 0x0B01) == 0x123
     assert rd(chip, 0x7119) & 1 and pie_flags(chip, 1) & 1
     wr(chip, 0x7119, 0x0010)                              # INT_SEQ1_CLR
     assert not rd(chip, 0x7119) & 1
+
+
+ADCTRL1, ADCTRL2, ADCMAXCONV, ADCCHSEL1, ADCASEQSR, ADCRES0, ADCTRL3, ADCST, HISPCP = \
+    0x7100, 0x7101, 0x7102, 0x7103, 0x7107, 0x7108, 0x7118, 0x7119, 0x701A
+CASC, CONT_RUN, SEQ_OVRD = 1 << 4, 1 << 6, 1 << 5
+SOC1, RST1, INT_ENA1, INT_MOD1, EXT_SOC1, SOC2, INT_ENA2 = 1 << 13, 1 << 14, 1 << 11, 1 << 10, 1 << 7, 1 << 5, 1 << 3
+
+
+def adc_on(c):
+    wr(c, 0x701C, 1 << 3)                                 # PCLKCR0.ADCENCLK
+    wr(c, ADCTRL3, 0x00E0)                                # bandgap, reference and core powered up
+
+
+def run_to(c, t):
+    c.run_cycles(t - c.now_cycles())
+
+
+@pytest.mark.parametrize("hispcp,clkps,cps,acq,first,step", [
+    (1, 0, 0, 0, 15, 4),                                  # ADCCLK = HSPCLK = SYSCLKOUT / 2: 2 cycles
+    (0, 0, 0, 0, 8, 2),                                   # ADCCLK = SYSCLKOUT: 3 (2.5 rounded up) + 1 + 4
+    (1, 1, 1, 3, 84, 40),                                 # HSPCLK / 2 / 2 = 8 cycles; ACQ_PS = 3
+])
+def test_adc_conversion_timing_from_the_clock_registers(chip, hispcp, clkps, cps, acq, first, step):
+    """SPRS439 7.10.4: first result 2.5 + (ACQ_PS + 1) + 4 ADCCLK after the trigger, then one every 2 + ACQ_PS."""
+    adc = chip.peripherals["ADC"]
+    for i in range(3):
+        adc.set_channel(f"A{i}", 0x100 + i)
+    adc_on(chip)
+    wr(chip, HISPCP, hispcp)
+    wr(chip, ADCTRL3, 0x00E0 | (clkps << 1))
+    wr(chip, ADCTRL1, CASC | (cps << 7) | (acq << 8))
+    wr(chip, ADCMAXCONV, 2)                               # 3 conversions
+    wr(chip, ADCCHSEL1, 0x210)
+    c0 = chip.now_cycles()
+    wr(chip, ADCTRL2, SOC1 | INT_ENA1)
+    assert rd(chip, ADCST) & 4 and (rd(chip, ADCASEQSR) >> 8) & 0xF == 2      # SEQ1_BSY, SEQ_CNTR = MAX_CONV1
+    times = [first, first + step, first + 2 * step]
+    for k, t in enumerate(times):
+        run_to(chip, c0 + t - 1)
+        assert rd(chip, ADCRES0 + k) == 0
+        run_to(chip, c0 + t)
+        assert rd(chip, ADCRES0 + k) == (0x100 + k) << 4 and rd(chip, 0x0B00 + k) == 0x100 + k
+        if k < 2:
+            assert (rd(chip, ADCASEQSR) >> 8) & 0xF == 1 - k and not rd(chip, ADCST) & 1
+    st = rd(chip, ADCST)
+    assert st & 1 and not st & 4 and pie_flags(chip, 1) & 1      # EOS at the last result: INT_SEQ1, SEQ1INT
+    assert rd(chip, ADCASEQSR) & 0xF == 3
+
+
+def test_adc_simultaneous_sampling(chip):
+    adc = chip.peripherals["ADC"]
+    for i in range(8):
+        adc.set_channel(f"A{i}", 0x10 + i)
+        adc.set_channel(f"B{i}", 0x20 + i)
+    adc_on(chip)
+    wr(chip, ADCTRL3, 0x00E1)                             # SMODE_SEL
+    wr(chip, ADCTRL1, CASC)
+    wr(chip, ADCMAXCONV, 1)                               # 2 pairs
+    wr(chip, ADCCHSEL1, 0x92)                             # CONV00 = A2/B2, CONV01 = 9 -> A1/B1 (MSB ignored)
+    c0 = chip.now_cycles()
+    wr(chip, ADCTRL2, SOC1)
+    run_to(chip, c0 + 15)                                 # A at 15, B one ADCCLK (2) later, next pair 3 ADCCLK on
+    assert [rd(chip, 0x0B00 + k) for k in range(4)] == [0x12, 0, 0, 0]
+    run_to(chip, c0 + 17)
+    assert [rd(chip, 0x0B00 + k) for k in range(4)] == [0x12, 0x22, 0, 0]
+    run_to(chip, c0 + 22)
+    assert not rd(chip, ADCST) & 1
+    run_to(chip, c0 + 23)
+    assert [rd(chip, 0x0B00 + k) for k in range(4)] == [0x12, 0x22, 0x11, 0x21] and rd(chip, ADCST) & 1
+
+
+@pytest.mark.parametrize("ovrd", [0, 1])
+def test_adc_continuous_run(chip, ovrd):
+    adc = chip.peripherals["ADC"]
+    adc_on(chip)
+    wr(chip, ADCTRL1, CASC | CONT_RUN | (SEQ_OVRD if ovrd else 0))
+    wr(chip, ADCMAXCONV, 1)                               # 2 conversions per session
+    wr(chip, ADCCHSEL1, 0x1010)                           # A0, A1, A0, A1
+    wr(chip, 0x7104, 0x1010)
+    adc.set_channel("A0", 5)
+    adc.set_channel("A1", 6)
+    c0 = chip.now_cycles()
+    wr(chip, ADCTRL2, SOC1 | INT_ENA1)
+    run_to(chip, c0 + 19)                                 # session 1 ends at 19 (15, 19)
+    assert rd(chip, ADCST) & 1
+    wr(chip, ADCST, 1 << 4)                               # INT_SEQ1_CLR
+    run_to(chip, c0 + 26)                                 # session 2 runs on back to back: 23, 27
+    assert not rd(chip, ADCST) & 1 and rd(chip, ADCST) & 4
+    run_to(chip, c0 + 27)
+    assert rd(chip, ADCST) & 1
+    run_to(chip, c0 + 35)                                 # session 3: 31, 35
+    res = [rd(chip, 0x0B00 + k) for k in range(8)]
+    if ovrd:                                              # SEQ_OVRD: on through the result registers
+        assert res == [5, 6, 5, 6, 5, 6, 0, 0] and rd(chip, ADCASEQSR) & 0xF == 6
+    else:                                                 # back to CONV00 at every end of sequence
+        assert res == [5, 6, 0, 0, 0, 0, 0, 0] and rd(chip, ADCASEQSR) & 0xF == 0
+    n = adc.conversions
+    wr(chip, ADCTRL1, CASC)                               # CONT_RUN off: stops after the current session
+    run_to(chip, c0 + 200)
+    assert adc.conversions == n + 2 and not rd(chip, ADCST) & 4
+
+
+def test_adc_int_mod_every_other_end_of_sequence(chip):
+    adc_on(chip)
+    wr(chip, ADCTRL1, CASC)
+    wr(chip, ADCTRL2, INT_ENA1 | INT_MOD1)
+    wr(chip, ADCTRL2, INT_ENA1 | INT_MOD1 | SOC1)
+    chip.run_cycles(40)
+    st = rd(chip, ADCST)
+    assert not st & 1 and st & (1 << 6) and not pie_flags(chip, 1) & 1      # EOS_BUF1 set, no interrupt
+    wr(chip, ADCTRL2, INT_ENA1 | INT_MOD1 | SOC1)
+    chip.run_cycles(40)
+    st = rd(chip, ADCST)
+    assert st & 1 and not st & (1 << 6) and pie_flags(chip, 1) & 1
+
+
+def test_adc_dual_sequencer_arbitration(chip):
+    """One converter: a SEQ1 SOC while SEQ2 converts waits; when both are pending SEQ1 goes first."""
+    adc = chip.peripherals["ADC"]
+    adc.set_channel("A0", 1)
+    adc.set_channel("B0", 2)
+    adc_on(chip)
+    wr(chip, ADCTRL1, 0)                                  # dual sequencers, 1 conversion each
+    wr(chip, ADCCHSEL1, 0x0)                              # CONV00 = A0
+    wr(chip, 0x7105, 0x8)                                 # CONV08 = B0
+    c0 = chip.now_cycles()
+    wr(chip, ADCTRL2, SOC2)                               # SEQ2 converts 0 .. 15
+    chip.run_cycles(1)
+    wr(chip, ADCTRL2, SOC1)                               # converter busy: SEQ1 pending
+    chip.run_cycles(1)
+    wr(chip, ADCTRL2, SOC2)                               # SEQ2 busy: pending
+    assert rd(chip, ADCTRL2) & (SOC1 | SOC2) == SOC1 | SOC2 and rd(chip, ADCST) & 0xC == 8
+    run_to(chip, c0 + 15)
+    st = rd(chip, ADCST)
+    assert st & 2 and not st & 1 and st & 0xC == 4        # SEQ2 done; SEQ1 (priority) converts now
+    assert rd(chip, ADCTRL2) & (SOC1 | SOC2) == SOC2
+    wr(chip, ADCST, 1 << 5)                               # INT_SEQ2_CLR
+    run_to(chip, c0 + 29)
+    assert not rd(chip, ADCST) & 1
+    run_to(chip, c0 + 30)
+    assert rd(chip, ADCST) & 1 and rd(chip, 0x0B00) == 1 and rd(chip, ADCST) & 0xC == 8
+    run_to(chip, c0 + 45)
+    assert rd(chip, ADCST) & 2 and rd(chip, 0x0B08) == 2 and not rd(chip, ADCTRL2) & (SOC1 | SOC2)
+
+
+def test_adc_external_soc_from_the_xint2_pin(chip):
+    adc = chip.peripherals["ADC"]
+    adc_on(chip)
+    wr(chip, ADCTRL1, CASC)
+    wr(chip, 0x6FE1, 5)                                   # GPIOXINT2SEL = GPIO5
+    chip.pins.set_external("GPIO5", "L")
+    chip.pins.set_external("GPIO4", "L")
+    wr(chip, ADCTRL2, EXT_SOC1 | INT_ENA1)
+    chip.pins.set_external("GPIO4", "H")                  # not the XINT2 source
+    chip.pins.set_external("GPIO5", "H")                  # rising edge: SOC
+    chip.pins.set_external("GPIO5", "L")                  # falling: nothing
+    chip.run_cycles(40)
+    assert adc.conversions == 1 and rd(chip, ADCST) & 1
+    wr(chip, ADCTRL2, INT_ENA1)                           # EXT_SOC_SEQ1 off
+    chip.pins.set_external("GPIO5", "H")
+    chip.run_cycles(40)
+    assert adc.conversions == 1
 
 
 # ------------------------------------------------------------------ misc

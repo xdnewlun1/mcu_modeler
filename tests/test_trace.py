@@ -345,3 +345,18 @@ def test_printer_two_edges_print_live():
     log.event("pin", 1.5e6, pin="PA6", field="level", old="H", new="L")
     assert out.getvalue().splitlines()[-1] == "[     1.500 ms] PA6   H -> L"
     pr.detach()
+
+
+def test_printer_waveform_ignores_startup_glitch():
+    log, out = EventLog(), io.StringIO()
+    pr = PinEventPrinter(out).attach(log)
+    log.event("pin", 30e3, pin="PA6", field="level", old="L", new="H")
+    log.event("pin", 31e3, pin="PA6", field="level", old="H", new="L")
+    t = 100e3
+    for _ in range(9):
+        log.event("pin", t, pin="PA6", field="level", old="L", new="H")
+        log.event("pin", t + 250e3, pin="PA6", field="level", old="H", new="L")
+        t += 1e6
+    pr.detach()
+    summ = [l for l in out.getvalue().splitlines() if "waveform:" in l]
+    assert summ and "1.000 kHz" in summ[0] and "duty 25.0 %" in summ[0], out.getvalue()

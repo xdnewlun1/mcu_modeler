@@ -156,8 +156,9 @@ clocks, LEDs, probes, counters, gates, flip-flops.
   programs needs `--clock`.
 - **Clock gates only warn.** Accessing a gated-off peripheral logs one `warn` and proceeds; silicon would fault.
 - **Unmodelled peripherals are RAM-like stubs.** A loop that waits for a hardware status bit on a stub spins forever.
-- **Peripheral pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel only through
-  links.
+- **UART and SPI pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel only
+  through links. Timer outputs are different: STM32 TIM, Kinetis FTM, C2000 ePWM / eCAP APWM drive their pins edge by
+  edge, and timer inputs (input capture, eCAP, faults, trip zones) see the edges on their pins (section 4.4).
 
 ---
 
@@ -681,6 +682,31 @@ $ .venv/bin/chipem run firmware/samples_c2000/build/epwm.c28img --chip tms320f28
 `boards/pwm_led.yaml` (STM32 `tim_pwm` and K22 `ftm_pwm`, each lighting an LED and watched by a probe) shows the
 same for board parts: 20 ms print about 40 lines instead of one per edge.
 
+**PWM outputs and input capture.** Timer channels drive their pins like any other output, so a PWM is visible
+everywhere a pin is:
+
+- `chipem run ... --pin-report`: the pin's notes say `periodic 1 kHz, duty 25.0 %`, the summary lists it under
+  "Outputs driven by peripherals". The live output prints `waveform:` lines with frequency and duty (above).
+- `chipem serve`: the Pins tab's **wave** column shows frequency and duty of every periodic pin.
+- `--vcd out.vcd`: every edge, for exact timing in a waveform viewer.
+- On a board, a `probe` part on the net measures the frequency (`state.freq_hz`, shown in the board summary).
+
+An input-capture pin (STM32 TIMx_CHn with CCxS = input, Kinetis FTMx_CHn with MSnB:MSnA = 00 and ELSnB:ELSnA != 00, C2000
+ECAPx) reads the level of its pin, so feed it like any input:
+
+- `--at TIME:PIN=0|1` for a few edges: `chipem run firmware/samples/build/ftm_capture.elf --clock 60e6 --for 4ms
+  --at 1ms:PTA12=1 --at 1.1ms:PTA12=0 --at 1.25ms:PTA12=1` prints `period 15000` (250 us at 60 MHz).
+- A board net from a PWM pin to the capture pin, on the same chip (`boards/k22_ftm_capture.yaml`,
+  `boards/c2000_ecap_loopback.yaml`) or on another one (`boards/pwm_capture_3way.yaml`: an STM32 PWM measured by a
+  K22 FTM and a C2000 eCAP). Edges cross chips up to one board quantum late, so a high time measured on another chip
+  is exact only with a small quantum (that board uses `quantum: 1us`); periods are unaffected.
+- A `pulse` or `pattern` part on the net (section 6) for a clock or an arbitrary edge sequence.
+
+`--all-edges` prints every edge on the input pin, to compare with what the firmware captured. Captures follow the
+silicon's input path where it is modelled: the K22 FTM latches CnV three bus clocks after the edge (synchroniser,
+`params.sync_clocks`); the STM32 TIM and C2000 eCAP capture on the cycle the edge arrives (no input filter or GPIO
+qualification).
+
 ### 4.5 The browser UI: `chipem serve`
 
 ```sh
@@ -867,7 +893,7 @@ summary. Other front ends on boards:
 
 ### 5.3 The boards in `boards/`
 
-All eleven were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_demo` 8 ms; 0.9–2.5 s wall each).
+All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_demo` 8 ms; 0.9–2.5 s wall each).
 
 | board | chips | demonstrates | result (bytes over the links) |
 |---|---|---|---|
@@ -882,6 +908,9 @@ All eleven were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_demo
 | `three_chip_demo.yaml` | K22 + STM32 + F28232 | one TX net fanning out to two RX pins, explicit one-way links, LEDs, a switch, a deliberate baud-mismatch warning | 4 links |
 | `logic_demo.yaml` | K22 + K22 | every kind of part: switch, LEDs, clock, inverter, AND, D flip-flop, probes, counter | no links |
 | `pwm_led.yaml` | STM32F405 + K22 | timer PWM (TIM3 CH1 on PA6, FTM0 CH0 on PTC1, 1 kHz 25 %) driving an LED and a probe each; the probes read 1000 Hz | no links |
+| `k22_ftm_capture.yaml` | K22 | FTM0 PWM (PTC1, 10 kHz) wired to the FTM1 input capture (PTA12) on the same chip | UART0 prints `period 6000` five times |
+| `c2000_ecap_loopback.yaml` | F28232 | ePWM1A (GPIO0, 20 kHz 30 %) wired to eCAP1 (GPIO24) | `ecap_period` 5000, `ecap_high` 1500 cycles |
+| `pwm_capture_3way.yaml` | STM32F405 + K22 + F28232 | one STM32 PWM (PA6, 1 kHz 25 %) measured by a probe, a K22 FTM capture and a C2000 eCAP (`--for 12ms`) | probe 1000 Hz, K22 `period 60000`, eCAP 100000 / 25000 cycles |
 
 ### 5.4 Pin report on a board
 
@@ -1203,8 +1232,8 @@ The prebuilt outputs are in each `build/` directory, and the tests use them. Reb
 
 | directory | build | output | tools |
 |---|---|---|---|
-| `firmware/samples/` (K22) | `firmware/samples/build.sh` | `build/*.elf`, `.bin`, `.map` (10 samples, incl. `ftm_pwm`) | clang + ld.lld |
-| `firmware/samples_stm32/` | `firmware/samples_stm32/build.sh` | 8 samples (incl. `tim_pwm`), linked at 0x08000000 | clang + ld.lld |
+| `firmware/samples/` (K22) | `firmware/samples/build.sh` | `build/*.elf`, `.bin`, `.map` (11 samples, incl. `ftm_pwm`, `ftm_capture`) | clang + ld.lld |
+| `firmware/samples_stm32/` | `firmware/samples_stm32/build.sh` | 9 samples (incl. `tim_pwm`, `tim_capture`), linked at 0x08000000 | clang + ld.lld |
 | `firmware/samples_stm32_hal/` | `firmware/samples_stm32_hal/build.sh` | `build/uart_chat_hal.elf` | clang + ld.lld + STM32CubeF4 in `firmware/vendor/` |
 | `firmware/samples_c2000/` | `firmware/samples_c2000/build.sh` | `build/*.c28img` | `tools/c28x_asm.py` |
 | `firmware/samples_c2000_c/` | `firmware/samples_c2000_c/build.sh` | `build/*.out` (EABI) and `*_coff.out` | TI cl2000 in `toolchains/` |

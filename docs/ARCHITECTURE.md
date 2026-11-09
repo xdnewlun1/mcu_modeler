@@ -318,11 +318,21 @@ Kinetis split of responsibilities:
   I2C → open-drain (input, H only when pulled), PWM/timer channels and clock outputs → output L, ADC/CMP/DAC →
   analog, JTAG TCK/TMS/TDI → input, TDO/SWO → output H, unknown → "none" (X). The full table is in
   `docs/CONTRACTS.md`. A TX pin on a net therefore drives it H and the connected RX reads H.
-- Timer/PWM models (`stm32.tim`, `kinetis.ftm`, `ti_c2000.epwm`) drive their output signals edge by edge with
-  `PinBoard.drive_signal(name, level)` (e.g. `TIM3_CH1`, `FTM0_CH0`, `EPWM1A`) and `release_signal(name, idle)`.
-  The PinBoard keeps the live level per signal (`signal_levels`): every output pin whose owner carries the signal
-  follows it, also when the pin is muxed to it later (`mcu_update` then substitutes the live level for the mux
-  model's idle drive). The models know signal names only, never pins.
+- Timer/PWM models (`stm32.tim`, `kinetis.ftm`, `ti_c2000.epwm`, `ti_c2000.ecap` in APWM mode) drive their output
+  signals edge by edge with `PinBoard.drive_signal(name, level)` (e.g. `TIM3_CH1`, `FTM0_CH0`, `EPWM1A`), each edge
+  a scheduler event at its exact counter tick, and stop with `release_signal(name, idle)`. The PinBoard keeps the
+  live level per signal (`signal_levels`): every output pin whose owner carries the signal follows it, also when the
+  pin is muxed to it later (`mcu_update` then substitutes the live level for the mux model's idle drive). The models
+  know signal names only, never pins. Whether a timer pin is an output is the timer's answer, asked by the mux
+  model: `stm32.gpio` and `ti_c2000.gpio` call the block's `signal_driven(...)` and show a released signal (an input
+  capture channel, CCxE=0, MOE=0, an ePWM trip to high impedance) as an input; `kinetis.port` asks the FTM through
+  `signal_dir_hooks` (FTMx_CHn is an input in input capture and dual edge capture) and the FTM calls
+  `refresh_function` when its answer changes; `ti_c2000.ecap` sets the direction of ECAPx pins itself on mux and
+  mode changes. Inputs work the other way round: capture, break / fault / trip-zone, external-clock and quadrature
+  inputs find their pins with `PinBoard.signal_pins(name)` and register `PinBoard.input_listeners[pin.id]`
+  callbacks, so an edge from `--at`, a net, a part or another chip's PWM is seen at its instruction-precise time
+  (`chip.now_ns()` / the current core cycle) and latched into the capture register (the K22 FTM adds its 3-clock
+  synchroniser, `params.sync_clocks`).
 
 STM32 (`stm32.gpio`) and C2000 (`ti_c2000.gpio`) follow the same pattern in one block each: MODER/AFRx/PUPDR,
 or GPxMUX/GPxDIR/GPxPUD, decide owner, direction and pull (peripheral signals through their own `signals.py`); ODR/BSRR or GPxDAT/SET/CLEAR/TOGGLE drive the level.

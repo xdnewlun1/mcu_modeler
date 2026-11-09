@@ -42,19 +42,43 @@ class LogEvent:
         return {"kind": self.kind, "t_ns": self.t_ns, "seq": self.seq, **self.fields}
 
 
+def wave_stats(edges: Iterable[tuple[float, Any]]) -> tuple[float | None, float | None]:
+    """(frequency Hz, duty %) of a periodic signal from its edges [(t_ns, new level)], robust against start-up
+    glitches: the period is the median of the rising-edge intervals, the duty the median high fraction of the whole
+    periods whose length is within 10 % of it. (None, None) with fewer than two rising edges. Shared by the run
+    printer (trace), the pin report / web `wave` column (pinreport.wave_of) and the stored `wave` log events."""
+    ev = [(t, v in ("H", "ON", True, 1)) for t, v in edges]
+    rises = [k for k, (_t, hi) in enumerate(ev) if hi]
+    if len(rises) < 2:
+        return None, None
+    periods = [ev[b][0] - ev[a][0] for a, b in zip(rises, rises[1:])]
+    per = sorted(periods)
+    n = len(per)
+    med = per[n // 2] if n % 2 else 0.5 * (per[n // 2 - 1] + per[n // 2])
+    if med <= 0:
+        return None, None
+    duties = []
+    for a, b in zip(rises, rises[1:]):
+        p = ev[b][0] - ev[a][0]
+        if abs(p - med) > 0.1 * med:
+            continue                                     # glitch / gap: not a representative period
+        fall = next((ev[k][0] for k in range(a + 1, b) if not ev[k][1]), None)
+        duties.append(0.0 if fall is None else (fall - ev[a][0]) / p)
+    duties.sort()
+    m = len(duties)
+    duty = None if not m else 100.0 * (duties[m // 2] if m % 2 else 0.5 * (duties[m // 2 - 1] + duties[m // 2]))
+    return 1e9 / med, duty
+
+
 class _Wave:
-    """Edge statistics of one pin while its stored history is decimated (see the module doc)."""
-    __slots__ = ("t0", "t_last", "edges", "rise0", "rise_last", "rises", "high", "t_up", "high_at_last_rise",
-                 "level", "fields")
+    """Edge count and recent edges of one pin while its stored history is decimated (see the module doc)."""
+    __slots__ = ("t0", "t_last", "edges", "recent", "level", "fields")
+    RECENT = 129                                   # edges kept for wave_stats (64 periods)
 
     def __init__(self, t: float, fields: dict):
         self.t0 = self.t_last = t
         self.edges = 0
-        self.rise0 = self.rise_last = None
-        self.rises = 0
-        self.high = 0.0
-        self.t_up = None
-        self.high_at_last_rise = 0.0
+        self.recent: deque = deque(maxlen=self.RECENT)
         self.level = None
         self.fields = fields
 
@@ -62,26 +86,12 @@ class _Wave:
         self.edges += 1
         self.t_last = t
         self.level = new
-        if new == "H":
-            if self.rise0 is None:
-                self.rise0 = t
-            self.rise_last = t
-            self.rises += 1
-            self.t_up = t
-            self.high_at_last_rise = self.high
-        elif self.t_up is not None:
-            if self.rise0 is not None:
-                self.high += t - self.t_up
-            self.t_up = None
+        self.recent.append((t, new))
 
     def summary(self) -> dict:
-        freq = duty = None
-        if self.rises >= 2 and self.rise_last > self.rise0:
-            span = self.rise_last - self.rise0
-            freq = (self.rises - 1) * 1e9 / span
-            duty = round(100.0 * self.high_at_last_rise / span, 3)
+        freq, duty = wave_stats(self.recent)
         return {**self.fields, "field": "wave", "old": None, "new": self.level, "edges": self.edges,
-                "since_ns": self.t0, "freq_hz": freq, "duty": duty}
+                "since_ns": self.t0, "freq_hz": freq, "duty": None if duty is None else round(duty, 3)}
 
 
 class EventLog:

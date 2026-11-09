@@ -1,0 +1,15 @@
+# eCAP loopback on one TMS320F28232: ePWM1A (GPIO0) drives eCAP1 (GPIO24) through the net PWM_LOOP.
+#   A (F28232) runs ecap: a 20 kHz, 30 % PWM on EPWM1A; eCAP1 captures period (CAP1) and high time (CAP2) and its
+#              ECAP1_INT ISR stores them in ecap_period / ecap_high (M0 RAM, 5000 / 1500 SYSCLKOUT cycles at 100 MHz).
+# The F28232 programs its PLL first (20 MHz x 10 / 2 = 100 MHz; ~6.6 ms PLL lock), so the PWM starts at ~6.6 ms.
+# The probe P measures the PWM frequency (state.freq_hz, 20000 Hz).
+# Run:   chipem run --board boards/c2000_ecap_loopback.yaml --for 20ms --pin-report
+# Build: firmware/samples_c2000/build.sh
+name: c2000_ecap_loopback
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/ecap.c28img}
+nets:
+  - {name: PWM_LOOP, pins: [A.GPIO0, A.GPIO24]}       # A.EPWM1A -> A.ECAP1
+parts:
+  - {id: P, type: probe, ports: {in: PWM_LOOP}}

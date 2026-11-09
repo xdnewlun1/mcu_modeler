@@ -201,3 +201,26 @@ def test_epwm_complementary_pair_with_dead_band(tmp_path):
     for t, side, v in merged:
         lv[side] = v
         assert not (lv["A"] == "H" and lv["B"] == "H"), t
+
+
+def test_ecap_loopback_board_measures_epwm(tmp_path):
+    """ecap.asm on boards/c2000_ecap_loopback.yaml: ePWM1A (GPIO0, 20 kHz, 30 %) is wired to eCAP1 (GPIO24); the
+    ECAP1_INT ISR stores CAP1 (period) and CAP2 (high time) in M0: 5000 and 1500 SYSCLKOUT cycles at 100 MHz."""
+    import json
+    from chipem.board import load_board
+    from chipem.session import Session
+    img = build("ecap", tmp_path)
+    sym = json.loads(img.read_text())["symbols"]
+    bd = load_board(ROOT / "boards" / "c2000_ecap_loopback.yaml")
+    bd.chips[0].firmware = img
+    s = Session.from_board(bd, quiet=True)
+    s.run_for(PLL_LOCK_NS + 2e6)                                 # 2 ms of PWM: 40 periods
+    bus = s.ctxs["A"].chip.bus
+    assert s.ctxs["A"].chip.clock.hz == 100e6
+    assert bus.read(sym["ecap_period"], 2) == 5000              # 50 us
+    assert bus.read(sym["ecap_high"], 2) == 1500                # 15 us = 30 %
+    n = bus.read(sym["ecap_count"], 1)
+    assert 38 <= n <= 41                                        # one ECAP1_INT per period
+    gpio24 = s.ctxs["A"].chip.pins.get("GPIO24")
+    assert gpio24.owner == "ECAP1" and gpio24.direction == "in"
+    assert not [e for e in s.events(kinds={"warn"})]

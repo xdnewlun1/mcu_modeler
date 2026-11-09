@@ -278,3 +278,21 @@ def test_pwm_pins_count_changes_and_show_frequency_duty():
     assert abs(waves["GPIO0"]["freq_hz"] - 20e3) < 1 and waves["GPIO0"]["duty"] == 29.0
     assert waves["GPIO0"]["edges"] == a["changes"]
     assert "Outputs driven by peripherals" in text
+
+
+def test_wave_of_glitch_then_clean_1khz():
+    """A start-up glitch edge must not skew the reported frequency (median period); the edge count stays exact."""
+    from chipem.pinreport import PinRecord, fmt_wave, wave_of
+    rec = PinRecord(pin=None)
+    edges = [(30e3, "H"), (31e3, "L")]
+    t = 100e3
+    for _ in range(20):
+        edges += [(t, "H"), (t + 250e3, "L")]
+        t += 1e6
+    for tt, v in edges:
+        rec.level_events += 1
+        rec.edge_times.append(tt)
+        rec.edge_levels.append(v)
+    w = wave_of(rec, now=t)
+    assert w["edges"] == 42 and w["freq_hz"] == 1000.0 and w["duty"] == 25.0
+    assert fmt_wave(w) == "periodic 1 kHz, duty 25.0 %"

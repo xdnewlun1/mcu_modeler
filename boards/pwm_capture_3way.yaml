@@ -1,0 +1,22 @@
+# One PWM, three vendors: an STM32 timer output measured by a Kinetis FTM input capture and a C2000 eCAP at once.
+#   A (STM32F405ZG)    runs tim_pwm: TIM3 CH1 PWM mode 1 on PA6, 1 kHz, 25 % (reset clock HSI 16 MHz).
+#   B (MK22FN1M0VLL12) runs ftm_capture: PTA12 = FTM1_CH0 captures rising edges, FTM1 free running from the 60 MHz
+#                      bus (clock_hz 60 MHz = the CLI's --clock 60e6); main prints "period 60000" (1 ms) on UART0
+#                      for the first 5 periods. Its own FTM0 PWM on PTC1 is left unconnected.
+#   C (TMS320F28232)   runs ecap: eCAP1 on GPIO24 captures rising (CAP1, resets the counter) and falling (CAP2)
+#                      edges; the ECAP1_INT ISR stores ecap_period = 100000 and ecap_high = 25000 SYSCLKOUT cycles
+#                      (100 MHz after the PLL locks at ~6.6 ms). Its own ePWM1A on GPIO0 is left unconnected.
+# The probe P measures the PWM frequency (state.freq_hz, 1000 Hz).
+# Run:   chipem run --board boards/pwm_capture_3way.yaml --for 12ms --pin-report
+#        chipem serve --board boards/pwm_capture_3way.yaml
+# Build: firmware/samples_stm32/build.sh; firmware/samples/build.sh; firmware/samples_c2000/build.sh
+name: pwm_capture_3way
+quantum: 1us                          # edges cross chips at most 1 us late: eCAP high time exact (10 us: +6.8 us)
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/tim_pwm.elf}
+  - {id: B, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/ftm_capture.elf, clock_hz: 60000000}
+  - {id: C, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/ecap.c28img}
+nets:
+  - {name: PWM, pins: [A.PA6, B.PTA12, C.GPIO24]}     # TIM3_CH1 -> FTM1_CH0 + ECAP1
+parts:
+  - {id: P, type: probe, ports: {in: PWM}}

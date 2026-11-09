@@ -177,9 +177,9 @@ the three real register tables, it reproduces the hand-written chips' model choi
 
 | family | mapped (everything else becomes `stub`) |
 |---|---|
-| `stm32` | `GPIOx`→`stm32.gpio {port}`, `USARTn`/`UARTn`→`stm32.usart {index, kind}`, `RCC`→`stm32.rcc {ext_hz}`, `TIM1..8`→`stm32.tim` (`TIM9..14` stay `stub` with a TODO: no model yet), `IWDG`, `WWDG`, `EXTI`, `SYSCFG`, `FLASH`, `PWR`, `DBG`→`stm32.dbgmcu` |
+| `stm32` | `GPIOx`→`stm32.gpio {port}`, `USARTn`/`UARTn`→`stm32.usart {index, kind}`, `RCC`→`stm32.rcc {ext_hz}`, `TIM1..14`→`stm32.tim` (one model; channels, break/dead time and RCR follow the SVD registers of each timer), `IWDG`, `WWDG`, `EXTI`, `SYSCFG`, `FLASH`, `PWR`, `DBG`→`stm32.dbgmcu` |
 | `kinetis` | `PORTx`→`kinetis.port`, `GPIOx`→`kinetis.gpio`, `UARTn`, `SIM`, `MCG`, `OSC`, `WDOG`, `PIT`, `FTMn`→`kinetis.ftm` (plus `FTM2_ALIAS`→`kinetis.ftm_alias {target: FTM2}` at 0x4003A000, which the SVD does not list), `LPTMR0`, `RTC`, `FTFE/FTFL/FTFA`→`kinetis.ftfe`, `ADCn`, `SPIn`→`kinetis.dspi`, `DMA`, `DMAMUX`, `PDB0`, `SMC`, `PMC`, `RCM`, `LLWU`, `RFVBAT`→`VBAT kinetis.vbat`, `RFSYS`→`ram` |
-| `ti_c2000` | `GPIO`, `SCIx`, `CPUTIMERn`, `SYSCTRL {ext_hz, boot_divsel}`, `ADC`, `ADCMIRROR`, `XINT`, `SPIx`, `FLASH`→`FLASHREGS ti_c2000.flash`, `CSM`, `PIE` (arch-owned), `EPWMn`→`ti_c2000.epwm {gate: EPWMnENCLK, index}`, eCAP/eQEP/eCAN/McBSP/I2C/DMA→`ti_c2000.storage {gate: <NAME>ENCLK}`, the rest `ti_c2000.storage` |
+| `ti_c2000` | `GPIO`, `SCIx`, `CPUTIMERn`, `SYSCTRL {ext_hz, boot_divsel}`, `ADC`, `ADCMIRROR`, `XINT`, `SPIx`, `FLASH`→`FLASHREGS ti_c2000.flash`, `CSM`, `PIE` (arch-owned), `EPWMn`→`ti_c2000.epwm {gate: EPWMnENCLK, index}`, `ECAPn`→`ti_c2000.ecap {gate: ECAPnENCLK, index}`, eQEP/eCAN/McBSP/I2C/DMA→`ti_c2000.storage {gate: <NAME>ENCLK}`, the rest `ti_c2000.storage` |
 | anything else | every block `stub` (a new family, section E) |
 
 Sizes: the SVD `addressBlock` extent rounded up to the family's granule (0x400 for STM32, 0x1000 for Kinetis, exact
