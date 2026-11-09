@@ -253,3 +253,28 @@ def test_shell_board_uart_prefix_and_pinreport_per_chip():
     assert rc == 0, out
     assert "B.UART0 <- b'x'" in out and "--- B.UART0" in out
     assert "=== chip A ===" in out and "=== chip B ===" in out
+
+
+EPWM_IMG = ROOT / "firmware" / "samples_c2000" / "build" / "epwm.c28img"
+
+
+@pytest.mark.skipif(not EPWM_IMG.exists(), reason="C2000 samples not built")
+def test_pwm_pins_count_changes_and_show_frequency_duty():
+    """PWM outputs are driven through PinBoard.drive_signal, not the GPIO model: their `chg` column comes from the
+    PinBoard edges and the notes carry the measured frequency / duty."""
+    from chipem.pinreport import pin_waves, report_dict
+    from chipem.session import Session
+    s = Session("tms320f28232", EPWM_IMG, quiet=True)
+    try:
+        s.run_for(20e6)
+        rows = {r["pin"]: r for r in report_dict(s.chip, static=False)["pins"]}
+        waves = pin_waves(s.chip)
+        text = format_pin_report(s.chip, static=False)
+    finally:
+        s.close()
+    a = rows["GPIO0"]
+    assert a["changes"] > 400
+    assert any("periodic 20 kHz, duty 29.0 %" in n for n in a["notes"]), a["notes"]
+    assert abs(waves["GPIO0"]["freq_hz"] - 20e3) < 1 and waves["GPIO0"]["duty"] == 29.0
+    assert waves["GPIO0"]["edges"] == a["changes"]
+    assert "Outputs driven by peripherals" in text

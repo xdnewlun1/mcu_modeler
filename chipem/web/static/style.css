@@ -301,6 +301,7 @@ table.pins th.sorted.desc::after { content: " ▼"; }
 table.pins td { padding: 5px 12px; border-bottom: 1px solid var(--line); font-family: var(--mono); white-space: nowrap; }
 table.pins td.num, table.pins th.num { text-align: right; width: 48px; }
 table.pins td.name { color: var(--dim); white-space: normal; }
+table.pins td.wave { color: var(--dim); font-variant-numeric: tabular-nums; }
 table.pins tr:hover td { background: var(--panel-2); }
 table.pins tr.flash td { animation: rowflash 1s ease-out; }
 @keyframes rowflash { from { background: var(--flash); } to { background: transparent; } }

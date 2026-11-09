@@ -34,6 +34,9 @@ GATES: dict[str, tuple[str, int]] = {
     "ADC0": ("SCGC6", 27), "RTC": ("SCGC6", 29),
     "FLEXBUS": ("SCGC7", 0), "FB": ("SCGC7", 0), "DMA": ("SCGC7", 1), "MPU": ("SCGC7", 2),
 }
+# second gate bit of a peripheral: its clock runs when either bit is set (RM 12.2.10/12.2.13: FTM2 is gated by
+# SIM_SCGC3[FTM2] (bit 24) and by SIM_SCGC6[FTM2] (bit 26))
+GATES_ALT: dict[str, tuple[str, int]] = {"FTM2": ("SCGC6", 26)}
 
 
 @register("kinetis.sim")
@@ -68,7 +71,10 @@ class SIM(MMIOBlock):
         if g is None:
             return True
         reg, bit = g
-        return bool((self.get(reg) >> bit) & 1)
+        if (self.get(reg) >> bit) & 1:
+            return True
+        alt = GATES_ALT.get(periph_name)
+        return alt is not None and bool((self.get(alt[0]) >> alt[1]) & 1)
 
     def check_gate(self, name: str, block: str | None = None) -> bool:
         """True if `name`'s clock gate is on; otherwise logs a `warn` (once per peripheral) and returns False."""

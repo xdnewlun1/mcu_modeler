@@ -198,3 +198,38 @@ def test_pin_report_uses_stm32_names(desc):
     chip2.run_for(0.5e6)
     rows2 = {r["pin"]: r for r in report_dict(chip2, static=False)["pins"]}
     assert rows2["PA9"]["role"] == "USART1_TX" and "USART1: PA9 TX, PA10 RX" in format_pin_report(chip2, static=False)
+
+
+def test_tim_pwm_sample_1khz_25_percent(desc):
+    """tim_pwm: TIM3 CH1 PWM mode 1 on PA6 at the reset clock (16 MHz), PSC 15, ARR 999, CCR1 250."""
+    chip, ev = boot(desc, "tim_pwm", pin="PA6")
+    chip.run_for(20.5e6)
+    pin = chip.pins.get("PA6")
+    assert pin.owner == "TIM3_CH1" and pin.direction == "out"
+    edges = [(e.t_ns, e.new) for e in ev if e.new in ("H", "L")]
+    rises = [t for t, v in edges if v == "H"]
+    periods = [b - a for a, b in zip(rises, rises[1:])]
+    highs = [t2 - t for (t, v), (t2, v2) in zip(edges, edges[1:]) if v == "H" and v2 == "L"]
+    assert len(periods) >= 19, edges[:6]
+    assert all(p == pytest.approx(1e6, abs=1) for p in periods[1:]), periods[:5]     # steady state: exact
+    assert periods[0] == pytest.approx(1e6, abs=500), periods[:2]   # first rise at CC1E, 3 cycles before CEN
+    assert all(h == pytest.approx(250e3, abs=1) for h in highs[1:]), highs[:5]
+    assert highs[0] == pytest.approx(250e3, abs=500), highs[:2]
+    assert not chip.bus.auto_stubs
+
+
+def test_tim_pwm_sample_first_period_exact(desc):
+    """The counter is exact from CEN: first fall 250 us and second rise 1 ms after the CEN write.  The first rise
+    comes earlier, at the CCER.CC1E write (3 instructions before CEN): PWM1 with the stopped counter at 0 < CCR1
+    already has OC1REF = 1 (CCR1 was written before OC1PE was set), so enabling the output drives the pin high, as
+    on silicon."""
+    chip, ev = boot(desc, "tim_pwm", pin="PA6")
+    chip.run_for(2.5e6)
+    t_cen = next(e.t_ns for e in chip.log if e.kind == "info" and str(e.fields.get("msg", "")).startswith(
+        "TIM3 started"))
+    rises = [e.t_ns for e in ev if e.new == "H"]
+    falls = [e.t_ns for e in ev if e.new == "L"]
+    assert rises[0] < t_cen and t_cen - rises[0] == pytest.approx(3 / 16e6 * 1e9, abs=1)
+    assert falls[0] - t_cen == pytest.approx(250e3, abs=1)
+    assert rises[1] - t_cen == pytest.approx(1e6, abs=1)
+    assert rises[2] - rises[1] == pytest.approx(1e6, abs=1)

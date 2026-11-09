@@ -77,11 +77,17 @@ clocks/GPIO/timers/UART are stubs.
 
 ## Peripherals
 
-**Stubs.** I2C0–2, FTM0–3, USB0, USBDCD, CAN0, I2S0, CRC, CMP, DAC0, VREF, EWM, CMT, SDHC,
+**Stubs.** I2C0–2, USB0, USBDCD, CAN0, I2S0, CRC, CMP, DAC0, VREF, EWM, CMT, SDHC,
 FlexBus, AXBS, AIPS, MPU, FMC and MCM have no behaviour. They read back what was written and start at 0,
 not at the SVD reset value. Firmware that waits for a status bit set by hardware (I2C byte complete,
-CRC result, FTM overflow) loops forever. The chip YAML's `model:` fields are the authoritative
-list.
+CRC result) loops forever. The chip YAML's `model:` fields are the authoritative list. FTM0–3 are modelled
+(`kinetis.ftm`, below).
+
+**FTM (`kinetis.ftm`)** models the counter, output compare, EPWM/CPWM, combine with dead time and the output path
+onto FTMx_CHn pins. Not modelled: input capture and dual-edge capture, quadrature decoder, fault inputs
+(FLTCTRL/FMS fault flags), external trigger outputs to PDB/ADC (EXTTRIG), write protection (WPEN reads back, but
+protected registers stay writable), the external clock (CLKS=11, one `warn`), the hardware sync triggers and most
+SYNCONF options (software sync and LDOK work), and DMA requests (DMAMUX sources 20–39).
 
 Notes on the modelled peripherals:
 
@@ -128,8 +134,11 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
 - **USART** is single-buffered like silicon: a byte arriving while RXNE is set sets ORE and is lost; bytes arriving
   with UE/RE clear, the RCC enable off, the RCC reset bit set or no pin in AF mode for USARTn_RX are dropped; no
   parity/framing/noise errors, no LIN, smartcard, IrDA or hardware flow control; DMA requests are not generated.
-- **Timers** (TIM1–8) model the time base and the update interrupt only: no capture/compare, PWM output on pins,
-  encoder mode, master/slave triggers or DMA. TIM9–14 are stubs.
+- **Timers** (TIM1–8) model the time base, the update interrupt, output compare and PWM1/PWM2 on channels 1–4
+  driving TIMx_CHn / TIMx_CHnN pins (TIM1/8 complementary outputs, MOE/OSSI/OSSR idle states). Not modelled: dead
+  time (BDTR.DTG), the break input, AOE, OCxCE / ETR clear, OCxFE fast enable, input capture (a channel with
+  CCxS ≠ 00 releases its pin, one `warn`), encoder mode, master/slave triggers (TRGO/ITRx) and DMA. TIM9–14 are
+  stubs (tools/new_chip.py also maps them to `stub`).
 - **WWDG** is storage only (a `warn` when enabled); IWDG is modelled.
 - RCC clock switches and PLL lock complete instantly; clock gates only `warn` on access to a gated-off block.
 - ADC, DAC, SPI, I2C, CAN, DMA, SDIO, USB, FSMC, RTC, RNG and CRC are RAM-like stubs.
@@ -181,8 +190,14 @@ die, same peripheral list and models). In addition:
   `.ebss`/`.bss` are not zeroed by the loader (RAM resets to 0 anyway).
 - **EALLOW protection is enforced**: a write to a protected register without EALLOW is ignored (one `warn` per
   block), like silicon. Missing `EALLOW` in firmware shows up as configuration that does nothing.
-- **Storage only**: ePWM/HRPWM, eCAP, eQEP, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
-  no behaviour; the ADC supports software start only (no ePWM SOC, no continuous mode); SPI MISO reads 0xFFFF.
+- **Storage only**: HRPWM, eCAP, eQEP, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
+  no behaviour; the ADC supports software start and ePWM SOCA/SOCB triggers (no continuous mode); SPI MISO reads
+  0xFFFF.
+- **ePWM** (`ti_c2000.epwm`) models time base, compare, action qualifier, dead band, software trip zone, event
+  trigger (INT, SOCA/SOCB) and the EPWMxA/B pins. Not modelled: the TZ1–TZ6 trip pins and the high-impedance trip
+  state (shows as L), external EPWMSYNCI / EPWMSYNCO and ADCSOCAO / ADCSOCBO pins, HRPWM (MEP), the PWM chopper
+  (PCCTL, one `warn`), emulation FREE_SOFT, TBCTR above TBPRD (clamped instead of counting to 0xFFFF; TBSTS.CTRMAX
+  never set) and the ePWM → eCAP sync chain.
 - **Clock gates only warn** (PCLKCR); silicon ignores accesses to an unclocked peripheral.
 - SCI: overrun is modelled (OE/RXERROR without FIFO: the unread character is overwritten; RXFFOVF with the FIFO:
   the 17th character is not stored, our reading of the guide's ambiguous wording); bytes arriving in SW RESET, with
@@ -196,8 +211,9 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
 ## Pins
 
 - Levels are digital (H/L/X). There are no voltages, so analog pins do not feed the ADC.
-- Peripheral functions (UART, SPI, FTM, I2C) do not toggle pin levels with their traffic. A peripheral-owned pin
-  shows the **idle** state of its signal from the family signal table (`chipem/periph/<family>/signals.py`, rule
+- Serial peripherals (UART, SPI, I2C) do not toggle pin levels with their traffic. Timer/PWM channels (STM32 TIM,
+  Kinetis FTM, C2000 ePWM) do: they drive their signal edge by edge through `PinBoard.drive_signal`, and the pin
+  shows the live level. Otherwise a peripheral-owned pin shows the **idle** state of its signal from the family signal table (`chipem/periph/<family>/signals.py`, rule
   in `docs/CONTRACTS.md`): UART/SCI TX is an output at H, RX an input, SPI SCK/MOSI an output at L (CPOL is not
   looked at), chip selects an output at H, I2C pins open-drain (H only when pulled), timer/PWM channels and clock
   outputs an output at L, ADC/CMP/DAC analog, JTAG/SWD TCK/TMS/TDI inputs and TDO/SWO an output at H. Signals
@@ -213,12 +229,15 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   lost; use `--at` to type later. A chip with no pin offering a UART's RX function receives host input without a
   pin check but nothing over board links.
 - A net is a perfect wire: there is no propagation delay, drive strength or open-drain modelling. A peripheral
-  output contributes its idle level as a strong driver; a peripheral input or open-drain pin contributes only its
+  output contributes its idle (or, for a PWM channel, its live) level as a strong driver; a peripheral input or open-drain pin contributes only its
   pull resistor.
 - Pin identifiers come from the chip YAML's `gpio_name_format` (`PTC5`, `PA9`, `GPIO34`).
-- The idle level is fixed: a PWM channel at 100 % duty, an inverted-polarity output (FTM ELSnA, TIM CCxP) or a
-  CPOL=1 SPI clock still shows L. The idle state is applied whenever the owner changes and at reset (JTAG/SWD
-  pins on Kinetis and STM32).
+- The idle level of a serial signal is fixed: a CPOL=1 SPI clock still shows L. PWM channels show their live level
+  (100 % duty, FTM ELSnA / TIM CCxP / ePWM inversion included) while the timer drives them; a released channel
+  (output disabled, module off) goes back to the drive the mux model set, the table's idle level. The idle state is
+  applied whenever the owner changes and at reset (JTAG/SWD pins on Kinetis and STM32).
+- Output volume: a 20 kHz PWM pin produces 40,000 edges per second. The VCD gets every edge; the live printer,
+  shell `trace` and the stored event log summarise periodic pins (see USER_GUIDE "Fast signals").
 
 ## Board parts
 
@@ -299,7 +318,8 @@ What it does not do yet:
   reads 0 mV. The software-triggered temperature-sensor read (ADCH 26) also reads 0.
 - **PTA13 floats.** It is an input with IRQC "logic 0", and with nothing connected it reads 0, so PORTA's
   ISF stays set. Drive it (e.g. `--set PTA13=1`) to mimic the board's idle level.
-- It references DWT, ITM, FPB, TPIU, I2C0/1, FTM0–2, USB0 and CRC, all stubs. Code paths that depend
-  on them (sensor I2C, FTM PWM, USB) will not behave.
+- It references DWT, ITM, FPB, TPIU, I2C0/1, USB0 and CRC, all stubs. Code paths that depend on them (sensor
+  I2C, USB) will not behave. FTM0–2 are modelled (`kinetis.ftm`); its output with and without the FTM models was
+  identical in the PWM review run.
 - The 0x0–0x3FFF bootloader is not in the file. That region is erased flash (0xFF), so anything that calls
   into the bootloader would fault.

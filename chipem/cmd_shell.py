@@ -222,6 +222,7 @@ class Shell(cmd.Cmd):
         self.interactive = interactive
         self.trace = False
         self._unsub = None
+        self._printer = None
         self._baseline = self._snapshot()
         self.symbols = _Symbols.for_image(getattr(session, "image", None))
         self.last_exit = 0
@@ -295,20 +296,28 @@ class Shell(cmd.Cmd):
         raise ValueError(f"bad address or unknown symbol {s!r}")
 
     # ---- trace -----------------------------------------------------------------------------------------------
-    def _trace_cb(self, ev: Any) -> None:
-        if getattr(ev, "kind", None) == "mmio":
-            return
-        self.p(format_ev(ev))
-
-    def _set_trace(self, on: bool) -> None:
-        if on and self._unsub is None:
-            log = self.chip.log
-            if hasattr(log, "subscribe"):
-                self._unsub = log.subscribe(self._trace_cb)
-        elif not on and self._unsub is not None:
+    def _set_trace(self, on: bool, all_edges: bool = False) -> None:
+        """Live events through trace.PinEventPrinter (mmio excluded): the same UART coalescing and periodic-waveform
+        collapse as `chipem run` (`all_edges` prints every edge, like `chipem run --all-edges`)."""
+        if self._unsub is not None:
             self._unsub()
             self._unsub = None
+        if self._printer is not None:
+            self._printer.flush()
+            self._printer = None
+        if on:
+            log = self.chip.log
+            if hasattr(log, "subscribe"):
+                from .log import KINDS
+                from .trace import PinEventPrinter
+                self._printer = PinEventPrinter(self.stdout, set(KINDS) - {"mmio"},
+                                                collapse_ns=None if all_edges else 10e6)
+                self._unsub = log.subscribe(self._printer)
         self.trace = on
+
+    def _flush_trace(self) -> None:
+        if self._printer is not None:
+            self._printer.flush()
 
     # ---- execution -------------------------------------------------------------------------------------------
     def _run_interruptible(self, fn, *a):
@@ -329,6 +338,7 @@ class Shell(cmd.Cmd):
                 self.p("^C stopped")
 
     def _after_run(self, reason: Any) -> None:
+        self._flush_trace()
         st = self.s.state()
         name = getattr(reason, "name", str(reason))
         t = st.get("t_ns", st.get("time_ns", 0.0))
@@ -793,13 +803,15 @@ class Shell(cmd.Cmd):
         self.p(f"({len(sel)} of {len(evs)} events)")
 
     def do_trace(self, arg: str) -> None:
-        """trace on|off   print events live while running (mmio excluded)."""
+        """trace on|off|all   print events live while running (mmio excluded). Periodic signals (PWM) are summarised
+        per 10 ms window like `chipem run`; `trace all` prints every edge (like `--all-edges`)."""
         a = self._args(arg)
         if not a:
             self.p(f"trace is {'on' if self.trace else 'off'}")
             return
-        self._set_trace(a[0].lower() in ("on", "1", "yes", "true"))
-        self.p(f"trace {'on' if self.trace else 'off'}")
+        w = a[0].lower()
+        self._set_trace(w in ("on", "1", "yes", "true", "all"), all_edges=w == "all")
+        self.p(f"trace {'on' if self.trace else 'off'}{' (all edges)' if w == 'all' and self.trace else ''}")
 
     def do_state(self, arg: str) -> None:
         """state   time, cycles, clock, pc/sp, mode, pending exceptions."""

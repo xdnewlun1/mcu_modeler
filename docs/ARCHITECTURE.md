@@ -318,6 +318,11 @@ Kinetis split of responsibilities:
   I2C → open-drain (input, H only when pulled), PWM/timer channels and clock outputs → output L, ADC/CMP/DAC →
   analog, JTAG TCK/TMS/TDI → input, TDO/SWO → output H, unknown → "none" (X). The full table is in
   `docs/CONTRACTS.md`. A TX pin on a net therefore drives it H and the connected RX reads H.
+- Timer/PWM models (`stm32.tim`, `kinetis.ftm`, `ti_c2000.epwm`) drive their output signals edge by edge with
+  `PinBoard.drive_signal(name, level)` (e.g. `TIM3_CH1`, `FTM0_CH0`, `EPWM1A`) and `release_signal(name, idle)`.
+  The PinBoard keeps the live level per signal (`signal_levels`): every output pin whose owner carries the signal
+  follows it, also when the pin is muxed to it later (`mcu_update` then substitutes the live level for the mux
+  model's idle drive). The models know signal names only, never pins.
 
 STM32 (`stm32.gpio`) and C2000 (`ti_c2000.gpio`) follow the same pattern in one block each: MODER/AFRx/PUPDR,
 or GPxMUX/GPxDIR/GPxPUD, decide owner, direction and pull (peripheral signals through their own `signals.py`); ODR/BSRR or GPxDAT/SET/CLEAR/TOGGLE drive the level.
@@ -326,18 +331,24 @@ All three report configuration and data writes, with the PC of the accessing ins
 
 `Session` subscribes to the board and copies every `PinEvent` into `chip.log` as a `pin` event. The VCD
 writer subscribes to the board directly; besides one wire per pin it writes a string variable per pin (scope
-`owner`) so a waveform viewer shows function changes.
+`owner`) so a waveform viewer shows function changes. The pin report (`pinreport.PinReport`) also subscribes to
+the board: its per-pin edge ring feeds the `chg` column, the frequency/duty note of periodic pins and the web pin
+table's `wave` column (`pinreport.pin_waves`).
 
 ## Event log
 
 `EventLog.event(kind, t_ns, **fields)` appends a `LogEvent(kind, t_ns, fields, seq)` (bounded deque, 1 M
-entries) and calls subscribers synchronously. Kinds: `pin mmio irq uart reset fault info warn` (plus `part` in a
+entries) and calls subscribers synchronously. Subscribers see every event; the stored history bounds fast periodic
+pins: after a burst of 1000 dense edges (20 edges within 10 ms) a pin's edges are counted into one `pin` event with
+`field="wave"` (`edges`, `since_ns`, `freq_hz`, `duty`) per 100 ms, so PWM cannot evict other events. Kinds: `pin mmio irq uart reset fault info warn` (plus `part` in a
 board's merged log, from board parts). Consumers:
 
-- `trace.PinEventPrinter` (live `chipem run` output; coalesces UART bytes and pin config changes);
+- `trace.PinEventPrinter` (live `chipem run` output and shell `trace`; coalesces UART bytes and pin config
+  changes, summarises periodic pin and part signals per 10 ms window by edge density; `--all-edges` turns that off);
 - `cmd_run.print_summary`;
 - the shell's `events`/`trace`;
-- the web worker (polls `session.events(since=seq)`);
+- the web worker (polls `session.events(since=seq)`; its own buffer caps `pin` events at 12,000 of 20,000 so
+  reset/info/uart/warn events survive);
 - the RCM model (watches `reset` events to report the reset cause).
 
 ## Board parts (`parts/`)

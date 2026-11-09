@@ -257,7 +257,91 @@ def test_printer_summarises_peripheral_waveforms():
     lines = txt.splitlines()
     summ = [l for l in lines if "waveform:" in l]
     assert len(summ) == 1 and "TIM3_CH1" in summ[0] and "16.000 kHz" in summ[0] and "duty 25.0 %" in summ[0]
-    assert any("waveform unchanged" in l for l in lines)
     assert any("PB0" in l and "L -> H" in l for l in lines) and any("PA7" in l and "L -> H" in l for l in lines)
     assert len(lines) < 12
+    assert _edges_accounted(lines, "PA6") == 1120               # 560 periods: every edge counted exactly once
+    same = [l for l in lines if "waveform unchanged" in l]
+    assert len(same) == 1 and "now L" in same[0]
+    ts = [float(l[1:11]) for l in lines if "PA7" not in l]   # (the PA7 owner event is fed late, at t=0)
+    assert ts == sorted(ts)                                     # printed in time order
     assert len(feed(None).splitlines()) > 1000                 # --all-edges
+
+
+def _edges_accounted(lines, pin):
+    """Edges of `pin` in printer output: single-edge lines + summary counts + 'unchanged (N more edges)'."""
+    import re
+    n = 0
+    for l in lines:
+        body = l[16:]
+        if not body.startswith(pin + " ") and not body.startswith(pin + "."):
+            continue
+        m = re.search(r"waveform: (\d+) edges", body) or re.search(r"unchanged \((\d+) more edges", body)
+        if m:
+            n += int(m.group(1))
+        elif re.search(r" [HLX] -> [HLX]$", body):
+            n += 1
+    return n
+
+
+def test_printer_wave_check_1120_edges_and_late_edge():
+    """Reviewer case: 1120 edges at 16 kHz with a UART byte mid-window, then one late forced edge at 80 ms. Every
+    edge is accounted for, the late edge prints on its own, and lines stay in time order."""
+    log, out = EventLog(), io.StringIO()
+    pr = PinEventPrinter(out).attach(log)
+    log.event("pin", 0.0, pin="PA6", field="owner", old="GPIO", new="TIM3_CH1")
+    t, period, n = 1000.0, 62500.0, 0
+    while t < 35e6:
+        log.event("pin", t, pin="PA6", field="level", old="L", new="H")
+        log.event("pin", t + 0.25 * period, pin="PA6", field="level", old="H", new="L")
+        t += period
+        n += 2
+        if abs(t - 12e6) < period / 2:
+            log.event("uart", t, uart="UART1", dir="tx", byte=0x41)
+    log.event("pin", 80e6, pin="PA6", field="level", old="L", new="H")
+    pr.detach()
+    lines = out.getvalue().splitlines()
+    assert n == 1120
+    assert _edges_accounted(lines, "PA6") == 1121
+    assert lines[-1] == "[    80.000 ms] PA6   L -> H"
+    assert any('UART1 TX: "A"' in l for l in lines)
+    ts = [float(l[1:11]) for l in lines]
+    assert ts == sorted(ts)
+    first = [l for l in lines if "waveform:" in l][0]
+    assert "16.000 kHz" in first and "duty 25.0 %" in first    # the first window does not count the mux edge
+
+
+def test_printer_collapses_by_density_not_owner():
+    """A periodic GPIO pin (receiving chip input) and board part signals (LED, probe) collapse too; sparse edges,
+    single pulses and stimulus print one line each, immediately."""
+    log, out = EventLog(), io.StringIO()
+    pr = PinEventPrinter(out, kinds=set(PinEventPrinter.DEFAULT_KINDS) | {"part"}).attach(log)
+    t = 0.0
+    while t < 30e6:                                            # 10 kHz, 50 %
+        for lvl, dt in (("H", 0.0), ("L", 50e3)):
+            old = "L" if lvl == "H" else "H"
+            log.event("pin", t + dt, chip="B", pin="PA0", field="level", old=old, new=lvl)
+            log.event("part", t + dt, chip="board", part="LED1", on=lvl == "H")
+            log.event("part", t + dt, chip="board", part="P1", port="in", level=lvl)
+        t += 100e3
+    log.event("pin", 40e6, chip="B", pin="PC6", field="level", old="H", new="L")     # --at stimulus
+    log.event("pin", 41e6, chip="B", pin="PC6", field="level", old="L", new="H")
+    pr.detach()
+    lines = out.getvalue().splitlines()
+    assert len(lines) < 25
+    for key in ("B.PA0", "LED1", "P1.in"):
+        assert any(l[16:].startswith(key + " ") and "waveform: " in l and "10.000 kHz" in l and "duty 50.0 %" in l
+                   for l in lines), key
+    assert _edges_accounted(lines, "B.PA0") == 600
+    assert "[    40.000 ms] B.PC6 H -> L" in lines and "[    41.000 ms] B.PC6 L -> H" in lines
+
+
+def test_printer_two_edges_print_live():
+    """A single pulse (two edges within the window) prints both edges at once, not when the window closes."""
+    log, out = EventLog(), io.StringIO()
+    pr = PinEventPrinter(out).attach(log)
+    log.event("pin", 0.0, pin="PA6", field="owner", old="GPIO", new="TIM3_CH1")
+    log.event("pin", 1e6, pin="PA6", field="level", old="L", new="H")
+    assert out.getvalue().splitlines()[-1] == "[     1.000 ms] PA6   L -> H"
+    log.event("pin", 1.5e6, pin="PA6", field="level", old="H", new="L")
+    assert out.getvalue().splitlines()[-1] == "[     1.500 ms] PA6   H -> L"
+    pr.detach()

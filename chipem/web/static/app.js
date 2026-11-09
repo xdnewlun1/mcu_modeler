@@ -149,7 +149,14 @@ function ownerCat(pin, row) {
   return c === "none" ? "disabled" : c;
 }
 
-const rowKey = (r) => `${r.level}|${r.owner}|${r.direction}|${r.pull}|${r.external}|${r.cfg_by || ""}`;
+const rowKey = (r) => `${r.level}|${r.owner}|${r.direction}|${r.pull}|${r.external}|${r.cfg_by || ""}|${fmtWave(r.wave)}`;
+// pin waveform summary (server: pinreport.pin_waves): "20.000 kHz 25.0%" for a periodic pin, "" otherwise
+function fmtWave(w) {
+  if (!w || !w.freq_hz) return "";
+  const f = w.freq_hz;
+  const fs = f >= 1e6 ? `${(f / 1e6).toFixed(3)} MHz` : f >= 1e3 ? `${(f / 1e3).toFixed(3)} kHz` : `${f.toFixed(1)} Hz`;
+  return `${fs} ${w.duty == null ? "?" : w.duty.toFixed(1)}%`;
+}
 
 function chipState(st, cid) {
   if (!st) return null;
@@ -679,7 +686,8 @@ function pinCells(r, p) {
   const lv = r.level || "X";
   return `<td class="num">${r.num}</td><td>${esc(p.short)}</td>
       <td class="owner-${oc}">${esc(r.owner)}</td><td>${esc(r.direction)}</td>
-      <td><span class="badge ${lv}">${lv}</span></td><td>${esc(r.pull ?? "—")}</td>
+      <td><span class="badge ${lv}">${lv}</span></td>
+      <td class="wave" title="${r.wave ? `${r.wave.edges} edges` : ""}">${esc(fmtWave(r.wave))}</td><td>${esc(r.pull ?? "—")}</td>
       <td class="ext" title="${p.kind === "gpio" ? "click to cycle H → L → open" : ""}">${r.external ? `<span class="badge ${r.external}">${r.external}</span>` : "—"}</td>
       <td class="net">${esc(r.net ?? "")}</td><td class="name">${esc(r.name)}</td>`;
 }
@@ -709,6 +717,7 @@ function renderPinTable(changed = new Set()) {
   const { k, desc } = ui.sort;
   rows.sort((a, b) => {
     let va = a[k] ?? "", vb = b[k] ?? "";
+    if (k === "wave") { va = a.wave?.freq_hz ?? -1; vb = b.wave?.freq_hz ?? -1; }
     if (k === "short") { va = shortKey(meta.get(a.num).short); vb = shortKey(meta.get(b.num).short); }
     const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
     return desc ? -c : c || a.num - b.num;
@@ -1863,9 +1872,9 @@ function partRows() {
 function pinRows() {
   if (ui.discOn) return tableRows($("discTable"));
   const meta = ui.metaByChip.get(ui.sel);
-  return [["chip", "num", "pin", "owner", "dir", "level", "pull", "external", "net", "datasheet_name"],
+  return [["chip", "num", "pin", "owner", "dir", "level", "freq_hz", "duty", "edges", "pull", "external", "net", "datasheet_name"],
     ...ui.pinVisible.map((r) => [ui.sel, r.num, meta.get(r.num)?.short ?? "", r.owner, r.direction, r.level || "X",
-      r.pull ?? "", r.external ?? "", r.net ?? "", r.name])];
+      r.wave?.freq_hz ?? "", r.wave?.duty ?? "", r.wave?.edges ?? "", r.pull ?? "", r.external ?? "", r.net ?? "", r.name])];
 }
 
 function filterDiscovery() {

@@ -140,6 +140,11 @@ def test_model_rule_requires_matching_registers():
     assert new_chip.map_model("ti_c2000", "EPWM3", [])[0] == "stub"         # a different register layout
     assert new_chip.map_model("ti_c2000", "ECAP2", [])[:2] == ("ti_c2000.storage", {"gate": "ECAP2ENCLK"})
     assert new_chip.map_model("ti_c2000", "FLASH", ["FOPT"])[:3] == ("ti_c2000.flash", {"regs": "FLASH"}, "FLASHREGS")
+    # TIM9-14 have no model yet (stm32.tim covers TIM1-8): explicit stub with a TODO note
+    for t in ("TIM9", "TIM12", "TIM14"):
+        model, _params, _name, note = new_chip.map_model("stm32", t, ["CR1", "PSC", "ARR", "SR", "DIER"])
+        assert model == "stub" and "TIM1-8" in note, t
+    assert new_chip.map_model("stm32", "TIM8", ["CR1", "PSC", "ARR", "SR", "DIER"])[0] == "stm32.tim"
 
 
 @pytest.mark.skipif(not K22_SVD, reason="MK22F12.svd not downloaded")
@@ -153,6 +158,11 @@ def test_scaffold_kinetis_and_c2000_match_the_real_chips(tmp_path):
         r = {p.name: (p.model, p.base) for p in load_chip(ROOT / "chips" / f"{real}.yaml").peripherals}
         assert {n: (r[n], g[n]) for n in r.keys() & g.keys() if r[n] != g[n]} == {}, gen
         assert len(r.keys() & g.keys()) >= 30
+    k22 = {p.name: p for p in load_chip(tmp_path / "chips" / "k22test.yaml").peripherals}
+    alias = k22["FTM2_ALIAS"]                       # not in the SVD: added by the family's alias table
+    assert (alias.model, alias.base, alias.size, alias.params) == ("kinetis.ftm_alias", 0x4003A000, 0x1000,
+                                                                   {"target": "FTM2"})
+    assert k22["FTM2"].model == "kinetis.ftm" and k22["FTM2"].base == 0x400B8000
     out = io.StringIO()
     assert svd2chip.check(K22_SVD[0], tmp_path / "chips" / "k22test.yaml", out=out) == 0, out.getvalue()
     c2k = load_chip(tmp_path / "chips" / "c2ktest.yaml")

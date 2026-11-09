@@ -84,6 +84,8 @@ FAMILIES: dict[str, dict] = {
             Rule(r"RCC", "stm32.rcc", ("CR", "PLLCFGR", "CFGR", "AHB1ENR"), _p(ext_hz=8_000_000),
                  note="TODO ext_hz = the board's HSE crystal"),
             Rule(r"TIM([1-8])", "stm32.tim", ("CR1", "PSC", "ARR", "SR", "DIER")),
+            Rule(r"TIM(9|1[0-4])", "stub", (),
+                 note="TODO stm32.tim models TIM1-8 only (TIM9-14: 1-2 channels, no DIR/CMS); stub until it does"),
             Rule(r"IWDG", "stm32.iwdg", ("KR", "PR", "RLR", "SR")),
             Rule(r"WWDG", "stm32.wwdg", ("CR", "CFR", "SR")),
             Rule(r"EXTI", "stm32.exti", ("IMR", "RTSR", "FTSR", "PR")),
@@ -127,6 +129,12 @@ FAMILIES: dict[str, dict] = {
             Rule(r"LLWU", "kinetis.llwu", ("F1",)),
             Rule(r"(?:RF)?VBAT", "kinetis.vbat", (), rename="VBAT", note="battery-backed register file (plain RAM)"),
             Rule(r"RFSYS", "ram", ()),
+        ],
+        # blocks the SVD does not list: (SVD block, its base, alias name, model, alias base, size, params, note).
+        # K22 FTM2 is also decoded at 0x4003A000 (K22P100M120SF5RM ch. 4 memory map; FTM2 slot on AIPS0)
+        "aliases": [
+            ("FTM2", 0x400B8000, "FTM2_ALIAS", "kinetis.ftm_alias", 0x4003A000, 0x1000, {"target": "FTM2"},
+             "second address window of FTM2 (not in the SVD)"),
         ],
     },
     "ti_c2000": {
@@ -231,6 +239,12 @@ def plan_peripherals(family: str, table: dict, memory: list[tuple], exclude: set
                 note = (note + "; " if note else "") + (f"TODO SVD extent {extent:#x} overlaps the next block at "
                                                        f"{nxt:#x}: check the RM memory map")
         out.append(Periph(yname, model, base, size, params, note))
+    have = {(p.name, p.base, p.model) for p in out}
+    for src, sbase, aname, amodel, abase, asize, aparams, anote in fam.get("aliases", ()):
+        if any(n == src and b == sbase and m != "stub" for n, b, m in have) and aname not in exclude \
+                and not any(p.base <= abase < p.base + p.size for p in out):
+            out.append(Periph(aname, amodel, abase, asize, dict(aparams), anote))
+    out.sort(key=lambda p: p.base)
     return out
 
 
@@ -393,7 +407,7 @@ from chipem.chipdesc import load_chip
 ROOT = Path(__file__).resolve().parent.parent
 YAML = ROOT / "chips" / "{stem}.yaml"
 TOOLS = Path(chipem.__file__).resolve().parent.parent / "tools"
-SVD = [p for p in ([ROOT / {svd_rel!r}] if {svd_rel!r} else []) if p.exists()]   # svd/dl-*/ is not committed
+SVD = [p for p in ([ROOT / {svd_rel!r}] if {svd_rel!r} else []) if p.exists()]   # svd/dl-*/ (committed; skipped if absent)
 EXPECTED_PINS = {expected}          # package pin count
 EXPECTED_GPIO = {n_gpio}            # TODO: GPIO-capable pins per the data sheet
 

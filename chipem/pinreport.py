@@ -52,6 +52,7 @@ class PinRecord:
     isr_pc: int | None = None            # last code that cleared the pin's interrupt flag
     level_events: int = 0
     edge_times: deque = field(default_factory=lambda: deque(maxlen=RING))
+    edge_levels: deque = field(default_factory=lambda: deque(maxlen=RING))   # new level of each edge in edge_times
 
     def add(self, t: float, pc: int | None, what: str) -> None:
         e = (t, pc, what)
@@ -175,6 +176,7 @@ class PinReport:
                     return
             r.level_events += 1
             r.edge_times.append(ev.t_ns)
+            r.edge_levels.append(ev.new)
         elif not self.hooked:
             try:
                 pin = self.chip.pins.get(ev.pin)
@@ -291,6 +293,65 @@ def _period(times: list[float]) -> tuple[float, bool] | None:
     return med, ok >= 0.8 * len(per)
 
 
+WAVE_EDGES = 65                 # edges looked at for the frequency / duty of a periodic pin
+
+
+def wave_of(rec: PinRecord | None, now: float | None = None) -> dict | None:
+    """{"edges", "freq_hz", "duty", "last_ns"} of a pin from its recent edges (any driver: PWM channel, GPIO, net),
+    or None without edges. Frequency from the rising edges, duty (% high) over whole periods; both None with fewer
+    than three rising edges or once the pin has been still for more than 4 periods (`now`)."""
+    if rec is None or not rec.level_events:
+        return None
+    ts, lv = rec.edge_times, rec.edge_levels
+    n = min(len(ts), len(lv), WAVE_EDGES)
+    out = {"edges": rec.level_events, "freq_hz": None, "duty": None, "last_ns": ts[-1] if ts else None}
+    if n < 5:
+        return out
+    k0 = len(ts) - n
+    e = [(ts[k0 + i], lv[len(lv) - n + i]) for i in range(n)]
+    rises = [t for t, v in e if v == "H"]
+    if len(rises) < 3 or rises[-1] <= rises[0]:
+        return out
+    per = (rises[-1] - rises[0]) / (len(rises) - 1)
+    if now is not None and now - e[-1][0] > 4 * per:
+        return out                                      # stopped
+    high, t_up = 0.0, None
+    for t, v in e:
+        if t > rises[-1]:
+            break
+        if v == "H":
+            t_up = t
+        elif t_up is not None and t >= rises[0]:
+            high += t - t_up
+            t_up = None
+    out["freq_hz"] = round(1e9 / per, 3)
+    out["duty"] = round(100.0 * high / (rises[-1] - rises[0]), 1)
+    return out
+
+
+def fmt_wave(w: dict | None) -> str:
+    """'PWM 20.00 kHz, duty 25.0 %' for a periodic pin, '' otherwise."""
+    if not w or not w.get("freq_hz"):
+        return ""
+    f = w["freq_hz"]
+    fs = f"{f / 1e6:.4g} MHz" if f >= 1e6 else f"{f / 1e3:.4g} kHz" if f >= 1e3 else f"{f:.4g} Hz"
+    return f"periodic {fs}, duty {w['duty']:.1f} %"
+
+
+def pin_waves(chip: Any) -> dict[str, dict]:
+    """pin id -> wave_of(...) for every pin with level changes (for the web pin table)."""
+    rep = _get_rep(chip)
+    if rep is None:
+        return {}
+    now = rep.now()
+    out = {}
+    for pid, rec in rep.recs.items():
+        w = wave_of(rec, now)
+        if w is not None:
+            out[pid] = w
+    return out
+
+
 def _static_pins(rep: Any, chip: Any = None) -> dict[str, list[str]]:
     """pin -> static notes predicted by firmware.analyze (PCR writes, PDDR output masks, PSOR/PCOR/PTOR masks)."""
     out: dict[str, list[str]] = {}
@@ -366,6 +427,7 @@ class _Row:
 
 def _rows(chip: Any, rep: PinReport, stats: dict, spins: dict[str, list[str]] | None) -> list[_Row]:
     board = chip.pins
+    now = rep.now()
     ids = set(rep.recs) | set(stats)
     rows = []
     for pid in ids:
@@ -378,6 +440,8 @@ def _rows(chip: Any, rep: PinReport, stats: dict, spins: dict[str, list[str]] | 
         hist = rec.history if rec else []
         reads, writes = int(st.get("reads", 0)), int(st.get("writes", 0))
         changes, irqs = int(st.get("changes", 0)), int(st.get("irqs", 0))
+        if rec is not None and pin.owner not in ("GPIO", "disabled") and pin.direction == "out":
+            changes = max(changes, rec.level_events)     # driven by a peripheral (PWM / timer channel): PinBoard edges
         if not hist and not reads and not writes and not irqs and not st.get("pcr_writes"):
             continue                                    # only external stimulus / reset activity
         r = _Row()
@@ -405,6 +469,9 @@ def _rows(chip: Any, rep: PinReport, stats: dict, spins: dict[str, list[str]] | 
         other = {f: n for f, n in (rec.funcs if rec else {}).items() if f not in (pin.owner, "GPIO" if gpio else "")}
         if other:
             notes.append("also " + ", ".join(f"{f} ({n}x)" for f, n in other.items()))
+        wn = fmt_wave(wave_of(rec, now))
+        if wn:
+            notes.append(wn)
         r.notes = notes
         if spins is None:
             r.static = "-"
@@ -480,6 +547,13 @@ def _summary(chip: Any, rep: PinReport, rows: list[_Row], spins: dict | None, no
                         f"driven by {who}{rel}"
                         + (f", now {r.pin.level()}" if r.pin.level() else ""))
     bullet("Outputs the firmware drives", outs)
+    pwm = []
+    for r in rows:
+        if r.pin.owner not in ("GPIO", "disabled") and r.pin.direction == "out" and r.changes:
+            wn = fmt_wave(wave_of(r.rec, now))
+            pwm.append(f"{r.pin.id}: {r.pin.owner}, {_pl(r.changes, 'level change')}" + (f", {wn}" if wn else "")
+                       + f", now {r.pin.level()}")
+    bullet("Outputs driven by peripherals (PWM / timer channels)", pwm)
 
     polled = []
     irq_in = []

@@ -117,3 +117,30 @@ def test_dis_arm_symbol_name():
     assert int(lines[2].split(":")[0].replace("=>", "").strip(), 16) == a0 + 4
     rc, out = run_exec("dis no_such_symbol")
     assert "unknown symbol" in out
+
+
+def test_trace_collapses_periodic_edges_like_run():
+    """`trace on` uses trace.PinEventPrinter: a fast-toggling pin becomes waveform summaries, not one line per edge;
+    `trace all` prints every edge."""
+    from chipem.session import Session
+
+    def feed(mode):
+        args = build_parser().parse_args(["shell", str(BLINKY), "--exec", "quit"])
+        s = Session.from_args(args)
+        buf = io.StringIO()
+        sh = cmd_shell.Shell(s, stdout=buf)
+        sh.onecmd(f"trace {mode}")
+        log = sh.chip.log
+        t = 1e6
+        for _ in range(500):                               # 20 kHz, 25 % for 25 ms
+            log.event("pin", t, pin="PTC1", field="level", old="L", new="H")
+            log.event("pin", t + 12.5e3, pin="PTC1", field="level", old="H", new="L")
+            t += 50e3
+        sh._flush_trace()
+        sh.onecmd("trace off")
+        return buf.getvalue().splitlines()
+    lines = feed("on")
+    assert len(lines) < 12, lines
+    assert any("waveform:" in l and "20.000 kHz" in l and "duty 25.0 %" in l for l in lines)
+    assert any("waveform unchanged" in l for l in lines)
+    assert len(feed("all")) > 1000

@@ -468,7 +468,24 @@ class Session:
             for ctx in self.ctxs.values():
                 if ctx.clock_override and ctx.chip.clock.hz != ctx.clock_override:
                     ctx.apply_clock_override()
+            self._flush_waves(stopped_only=True)
             return r
+
+    def _flush_waves(self, stopped_only: bool) -> None:
+        """Store the open `wave` summaries of decimated pins (log.EventLog): after a run only those of pins that
+        stopped toggling, on close all of them."""
+        logs = [ctx.chip.log for ctx in self.ctxs.values()]
+        if self.board is not None:
+            logs.append(self.board.log)
+        for log in logs:
+            fw = getattr(log, "flush_waves", None)
+            if fw is None:
+                continue
+            if stopped_only:
+                now = self.board.now_ns() if self.board is not None else self.chip.now_ns()
+                fw(now)
+            else:
+                fw()
 
     def run_for(self, ns: float) -> StopReason:
         if self.board is not None:
@@ -737,6 +754,10 @@ class Session:
         return [(e, arch.exc_name(e), n) for e, n in sorted(ctx.irq_counts.items())]
 
     def close(self) -> None:
+        try:
+            self._flush_waves(stopped_only=False)
+        except Exception:
+            pass
         for ctx in self.ctxs.values():
             ctx.close()
         if self.board is not None:

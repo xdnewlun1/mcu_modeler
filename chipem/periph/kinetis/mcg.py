@@ -53,6 +53,7 @@ class MCG(MMIOBlock):
         self.bus_hz = 0.0
         self._sim: Any = None
         self._logged: tuple | None = None
+        self._ff: float | None = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -151,9 +152,15 @@ class MCG(MMIOBlock):
         self.core_hz = out / self._outdiv(1)
         self.bus_hz = out / self._outdiv(2)
         key = (round(self.core_hz), round(self.bus_hz), mode)
+        ff = self.ffclk_hz()
         if key == self._logged:
+            if ff != self._ff:                  # only MCGFFCLK changed (FRDIV/IREFS): tell its users (FTM CLKS=10)
+                self._ff = ff
+                for cb in list(self.listeners):
+                    cb()
             return
         self._logged = key
+        self._ff = ff
         chip = self.chip
         if chip is not None and getattr(chip, "clock_override", None):
             self.frozen = True

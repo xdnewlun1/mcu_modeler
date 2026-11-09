@@ -14,11 +14,13 @@ PinEventPrinter(out): subscribe to a chip's EventLog (`printer.attach(log)`), pr
     [   100.000 ms] UART0 TX: "hello\\r\\n"
     [  1200.000 ms] RESET watchdog
 Consecutive UART bytes of one UART within the same millisecond are coalesced into one line; an owner change
-and the direction/pull changes that accompany it (same pin, same instant) are merged too.  Level changes of a pin
-owned by a peripheral (a PWM / timer channel output) are summarised per `collapse_ns` window (default 10 ms of
-virtual time): one line with the edge count, frequency, duty cycle and current level; a window with one or two
-edges prints them as usual, and a summary identical to the previous one is not repeated (one "unchanged" line at
-the end).  `collapse_ns=None` prints every edge.  Call `flush()` at the end of a run.
+and the direction/pull changes that accompany it (same pin, same instant) are merged too.  Periodic signals are
+collapsed by edge density, whatever drives them (a PWM output, the receiving GPIO on another chip, an LED, probe or
+gate on the board): the first edges of a pin or part signal print as usual; once `collapse_edges` (3) edges fall
+within `collapse_ns` (default 10 ms of virtual time) its edges are summarised per window, one line with the edge
+count, frequency, duty cycle and current level, and identical windows are counted into one "waveform unchanged
+(N more edges)" line.  Sparse edges (single pulses, `--at` stimulus, slow blinks) always print one line each, at once.
+`collapse_ns=None` (`chipem run --all-edges`) prints every edge.  Call `flush()` at the end of a run.
 """
 from __future__ import annotations
 
@@ -333,13 +335,16 @@ class PinEventPrinter:
     NOT_PERIPHERAL = frozenset({"GPIO", "disabled", "analog", "power", "special", None})
 
     def __init__(self, out: TextIO | None = None, kinds: Iterable[str] | None = None, *, pin_width: int = 5,
-                 collapse_ns: float | None = 10e6):
+                 collapse_ns: float | None = 10e6, collapse_edges: int = 3):
         self.out = out if out is not None else sys.stdout
         self.kinds = frozenset(kinds) if kinds is not None else self.DEFAULT_KINDS
         self.pin_width = pin_width
         self.collapse_ns = collapse_ns
         self._owner: dict[str, str] = {}     # pin -> current owner (from owner events)
-        self._wave: dict[str, dict] = {}     # pin -> edge statistics of the open window
+        self.collapse_edges = max(2, int(collapse_edges))
+        self._wave: dict[str, dict] = {}     # pin / part signal -> density + open window (see _edge)
+        self._next_expiry: float | None = None
+        self._last_t = float("-inf")         # time stamp of the last printed line
         self._uart: tuple[str, str, int, float, bytearray] | None = None   # (uart, dir, ms bucket, t0, bytes)
         self._cfg: dict | None = None        # pending pin configuration line
         self._unsub = None
@@ -359,12 +364,23 @@ class PinEventPrinter:
         self.out.write(line + "\n")
         self.lines += 1
 
+    def _emit_t(self, t: float, body: str, summary: bool = False, pending: bool = True) -> None:
+        """Print `[t] body` after any pending UART / pin configuration line (`pending`); a summary is stamped no
+        earlier than the last printed line (it is printed late)."""
+        if pending:
+            self.flush_pending()
+        if summary and t < self._last_t:
+            t = self._last_t
+        if t > self._last_t:
+            self._last_t = t
+        self._emit(f"{fmt_t(t)} {body}")
+
     def _flush_uart(self) -> None:
         u = self._uart
         if u is not None:
             self._uart = None
             uart, d, _, t0, data = u
-            self._emit(f"{fmt_t(t0)} {uart} {d.upper()}: \"{escape_bytes(bytes(data))}\"")
+            self._emit_t(t0, pending=False, body=f"{uart} {d.upper()}: \"{escape_bytes(bytes(data))}\"")
 
     def _flush_cfg(self) -> None:
         c = self._cfg
@@ -383,75 +399,132 @@ class PinEventPrinter:
             if "pull" in c:
                 o, n = c["pull"]
                 parts.append(f"pull {o or 'none'} -> {n or 'none'}")
-            self._emit(f"{fmt_t(c['t'])} {c['pin']:<{self.pin_width}} " + ", ".join(parts))
+            self._emit_t(c['t'], f"{c['pin']:<{self.pin_width}} " + ", ".join(parts), pending=False)
 
-    # ---------------------------------------------------------------- peripheral waveforms
-    def _wave_edge(self, pin: str, t: float, old: Any, new: Any) -> None:
-        w = self._wave.get(pin)
-        if w is None or t - w["t0"] >= self.collapse_ns:
-            if w is not None:
-                self._flush_wave(pin)
-            w = self._wave[pin] = {"t0": t, "edges": [], "same": 0, "same_t": None, "last": w["last"] if w else None,
-                                   "lvl": old, "lvl_t": t}
-        w["lvl"], w["lvl_t"] = new, t
-        w["edges"].append((t, old, new))
+    # ---------------------------------------------------------------- periodic waveforms
+    # Every pin and part signal is judged by edge density, not by owner: while fewer than `collapse_edges` edges
+    # fall within `collapse_ns`, each edge prints at once (single edges, `--at` stimulus, slow blinks).  From the
+    # edge that makes it dense on, the signal's edges are gathered per `collapse_ns` window and summarised when the
+    # window closes (the next event at or after its end, an owner change, or flush()).  A window with one or two
+    # edges prints them as usual; a summary within tolerance of the last printed one is not repeated but counted,
+    # across any number of windows, into one "waveform unchanged (N more edges)" line, printed when the waveform
+    # changes, stops or the run ends.  Summary lines are stamped with the time they are printed (never earlier than
+    # a line already printed) and name the span they cover.
+    def _sig_state(self, key: str) -> dict:
+        s = self._wave.get(key)
+        if s is None:
+            from collections import deque
+            s = self._wave[key] = {"recent": deque(maxlen=max(1, self.collapse_edges - 1)), "win": None,
+                                   "last": None, "same": 0, "same_t": None, "lvl": None, "label": ""}
+        return s
 
-    def _wave_stats(self, w: dict) -> tuple[int, float | None, float | None]:
-        e = w["edges"]
-        rises = [t for t, _o, n in e if n == "H"]
+    def _edge(self, key: str, t: float, old: Any, new: Any, live_line: str, label: str = "") -> None:
+        s = self._sig_state(key)
+        s["label"] = label
+        w = s["win"]
+        if w is not None and t - w["t0"] >= self.collapse_ns:
+            self._close_window(key, s)
+            w = None
+        rec = s["recent"]
+        dense = len(rec) == rec.maxlen and t - rec[0] < self.collapse_ns
+        rec.append(t)
+        if w is None:
+            if not dense:
+                self._flush_same(key, s)
+                s["last"] = None                 # a later burst gets a fresh summary
+                s["lvl"] = new
+                self._emit_t(t, live_line)
+                return
+            self._flush_cfg()                    # an owner change line comes before the waveform
+            w = s["win"] = {"t0": t, "edges": []}
+            if self._next_expiry is None or t + self.collapse_ns < self._next_expiry:
+                self._next_expiry = t + self.collapse_ns
+        s["lvl"] = new
+        w["edges"].append((t, old, new, live_line))
+
+    @staticmethod
+    def _is_high(v: Any) -> bool:
+        return v in ("H", "ON", True, 1)
+
+    def _wave_stats(self, edges: list) -> tuple[int, float | None, float | None]:
+        rises = [t for t, _o, n, _l in edges if self._is_high(n)]
         if len(rises) < 2 or rises[-1] <= rises[0]:
-            return len(e), None, None
+            return len(edges), None, None
         freq = (len(rises) - 1) * 1e9 / (rises[-1] - rises[0])
         high, t_up = 0.0, None                  # duty over whole periods: first rise .. last rise
-        for t, _o, n in e:
+        for t, _o, n, _l in edges:
             if t > rises[-1]:
                 break
-            if n == "H":
+            if self._is_high(n):
                 t_up = t
             elif t_up is not None:
                 high += t - t_up
                 t_up = None
-        return len(e), freq, 100.0 * high / (rises[-1] - rises[0])
+        return len(edges), freq, 100.0 * high / (rises[-1] - rises[0])
 
-    def _flush_wave(self, pin: str, final: bool = False) -> None:
-        w = self._wave.get(pin)
-        if w is None:
+    @staticmethod
+    def _same_wave(a: tuple | None, b: tuple) -> bool:
+        if a is None:
+            return False
+        (fa, da), (fb, db) = a, b
+        if (fa is None) != (fb is None) or (da is None) != (db is None):
+            return False
+        if fa is not None and abs(fa - fb) > 1e-3 * fa:
+            return False
+        return da is None or abs(da - db) <= 0.5
+
+    def _close_window(self, key: str, s: dict) -> None:
+        w = s["win"]
+        s["win"] = None
+        if w is None or not w["edges"]:
             return
         e = w["edges"]
-        if e:
-            n, freq, duty = self._wave_stats(w)
-            key = (round(freq, 1) if freq else None, round(duty, 1) if duty is not None else None)
-            if n <= 2:
-                for t, o, nw in e:
-                    self._emit(f"{fmt_t(t)} {pin:<{self.pin_width}} {o} -> {nw}")
-                w["last"] = None
-            elif key == w["last"]:
-                w["same"] += n                       # same waveform as the last summary: say so once at the end
-                w["same_t"] = e[-1][0]
-            else:
-                self._flush_same(pin, w)
-                own = self._owner.get(pin, "")
-                f = f"{freq / 1e3:.3f} kHz" if freq and freq >= 1e3 else (f"{freq:.1f} Hz" if freq else "? Hz")
-                d = f"duty {duty:.1f} %" if duty is not None else ""
-                span = (e[-1][0] - e[0][0]) / 1e6
-                self._emit(f"{fmt_t(e[0][0])} {pin:<{self.pin_width}} {own} waveform: {n} edges in {span:.3f} ms, "
-                           f"{f}, {d}, now {e[-1][2]}".replace(", ,", ","))
-                w["last"] = key
-            w["edges"] = []
-            w["lvl_t"] = e[-1][0]
-        if final:
-            self._flush_same(pin, w)
-            self._wave.pop(pin, None)
+        n, freq, duty = self._wave_stats(e)
+        if n <= 2:
+            self._flush_same(key, s)
+            for t, _o, _n, line in e:
+                self._emit_t(t, line)
+            s["last"] = None
+            return
+        wave = (freq, duty)
+        if self._same_wave(s["last"], wave):
+            s["same"] += n                       # same waveform as the last summary: one line at the end
+            s["same_t"] = e[-1][0]
+            return
+        self._flush_same(key, s)
+        f = f"{freq / 1e3:.3f} kHz" if freq and freq >= 1e3 else (f"{freq:.1f} Hz" if freq else "? Hz")
+        d = f", duty {duty:.1f} %" if duty is not None else ""
+        lab = f"{s['label']} " if s["label"] else ""
+        self._emit_t(e[-1][0], f"{key:<{self.pin_width}} {lab}waveform: {n} edges in "
+                     f"{(e[-1][0] - e[0][0]) / 1e6:.3f} ms from {e[0][0] / 1e6:.3f} ms, {f}{d}, now {e[-1][2]}",
+                     summary=True)
+        s["last"] = wave
 
-    def _flush_same(self, pin: str, w: dict) -> None:
-        if w["same"]:
-            self._emit(f"{fmt_t(w['same_t'])} {pin:<{self.pin_width}} waveform unchanged ({w['same']} more edges), "
-                       f"now {w['lvl']}")
-            w["same"] = 0
+    def _flush_same(self, key: str, s: dict) -> None:
+        if s["same"]:
+            self._emit_t(s["same_t"], f"{key:<{self.pin_width}} waveform unchanged ({s['same']} more edges, until "
+                         f"{s['same_t'] / 1e6:.3f} ms), now {s['lvl']}", summary=True)
+            s["same"] = 0
+
+    def _flush_wave(self, key: str, final: bool = False) -> None:
+        s = self._wave.get(key)
+        if s is None:
+            return
+        self._close_window(key, s)
+        if final:
+            self._flush_same(key, s)
+            self._wave.pop(key, None)
 
     def _expire_waves(self, t: float) -> None:
-        for pin in [p for p, w in self._wave.items() if w["edges"] and t - w["t0"] >= self.collapse_ns]:
-            self._flush_wave(pin)
+        if self._next_expiry is None or t < self._next_expiry:
+            return
+        C = self.collapse_ns
+        due = sorted((s["win"]["t0"], k) for k, s in self._wave.items() if s["win"] is not None
+                     and t - s["win"]["t0"] >= C)
+        for _t0, k in due:
+            self._close_window(k, self._wave[k])
+        open_t0 = [s["win"]["t0"] for s in self._wave.values() if s["win"] is not None]
+        self._next_expiry = min(open_t0) + C if open_t0 else None
 
     def flush(self) -> None:
         self._flush_cfg()
@@ -493,6 +566,8 @@ class PinEventPrinter:
             pin = f.get("pin")
             if cid:
                 pin = f"{cid}.{pin}"
+            if fld == "wave":
+                return                          # a stored-history summary (log.EventLog); we see every edge
             if fld == "owner":
                 if pin in self._wave:
                     self._flush_wave(pin, final=True)
@@ -507,31 +582,45 @@ class PinEventPrinter:
                     c = self._cfg = {"pin": pin, "t": ev.t_ns}
                 c[fld] = (f.get("old"), f.get("new"))
                 return
-            if self.collapse_ns and self._owner.get(pin) not in self.NOT_PERIPHERAL:
-                self._flush_cfg()
-                self._wave_edge(pin, ev.t_ns, f.get("old"), f.get("new"))
+            line = f"{pin:<{self.pin_width}} {f.get('old')} -> {f.get('new')}"
+            if self.collapse_ns:
+                o = self._owner.get(pin)
+                self._edge(pin, ev.t_ns, f.get("old"), f.get("new"), line,
+                           "" if o in self.NOT_PERIPHERAL else str(o))
                 return
-            self.flush_pending()
-            self._emit(f"{fmt_t(ev.t_ns)} {pin:<{self.pin_width}} {f.get('old')} -> {f.get('new')}")
+            self._emit_t(ev.t_ns, line)
             return
         self.flush_pending()
         msg = f.get("msg")
         if kind == "part":
-            if f.get("action") == "set":
+            act = f.get("action")
+            if act == "set":
                 return                          # the resulting level/on events are printed instead
-            self._emit(f"{fmt_t(ev.t_ns)} {format_part_event(f)}")
+            line = format_part_event(f)
+            if self.collapse_ns and act is None and ("on" in f or (f.get("port") is not None and "level" in f)):
+                pid = str(f.get("part", "?"))
+                if "on" in f:
+                    key, new = pid, ("ON" if f["on"] else "off")
+                else:
+                    key, new = f"{pid}.{f['port']}", f["level"]
+                self._edge(key, ev.t_ns, None, new, line)
+                return
+            if act == "remove":
+                for k in [k for k in self._wave if k == f.get("part") or k.startswith(f"{f.get('part')}.")]:
+                    self._flush_wave(k, final=True)
+            self._emit_t(ev.t_ns, line)
             return
         if kind == "reset":
-            self._emit(f"{fmt_t(ev.t_ns)} {tag}RESET {f.get('reason', '')}".rstrip())
+            self._emit_t(ev.t_ns, f"{tag}RESET {f.get('reason', '')}".rstrip())
         elif kind == "irq":
             name = f.get("name") or f.get("irq") or ""
-            self._emit(f"{fmt_t(ev.t_ns)} {tag}IRQ {name} {msg or ''}".rstrip())
+            self._emit_t(ev.t_ns, f"{tag}IRQ {name} {msg or ''}".rstrip())
         elif kind == "mmio" and not msg:
             reg = f.get("reg") or f"+0x{f.get('offset', 0):x}"
             acc = "W" if f.get("access") == "w" else "R"
-            self._emit(f"{fmt_t(ev.t_ns)} {tag}MMIO {acc} {f.get('block', '')}.{reg} = 0x{int(f.get('value') or 0):x}")
+            self._emit_t(ev.t_ns, f"{tag}MMIO {acc} {f.get('block', '')}.{reg} = 0x{int(f.get('value') or 0):x}")
         else:
-            self._emit(f"{fmt_t(ev.t_ns)} {tag}{kind.upper()} {msg if msg is not None else f}")
+            self._emit_t(ev.t_ns, f"{tag}{kind.upper()} {msg if msg is not None else f}")
 
     def flush_pending(self) -> None:
         self._flush_cfg()

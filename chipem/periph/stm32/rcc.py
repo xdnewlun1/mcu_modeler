@@ -15,7 +15,8 @@ Whenever HCLK changes the model calls chip.clock.set_hz(HCLK) unless `frozen` (p
 different from the chip YAML, or chip.clock_override set by Session for --clock), like kinetis.mcg.
 `core_hz`, `apb1_hz`, `apb2_hz`, `timer_hz(bus)` are the derived values; `effective_apb_hz(bus)` /
 `effective_timer_hz(bus)` scale them to the clock the core actually runs at (what USART/TIM models use).
-Other models subscribe to clock-tree changes with `rcc.listeners.append(cb)` (cb() without arguments).
+Other models subscribe to clock-tree changes with `rcc.listeners.append(cb)` (cb() without arguments) and to clock
+gate changes with `rcc.gate_listeners.append(cb)` (cb(enr_name, old, new) after a write that changes an xxxENR).
 
 Clock gates: AHB1ENR/AHB2ENR/AHB3ENR/APB1ENR/APB2ENR; `clock_enabled(name)` / `check_gate(name, block)` (one
 `warn` per peripheral when a gated-off block is accessed; silicon ignores such accesses).  Writing 1 to a bit of
@@ -72,11 +73,14 @@ class RCC(MMIOBlock):
                                "CSR": {"on_write": self._csr_write}, "BDCR": {"on_write": self._bdcr_write}}
         for r in _RST_REG.values():
             ov[r] = {"on_write": self._rstr_write}
+        for r in _RST_REG:
+            ov[r] = {"on_write": self._enr_write}
         r = build_regs((name, "RCC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.ext_hz = float(params.get("ext_hz", 8_000_000))
         self.frozen = bool(params.get("frozen", False))
         self.listeners: list[Callable[[], None]] = []
+        self.gate_listeners: list[Callable[[str, int, int], None]] = []    # cb(enr_name, old, new)
         self.sysclk_hz = HSI_HZ
         self.core_hz = HSI_HZ
         self.apb1_hz = HSI_HZ
@@ -217,6 +221,12 @@ class RCC(MMIOBlock):
 
     def _bdcr_write(self, blk, reg, old, new):
         return (new & ~LSERDY) | (LSERDY if new & LSEON else 0)
+
+    def _enr_write(self, blk, reg, old, new):
+        if old != new:
+            for cb in list(self.gate_listeners):
+                cb(reg.name, old, new)
+        return None
 
     def _rstr_write(self, blk, reg, old, new):
         rising = new & ~old

@@ -16,11 +16,11 @@ svd2chip schema. Check bit-level details against the TRMs before relying on them
 | interrupt architecture | `arch/c28x/{arch,pie}.py` | done: PIE (PIECTRL/ENPIE/PIEVECT, PIEACK, PIEIER/IFR 1-12, vector RAM 0x0D00), INT13/14/NMI, CPU vector tables (0x3FFFC0 / 0x000000) when ENPIE=0, ITRAP → vector 19, reset (PC = image entry or 0x33FFF6, SP 0x400, ST1 0x0A0B), `vector_table()` |
 | chip description | `chips/tms320f28232.yaml` | done: memory map, 176 pins with MUX1-3 functions, IRQ names by vector number, all peripheral frames |
 | register table | `chips/tms320f28232_regs.yaml` | done (hand-written, 16-bit units) |
-| models | `periph/ti_c2000/` | `sysctrl` (PLL/DIVSEL/HISPCP/LOSPCP, PCLKCR gates, watchdog), `gpio` (A/B/C mux, DIR, PUD, DAT/SET/CLEAR/TOGGLE, XINT select), `xint`, `cputimer`, `sci` (FIFO, interrupts, board links), `adc` (software-start sequencer, minimal), `adcmirror`, `spi` (minimal), `flash`, `csm`, `alias` (L0-L3 dual mapping), `storage` (ePWM, eCAP, eQEP, eCAN, I2C, McBSP, XINTF, DMA, device emulation) |
+| models | `periph/ti_c2000/` | `sysctrl` (PLL/DIVSEL/HISPCP/LOSPCP, PCLKCR gates, watchdog), `gpio` (A/B/C mux, DIR, PUD, DAT/SET/CLEAR/TOGGLE, XINT select), `xint`, `cputimer`, `sci` (FIFO, interrupts, board links), `adc` (software start and ePWM SOCA/SOCB sequencer starts), `adcmirror`, `epwm` (ePWM1-6: TB, CC, AQ, DB, software TZ, ET with INT and SOC, EPWMxA/B pins), `spi` (minimal), `flash`, `csm`, `alias` (L0-L3 dual mapping), `storage` (HRPWM, eCAP, eQEP, eCAN, I2C, McBSP, XINTF, DMA, device emulation) |
 | loaders | `firmware.py` | `.c28img` (assembler JSON), TI COFF2 `.out` (sniffed against ELF), C2000 ELF (word addresses), raw `.bin` with `--load-addr` in words |
 | analysis | `firmware.analyze` | boot-entry `LB` target, vectors present in the image, peripheral references from `MOVW/MOVZ DP` and `MOVL XARn,#22`, pin roles from direct `MOV/OR/AND @GPxMUX/GPxDIR,#imm` stores (ISA-table decode) |
 | front ends | `cmd_run`, `cmd_shell`, `session` | run summary (SCI output, "PIE x.y" labels), shell `regs`, `--uart-in SCIA:...`, `--adc ADCINA0=...`, `--clock` freezes SYSCTRL |
-| samples | `firmware/samples_c2000/`, `firmware/samples_c2000_c/` | assembler: `blinky`, `button_mirror`, `timer_irq`, `sci_echo`, `uart_link_echo`; `build.sh` → `build/*.c28img`. TI-compiled C (cl2000 25.11.1, EABI and COFF): `blinky`, `uart_chat`, `selftest` |
+| samples | `firmware/samples_c2000/`, `firmware/samples_c2000_c/` | assembler: `blinky`, `button_mirror`, `timer_irq`, `sci_echo`, `uart_link_echo`, `epwm`; `build.sh` → `build/*.c28img`. TI-compiled C (cl2000 25.11.1, EABI and COFF): `blinky`, `uart_chat`, `selftest` |
 | board | `boards/c2000_k22_uart.yaml`, `boards/c2000_stm32_uart.yaml` | K22 `uart_link_sender` ↔ F28232 `uart_link_echo` over UART0 ↔ SCI-A; F28232 `uart_link_sender` ↔ STM32 `uart_link_echo` over SCI-A ↔ USART1 (run, `--pin-report`, web UI) |
 | tests | `tests/test_engine_units.py`, `tests/test_c2000_{chip,periph,samples,compiled}.py` | fake-core tests for the engine/arch/models; samples, COFF/ELF, TI-compiled C and the board on the real core |
 
@@ -68,8 +68,7 @@ whole-port GPADAT read reports them floating (one `warn` per read that finds new
 ## Limitations (F28232 support)
 
 - Not modelled: input qualification (GPxCTRL/QSEL), low-power modes beyond IDLE, XINTF timing (zones are plain
-  RAM), DMA, ePWM/HRPWM, eCAP, eQEP, eCAN, I2C, McBSP (register storage only), ADC continuous mode and ePWM SOC
-  triggers, SPI devices (MISO reads 0xFFFF), flash programming (flash is writable by the CPU), CSM (always
+  RAM), DMA, HRPWM, eCAP, eQEP, eCAN, I2C, McBSP (register storage only), ADC continuous mode, SPI devices (MISO reads 0xFFFF), flash programming (flash is writable by the CPU), CSM (always
   unsecured), missing-clock detection / limp mode.
 - SCI: no framing/parity errors or break detection; FFTXDLY/autobaud are ignored. Bytes that arrive while the
   receiver is disabled, in reset, gated off or not muxed are dropped, and overruns set OE/RXERROR (or RXFFOVF), as on
@@ -81,8 +80,10 @@ whole-port GPADAT read reports them floating (one `warn` per read that finds new
 
 ## Remaining work
 
-1. ePWM (time base, compare, action qualifier driving EPWMxA/B pins, ET interrupts and ADC SOC) and the ADC's
-   ePWM triggers: the first models that drive pins on their own.
+1. ePWM remainder (done: time base, compare, action qualifier, dead band, software trip zone, ET interrupts and
+   ADC SOC, EPWMxA/B pins): TZ1-6 pins and high-impedance trip, EPWMSYNCI/O and ADCSOCxO pins, HRPWM MEP, chopper,
+   FREE_SOFT, TBCTR wrap above TBPRD (CTRMAX), ePWM → eCAP sync; a TI-compiled C sample (`samples_c2000_c/epwm.c`
+   with InitEPwm, an ET ISR and SOCA → ADC ISR).
 2. Input qualification and GPIO low-power wake-up; XNMI routing details.
 3. Other parts: F28335 (FPU32, SCI-C, 34K SARAM) is a YAML away (same family package); F2837xD needs new
    sysctl/GPIO models (different register maps, GPxGMUX, input X-BAR) and a grid package renderer for BGA.

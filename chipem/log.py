@@ -1,6 +1,17 @@
 """EventLog: the single stream of runtime observations (pin, mmio, irq, uart, reset, fault, info, warn).
 
 `log.event(kind, t_ns, **fields)` appends and notifies subscribers; CLI/VCD/web subscribe. See docs/CONTRACTS.md.
+
+Bounded pin history.  Subscribers see every event, but the *stored* history (iteration, `filter`, Session.events,
+the web event list) keeps a fast periodic pin (PWM) bounded: a `pin` level edge counts as dense when at least
+`pin_dense_edges` (20) edges of that pin (per `chip` field) fall within `pin_dense_ns` (10 ms), i.e. a square wave
+of about 1 kHz or more.  The first `pin_burst` (1000) dense edges are stored as usual; after that the pin's edges are
+counted, and one `pin` event with `field="wave"` is stored per `pin_wave_ns` (100 ms) of virtual time:
+`edges` (edges in the window), `since_ns` (first of them; `t_ns` is the last), `freq_hz` and `duty` (% high over
+whole periods, None if under two rising edges) and `new` (level after the last edge).  When the pin slows down the
+open window is stored and edges are stored one by one again (a new burst).  `flush_waves()` stores open windows (the
+Session does so after each run for pins that stopped, and on close).  `EventLog(pin_burst=None)` stores every edge.
+The VCD writer and the run printer subscribe to the PinBoard / log and still receive every edge.
 """
 from __future__ import annotations
 
@@ -31,20 +42,114 @@ class LogEvent:
         return {"kind": self.kind, "t_ns": self.t_ns, "seq": self.seq, **self.fields}
 
 
+class _Wave:
+    """Edge statistics of one pin while its stored history is decimated (see the module doc)."""
+    __slots__ = ("t0", "t_last", "edges", "rise0", "rise_last", "rises", "high", "t_up", "high_at_last_rise",
+                 "level", "fields")
+
+    def __init__(self, t: float, fields: dict):
+        self.t0 = self.t_last = t
+        self.edges = 0
+        self.rise0 = self.rise_last = None
+        self.rises = 0
+        self.high = 0.0
+        self.t_up = None
+        self.high_at_last_rise = 0.0
+        self.level = None
+        self.fields = fields
+
+    def add(self, t: float, new: Any) -> None:
+        self.edges += 1
+        self.t_last = t
+        self.level = new
+        if new == "H":
+            if self.rise0 is None:
+                self.rise0 = t
+            self.rise_last = t
+            self.rises += 1
+            self.t_up = t
+            self.high_at_last_rise = self.high
+        elif self.t_up is not None:
+            if self.rise0 is not None:
+                self.high += t - self.t_up
+            self.t_up = None
+
+    def summary(self) -> dict:
+        freq = duty = None
+        if self.rises >= 2 and self.rise_last > self.rise0:
+            span = self.rise_last - self.rise0
+            freq = (self.rises - 1) * 1e9 / span
+            duty = round(100.0 * self.high_at_last_rise / span, 3)
+        return {**self.fields, "field": "wave", "old": None, "new": self.level, "edges": self.edges,
+                "since_ns": self.t0, "freq_hz": freq, "duty": duty}
+
+
 class EventLog:
-    def __init__(self, maxlen: int | None = 1_000_000):
+    def __init__(self, maxlen: int | None = 1_000_000, *, pin_burst: int | None = 1000, pin_dense_edges: int = 20,
+                 pin_dense_ns: float = 10e6, pin_wave_ns: float = 100e6):
         self._events: deque[LogEvent] = deque(maxlen=maxlen)
         self._subs: list[tuple[Callable[[LogEvent], None], frozenset[str] | None]] = []
         self._seq = 0
+        self.pin_burst = pin_burst
+        self.pin_dense_edges = max(2, int(pin_dense_edges))
+        self.pin_dense_ns = float(pin_dense_ns)
+        self.pin_wave_ns = float(pin_wave_ns)
+        # (chip, pin) -> [recent edge times, dense edges stored in this burst, open _Wave | None]
+        self._pins: dict[tuple, list] = {}
+        self.pin_edges_dropped = 0          # edges kept out of the stored history (counted in `wave` events)
 
     def event(self, kind: str, t_ns: float, **fields: Any) -> LogEvent:
         self._seq += 1
         ev = LogEvent(kind, float(t_ns), fields, self._seq)
-        self._events.append(ev)
+        if kind != "pin" or self.pin_burst is None or fields.get("field") != "level" or self._store_edge(ev):
+            self._events.append(ev)
         for cb, kinds in list(self._subs):
             if kinds is None or kind in kinds:
                 cb(ev)
         return ev
+
+    def _store_edge(self, ev: LogEvent) -> bool:
+        f = ev.fields
+        key = (f.get("chip"), f.get("pin"))
+        st = self._pins.get(key)
+        if st is None:
+            st = self._pins[key] = [deque(maxlen=self.pin_dense_edges - 1), 0, None]
+        t = ev.t_ns
+        rec = st[0]
+        dense = len(rec) == rec.maxlen and t - rec[0] < self.pin_dense_ns
+        rec.append(t)
+        w = st[2]
+        if not dense:
+            if w is not None:
+                self._store_wave(st)
+            st[1] = 0
+            return True
+        if w is None:
+            if st[1] < self.pin_burst:
+                st[1] += 1
+                return True
+            w = st[2] = _Wave(t, {k: v for k, v in f.items() if k in ("chip", "pin")})
+        elif t - w.t0 >= self.pin_wave_ns:
+            self._store_wave(st)
+            w = st[2] = _Wave(t, w.fields)
+        w.add(t, f.get("new"))
+        self.pin_edges_dropped += 1
+        return False
+
+    def _store_wave(self, st: list) -> None:
+        w = st[2]
+        st[2] = None
+        if w is not None and w.edges:
+            self._seq += 1
+            self._events.append(LogEvent("pin", w.t_last, w.summary(), self._seq))
+
+    def flush_waves(self, now_ns: float | None = None) -> None:
+        """Store open `wave` windows: all of them (`now_ns` None), or those of pins with no edge for
+        `pin_dense_ns` before `now_ns` (stopped; a running PWM keeps its window open)."""
+        for st in self._pins.values():
+            w = st[2]
+            if w is not None and (now_ns is None or now_ns - w.t_last >= self.pin_dense_ns):
+                self._store_wave(st)
 
     # convenience wrappers
     def info(self, t_ns: float, msg: str, **fields: Any) -> LogEvent:
@@ -82,6 +187,7 @@ class EventLog:
 
     def clear(self):
         self._events.clear()
+        self._pins.clear()
 
     def __iter__(self) -> Iterator[LogEvent]:
         return iter(list(self._events))
@@ -103,7 +209,13 @@ def format_event(ev: LogEvent) -> str:
     if ev.kind == "pin" and "pin" in f:
         fld = f.pop("field", "level")
         old, new = f.pop("old", None), f.pop("new", None)
-        s = f"{head} {f.pop('pin')} {fld} {old}->{new}"
+        if fld == "wave":
+            n, fr, du = f.pop("edges", 0), f.pop("freq_hz", None), f.pop("duty", None)
+            t0 = f.pop("since_ns", ev.t_ns)
+            s = (f"{head} {f.pop('pin')} wave {n} edges since {t0 / 1e6:.3f} ms"
+                 + (f" {fr:.6g} Hz" if fr else "") + (f" duty {du:.1f}%" if du is not None else "") + f" now {new}")
+        else:
+            s = f"{head} {f.pop('pin')} {fld} {old}->{new}"
     elif ev.kind == "uart" and ("data" in f or "text" in f):
         name = f.pop("name", f.pop("uart", ""))
         data = f.pop("data", None)

@@ -40,6 +40,18 @@ def fmt_time(ns: Any) -> str:
     return f"{math.floor(ns + 0.5)} ns"                    # Math.round
 
 
+def fmt_freq(hz: Any) -> str:
+    """Frequency as the pin table shows it: 20.000 kHz, 1.000 MHz, 50.0 Hz."""
+    if hz is None:
+        return "—"
+    hz = float(hz)
+    if hz >= 1e6:
+        return f"{_fixed(hz / 1e6, 3)} MHz"
+    if hz >= 1e3:
+        return f"{_fixed(hz / 1e3, 3)} kHz"
+    return f"{_fixed(hz, 1)} Hz"
+
+
 def _js_number(v: float | int) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
@@ -98,6 +110,12 @@ def describe_event(e: dict) -> str:
     if kind == "pin":
         f = e.get("field") or "level"
         old, new = e.get("old"), e.get("new")
+        if f == "wave":                       # decimated PWM edges (log.EventLog): one summary per window
+            fr, du = e.get("freq_hz"), e.get("duty")
+            return (f"{_js_str(e.get('pin'))} wave {_js_str(e.get('edges'))} edges since "
+                    f"{fmt_time(e.get('since_ns'))}" + (f", {fmt_freq(fr)}" if fr else "")
+                    + (f", duty {_fixed(float(du), 1)} %" if du is not None else "")
+                    + f", now {'—' if new is None else _js_str(new)}")
         return f"{_js_str(e.get('pin'))} {_js_str(f)} {'—' if old is None else _js_str(old)} → " \
                f"{'—' if new is None else _js_str(new)}"
     if kind == "part":

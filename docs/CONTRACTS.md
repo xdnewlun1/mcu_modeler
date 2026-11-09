@@ -40,7 +40,23 @@ class PinBoard:
     def mcu_update(self, name, *, owner=None, direction=None, drive=None, pull=None)   # from family mux/gpio models
     def subscribe(self, cb)        # cb(event: PinEvent)  PinEvent(t_ns, pin, field, old, new) ; field in {"level","owner","direction","pull"}
     def input_listeners: pin name -> list[cb(pin)]  # family models register to learn of external level changes (for PORT IRQs)
+    # peripheral output signals (timer/PWM channels; names only, no pins or vendor knowledge in the caller)
+    signal_levels: dict[str, Level]                    # live level of every signal a peripheral currently drives
+    def drive_signal(self, name, level)                # e.g. "TIM3_CH1", "FTM0_CH0", "EPWM1A": every output pin whose owner
+                                                       #   carries `name` follows (instruction-precise "level" events)
+    def release_signal(self, name, idle=None)          # no longer driven: pins go to `idle`, else to the drive the mux
+                                                       #   model last passed to mcu_update (the table's idle level)
+    def signal_pins(self, name) -> list[Pin]           # pins offering `name` in any function (static, cached)
+    @staticmethod
+    def signal_matches(owner, name) -> bool            # owner carries name: equal, a '/'-part equal, or a '/'-part
+                                                       #   "<name>_<LETTERS>[_<LETTERS>]" ("TIM2_CH1_ETR" carries "TIM2_CH1";
+                                                       #   "TIM1_CH10", "TIM1_CH1N" and "TIM1_CH1" for name "TIM1" do not)
 ```
+**`mcu_update` drive override.** While a signal is driven (`name in signal_levels`), `mcu_update(pin, drive=d)` on an
+output pin whose owner carries it stores `d` as the mux model's requested drive but sets `pin.drive` to the live
+signal level, so a pin muxed to a running PWM channel shows its current level at once. If the owner carries several
+driven signals the exact match (owner or one of its '/'-parts equals the name) wins over a bundled one, then the
+longest name: deterministic whatever the order of `drive_signal` calls. `reset()` clears `signal_levels`.
 **Peripheral-owned pins.** When a family mux model gives a pin to a peripheral signal (Kinetis PORT MUX=2..7, STM32
 MODER=AF, C2000 GPxMUX≠GPIO) it sets `owner` to the signal name and takes `direction`/`drive` from its family table
 `chipem/periph/<family>/signals.py` (`TABLE = chipem.periph.signals.SignalTable([(regex, role), ...])`, first match on
@@ -56,14 +72,16 @@ any `/`-part of the name; `TABLE.pin_state(fn) -> (direction, drive)`). It does 
 | SPI `PCS*`/`NSS`/`SPISTE*` | out | H |
 | I2C `SDA`/`SCL` (open-drain) | in | H when pulled up, else X |
 | CAN TX / RX | out / in | H / pull |
-| PWM/timer channels (`FTMx_CHn`, `TIMx_CHn[N]`, `EPWMxA/B`) | out | L |
+| PWM/timer channels (`FTMx_CHn`, `TIMx_CHn[N]`, `EPWMxA/B`) | out | L idle; the live level while the timer drives the signal (`drive_signal`) |
 | clock outputs (`CLKOUT`, `RTC_CLKOUT`, `XCLKOUT`, `MCOx`), trace clock/data | out | L |
 | ADC/CMP/DAC | analog | — |
 | JTAG/SWD `TCK`/`TMS`/`TDI`/`TRST` / `TDO`/`SWO` | in / out | pull / H |
 | anything else | none | X |
 
-The level never follows the peripheral's traffic (bytes, frames, PWM duty); it is the signal's idle state. Nets treat
-a peripheral output like any driven output.
+The level does not follow serial traffic (UART bytes, SPI frames): it is the signal's idle state. Timer/PWM
+models are the exception: they call `PinBoard.drive_signal` at every output edge, and a pin owned by that signal
+shows the live level (see the drive override above) until `release_signal`. Nets treat a peripheral output like any
+driven output.
 
 ## chipem/periph/base.py — MMIO blocks
 ```python
@@ -149,6 +167,14 @@ Chip YAML keys: `name, core{arch, backend, cpu, fpu, clock_hz, addr_unit_bits}, 
 ## Events / logging
 All runtime observations go through `chip.log` (a `chipem.log.EventLog`): `log.event(kind, t_ns, **fields)` with kinds
 `pin`, `mmio`, `irq`, `uart`, `reset`, `fault`, `info`, `warn`. The CLI/VCD/web subscribe to it.
+Subscribers receive every event. The stored history (`iter(log)`, `filter`, `Session.events`) bounds fast periodic
+pins: `EventLog(maxlen=1_000_000, *, pin_burst=1000, pin_dense_edges=20, pin_dense_ns=10e6, pin_wave_ns=100e6)`; a
+`pin` level event of a pin (keyed by `chip`, `pin`) with `pin_dense_edges` edges within `pin_dense_ns` is dense; after
+`pin_burst` stored dense edges, the edges are not stored but counted, and one stored-only (not notified) event
+`pin` with `field="wave", new=<level>, edges=N, since_ns, freq_hz, duty` is appended per `pin_wave_ns` window, when the
+pin slows down, or on `flush_waves(now_ns=None)` (all open windows; with `now_ns`, those of pins quiet for
+`pin_dense_ns`). `pin_burst=None` stores every edge. Consumers of stored `pin` events must ignore `field == "wave"`
+or use it as a summary.
 
 ## chipem/session.py — one emulation (a chip, or a board of chips) shared by run/shell/serve
 ```python

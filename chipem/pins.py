@@ -167,6 +167,7 @@ class PinBoard:
         # level instead of the signal's idle level (drive_signal / release_signal)
         self.signal_levels: dict[str, Level] = {}
         self._signal_pins: dict[str, list[Pin]] = {}
+        self._mux_drive: dict[int, Level | None] = {}       # pin num -> drive the mux model last asked for
 
     # --- construction --------------------------------------------------
     @classmethod
@@ -265,6 +266,7 @@ class PinBoard:
             o, pin.direction = pin.direction, direction
             self._emit(pin, "direction", o, direction, t)
         if drive is not _KEEP:
+            self._mux_drive[pin.num] = _norm_level(drive)
             if self.signal_levels and pin.direction == "out" and pin.owner not in ("GPIO", "disabled"):
                 lvl = self._signal_level(pin.owner)
                 if lvl is not None:
@@ -280,22 +282,41 @@ class PinBoard:
 
     # --- peripheral output signals (generic: names only, no vendor knowledge) --------------------------------------
     @staticmethod
-    def signal_matches(owner: str | None, name: str) -> bool:
-        """Does pin owner `owner` carry signal `name`? Exact, a '/'-part of a shared function ("A/B"), or a function
-        that bundles more signals on one pin ("TIM2_CH1_ETR" carries "TIM2_CH1")."""
-        if not owner:
-            return False
+    def _signal_rank(owner: str | None, name: str) -> int:
+        """0 = `owner` does not carry `name`; 2 = exact (a whole '/'-part of the owner is `name`); 1 = the owner
+        bundles `name` with a letters-only qualifier ("TIM2_CH1_ETR" carries "TIM2_CH1"). A suffix with digits is a
+        different signal: "TIM1" does not match "TIM1_CH1", "FTM0_CH1" does not match "FTM0_CH10"."""
+        if not owner or not name:
+            return 0
+        best = 0
         for part in str(owner).split("/"):
             part = part.strip()
-            if part == name or part.startswith(name + "_"):
-                return True
-        return False
+            if part == name:
+                return 2
+            if part.startswith(name + "_"):
+                rest = part[len(name) + 1:]
+                if rest and all(q.isalpha() for q in rest.split("_")):
+                    best = 1
+        return best
+
+    @classmethod
+    def signal_matches(cls, owner: str | None, name: str) -> bool:
+        """Does pin owner `owner` carry signal `name`? Exact, a '/'-part of a shared function ("A/B"), or a function
+        that bundles more signals on one pin with a letters-only qualifier ("TIM2_CH1_ETR" carries "TIM2_CH1")."""
+        return cls._signal_rank(owner, name) > 0
 
     def _signal_level(self, owner: str) -> Level | None:
+        """Live level for a pin owned by `owner`: the driven signal that is exactly the owner (or one of its
+        '/'-parts) wins over a bundled match; among equal matches the longest signal name wins, then the name
+        (deterministic whatever the order in which the signals were first driven)."""
+        best, key = None, None
         for name, lvl in self.signal_levels.items():
-            if self.signal_matches(owner, name):
-                return lvl
-        return None
+            r = self._signal_rank(owner, name)
+            if r:
+                k = (r, len(name), name)
+                if key is None or k > key:
+                    best, key = lvl, k
+        return best
 
     def signal_pins(self, name: str) -> list[Pin]:
         """Pins that offer signal `name` in any of their functions (static, from the chip description)."""
@@ -312,20 +333,35 @@ class PinBoard:
         if self.signal_levels.get(name) == lvl:
             return
         self.signal_levels[name] = lvl
+        t = None
         for p in self.signal_pins(name):
-            if p.direction == "out" and p.drive != lvl and self.signal_matches(p.owner, name):
-                self.mcu_update(p, drive=lvl)
+            if p.direction != "out" or not self.signal_matches(p.owner, name):
+                continue
+            plvl = self._signal_level(p.owner)     # the owner's best signal (an exact match wins over a bundle)
+            if plvl is not None and p.drive != plvl:
+                if t is None:
+                    t = self._now()
+                old = p.level()
+                p.drive = plvl                       # not via mcu_update: keep the mux model's requested drive
+                self._level_changed(p, old, t)
 
     def release_signal(self, name: str, idle: Level | None = None) -> None:
-        """The peripheral no longer drives `name` (output disabled, module off): its pins show `idle` (default: the
-        signal's idle level as the mux model last reported it, i.e. unchanged until the next mux update)."""
+        """The peripheral no longer drives `name` (output disabled, module off). Its output pins show `idle` if
+        given, else the drive the mux model last reported for them (the signal's idle level from the family table),
+        or the live level of another still-driven signal the owner carries."""
         if self.signal_levels.pop(name, None) is None:
             return
-        if idle is None:
-            return
+        idle = _norm_level(idle)
         for p in self.signal_pins(name):
-            if p.direction == "out" and self.signal_matches(p.owner, name) and p.drive != idle:
-                self.mcu_update(p, drive=idle)
+            if p.direction != "out" or not self.signal_matches(p.owner, name):
+                continue
+            lvl = self._signal_level(p.owner) if self.signal_levels else None
+            if lvl is None:
+                lvl = idle if idle is not None else self._mux_drive.get(p.num, p.drive)
+            if p.drive != lvl:
+                old = p.level()
+                p.drive = lvl                    # not via mcu_update: keep the mux model's requested drive
+                self._level_changed(p, old, self._now())
 
     def reset(self):
         """MCU reset: restore power-on owner/direction/drive/pull (external stimulus is kept). Emits events."""

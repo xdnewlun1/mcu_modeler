@@ -598,3 +598,64 @@ def test_board_editor_add_remove_save_open(app, tmp_path, monkeypatch):
     code, r = post(app, "/api/run", {"ms": 1})
     assert code == 200
     assert wait_for(lambda: get_json(app, "/api/state").get("last_stop") == "DONE")
+
+
+def test_event_buffer_reserves_room_for_non_pin_events():
+    """A 20 kHz PWM fills the pin ring, but reset/info/uart/warn events stay (per-kind cap); iteration is in seq
+    order."""
+    from chipem.web.server import EventBuffer
+    b = EventBuffer(total=100, pin_cap=60)
+    seq = 0
+
+    def add(kind, **f):
+        nonlocal seq
+        seq += 1
+        b.append({"kind": kind, "seq": seq, **f})
+    add("reset", reason="por")
+    add("info", msg="PLL locked")
+    for i in range(10_000):
+        add("pin", pin="PA6", field="level")
+        if i == 5000:
+            add("uart", uart="USART1", byte=0x41)
+    assert len(b) == 63
+    kinds = [e["kind"] for e in b]
+    assert kinds[:3] == ["reset", "info", "uart"] and kinds.count("pin") == 60
+    seqs = [e["seq"] for e in b]
+    assert seqs == sorted(seqs)
+    b.clear()
+    assert len(b) == 0 and list(b) == []
+
+
+def test_wave_event_text():
+    from chipem.web.evfmt import describe_event
+    d = describe_event({"kind": "pin", "pin": "PA6", "field": "wave", "new": "L", "edges": 4000, "since_ns": 1.5e6,
+                        "freq_hz": 20000.0, "duty": 25.0})
+    assert d == "PA6 wave 4000 edges since 1.500 ms, 20.000 kHz, duty 25.0 %, now L"
+
+
+EPWM_IMG = ROOT / "firmware" / "samples_c2000" / "build" / "epwm.c28img"
+
+
+@pytest.mark.skipif(not EPWM_IMG.exists(), reason="C2000 samples not built")
+def test_pwm_pin_wave_in_state_and_events_bounded():
+    """ePWM sample (20 kHz on GPIO0/GPIO1): the pin rows carry wave {edges, freq_hz, duty}; the event list keeps the
+    reset/info events and holds a bounded number of pin events (EventLog burst + wave summaries)."""
+    s = Session("tms320f28232", EPWM_IMG)
+    a = WebApp(s, "127.0.0.1", 0).start()
+    try:
+        assert post(a, "/api/run", {"ms": 300})[0] == 200
+        assert wait_for(lambda: get_json(a, "/api/state").get("last_stop") == "DONE", 60)
+        st = get_json(a, "/api/state")
+        row = next(p for p in st["pins"] if p["short"] == "GPIO0")
+        w = row["wave"]
+        assert abs(w["freq_hz"] - 20e3) < 1 and w["duty"] == 29.0 and w["edges"] > 10_000
+        evs = get_json(a, "/api/events?limit=0")
+        evs = evs["events"] if isinstance(evs, dict) else evs
+        kinds = [e["kind"] for e in evs]
+        assert "reset" in kinds and "info" in kinds
+        assert kinds.count("pin") < 4000                         # 300 ms of 2 x 20 kHz = 24,000 edges
+        waves = [e for e in evs if e.get("field") == "wave"]
+        assert waves and "wave" in waves[0]["desc"] and "kHz" in waves[0]["desc"]
+    finally:
+        a.stop()
+        s.close()

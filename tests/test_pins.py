@@ -123,3 +123,99 @@ def test_no_clock():
     b.subscribe(ev.append)
     b.set_external(1, "high")
     assert ev[0].t_ns == 0.0 and ev[0].new == "H"
+
+
+# ---- peripheral output signals (drive_signal / release_signal / signal_levels / signal_pins / signal_matches) ----
+def _sig_board():
+    clk = FakeClock()
+    pins = [Pin(1, "PA6", functions={"AF2": "TIM3_CH1", "AF1": "TIM1_BKIN"}, port="A", bit=6, owner="GPIO",
+                direction="in", gpio_name_format="P{port}{bit}"),
+            Pin(2, "PA0", functions={"AF1": "TIM2_CH1_ETR"}, port="A", bit=0, owner="GPIO", direction="in",
+                gpio_name_format="P{port}{bit}"),
+            Pin(3, "PB1", functions={"AF1": "TIM1_CH1/TIM1_CH1N"}, port="B", bit=1, owner="GPIO", direction="in",
+                gpio_name_format="P{port}{bit}"),
+            Pin(4, "PB2", functions={"AF1": "TIM1_CH10"}, port="B", bit=2, owner="GPIO", direction="in",
+                gpio_name_format="P{port}{bit}")]
+    b = PinBoard(pins, clk)
+    b.clk = clk
+    ev = []
+    b.subscribe(ev.append)
+    return b, ev
+
+
+def test_signal_matches_rules():
+    m = PinBoard.signal_matches
+    assert m("TIM3_CH1", "TIM3_CH1")
+    assert m("TIM2_CH1_ETR", "TIM2_CH1")                  # bundled with a letters-only qualifier
+    assert m("JTAG_TDO/TIM1_CH1", "TIM1_CH1")             # a '/'-part
+    assert not m("TIM1_CH10", "TIM1_CH1")                 # different channel
+    assert not m("TIM1_CH1", "TIM1")                      # module name is not a channel
+    assert not m("TIM1_CH1N", "TIM1_CH1")
+    assert not m("", "TIM1_CH1") and not m(None, "TIM1_CH1") and not m("TIM1_CH1", "")
+
+
+def test_signal_pins_static_from_functions():
+    b, _ = _sig_board()
+    assert [p.id for p in b.signal_pins("TIM3_CH1")] == ["PA6"]
+    assert [p.id for p in b.signal_pins("TIM2_CH1")] == ["PA0"]
+    assert [p.id for p in b.signal_pins("TIM1_CH1")] == ["PB1"]      # not PB2 (TIM1_CH10)
+    assert b.signal_pins("TIM9_CH1") == []
+
+
+def test_drive_signal_follows_only_owned_output_pins():
+    b, ev = _sig_board()
+    b.drive_signal("TIM3_CH1", "H")                       # pin still GPIO: nothing changes
+    assert b.signal_levels == {"TIM3_CH1": "H"} and b.get("PA6").level() == "X" and not ev
+    b.mcu_update("PA6", owner="TIM3_CH1", direction="out", drive="L")   # mux: idle L, but the signal is H now
+    assert b.get("PA6").level() == "H"
+    b.clk.t = 100.0
+    ev.clear()
+    b.drive_signal("TIM3_CH1", "L")
+    b.drive_signal("TIM3_CH1", "L")                       # unchanged: no event
+    assert [(e.t_ns, e.pin, e.old, e.new) for e in ev] == [(100.0, "PA6", "H", "L")]
+    b.drive_signal("TIM3_CH1", 1)
+    assert b.get("PA6").level() == "H"
+    b.mcu_update("PA6", direction="in")                   # input: drive ignored
+    ev.clear()
+    b.drive_signal("TIM3_CH1", "L")
+    assert not [e for e in ev if e.field == "level"]
+
+
+def test_release_signal_restores_mux_drive_or_idle():
+    b, ev = _sig_board()
+    b.mcu_update("PA6", owner="TIM3_CH1", direction="out", drive="L")
+    b.drive_signal("TIM3_CH1", "H")
+    assert b.get("PA6").level() == "H"
+    b.release_signal("TIM3_CH1")                          # back to the drive the mux model asked for (L)
+    assert b.get("PA6").level() == "L" and "TIM3_CH1" not in b.signal_levels
+    b.drive_signal("TIM3_CH1", "L")
+    b.release_signal("TIM3_CH1", "H")                     # explicit idle level
+    assert b.get("PA6").level() == "H"
+    ev.clear()
+    b.release_signal("TIM3_CH1", "L")                     # not driven any more: no-op
+    assert not ev and b.get("PA6").level() == "H"
+
+
+def test_signal_level_prefers_exact_match_deterministically():
+    b, _ = _sig_board()
+    b.drive_signal("TIM1_CH1N", "L")
+    b.drive_signal("TIM1_CH1", "H")
+    b.mcu_update("PB1", owner="TIM1_CH1N", direction="out", drive="L")
+    assert b.get("PB1").level() == "L"                    # TIM1_CH1N exactly, not TIM1_CH1 (driven later)
+    b.mcu_update("PA0", owner="TIM2_CH1_ETR", direction="out", drive="L")
+    b.drive_signal("TIM2_CH1", "H")
+    assert b.get("PA0").level() == "H"                    # bundled match
+    b.drive_signal("TIM2_CH1_ETR", "L")
+    assert b.get("PA0").level() == "L"                    # the exact signal beats the bundled one
+    b.drive_signal("TIM2_CH1", "H")
+    assert b.get("PA0").level() == "L"                    # ... whatever the order of updates
+    b.release_signal("TIM2_CH1_ETR")
+    assert b.get("PA0").level() == "H"                    # still carries the driven TIM2_CH1
+
+
+def test_reset_clears_signal_levels():
+    b, _ = _sig_board()
+    b.mcu_update("PA6", owner="TIM3_CH1", direction="out", drive="L")
+    b.drive_signal("TIM3_CH1", "H")
+    b.reset()
+    assert b.signal_levels == {} and b.get("PA6").owner == "GPIO" and b.get("PA6").direction == "in"

@@ -509,3 +509,36 @@ def test_session_reset_reports_part_state_changes(tmp_path):
         elif line[1:] == vid:
             last[t] = line[0]
     assert last[max(last)] == "0" and max(last) == 700000
+
+
+PWM_BOARD = ROOT / "boards/pwm_led.yaml"
+
+
+@pytest.mark.skipif(not (ROOT / "firmware/samples_stm32/build/tim_pwm.elf").exists()
+                    or not (ROOT / "firmware/samples/build/ftm_pwm.elf").exists(), reason="PWM samples not built")
+def test_pwm_led_board_probe_measures_frequency():
+    """boards/pwm_led.yaml: STM32 TIM3 and K22 FTM0 PWM (1 kHz, 25 %) drive an LED and a probe each; the probes
+    measure 1 kHz, the LEDs blink with the PWM, and the printer collapses all of it into a few summary lines."""
+    import io
+
+    from chipem.trace import PinEventPrinter
+    s = Session.from_board(PWM_BOARD)
+    out = io.StringIO()
+    pr = PinEventPrinter(out, set(PinEventPrinter.DEFAULT_KINDS) | {"part"}, pin_width=8).attach(s.log)
+    leds = {"LED_A": [], "LED_B": []}
+    for k, lst in leds.items():
+        s.board.parts[k].listeners.append(lambda part, f, _l=lst: _l.append(f["on"]) if "on" in f else None)
+    try:
+        s.run_for(10.5e6)
+        pr.detach()
+        for pid in ("P_A", "P_B"):
+            st = s.board.parts[pid].state()
+            assert st["freq_hz"] is not None and abs(st["freq_hz"] - 1000) < 0.5, (pid, st)
+            assert st["rises"] >= 10 and st["falls"] >= 10
+        for k, ons in leds.items():
+            assert ons.count(True) >= 10 and ons.count(False) >= 10, k
+    finally:
+        s.close()
+    lines = out.getvalue().splitlines()
+    assert len(lines) < 60, len(lines)
+    assert sum("waveform:" in l and "1.000 kHz" in l and "duty 25.0 %" in l for l in lines) >= 6

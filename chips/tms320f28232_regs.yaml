@@ -751,7 +751,7 @@ peripherals:
     base: 0x6800
     size: 0x040
     derived_from: null
-    description: "ePWM1 + HRPWM1 (storage only)"
+    description: "ePWM1 + HRPWM1 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
     group: EPWM
     interrupts: {40: EPWM1_TZINT, 48: EPWM1_INT}
     registers:
@@ -799,7 +799,7 @@ peripherals:
     base: 0x6840
     size: 0x040
     derived_from: null
-    description: "ePWM2 + HRPWM2 (storage only)"
+    description: "ePWM2 + HRPWM2 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
     group: EPWM
     interrupts: {41: EPWM2_TZINT, 49: EPWM2_INT}
     registers:
@@ -847,7 +847,7 @@ peripherals:
     base: 0x6880
     size: 0x040
     derived_from: null
-    description: "ePWM3 + HRPWM3 (storage only)"
+    description: "ePWM3 + HRPWM3 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
     group: EPWM
     interrupts: {42: EPWM3_TZINT, 50: EPWM3_INT}
     registers:
@@ -895,7 +895,7 @@ peripherals:
     base: 0x68C0
     size: 0x040
     derived_from: null
-    description: "ePWM4 + HRPWM4 (storage only)"
+    description: "ePWM4 + HRPWM4 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
     group: EPWM
     interrupts: {43: EPWM4_TZINT, 51: EPWM4_INT}
     registers:
@@ -943,7 +943,7 @@ peripherals:
     base: 0x6900
     size: 0x040
     derived_from: null
-    description: "ePWM5 + HRPWM5 (storage only)"
+    description: "ePWM5 + HRPWM5 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
     group: EPWM
     interrupts: {44: EPWM5_TZINT, 52: EPWM5_INT}
     registers:
@@ -991,7 +991,7 @@ peripherals:
     base: 0x6940
     size: 0x040
     derived_from: null
-    description: "ePWM6 + HRPWM6 (storage only)"
+    description: "ePWM6 + HRPWM6 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
     group: EPWM
     interrupts: {45: EPWM6_TZINT, 53: EPWM6_INT}
     registers:

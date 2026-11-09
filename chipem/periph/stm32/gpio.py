@@ -31,12 +31,16 @@ counters to the report.
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 from ..base import MMIOBlock
 from ..registry import register
 from ._util import GatedBlock, build_regs
 from .signals import TABLE as SIGNALS
+
+_TIM_CH = re.compile(r"(TIM\d+)_CH(\d)(N?)(?:_|$)")
 
 MODE_NAMES = ("input", "output", "alternate", "analog")
 CFG_REGS = ("MODER", "OTYPER", "OSPEEDR", "PUPDR", "AFRL", "AFRH")
@@ -167,6 +171,8 @@ class GPIO(GatedBlock):
         if mode == 2:
             owner = self._owner_af(pin, i, self.af(i)) if pin is not None else "?"
             d, drv = SIGNALS.pin_state(owner if owner not in ("disabled", "?") else None)
+            if d == "out" and owner.startswith("TIM") and self._tim_released(owner):
+                d, drv = "in", None                     # timer channel not driving (disabled / input capture)
             return owner, d, drv, pull
         if mode == 1:
             high = bool(self.odr >> i & 1)
@@ -174,6 +180,29 @@ class GPIO(GatedBlock):
                 return "GPIO", "in", None, pull         # open-drain released
             return "GPIO", "out", ("H" if high else "L"), pull
         return "GPIO", "in", None, pull
+
+    def _tim_released(self, owner: str) -> bool:
+        """Pin function TIMx_CHn(N): does the timer model say it does not drive that output now?"""
+        periphs = getattr(self.chip, "peripherals", None) or {}
+        for part in owner.split("/"):
+            m = _TIM_CH.match(part.strip())
+            if m is None:
+                continue
+            f = getattr(periphs.get(m[1]), "signal_driven", None)
+            if f is not None:
+                driven = f(int(m[2]), bool(m[3]))
+                if driven is not None:
+                    return not driven
+        return False
+
+    def resync_signal(self, sig: str) -> None:
+        """A peripheral started or stopped driving `sig`: re-evaluate the alternate-function pins carrying it."""
+        board = getattr(self.chip, "pins", None)
+        if board is None:
+            return
+        for i, pin in enumerate(self.pins):
+            if pin is not None and self.mode(i) == 2 and board.signal_matches(pin.owner, sig):
+                self._sync_pin(i, quiet=True)
 
     def _sync_pin(self, i: int, *, quiet: bool = False, why: str = "") -> None:
         pin = self.pins[i]

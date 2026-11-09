@@ -25,8 +25,8 @@ def add_args(p) -> None:
                         "mmio included with --log-mmio)")
     p.add_argument("--max-slice", type=int, default=None, metavar="N", help="max instructions per core slice")
     p.add_argument("--all-edges", action="store_true",
-                   help="print every level change of peripheral-driven pins (PWM/timer outputs) instead of one "
-                        "waveform summary per 10 ms")
+                   help="print every pin and board-part edge; by default a signal with 3+ edges within 10 ms "
+                        "(PWM, clocks and what they drive) prints one waveform summary per 10 ms window")
     p.add_argument("--stop-on-fault", action="store_true",
                    help="stop at the first fault instead of entering the firmware's HardFault handler")
 

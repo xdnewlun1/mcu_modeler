@@ -9,7 +9,10 @@ Session/Chip are not thread-safe, so *every* chip access happens on one `Worker`
     and drains the command queue between chunks, so commands are served within one chunk's wall time.
     `pause` additionally calls `session.stop()` (documented thread-safe) to cut a long chunk short.
   * After every chunk/command the worker publishes immutable snapshots (state + pin table) and appends new log
-    events (as JSON-ready dicts) to a bounded buffer.  Read-only endpoints (`/api/state`, `/api/events`,
+    events (as JSON-ready dicts) to a bounded buffer (`EventBuffer`: MAX_EVENTS, of which at most MAX_PIN_EVENTS
+    `pin` events, so PWM edges never evict reset/info/uart/warn events; the session log itself stores a fast PWM
+    pin as a burst of edges and then `wave` summaries, see chipem/log.py). Pin rows carry `wave`
+    ({edges, freq_hz, duty}) for pins with level changes (pinreport.pin_waves).  Read-only endpoints (`/api/state`, `/api/events`,
     `/api/stream`) are served from those snapshots, so they never block on a busy worker.
   * A `threading.Condition` wakes SSE streams when something new is published.
   * Board wiring (nets, links) can change at runtime (`/api/net`, `/api/link`, auto UART links when firmware
@@ -66,10 +69,35 @@ from ..cmd_shell import event_dict, jsonable
 from .evfmt import describe_event, event_line, text_matcher
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-MAX_EVENTS = 20000          # events kept for /api/events and the SSE stream
+MAX_EVENTS = 20000          # events kept for /api/events and the SSE stream ...
+MAX_PIN_EVENTS = 12000      # ... of which at most this many `pin` events (PWM must not evict reset/info/uart/warn)
 MAX_EVENTS_PER_POLL = 4000  # if the chip logs more than this per chunk, only the newest are published
 MAX_STEPS = 1_000_000       # /api/step n limit (single steps run at ~1e5/s; use /api/run for more)
 BODY_TIMEOUT_S = 10.0       # a request body that does not arrive within this is answered 408
+
+
+class EventBuffer:
+    """The web's bounded event list with a per-kind cap: `pin` events (PWM edges, waveform summaries) are kept in
+    their own ring of `pin_cap` and every other kind in a ring of `total - pin_cap`, so a fast PWM can never push
+    reset / info / uart / warn events out. Iteration merges both rings in sequence (`seq`) order."""
+
+    def __init__(self, total: int = MAX_EVENTS, pin_cap: int = MAX_PIN_EVENTS):
+        self.pin: deque[dict] = deque(maxlen=pin_cap)
+        self.other: deque[dict] = deque(maxlen=max(1, total - pin_cap))
+
+    def append(self, d: dict) -> None:
+        (self.pin if d.get("kind") == "pin" else self.other).append(d)
+
+    def clear(self) -> None:
+        self.pin.clear()
+        self.other.clear()
+
+    def __len__(self) -> int:
+        return len(self.pin) + len(self.other)
+
+    def __iter__(self):
+        import heapq
+        return heapq.merge(self.pin, self.other, key=lambda e: e.get("seq", 0))
 
 
 class Worker:
@@ -89,7 +117,7 @@ class Worker:
         self.error: str | None = None
         self.snapshot: dict = {}
         self.version = 0
-        self.events: deque[dict] = deque(maxlen=MAX_EVENTS)
+        self.events = EventBuffer()
         self.event_seq = 0              # seq of the newest published event
         self._cmd_gen = 0               # bumped by pause(): queued run/step commands from before it are void
         self._last_log_seq = 0
@@ -267,8 +295,11 @@ class Worker:
             # "seq > since" polling stays exact
             new = sorted(new, key=lambda e: getattr(e, "seq", 0))
             self._last_log_seq = max(self._last_log_seq, getattr(new[-1], "seq", self._last_log_seq + len(new)))
-            if len(new) > MAX_EVENTS_PER_POLL:
-                new = new[-MAX_EVENTS_PER_POLL:]
+            if len(new) > MAX_EVENTS_PER_POLL:          # keep every non-pin event; drop the oldest pin events
+                other = [e for e in new if getattr(e, "kind", None) != "pin"][-MAX_EVENTS_PER_POLL:]
+                room = MAX_EVENTS_PER_POLL - len(other)
+                pins = [e for e in new if getattr(e, "kind", None) == "pin"][-room:] if room > 0 else []
+                new = sorted(other + pins, key=lambda e: getattr(e, "seq", 0))
         if b is not None and isinstance(st.get("board"), dict) and "parts" not in st["board"]:
             try:
                 st["board"]["parts"] = [{"id": k, "state": v} for k, v in jsonable(part_states(b)).items()]
@@ -508,8 +539,19 @@ def all_pins(session: Any) -> list[dict]:
                     c = cfg.get(sh[len(pre):] if sh.startswith(pre) else sh)
                     if c:
                         row.update(c)
+        try:
+            from ..pinreport import pin_waves
+            waves = pin_waves(_ctx(session, cid).chip)
+        except Exception:
+            waves = {}
+        pre = f"{cid}."
         for row in part:
             row.setdefault("chip", cid)
+            if waves:
+                sh = str(row.get("short") or "")
+                w = waves.get(sh[len(pre):] if sh.startswith(pre) else sh)
+                if w is not None:            # waveform summary: edge count, frequency and duty of periodic pins
+                    row["wave"] = {"edges": w["edges"], "freq_hz": w["freq_hz"], "duty": w["duty"]}
         rows.extend(part)
     return rows
 

@@ -1,0 +1,214 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Mon Nov  9 14:03:49 2026
+
+OUTPUT FILE NAME:   <build/epwm_coff.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00330000   0000ff80  000001d2  0000fdae  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  00000010  00000ff0  RWIX
+  RAML5                 0000d000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00330000    000001b8     
+                  00330000    000000a8     epwm.obj (.text)
+                  003300a8    00000054     rts2800_ml.lib : boot28.asm.obj (.text)
+                  003300fc    0000002a     epwm.obj (.text:retain)
+                  00330126    00000029     rts2800_ml.lib : exit.c.obj (.text)
+                  0033014f    00000024                    : cpy_tbl.c.obj (.text)
+                  00330173    00000020                    : memcpy.c.obj (.text)
+                  00330193    00000011                    : args_main.c.obj (.text)
+                  003301a4    00000009                    : _lock.c.obj (.text)
+                  003301ad    00000008     codestart.obj (.text)
+                  003301b5    00000002     rts2800_ml.lib : pre_init.c.obj (.text)
+                  003301b7    00000001                    : startup.c.obj (.text)
+
+.cinit     0    003301b8    0000001a     
+                  003301b8    0000000e     rts2800_ml.lib : exit.c.obj (.cinit)
+                  003301c6    00000005                    : _lock.c.obj (.cinit:__lock)
+                  003301cb    00000005                    : _lock.c.obj (.cinit:__unlock)
+                  003301d0    00000002     --HOLE-- [fill = 0]
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000002     DSECT
+                  003fffc0    00000002     rts2800_ml.lib : boot28.asm.obj (.reset)
+
+.pinit     0    00330000    00000000     UNINITIALIZED
+
+.ebss      1    0000c000    00000010     UNINITIALIZED
+                  0000c000    00000006     epwm.obj (.ebss)
+                  0000c006    00000006     rts2800_ml.lib : exit.c.obj (.ebss)
+                  0000c00c    00000002                    : _lock.c.obj (.ebss:__lock)
+                  0000c00e    00000002                    : _lock.c.obj (.ebss:__unlock)
+
+MODULE SUMMARY
+
+       Module            code   initialized data   uninitialized data
+       ------            ----   ----------------   ------------------
+    build/obj_coff/epwm/
+       epwm.obj          210    0                  6                 
+       codestart.obj     10     0                  0                 
+    +--+-----------------+------+------------------+--------------------+
+       Total:            220    0                  6                 
+                                                                     
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml.lib
+       boot28.asm.obj    84     0                  0                 
+       exit.c.obj        41     14                 6                 
+       cpy_tbl.c.obj     36     0                  0                 
+       memcpy.c.obj      32     0                  0                 
+       _lock.c.obj       9      10                 4                 
+       args_main.c.obj   17     0                  0                 
+       pre_init.c.obj    2      0                  0                 
+       startup.c.obj     1      0                  0                 
+    +--+-----------------+------+------------------+--------------------+
+       Total:            222    24                 10                
+                                                                     
+       Stack:            0      0                  768               
+    +--+-----------------+------+------------------+--------------------+
+       Grand Total:      442    24                 784               
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c000     300 (0000c000)     _adc_last
+0000c002     300 (0000c000)     _epwm_isr_count
+0000c004     300 (0000c000)     _adc_isr_count
+0000c006     300 (0000c000)     ___TI_enable_exit_profile_output
+0000c008     300 (0000c000)     ___TI_cleanup_ptr
+0000c00a     300 (0000c000)     ___TI_dtors_ptr
+0000c00c     300 (0000c000)     __lock
+0000c00e     300 (0000c000)     __unlock
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     00330126  C$$EXIT                         
+1     00000700  __STACK_END                     
+abs   00000300  __STACK_SIZE                    
+1     0000c008  ___TI_cleanup_ptr               
+1     0000c00a  ___TI_dtors_ptr                 
+1     0000c006  ___TI_enable_exit_profile_output
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+0     003301b8  ___cinit__                      
+0     003301b8  ___etext__                      
+abs   ffffffff  ___pinit__                      
+0     00330000  ___text__                       
+0     00330193  __args_main                     
+1     0000c00c  __lock                          
+0     003301ac  __nop                           
+0     003301a8  __register_lock                 
+0     003301a4  __register_unlock               
+1     00000400  __stack                         
+0     003301b7  __system_post_cinit             
+0     003301b5  __system_pre_init               
+1     0000c00e  __unlock                        
+0     00330126  _abort                          
+0     0033010c  _adc_isr                        
+1     0000c004  _adc_isr_count                  
+1     0000c000  _adc_last                       
+0     003300a8  _c_int00                        
+0     0033014f  _copy_in                        
+0     003300fc  _epwm1_isr                      
+1     0000c002  _epwm_isr_count                 
+0     00330128  _exit                           
+0     00330083  _main                           
+0     00330173  _memcpy                         
+abs   ffffffff  binit                           
+0     003301b8  cinit                           
+0     0033fff6  code_start                      
+0     003301b8  etext                           
+abs   ffffffff  pinit                           
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     00330000  ___text__                       
+0     00330083  _main                           
+0     003300a8  _c_int00                        
+0     003300fc  _epwm1_isr                      
+0     0033010c  _adc_isr                        
+0     00330126  C$$EXIT                         
+0     00330126  _abort                          
+0     00330128  _exit                           
+0     0033014f  _copy_in                        
+0     00330173  _memcpy                         
+0     00330193  __args_main                     
+0     003301a4  __register_unlock               
+0     003301a8  __register_lock                 
+0     003301ac  __nop                           
+0     003301b5  __system_pre_init               
+0     003301b7  __system_post_cinit             
+0     003301b8  ___cinit__                      
+0     003301b8  ___etext__                      
+0     003301b8  cinit                           
+0     003301b8  etext                           
+0     0033fff6  code_start                      
+1     00000400  __stack                         
+1     00000700  __STACK_END                     
+1     0000c000  _adc_last                       
+1     0000c002  _epwm_isr_count                 
+1     0000c004  _adc_isr_count                  
+1     0000c006  ___TI_enable_exit_profile_output
+1     0000c008  ___TI_cleanup_ptr               
+1     0000c00a  ___TI_dtors_ptr                 
+1     0000c00c  __lock                          
+1     0000c00e  __unlock                        
+abs   00000300  __STACK_SIZE                    
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+abs   ffffffff  ___pinit__                      
+abs   ffffffff  binit                           
+abs   ffffffff  pinit                           
+
+[41 symbols]

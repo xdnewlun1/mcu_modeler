@@ -6,6 +6,7 @@ Runs the real compiler output (RTS `_c_int00`, `.cinit` copy tables, compiler id
   - uart_chat alone with UART input: HELLO, the once-only HELLO answer, PONG, PINGs every 5 ms
   - boards/c2000_stm32_chat_c.yaml: the chat with the STM32 HAL firmware, same conversation as the asm version
   - selftest: integer/long long arithmetic via the RTS helpers, soft-float, library functions, checked on the host
+  - epwm: 20 kHz / 25 % on GPIO0 (EPWM1A), the ePWM event-trigger ISR (ETCLR, PIEACK 3) and the SOCA -> ADC ISR
 Skipped when the images are not built (the compiler is not part of the repository).  Timings within 5 %."""
 from __future__ import annotations
 
@@ -293,3 +294,37 @@ def test_selftest_results(name, double_bits):
     bad = [(i, hex(g), hex(x)) for i, (g, x) in enumerate(zip(got, exp)) if g != x]
     assert not bad, bad
     assert text == "-12345|-1234567890|50000|beef"
+
+
+# ------------------------------------------------------------------------------------------------ epwm
+@pytest.mark.parametrize("name", ["epwm.out", "epwm_coff.out"])
+def test_epwm_pwm_isr_and_adc(name):
+    """firmware/samples_c2000_c/epwm.c: up count TBPRD 4999 at 100 MHz (50 us), CMPA 1250 (12.5 us high) on GPIO0;
+    the CTR=ZERO interrupt and the CTR=PRD SOCA -> ADCINT interrupt run once per period."""
+    from chipem.session import Session
+    s = Session("tms320f28232", _img(name), quiet=True)
+    try:
+        s.chips["A"].peripherals["ADC"].set_channel("ADCINA0", 0x5A5)
+        s.run_for(8e6)
+        chip = s.chips["A"]
+        syms = s.ctxs["A"].image.symbols
+        pre = "_" if name.endswith("_coff.out") else ""
+        n0 = _word(chip, syms[pre + "epwm_isr_count"], 2)
+        a0 = _word(chip, syms[pre + "adc_isr_count"], 2)
+        s.run_for(2e6)                                    # 2 ms = 40 periods
+        n1 = _word(chip, syms[pre + "epwm_isr_count"], 2)
+        a1 = _word(chip, syms[pre + "adc_isr_count"], 2)
+        last = _word(chip, syms[pre + "adc_last"])
+        evs = s.events(kinds={"pin", "warn", "fault"})
+    finally:
+        s.close()
+    assert n0 > 0 and abs((n1 - n0) - 40) <= 1
+    assert a0 > 0 and abs((a1 - a0) - 40) <= 1
+    assert last == 0x5A5
+    assert not [e for e in evs if e.kind in ("warn", "fault")]
+    e = [(t, v) for t, v in _edges(evs, "GPIO0") if t > 7.0]
+    rises = [t for t, v in e if v == "H"]
+    falls = [t for t, v in e if v == "L" and t > rises[0]]
+    assert len(rises) >= 39
+    assert all(abs((b - a) - 0.050) < 1e-6 for a, b in zip(rises, rises[1:]))
+    assert all(abs((f - r) - 0.0125) < 1e-6 for r, f in zip(rises, falls))

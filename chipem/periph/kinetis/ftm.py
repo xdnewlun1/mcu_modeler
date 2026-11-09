@@ -1,38 +1,56 @@
-"""Kinetis FlexTimer (FTM0-FTM3 on the K22F; K22P100M120SF5V2RM chapter 40, "FlexTimer Module").
+"""Kinetis FlexTimer (FTM0-FTM3 on the K22F; K22P100M120SF5V2RM chapter 38, "FlexTimer Module (FTM)").
 
 Counter (16 bit, FTM clock = SC.CLKS: 01 system (bus) clock, 10 fixed frequency clock MCGFFCLK, 11 external clock
-(not modelled: no FTM_CLKINx, one `warn`), divided by 2^SC.PS):
-* up counting (SC.CPWMS=0): CNTIN .. MOD, then CNTIN again; TOF when the counter goes MOD -> CNTIN.
-* up-down counting (CPWMS=1): CNTIN up to MOD and down to CNTIN; TOF when it goes MOD -> MOD-1.
+(not modelled: no FTM_CLKINx, one `warn`), divided by 2^SC.PS). Counter values wrap at 16 bits (38.4.3.1):
+* up counting (SC.CPWMS=0): CNTIN .. MOD, then CNTIN again: (MOD - CNTIN + 1) mod 2^16 ticks, so signed counting
+  (CNTIN = 0xFFFC, MOD = 4: -4 .. 4, 9 ticks) and CNTIN > MOD (through 0xFFFF -> 0x0000, Fig. 38-211) work; TOF when
+  the counter goes MOD -> CNTIN. MOD = CNTIN: TOF at every tick (one `warn`).
+* free running (38.4.3.3): FTMEN=0 and MOD = 0x0000 or 0xFFFF: 0x0000 .. 0xFFFF, TOF at 0xFFFF -> 0x0000 (every
+  65536 ticks). FTMEN=1 and MOD = CNTIN = 0: the counter is stopped (no TOF, no matches); MOD/CNTIN/CnV writes then
+  take effect at once.
+* up-down counting (CPWMS=1): CNTIN up to MOD and down to CNTIN, 2 x (MOD - CNTIN) ticks; TOF when it goes MOD ->
+  MOD-1. MOD = CNTIN stops it.
+* CONF.NUMTOF (38.4.3.5): TOF is set at the first overflow and then not for the next NUMTOF overflows; a CNT write
+  restarts that count.
 * CNT reads are live; any CNT write resets the counter to CNTIN.
+* clock changes (SC.CLKS/PS, the bus clock through SIM CLKDIV1 / MCG, MCGFFCLK) keep the counter value and the elapsed
+  fraction of the current tick; a counter stopped with CLKS=00 continues from CNT when restarted (no repeated match).
 
 Channels (n = 0..7; pairs m = n/2 for COMBINE/DEADTIME):
 * output compare (MSnB:MSnA=01): on CnV match toggle / clear / set (ELSnB:ELSnA 01/10/11); 00 = software compare
   (flag only).
-* edge-aligned PWM (MSnB=1): high-true (ELSnB:ELSnA=10) high from CNTIN while CNT < CnV, low-true (X1) the
-  inverse; CnV <= CNTIN gives 0 %, CnV > MOD 100 %.
-* center-aligned PWM (CPWMS=1, ELS != 00): high-true is cleared at the match counting up and set at the match
-  counting down (high while CNT < CnV up, CNT <= CnV down).
+* edge-aligned PWM (MSnB=1, 38.4.6): high-true (ELSnB:ELSnA=10) high from CNTIN while CNT < CnV, low-true (X1) the
+  inverse. CnV = CNTIN (CnV = 0 with CNTIN = 0) gives 0 %, CnV > MOD or CnV < CNTIN 100 %; neither sets CHnF.
+* center-aligned PWM (CPWMS=1, 38.4.7): high-true is cleared at the match counting up and set at the match counting
+  down (high while CNT < CnV up, CNT <= CnV down). CnV = 0 or CnV[15] = 1: 0 %; CnV >= MOD (MOD != 0): 100 %; neither
+  sets CHnF.
 * combine (COMBINEm): channel 2m is set at C(2m)V and cleared at C(2m+1)V (high-true), low at the start of the period;
   channel 2m+1 is the same, or its complement with COMPm. Dead time (DTENm): each rising edge of the pair is
   delayed by DEADTIME (DTVAL x 1/4/16 system-clock cycles), a pulse shorter than that disappears.
 * CHnF at every match (also of channels without an output) and the FTM IRQ for TOF&TOIE | CHnF&CHnIE.
-  TOF / CHnF / STATUS clear by a read with the flag set followed by a write of 0 (the documented sequence).
+  TOF / CHnF / STATUS clear by a read with the flag set followed by a write of 0; a flag set again between the read
+  and the write stays set.
 * output path: mode -> dead time -> software output control (SWOCTRL) -> POL (inverts) -> OUTMASK (forces the
   inactive state, POLn) -> the pin owned by FTMx_CHn (PinBoard.drive_signal). MODE.INIT loads the channel outputs
-  from OUTINIT. ELSnB:ELSnA = 00 (and not combine) leaves the pin at its idle level.
-* register updates (40.4.10/40.4.11): with the counter clock off MOD/CNTIN/CnV take effect at once. FTMEN=0: CnV of
-  output compare at once; MOD, CNTIN and PWM CnV at the next counter overflow (EPWM: MOD -> CNTIN; CPWM: MOD ->
-  MOD-1). FTMEN=1: from the write buffers at the loading point after a software sync (SYNC.SWSYNC; CNTMAX: counter =
-  MOD, CNTMIN: counter = CNTIN, neither: the end of the period; SYNC.REINIT also restarts the counter) or at every
-  loading point while PWMLOAD.LDOK is set.
+  from OUTINIT. ELSnB:ELSnA = 00 (and not combine) leaves the pin at its idle level. A PWM / combine channel whose
+  FTMx_CHn is not muxed to a pin (and without CHnIE/DMA) schedules no edges; it starts when the PORT mux selects it.
+* register updates (38.4.10): with the counter clock off (or the counter stopped) MOD/CNTIN/CnV take effect at once.
+  CNTIN: at once unless FTMEN=1 and SYNCONF.CNTINC=1. FTMEN=0: CnV of output compare at the next counter tick; MOD and
+  PWM CnV at the next counter overflow (EPWM: MOD -> CNTIN, free running 0xFFFF -> 0; CPWM: MOD -> MOD-1). FTMEN=1:
+  output compare CnV at the next tick when COMBINE.SYNCENm=0; otherwise from the write buffers at the loading point
+  after a software sync (SYNC.SWSYNC; CNTMAX: counter = MOD, CNTMIN: counter = CNTIN, neither: the end of the period;
+  SYNC.REINIT also restarts the counter) or at every loading point while PWMLOAD.LDOK is set.
+* MODE.WPDIS reads as the complement of FMS.WPEN (WPEN is set by writing 1, cleared by reading WPEN = 1 and then
+  writing 1 to WPDIS); the write protection itself is not enforced.
 
 Not modelled: input capture / dual edge capture / quadrature decoder (stored only, one `warn`), fault inputs,
-hardware triggers (TRIGn, EXTTRIG to the ADC/PDB), INVCTRL, DMA requests, write protection (FMS.WPEN/MODE.WPDIS),
-external clock, debug mode, the half-cycle reload; the counter is one 16-bit counter of the FTM clock.
+hardware triggers (TRIGn, EXTTRIG to the ADC/PDB), INVCTRL, DMA requests, write protection, external clock, debug
+mode, the half-cycle reload; the counter is one 16-bit counter of the FTM clock. Writing CNTIN while running so that
+the counter lies outside CNTIN..MOD lets it count up to MOD; matches in that stretch are not generated.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ..base import MMIOBlock
@@ -42,24 +60,29 @@ from .clockutil import bus_hz, irq_number
 
 TOF, TOIE, CPWMS = 1 << 7, 1 << 6, 1 << 5
 CHF, CHIE, MSB, MSA, ELSB, ELSA, DMA = 1 << 7, 1 << 6, 1 << 5, 1 << 4, 1 << 3, 1 << 2, 1 << 0
-FTMEN, INIT = 1 << 0, 1 << 1
+FTMEN, INIT, WPDIS = 1 << 0, 1 << 1, 1 << 2
+WPEN = 1 << 6
 SYNC_CNTMIN, SYNC_CNTMAX, SYNC_REINIT, SYNC_SWSYNC = 1 << 0, 1 << 1, 1 << 2, 1 << 7
+CNTINC = 1 << 2                  # SYNCONF
+SYNCEN = 1 << 5                  # COMBINE, per pair byte
 LDOK = 1 << 9
 DTPS_FACTOR = (1, 1, 4, 16)
+EPS = 1e-6                       # in ticks
+_INF = float("inf")
 
 
 class _Ch:
     __slots__ = ("n", "v", "kind", "lowtrue", "oc", "ie", "active", "ref", "target", "applied", "ev", "dt_ev",
-                 "out", "lazy_k", "armed")
+                 "out", "lazy_k", "armed", "last_t")
 
     def __init__(self, n: int):
         self.n = n
         self.v = 0               # active CnV
-        self.kind = "off"        # off | sw | oc | ic | epwm | cpwm | comb | comb2
+        self.kind = "off"        # off | sw | swe | swc | oc | ic | epwm | cpwm | comb | comb2
         self.lowtrue = False
         self.oc = 0              # output compare action: 0 none, 1 toggle, 2 clear, 3 set
         self.ie = False          # CHIE or DMA: matches need their exact time
-        self.active = False      # needs match events (drives a pin or interrupts)
+        self.active = False      # needs match events (drives a muxed pin or interrupts)
         self.ref = False         # mode output (high-true sense, before dead time/POL)
         self.target = False      # after the mode's polarity, before dead time
         self.applied = False     # after dead time
@@ -68,6 +91,7 @@ class _Ch:
         self.out: str | None = None      # level driven on the pin signal (None: not driving)
         self.lazy_k = -1         # quiet channel: last match position already reflected in CHnF
         self.armed = False       # CHnF read as 1 (a following write of 0 clears it)
+        self.last_t = -_INF      # time of the last match (never two matches at one instant)
 
 
 @register("kinetis.ftm")
@@ -82,6 +106,7 @@ class FTM(GatedBlock):
             "MOD": {"on_write": self._buf_write}, "CNTIN": {"on_write": self._buf_write},
             "STATUS": {"on_read": self._status_read, "on_write": self._status_write},
             "MODE": {"on_write": self._mode_write},
+            "FMS": {"on_read": self._fms_read, "on_write": self._fms_write, "ro_mask": 0xFFFFFFFF & ~WPEN},
             "SYNC": {"on_write": self._sync_write},
             "COMBINE": {"on_write": self._cfg_write}, "POL": {"on_write": self._cfg_write},
             "OUTMASK": {"on_write": self._cfg_write}, "SWOCTRL": {"on_write": self._cfg_write},
@@ -99,15 +124,23 @@ class FTM(GatedBlock):
         self._line = False
         self.running = False
         self.mod = self.cntin = 0    # active values (write buffers: the MOD/CNTIN registers)
+        self._c0 = 0                 # counter value at position 0 (CNTIN; 0 when free running)
+        self._mm = 0                 # MOD - CNTIN (mod 2^16; 0xFFFF free running)
+        self._halt = False           # counter stopped by its configuration (FTMEN=1, MOD=CNTIN=0)
         self._start_ns = 0.0         # anchor time
-        self._p0 = 0                 # position in the period (ticks since CNTIN counting up) at the anchor
+        self._p0: float = 0          # position in the period (ticks since CNTIN counting up) at the anchor
         self._tick_ns = 0.0
+        self._fresh = True           # counter just (re)loaded: a match at its position is still to come
+        self._down = False           # counting down when stopped (up-down counting)
+        self._tofcnt = 0             # NUMTOF counter
         self._pending = False        # write buffers differ from the active values
         self._sync = False           # software sync requested (SWSYNC), loads at the next loading point
         self._tof_armed = False
         self._status_armed = 0
+        self._wpen_armed = False
         self._quiet: list[_Ch] = []
         self._warned: set[str] = set()
+        self._prefix = f"{name}_CH"
         self.overflows = 0
 
     def attach(self, chip: Any) -> None:
@@ -116,6 +149,9 @@ class FTM(GatedBlock):
         mcg = find_model(chip, "kinetis.mcg", "MCG")
         if mcg is not None and hasattr(mcg, "listeners"):
             mcg.listeners.append(self._clock_changed)
+        pins = getattr(chip, "pins", None)
+        if pins is not None:
+            pins.subscribe(self._pin_event)
 
     def reset(self) -> None:
         if getattr(self, "ch", None) is not None:
@@ -123,7 +159,7 @@ class FTM(GatedBlock):
             for c in self.ch:
                 self._cancel_dt(c)
                 c.ref = c.target = c.applied = False
-                c.v, c.lazy_k, c.armed = 0, -1, False
+                c.v, c.lazy_k, c.armed, c.last_t = 0, -1, False, -_INF
                 if c.out is not None and self.chip is not None and self.chip.pins is not None:
                     self.chip.pins.release_signal(self._sig(c), "L")
                 c.out = None
@@ -135,14 +171,11 @@ class FTM(GatedBlock):
             return
         self.mod = self.cntin = 0
         self._p0 = 0
-        self._pending = self._sync = self._tof_armed = False
-        self._status_armed = 0
+        self._pending = self._sync = self._tof_armed = self._wpen_armed = self._down = False
+        self._fresh = True
+        self._status_armed = self._tofcnt = 0
+        self._geom()
         self._chan_cfg()
-
-    def write(self, offset: int, size: int, value: int) -> None:
-        if self._gate_loc is not None:
-            self._gate_ok()
-        MMIOBlock.write(self, offset, size, value)
 
     def _sig(self, c: _Ch) -> str:
         return f"{self.name}_CH{c.n}"
@@ -171,26 +204,52 @@ class FTM(GatedBlock):
     def _cpwm(self) -> bool:
         return bool(self.mem[0] & CPWMS)             # SC is at offset 0
 
-    def _m(self) -> int:
-        return max((self.mod - self.cntin) & 0xFFFF, 0) if self.mod >= self.cntin else 0
+    def _geom(self) -> None:
+        """Counting range from the active MOD/CNTIN, FTMEN and CPWMS (38.4.3)."""
+        cp = self._cpwm()
+        ftmen = self.get("MODE") & FTMEN
+        if not ftmen and not cp and self.mod in (0, 0xFFFF):     # free running counter
+            self._c0, self._mm, self._halt = 0, 0xFFFF, False
+            return
+        self._c0 = self.cntin
+        self._mm = (self.mod - self.cntin) & 0xFFFF
+        self._halt = (cp and self._mm == 0) or (bool(ftmen) and not cp and self.mod == 0 and self.cntin == 0)
 
     def _period(self) -> int:
-        m = self._m()
+        m = self._mm
         return max(2 * m, 1) if self._cpwm() else m + 1
 
     def _counter(self, p: int) -> tuple[int, bool]:
         """(counter value, counting down) at position p of the period."""
-        m = self._m()
-        if self._cpwm() and p > m:
-            return (self.cntin + 2 * m - p) & 0xFFFF, True
-        return (self.cntin + p) & 0xFFFF, False
+        m = self._mm
+        if p > m and self._cpwm():
+            return (self._c0 + 2 * m - p) & 0xFFFF, True
+        return (self._c0 + p) & 0xFFFF, False
+
+    def _cnt_at(self, ip: int) -> tuple[int, bool]:
+        per = self._period()
+        if ip >= per:                                # the end of the period, its event not handled yet
+            ip -= per
+        return self._counter(ip)
+
+    def _pos_from_cnt(self, cnt: int, down: bool) -> int:
+        """Position in the period of counter value cnt (negative: below CNTIN, counting up to MOD)."""
+        m, c0 = self._mm, self._c0
+        d = (cnt - c0) & 0xFFFF
+        if self._cpwm():
+            if d > m:
+                return m + 1 if down and m > 0 else 0
+            return 2 * m - d if down and 0 < d < m else d
+        if d <= m:
+            return d
+        return m - ((((c0 + m) & 0xFFFF) - cnt) & 0xFFFF)
 
     def _boundaries(self) -> list[tuple[int, str]]:
         """Positions of the period's boundary events: (M+1, 'mid') when up-down counting (TOF, MOD -> MOD-1) and
         (period, 'end') (up counting: TOF, MOD -> CNTIN; up-down: back at CNTIN)."""
         p = self._period()
-        if self._cpwm() and self._m() > 0:
-            return [(self._m() + 1, "mid"), (p, "end")]
+        if self._cpwm() and self._mm > 0:
+            return [(self._mm + 1, "mid"), (p, "end")]
         return [(p, "end")]
 
     def _pos_now(self) -> float:
@@ -198,62 +257,89 @@ class FTM(GatedBlock):
             return float(self._p0)
         return self._p0 + (self.chip.now_ns() - self._start_ns) / self._tick_ns
 
-    def _t(self, pos: int) -> float:
+    def _t(self, pos: float) -> float:
         return self._start_ns + (pos - self._p0) * self._tick_ns
 
     # ------------------------------------------------------------ start / stop / anchor
-    def _stop(self) -> None:
-        if self._quiet and self.running:
-            self._lazy_flags(self._pos_now())
+    def _cancel(self) -> None:
         self._quiet = []
-        if self._ev is not None and self.chip is not None:
-            self.chip.sched.cancel(self._ev)
+        sched = self.chip.sched if self.chip is not None else None
+        if self._ev is not None and sched is not None:
+            sched.cancel(self._ev)
         self._ev = None
         for c in getattr(self, "ch", ()):
-            if c.ev is not None and self.chip is not None:
-                self.chip.sched.cancel(c.ev)
+            if c.ev is not None and sched is not None:
+                sched.cancel(c.ev)
             c.ev = None
-        if self.running:
-            self.set("CNT", self._counter(int(self._pos_now() + 1e-6) % max(self._period(), 1))[0])
-        self.running = False
 
-    def _start(self, p0: int, t_ns: float | None = None) -> None:
-        """(Re)anchor the counter at period position p0 at time t_ns (default now) and schedule what follows."""
-        self._stop()
+    def _stop(self) -> tuple[int, bool, float]:
+        """Stop counting: flags of quiet channels brought up to date, events cancelled, CNT holds the counter.
+        Returns (counter, counting down, elapsed fraction of the current tick)."""
+        if self.running:
+            pos = self._pos_now()
+            if self._quiet:
+                self._lazy_flags(pos)
+            ip = math.floor(pos + EPS)
+            cnt, down = self._cnt_at(ip)
+            self.set("CNT", cnt)
+            self._down = down
+            self._fresh = False
+            st = (cnt, down, max(pos - ip, 0.0))
+        else:
+            st = (self.get("CNT") & 0xFFFF, self._down, 0.0)
+        self._cancel()
+        self.running = False
+        return st
+
+    def _start(self, p0: float, t_ns: float | None = None, fresh: bool = False) -> None:
+        """Anchor the counter at period position p0 at time t_ns (default now) and schedule what follows. fresh: the
+        counter has just been loaded with this value (a match at p0 happens now); otherwise matches at p0 are past."""
+        self._cancel()
         hz = self.counter_hz() if self.chip is not None else 0.0
-        if hz <= 0:
-            self.set("CNT", self._counter(p0)[0])
+        if hz <= 0 or self._halt:
+            self.running = False
+            self._resync(0)
             return
+        if self._mm == 0 and not self._cpwm():
+            self._warn_once("modeq", "MOD = CNTIN: the counter overflows (TOF) at every FTM clock")
         self.running = True
         self._tick_ns = 1e9 / hz
         self._start_ns = self.chip.now_ns() if t_ns is None else t_ns
         self._p0 = p0
         self._schedule_boundary(p0)
-        self._resync(start=True)
+        self._resync(math.ceil(p0 - EPS) if fresh else math.floor(p0 + EPS) + 1)
+
+    def _resume(self, st: tuple[int, bool, float], fresh: bool = False) -> None:
+        """Continue from a _stop() state in the (possibly changed) geometry and clock."""
+        cnt, down, frac = st
+        self._start(self._pos_from_cnt(cnt, down) + (0.0 if fresh else frac), fresh=fresh)
 
     def _schedule_boundary(self, after: float) -> None:
         for pos, kind in self._boundaries():
-            if pos > after + 1e-6:
+            if pos > after + EPS:
                 self._ev = self.chip.sched.at_ns(self._t(pos), self._boundary, kind, pos)
                 return
 
     def _clock_changed(self) -> None:
-        if self.running:
-            self._start(int(self._pos_now() + 1e-6) % max(self._period(), 1))
+        if not self.running or self.chip is None:
+            return
+        hz = self.counter_hz()
+        if hz > 0 and abs(hz * self._tick_ns - 1e9) < 1e-3:
+            return                                      # this FTM's clock did not change
+        self._resume(self._stop())
 
     # ------------------------------------------------------------ boundaries, loading, TOF
     def _boundary(self, kind: str, pos: int) -> None:
         self._ev = None
         if self._quiet:
-            self._lazy_flags(None)
+            self._lazy_flags(pos)
         t = self._t(pos)
         cpwm = self._cpwm()
         sync = self.get("SYNC")
         ftmen = self.get("MODE") & FTMEN
         if kind == "mid" or not cpwm:                    # TOF: MOD -> MOD-1 (up-down) / MOD -> CNTIN (up)
             self.overflows += 1
-            self.set("SC", self.get("SC") | TOF)
-            self._update_line()
+            self._overflow()
         load = False
         if self._pending or self._sync:
             if not ftmen:
@@ -269,15 +355,23 @@ class FTM(GatedBlock):
         if kind == "end":
             if load:
                 self._load()
-            self._start(0, t)
+            self._start(0, t, fresh=True)
             return
         if load:                                         # mid-period load (up-down): keep counting down from here
             cnt = self._counter(pos)[0]
             self._load()
-            m = self._m()
-            self._start(min(max(2 * m - ((cnt - self.cntin) & 0xFFFF), m + 1), max(2 * m - 1, 0)), t)
+            self._start(self._pos_from_cnt(cnt, True), t, fresh=True)
             return
-        self._schedule_boundary(pos)
+        per = self._period()
+        self._ev = self.chip.sched.at_ns(self._t(per), self._boundary, "end", per)
+
+    def _overflow(self) -> None:
+        """A counter overflow: TOF unless CONF.NUMTOF skips it."""
+        if self._tofcnt == 0:
+            self.set("SC", self.get("SC") | TOF)
+            self._tof_armed = False                      # set again: a pending read-then-write-0 no longer clears
+            self._update_line()
+        self._tofcnt = self._tofcnt + 1 if self._tofcnt < (self.get("CONF") & 0x1F) else 0
 
     def _load(self) -> None:
         self.mod = self.get("MOD") & 0xFFFF
@@ -288,6 +382,7 @@ class FTM(GatedBlock):
         if self._sync:
             self._sync = False
             self.set("SYNC", self.get("SYNC") & ~SYNC_SWSYNC)
+        self._geom()
 
     # ------------------------------------------------------------ channel configuration
     def _chan_cfg(self) -> None:
@@ -309,16 +404,49 @@ class FTM(GatedBlock):
                 else:
                     c.kind, c.lowtrue = "comb2", False
             elif cpwm:
-                c.kind, c.lowtrue = ("cpwm" if els else "off"), bool(els & 1)
+                c.kind, c.lowtrue = ("cpwm" if els else "swc"), bool(els & 1)
             elif ms == 0:
                 c.kind = "ic" if els else "off"
             elif ms == 1:
                 c.kind, c.oc = ("oc" if els else "sw"), els
             else:
-                c.kind, c.lowtrue = ("epwm" if els else "sw"), bool(els & 1)
+                c.kind, c.lowtrue = ("epwm" if els else "swe"), bool(els & 1)
             if c.kind == "ic" and els:
                 self._warn_once("ic", "input capture / dual edge capture / quadrature decoder are not modelled")
-            c.active = c.kind not in ("off", "ic") and (c.ie or self._drives(c))
+        for c in self.ch:
+            k = c.kind
+            if k in ("off", "ic"):
+                c.active = False
+            elif k == "oc":
+                c.active = True                          # the output state (toggle) depends on every match
+            elif k in ("epwm", "cpwm"):
+                c.active = c.ie or self._visible(c)      # the output follows the counter: no pin, no events
+            elif k in ("comb", "comb2"):
+                b = c.n & ~1
+                vis = any(self._drives(x) and self._visible(x) for x in self.ch[b:b + 2])
+                c.active = c.ie or vis
+            else:
+                c.active = c.ie
+
+    def _visible(self, c: _Ch) -> bool:
+        """Is FTMx_CHn muxed to a pin as an output?"""
+        pins = self.chip.pins if self.chip is not None else None
+        if pins is None:
+            return False
+        sig = self._sig(c)
+        return any(p.direction == "out" and pins.signal_matches(p.owner, sig) for p in pins.signal_pins(sig))
+
+    def _pin_event(self, ev: Any) -> None:
+        f = ev.field
+        if f != "owner" and f != "direction":
+            return
+        pre = self._prefix
+        if f == "owner":
+            hit = pre in str(ev.new) or pre in str(ev.old)
+        else:
+            hit = pre in str(self.chip.pins.get(ev.pin).owner)
+        if hit and getattr(self, "ch", None):
+            self._config_changed()
 
     def _drives(self, c: _Ch) -> bool:
         if c.kind in ("oc", "epwm", "cpwm", "comb"):
@@ -343,53 +471,80 @@ class FTM(GatedBlock):
         if self._quiet and self.running:
             self._lazy_flags(self._pos_now())
         self._chan_cfg()
-        self._resync(start=False)
+        self._resync()
 
     # ------------------------------------------------------------ matches and outputs
-    def _match_positions(self, v: int) -> list[int]:
-        """Positions in the period where the counter equals v (each counts as a match)."""
-        m = self._m()
-        d = (v - self.cntin) & 0xFFFF
-        if v < self.cntin or d > m:
-            return []
-        if self._cpwm():
-            return sorted({d, 2 * m - d} - {2 * m} if m else {0})
-        return [d]
-
-    def _value_of(self, c: _Ch) -> int:
-        return c.v
+    def _matches(self, c: _Ch) -> tuple[int, ...]:
+        """Positions in the period where channel c matches (CHnF; 38.4.5-38.4.8 incl. the CnV boundary rules)."""
+        v = c.v
+        m = self._mm
+        d = (v - self._c0) & 0xFFFF
+        k = c.kind
+        if k == "cpwm" or k == "swc":
+            if v == 0 or v & 0x8000 or (self.mod and v >= self.mod) or d > m:
+                return ()                                # 0 % / 100 %: no CHnF
+            return (d,) if d == 0 else (d, 2 * m - d)
+        if d > m:
+            return ()
+        if d == 0 and (k == "epwm" or k == "swe"):       # CnV = CNTIN: 0 %, no CHnF
+            return ()
+        return (d,)
 
     def _mode_ref(self, c: _Ch, cnt: int, down: bool) -> bool | None:
         """Mode output (high-true sense) derived from the counter, or None for modes that only change at matches."""
-        if c.kind == "epwm":
-            return cnt < c.v
-        if c.kind == "cpwm":
-            return cnt <= c.v if down else cnt < c.v
-        if c.kind == "comb":
+        k = c.kind
+        if k == "epwm":
+            c0 = self._c0
+            d = (c.v - c0) & 0xFFFF
+            if d > self._mm:
+                return True                              # CnV > MOD or CnV < CNTIN: 100 %
+            return ((cnt - c0) & 0xFFFF) < d
+        if k == "cpwm":
+            v = c.v
+            if v == 0 or v & 0x8000:
+                return False
+            if self.mod and v >= self.mod:
+                return True
+            c0 = self._c0
+            d = (v - c0) & 0xFFFF
+            if d > self._mm:
+                return False
+            p = (cnt - c0) & 0xFFFF
+            return p <= d if down else p < d
+        if k == "comb":
+            c0 = self._c0
             v1 = self.ch[c.n + 1].v if c.n + 1 < len(self.ch) else 0
-            return c.v <= cnt < v1
+            p = (cnt - c0) & 0xFFFF
+            return (c.v - c0) & 0xFFFF <= p < (v1 - c0) & 0xFFFF
         return None
 
-    def _resync(self, start: bool) -> None:
-        """Re-evaluate the PWM/combine outputs from the counter now and (re)schedule the next match of every
-        active channel; quiet channels (no pin, no IRQ/DMA) get their CHnF when read."""
-        pos = self._pos_now() if self.running else float(self._p0)
-        ipos = int(pos + 1e-6)
-        cnt, down = self._counter(ipos % max(self._period(), 1))
-        if not self.running:
-            cnt = self.get("CNT") & 0xFFFF
-        kmin = self._p0 if start else ipos + 1          # a match exactly now has already been handled
-        quiet = []
+    def _resync(self, kmin: int | None = None) -> None:
+        """Re-evaluate the PWM/combine outputs from the counter now and (re)schedule the next match (position >= kmin;
+        default: after the current tick) of every active channel; quiet channels get their CHnF when read."""
+        running = self.running
+        if running:
+            pos = self._pos_now()
+            if self._quiet:
+                self._lazy_flags(pos)
+            ip = math.floor(pos + EPS)
+            cnt, down = self._cnt_at(ip)
+            if kmin is None:
+                kmin = ip + 1                           # a match at the current tick has already been handled
+        else:
+            cnt, down = self.get("CNT") & 0xFFFF, self._down
+            kmin = 0
+        sched = self.chip.sched if self.chip is not None else None
         for c in self.ch:
-            if c.ev is not None:
-                self.chip.sched.cancel(c.ev)
-                c.ev = None
+            if c.ev is not None and sched is not None:
+                sched.cancel(c.ev)
+            c.ev = None
             r = self._mode_ref(c, cnt, down)
             if r is not None:
                 c.ref = r
+        quiet = []
         for c in self.ch:
             self._apply(c)
-            if not self.running or c.kind in ("off", "ic"):
+            if not running or c.kind in ("off", "ic"):
                 continue
             if c.active:
                 self._schedule_match(c, kmin)
@@ -399,24 +554,35 @@ class FTM(GatedBlock):
         self._quiet = quiet
 
     def _schedule_match(self, c: _Ch, kmin: int) -> None:
-        for k in self._match_positions(c.v):
-            if k >= kmin:
-                if k == self._p0 and k == kmin and c.kind in ("epwm", "comb", "comb2"):
-                    if k == 0:
-                        self._match(c, k, False)        # CnV = CNTIN: match at the start of the period
-                    continue
-                c.ev = self.chip.sched.at_ns(self._t(k), self._match, c, k, True)
-                return
+        tol = self._tick_ns * 1e-3
+        for k in self._matches(c):
+            if k < kmin:
+                continue
+            t = self._t(k)
+            if t <= c.last_t + tol:                      # this match already happened (re-anchored at that instant)
+                continue
+            if k == self._p0 and k == kmin and c.kind in ("epwm", "comb", "comb2"):
+                if k == 0:
+                    self._match(c, k, False)            # C(n)V = CNTIN: match at the start of the period
+                continue
+            c.ev = self.chip.sched.at_ns(t, self._match, c, k, True)
+            return
+
+    def _flag(self, c: _Ch) -> None:
+        self.set(f"C{c.n}SC", self.get(f"C{c.n}SC") | CHF)
+        c.armed = False                                  # set again: a pending read-then-write-0 no longer clears
+        self._status_armed &= ~(1 << c.n)
 
     def _match(self, c: _Ch, k: int, resched: bool) -> None:
         c.ev = None
-        self.set(f"C{c.n}SC", self.get(f"C{c.n}SC") | CHF)
+        c.last_t = self._t(k)
+        self._flag(c)
         self._update_line()
         cnt, down = self._counter(k)
         if c.kind == "oc":
             c.ref = {1: not c.ref, 2: False, 3: True}.get(c.oc, c.ref)
         elif c.kind in ("epwm", "cpwm"):
-            c.ref = (cnt <= c.v if down else cnt < c.v) if c.kind == "cpwm" else False
+            c.ref = bool(self._mode_ref(c, cnt, down))
         elif c.kind == "comb":
             c.ref = True                                     # set at C(2m)V
         elif c.kind == "comb2" and c.n > 0:
@@ -493,14 +659,19 @@ class FTM(GatedBlock):
 
     # ------------------------------------------------------------ flags and IRQ
     def _lazy_flags(self, upto: float | None) -> None:
-        sc_changed = False
+        changed = False
+        tol = self._tick_ns * 1e-3
         for c in self._quiet:
-            for k in self._match_positions(c.v):
-                if k > c.lazy_k and k >= self._p0 and (upto is None or k <= upto + 1e-6):
+            for k in self._matches(c):
+                if k > c.lazy_k and (upto is None or k <= upto + EPS):
                     c.lazy_k = k
-                    self.set(f"C{c.n}SC", self.get(f"C{c.n}SC") | CHF)
-                    sc_changed = True
-        if sc_changed:
+                    t = self._t(k)
+                    if t <= c.last_t + tol:
+                        continue
+                    c.last_t = t
+                    self._flag(c)
+                    changed = True
+        if changed:
             self._update_line()
 
     def _update_line(self) -> None:
@@ -518,8 +689,7 @@ class FTM(GatedBlock):
 
     # ------------------------------------------------------------ register hooks
     def _sc_read(self, blk, reg):
-        v = self.get("SC")
-        if v & TOF:
+        if self.get("SC") & TOF:
             self._tof_armed = True
         return None
 
@@ -529,49 +699,61 @@ class FTM(GatedBlock):
             tof = 0                                         # read-1-then-write-0 clears TOF
         self._tof_armed = False
         new = (new & ~TOF) | tof
-        self._store(reg, new)
         if (old ^ new) & (0x1F | CPWMS):                    # CLKS / PS / CPWMS
-            if self.running:
-                pos = int(self._pos_now() + 1e-6) % max(self._period(), 1)
-                cnt = self._counter(pos)[0] if not (old ^ new) & CPWMS else self.get("CNT")
-            else:
-                cnt = self.get("CNT") & 0xFFFF
-            if not self.running:
+            self._store(reg, old)                           # the counter so far, in the old mode and clock
+            was_running = self.running
+            st = self._stop()
+            self._store(reg, new)
+            if not was_running:
                 self._load()                                # clock off: the buffers are the values
-            p = (cnt - self.cntin) & 0xFFFF
-            p = p if p <= self._m() else 0
+            self._geom()
             self._chan_cfg()
-            self._start(p)
+            self._resume(st, fresh=self._fresh)
         else:
+            self._store(reg, new)
             self._chan_cfg()
-            self._resync(start=False)
+            self._resync()
         self._update_line()
         return new
 
     def _cnt_read(self, blk, reg):
         if not self.running:
             return None
-        return self._counter(int(self._pos_now() + 1e-6) % max(self._period(), 1))[0]
+        return self._cnt_at(math.floor(self._pos_now() + EPS))[0]
 
     def _cnt_write(self, blk, reg, old, new):
-        self._store(reg, self.cntin)
-        if self.running:
-            self._start(0)
+        self._stop()
+        self._tofcnt = 0
+        self.set("CNT", self.cntin)
+        self._down = False
+        self._fresh = True
+        self._start(self._pos_from_cnt(self.cntin, False), fresh=True)
         return self.cntin
 
     def _buf_write(self, blk, reg, old, new):
         name = reg.name
-        if not self.running:
-            self._load()                                    # counter clock off: takes effect at once
-            self._resync(start=False)
+        if not self.running:                                # counter clock off / counter stopped: at once
+            st = self._stop()
+            self._load()
+            self._resume(st, fresh=self._fresh)
             return None
-        if name.startswith("C") and name.endswith("V") and not self.get("MODE") & FTMEN:
-            c = self.ch[int(name[1])] if int(name[1]) < len(self.ch) else None
-            if c is not None and c.kind in ("oc", "sw", "off", "ic"):
+        ftmen = self.get("MODE") & FTMEN
+        if name == "CNTIN":
+            if not ftmen or not self.get("SYNCONF") & CNTINC:   # Table 38-303: at the next system clock
+                st = self._stop()
+                self.cntin = new & 0xFFFF
+                self._geom()
+                self._resume(st)
+                return None
+        elif name != "MOD":
+            n = int(name[1])
+            c = self.ch[n] if n < len(self.ch) else None
+            if c is not None and c.kind in ("oc", "sw", "off", "ic") and \
+                    (not ftmen or not (self.get("COMBINE") >> (8 * (n // 2))) & SYNCEN):
                 if self._quiet:
                     self._lazy_flags(self._pos_now())
-                c.v = new & 0xFFFF                          # output compare: at once
-                self._resync(start=False)
+                c.v = new & 0xFFFF                          # output compare: at the next counter tick (38-305)
+                self._resync()
                 return None
         self._pending = True
         return None
@@ -583,12 +765,16 @@ class FTM(GatedBlock):
             v = self.get(f"C{n}SC")
             if v & CHF and n < len(self.ch):
                 self.ch[n].armed = True
-            return None if not self._quiet else v
+            return v                                    # (storage may have changed: lazy CHnF)
         return rd
 
     def _csc_write(self, n: int):
         def wr(blk, reg, old, new):
-            chf = old & CHF
+            self._store(reg, old)
+            if self._quiet and self.running:
+                self._lazy_flags(self._pos_now())          # a match up to now may set CHnF again
+            cur = self.get(f"C{n}SC")
+            chf = cur & CHF
             c = self.ch[n] if n < len(self.ch) else None
             if c is not None:
                 if not new & CHF and c.armed:
@@ -596,7 +782,7 @@ class FTM(GatedBlock):
                 c.armed = False
             new = (new & ~CHF) | chf
             self._store(reg, new)
-            if (old ^ new) & ~CHF & 0xFF:
+            if (cur ^ new) & ~CHF & 0xFF:
                 self._config_changed()
             self._update_line()
             return new
@@ -614,6 +800,8 @@ class FTM(GatedBlock):
         return v
 
     def _status_write(self, blk, reg, old, new):
+        if self._quiet and self.running:
+            self._lazy_flags(self._pos_now())
         clear = self._status_armed & ~new
         self._status_armed = 0
         for c in self.ch:
@@ -626,8 +814,33 @@ class FTM(GatedBlock):
                 v |= 1 << c.n
         return v
 
+    def _fms_read(self, blk, reg):
+        if self.get("FMS") & WPEN:
+            self._wpen_armed = True
+        return None
+
+    def _fms_write(self, blk, reg, old, new):
+        wpen = (old | new) & WPEN                           # writing 1 sets WPEN, writing 0 has no effect
+        self._wpen_armed = False
+        if wpen:
+            self.set("MODE", self.get("MODE") & ~WPDIS)
+        return (old & ~WPEN) | wpen
+
     def _mode_write(self, blk, reg, old, new):
-        if new & INIT:                                      # initialize the channel outputs from OUTINIT
+        init = new & INIT
+        wpen = self.get("FMS") & WPEN
+        if wpen and new & WPDIS and self._wpen_armed:       # WPEN read as 1, then 1 written to WPDIS
+            wpen = 0
+            self.set("FMS", self.get("FMS") & ~WPEN)
+        self._wpen_armed = False
+        new = (new & ~(INIT | WPDIS)) | (0 if wpen else WPDIS)
+        if (old ^ new) & FTMEN:                             # free running / stopped counter rules depend on FTMEN
+            self._store(reg, old)
+            st = self._stop()
+            self._store(reg, new)
+            self._geom()
+            self._resume(st, fresh=self._fresh)
+        if init:                                            # initialize the channel outputs from OUTINIT
             oi = self.get("OUTINIT")
             for c in self.ch:
                 self._cancel_dt(c)
@@ -635,18 +848,23 @@ class FTM(GatedBlock):
                 c.applied = c.ref ^ c.lowtrue
             for c in self.ch:
                 self._apply(c)
-        return new & ~INIT
+        return new
 
     def _sync_write(self, blk, reg, old, new):
         self._store(reg, new)
         if new & SYNC_SWSYNC:
             self._sync = True
             if new & SYNC_REINIT and self.running:          # software trigger with REINIT: restart at CNTIN now
+                self._stop()
                 self._load()
-                self._start(0)
+                self.set("CNT", self.cntin)
+                self._down = False
+                self._fresh = True
+                self._start(self._pos_from_cnt(self.cntin, False), fresh=True)
             elif not self.running:
+                st = self._stop()
                 self._load()
-                self._resync(start=False)
+                self._resume(st, fresh=self._fresh)
         return None
 
 

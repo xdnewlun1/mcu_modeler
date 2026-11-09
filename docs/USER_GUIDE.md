@@ -442,6 +442,7 @@ exceptions taken:
 | `--vcd FILE` | `--vcd out.vcd` | write pin waveforms |
 | `--pin-report` | | after the run, print what the firmware did with every pin |
 | `--events KINDS` | `--events pin,uart` | event kinds printed live (default all but `mmio`) |
+| `--all-edges` | | print every pin and part edge instead of summarising periodic signals ([4.4](#44-waveforms-vcd)) |
 | `--log-mmio` | | log every peripheral register access as `mmio` events (slow) |
 | `--precise` | | exact per-block instruction counting (about 10x slower) |
 | `-q`, `--quiet`, `--summary-only` | | summary only |
@@ -550,7 +551,7 @@ interaction (handy in scripts). All `run` options (`--clock`, `--set`, `--part`,
 | `periph [NAME]` | list blocks, or dump one block's registers without read side effects |
 | `uart [NAME] TEXT`, `uartout [NAME]` | send to a UART receiver; show what a UART sent |
 | `adc CHANNEL VALUE` | set an ADC reading |
-| `events [N] [kinds]`, `trace on\|off` | recent events; print events live during `run` |
+| `events [N] [kinds]`, `trace on\|off\|all` | recent events; print events live during `run` (same format and PWM summaries as `chipem run`; `trace all` prints every edge) |
 | `parts`, `part ID [KEY=VALUE]`, `part add ID:TYPE:...` | list, set or add board parts |
 | `vcd PATH` | start writing a VCD |
 | `help [cmd]`, `quit` | |
@@ -602,8 +603,8 @@ hello
 
 UART0 <- b'abc\r\n' (5 bytes, sent at the UART's baud while the emulation runs)
 trace on
-[     1.087 ms] uart uart=UART0 dir=rx byte=97
-[     1.087 ms] uart uart=UART0 dir=tx byte=97
+[     1.087 ms] UART0 RX: "a"
+[     1.087 ms] UART0 TX: "a"
 ...
 pin 36  PTA2  (PTA2, kind=gpio)
   owner=UART0_TX dir=out level=H drive=H pull=- external=none
@@ -654,7 +655,31 @@ Viewers: GTKWave (`gtkwave systick.vcd`), PulseView (File → Import → Value C
 installed on this machine** (`which gtkwave pulseview surfer` finds nothing). Install one with
 `sudo dnf install gtkwave` (Fedora) or `sudo apt install gtkwave`, or use the online viewer at
 <https://app.surfer-project.org/>. For a quick look without a viewer, the live `pin` events (`--events pin`) carry
-the same edges.
+the same edges (fast periodic signals summarised, see below; `--all-edges` prints each one).
+
+**Fast signals (PWM): what is printed, stored and traced.** A 20 kHz PWM pin changes 40,000 times per virtual
+second, and on a board every net member and part it drives changes with it. Each consumer handles that differently:
+
+| consumer | policy |
+|---|---|
+| VCD (`--vcd`) | every edge, always |
+| live output (`chipem run`, shell `trace on`) | decided per pin or part signal by edge density, not by owner: the first edges print as usual; from the 3rd edge within 10 ms on, edges are gathered per 10 ms window and printed as one line, `waveform: N edges in X ms from T ms, 20.000 kHz, duty 25.0 %, now L`. Windows with the same frequency (±0.1 %) and duty (±0.5 %) are counted into one `waveform unchanged (N more edges, until T ms)` line, printed when the waveform changes, stops or the run ends. Single pulses, slow blinks and `--at` stimulus print one line per edge at once. `--all-edges` (shell: `trace all`) prints every edge |
+| stored event log (`Session.events`, shell `events`, web event list, `/api/events`) | every edge of slow pins. A pin with 20 or more edges within 10 ms (≈1 kHz and faster) keeps its first 1000 such edges, then its edges are counted into one `pin` event with `field=wave` per 100 ms (`edges`, `since_ns`, `freq_hz`, `duty`, `new` = level now); when it slows down or stops, the open window is stored and single edges are stored again. Other events are never evicted by PWM (2 s of four 20 kHz signals store a few thousand events, not 320,000) |
+| web UI | the event buffer keeps at most 12,000 `pin` events of its 20,000, so reset / info / uart / warn events stay; the pin table's **wave** column shows frequency and duty of periodic pins (hover: edge count), also in the copied / CSV rows |
+| `--pin-report` | the `chg` column counts PWM edges (PinBoard edges for peripheral-driven pins); notes show `periodic 20 kHz, duty 25.0 %`; the summary lists "Outputs driven by peripherals" |
+
+```
+$ .venv/bin/chipem run firmware/samples_c2000/build/epwm.c28img --chip tms320f28232 --for 2s
+...
+[     6.572 ms] GPIO0 L -> H
+[    16.537 ms] GPIO1 EPWM1B waveform: 400 edges in 9.966 ms from 6.572 ms, 20.000 kHz, duty 69.0 %, now H
+[    16.572 ms] GPIO0 EPWM1A waveform: 400 edges in 9.986 ms from 6.587 ms, 20.000 kHz, duty 29.0 %, now H
+[  1999.987 ms] GPIO0 waveform unchanged (79337 more edges, until 1999.987 ms), now L
+[  1999.987 ms] GPIO1 waveform unchanged (79338 more edges, until 1999.987 ms), now H
+```
+
+`boards/pwm_led.yaml` (STM32 `tim_pwm` and K22 `ftm_pwm`, each lighting an LED and watched by a probe) shows the
+same for board parts: 20 ms print about 40 lines instead of one per edge.
 
 ### 4.5 The browser UI: `chipem serve`
 
@@ -842,7 +867,7 @@ summary. Other front ends on boards:
 
 ### 5.3 The boards in `boards/`
 
-All ten were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_demo` 8 ms; 0.9–2.5 s wall each).
+All eleven were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_demo` 8 ms; 0.9–2.5 s wall each).
 
 | board | chips | demonstrates | result (bytes over the links) |
 |---|---|---|---|
@@ -856,6 +881,7 @@ All ten were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_demo` 8
 | `c2000_stm32_chat_c.yaml` | F28232 + STM32F405 | the same with TI-compiled C on the F28232 | 130 / 130 |
 | `three_chip_demo.yaml` | K22 + STM32 + F28232 | one TX net fanning out to two RX pins, explicit one-way links, LEDs, a switch, a deliberate baud-mismatch warning | 4 links |
 | `logic_demo.yaml` | K22 + K22 | every kind of part: switch, LEDs, clock, inverter, AND, D flip-flop, probes, counter | no links |
+| `pwm_led.yaml` | STM32F405 + K22 | timer PWM (TIM3 CH1 on PA6, FTM0 CH0 on PTC1, 1 kHz 25 %) driving an LED and a probe each; the probes read 1000 Hz | no links |
 
 ### 5.4 Pin report on a board
 
@@ -1177,8 +1203,8 @@ The prebuilt outputs are in each `build/` directory, and the tests use them. Reb
 
 | directory | build | output | tools |
 |---|---|---|---|
-| `firmware/samples/` (K22) | `firmware/samples/build.sh` | `build/*.elf`, `.bin`, `.map` (9 samples) | clang + ld.lld |
-| `firmware/samples_stm32/` | `firmware/samples_stm32/build.sh` | 7 samples, linked at 0x08000000 | clang + ld.lld |
+| `firmware/samples/` (K22) | `firmware/samples/build.sh` | `build/*.elf`, `.bin`, `.map` (10 samples, incl. `ftm_pwm`) | clang + ld.lld |
+| `firmware/samples_stm32/` | `firmware/samples_stm32/build.sh` | 8 samples (incl. `tim_pwm`), linked at 0x08000000 | clang + ld.lld |
 | `firmware/samples_stm32_hal/` | `firmware/samples_stm32_hal/build.sh` | `build/uart_chat_hal.elf` | clang + ld.lld + STM32CubeF4 in `firmware/vendor/` |
 | `firmware/samples_c2000/` | `firmware/samples_c2000/build.sh` | `build/*.c28img` | `tools/c28x_asm.py` |
 | `firmware/samples_c2000_c/` | `firmware/samples_c2000_c/build.sh` | `build/*.out` (EABI) and `*_coff.out` | TI cl2000 in `toolchains/` |

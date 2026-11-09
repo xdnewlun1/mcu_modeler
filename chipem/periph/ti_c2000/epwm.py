@@ -4,6 +4,11 @@ Time base (TB): TBCLK = SYSCLKOUT / (HSPCLKDIV x CLKDIV) (HSPCLKDIV 0 -> 1, n ->
 exact core cycles. It runs while TBCTL.CTRMODE != 3 (freeze), PCLKCR0.TBCLKSYNC and PCLKCR1.EPWMxENCLK are set.
 * up-count: 0 .. TBPRD, period TBPRD+1; down-count: TBPRD .. 0, period TBPRD+1; up-down: 0 .. TBPRD .. 0,
   period 2 x TBPRD. Events CTR=ZERO, CTR=PRD, CTR=CMPA / CMPB (CAU/CAD, CBU/CBD by count direction).
+  A TBCTL mode / divider change while running continues from the current TBCTR and direction.
+* compare values outside the period (SPRUG04 "Behavior if CMPA/CMPB is greater than the period"): up-count, no event
+  when CMPx > TBPRD; down-count, CxD at TBCTR = TBPRD when CMPx >= TBPRD; up-down, CxU *and* CxD at TBCTR = TBPRD when
+  CMPx >= TBPRD (the down-count priority applies there, so CAD wins over CAU), otherwise CxU while counting up
+  (TBCTR = 0 included: CMPx = 0 gives CxU at zero, no CxD) and CxD while counting down (TBPRD-1 .. 1).
 * TBPRD is shadowed (loaded at CTR=ZERO) unless TBCTL.PRDLD; TBCTR reads/writes are live; TBSTS.CTRDIR is live.
 * synchronization: SYNCI (SWFSYNC, or SYNCO of the previous module: ePWM1 -> 2 -> ... -> 6) loads TBCTR from TBPHS
   when PHSEN (PHSDIR picks the direction in up-down mode); SYNCO per SYNCOSEL: pass SYNCI through, CTR=ZERO,
@@ -12,19 +17,27 @@ Counter compare (CC): CMPA/CMPB shadowed unless CMPCTL.SHDWxMODE, loaded per LOA
   freeze); CMPCTL.SHDWxFULL shows a pending shadow value.
 Action qualifier (AQ): AQCTLA/B (ZRO, PRD, CAU, CAD, CBU, CBD: nothing / clear / set / toggle); simultaneous events
   follow the priority table of SPRUG04 (up-count: PRD > CBU > CAU > ZRO; down: ZRO > CBD > CAD > PRD; up-down
-  counting up: CBU > CAU > ZRO > CBD > CAD, counting down: CBD > CAD > PRD > CBU > CAU); AQSFRC one-time and
-  AQCSFRC continuous software forcing.
+  counting up: CBU > CAU > ZRO > CBD > CAD, counting down (TBCTR = TBPRD .. 1): CBD > CAD > PRD > CBU > CAU);
+  AQSFRC one-time and AQCSFRC continuous software forcing; AQCSFRC is shadowed and loaded per AQSFRC.RLDCSF
+  (00 at CTR=ZERO, 01 at CTR=PRD, 10 at either, 11 immediately; reads return the shadow / written value).
 Dead band (DB): DBCTL IN_MODE (sources of the rising/falling-edge delay), OUT_MODE (bypass / FED on B / RED on A /
   both), POLSEL (invert the RED path = A, the FED path = B), DBRED / DBFED in TBCLK cycles (a pulse shorter than the
   delay disappears).
-Trip zone (TZ): software forcing (TZFRC OST/CBC; CBC is released at the next CTR=ZERO, OST by TZCLR), TZCTL TZA/TZB
-  (force high / low / no change; high impedance shows as L), TZFLG / TZEINT -> EPWMx_TZINT. EALLOW-protected registers
-  as on silicon (TZSEL, TZCTL, TZEINT, TZCLR, TZFRC, HRCNFG). The TZ1-6 pins are not sampled.
+Trip zone (TZ): software forcing (TZFRC OST/CBC), TZCTL TZA/TZB (force high / low / no change; high impedance shows
+  as L), TZFLG / TZEINT -> EPWMx_TZINT. TZFLG.CBC and .OST stay latched until TZCLR; the OST action ends with
+  TZCLR.OST, the CBC action at the next CTR=ZERO (also when TZCLR.CBC clears the flag earlier). TZCLR.INT with an
+  enabled OST/CBC flag still set generates another TZINT pulse. EALLOW-protected registers as on silicon (TZSEL,
+  TZCTL, TZEINT, TZCLR, TZFRC, HRCNFG).
 Event trigger (ET): ETSEL INTSEL/SOCASEL/SOCBSEL (ZRO, PRD, CAU, CAD, CBU, CBD), ETPS prescaling (1st/2nd/3rd event,
-  INTCNT/SOCxCNT live), ETFLG / ETCLR / ETFRC; INT -> EPWMx_INT (PIE 3.x); SOCA/SOCB start the ADC sequencers
+  INTCNT/SOCxCNT live; INTCNT stops at INTPRD while ETFLG.INT is set), ETFLG / ETCLR / ETFRC; INT -> EPWMx_INT (PIE 3.x); SOCA/SOCB start the ADC sequencers
   (ti_c2000.adc.epwm_soc).
-Pins: EPWMxA / EPWMxB follow the outputs (PinBoard.drive_signal). Not modelled: PWM chopper (PCCTL, one `warn`),
-HRPWM (TBPHSHR/CMPAHR/HRCNFG stored), TZ pins and digital compare, external EPWMSYNCI, emulation FREE_SOFT.
+Pins: EPWMxA / EPWMxB follow the outputs (PinBoard.drive_signal); a GPIO muxed to EPWMxA/B later shows the current
+level.  TBPRD = 0 with actions or events enabled schedules an event every TBCLK (correct but slow: one `warn`).
+Not modelled: PWM chopper (PCCTL, one `warn`), HRPWM (TBPHSHR/CMPAHR/HRCNFG stored), TZ1-6 pins and the
+high-impedance trip state, external EPWMSYNCI / EPWMSYNCO / ADCSOCxO pins, emulation FREE_SOFT; TBCTR > TBPRD (a
+TBCTR / TBPHS write above the period, or TBPRD lowered below TBCTR with PRDLD) is clamped to TBPRD instead of
+counting on to 0xFFFF (TBSTS.CTRMAX is never set); a TBCTR write / sync re-anchors the TBCLK phase at the write;
+INTCNT/SOCxCNT do not count while the source is disabled (ETSEL xxEN = 0).
 """
 from __future__ import annotations
 
@@ -95,7 +108,10 @@ class EPWM(C2000Block):
         self._cnt = {"INT": 0, "SOCA": 0, "SOCB": 0}
         self._int_line = self._tz_line = None
         self._int_lvl = self._tz_lvl = False
-        self._started_at_zero = False
+        self._cbc_act = False                      # cycle-by-cycle trip action active (until CTR=ZERO)
+        self._csf = 0                              # active AQCSFRC (the register holds the shadow)
+        self._csf_pending = False
+        self._chop_warned = self._tiny_warned = False
         self.periods = 0
 
     def attach(self, chip: Any) -> None:
@@ -128,6 +144,8 @@ class EPWM(C2000Block):
         self._dir_up = True
         self._cnt = {"INT": 0, "SOCA": 0, "SOCB": 0}
         self._int_lvl = self._tz_lvl = False
+        self._cbc_act = self._csf_pending = False
+        self._csf = 0
 
     # ------------------------------------------------------------ geometry
     def _mode(self) -> int:
@@ -195,8 +213,9 @@ class EPWM(C2000Block):
         self._ev = None
         self.running = False
 
-    def _update_run(self) -> None:
-        """Start or stop the time base from CTRMODE / TBCLKSYNC / EPWMxENCLK."""
+    def _update_run(self, first: bool = True) -> None:
+        """Start or stop the time base from CTRMODE / TBCLKSYNC / EPWMxENCLK.  `first`: an event at the starting
+        count fires now (a fresh start); False when the count was only re-anchored (TBCTL change while running)."""
         want = self._mode() != FREEZE and self._clock_on() and self.chip is not None
         if want == self.running:
             return
@@ -208,7 +227,7 @@ class EPWM(C2000Block):
         ctr = self.get("TBCTR")
         self._cyc0 = self.chip.now_cycles()
         self._t0 = self._pos_of(ctr, self._dir_up)
-        self._reschedule(first=True)
+        self._reschedule(first=first)
 
     def _clocks_changed(self) -> None:
         self._update_run()
@@ -232,8 +251,14 @@ class EPWM(C2000Block):
         elif so == 2:
             rel.update(("CBU", "CBD"))
         cc = self.get("CMPCTL")
-        if self._prd_pending or self.get("TZFLG") & TZ_CBC:
+        if self._prd_pending or self._cbc_act:
             rel.add("ZRO")
+        if self._csf_pending:
+            rl = (self.get("AQSFRC") >> 6) & 3
+            if rl in (0, 2):
+                rel.add("ZRO")
+            if rl in (1, 2):
+                rel.add("PRD")
         for full, mode_sh in ((SHDWAFULL, 0), (SHDWBFULL, 2)):
             if cc & full:
                 lm = (cc >> mode_sh) & 3
@@ -255,17 +280,24 @@ class EPWM(C2000Block):
         if "PRD" in rel:
             out.add(0 if m == DOWN else prd)
         for v, u, d in ((self.cmpa, "CAU", "CAD"), (self.cmpb, "CBU", "CBD")):
-            if v > prd:
-                continue
-            if m == UP and u in rel:
-                out.add(v)
-            elif m == DOWN and d in rel:
-                out.add(prd - v)
-            elif m == UPDOWN:
-                if u in rel and 0 < v <= prd:
+            if m == UP:
+                if u in rel and v <= prd:
                     out.add(v)
-                if d in rel and v < prd:
-                    out.add((2 * prd - v) % max(2 * prd, 1))
+            elif m == DOWN:
+                if d in rel:
+                    out.add(prd - min(v, prd))
+            elif v >= prd:                                   # up-down, CMPx >= TBPRD: CxU and CxD at the peak
+                if u in rel or d in rel:
+                    out.add(prd)
+            else:
+                if u in rel:
+                    out.add(v)                               # counting up, 0 included
+                if d in rel and v > 0:
+                    out.add(2 * prd - v)                     # counting down, TBPRD-1 .. 1
+        if out and self.prd == 0 and not self._tiny_warned:
+            self._tiny_warned = True
+            self.emit("warn", block=self.name, msg=f"{self.name}: TBPRD = 0 with actions/events enabled: an event "
+                      "every TBCLK (slow to simulate)")
         return sorted(out)
 
     def _reschedule(self, first: bool) -> None:
@@ -279,7 +311,7 @@ class EPWM(C2000Block):
         if not pos:
             return
         t_now, frac = self._now_tick()
-        base = t_now if (first or frac == 0) and first else t_now + 1
+        base = t_now if first else t_now + 1
         cur = base % L
         best = None
         for p in pos:
@@ -301,13 +333,17 @@ class EPWM(C2000Block):
         if ctr == self.prd:
             kinds.append("PRD")
         for v, u, d in ((self.cmpa, "CAU", "CAD"), (self.cmpb, "CBU", "CBD")):
-            if ctr == v:
-                if m == UP:
+            if m == UP:
+                if ctr == v:
                     kinds.append(u)
-                elif m == DOWN:
+            elif m == DOWN:
+                if ctr == min(v, self.prd):
                     kinds.append(d)
-                else:
-                    kinds.append(u if (0 < p <= self.prd) else d)
+            elif v >= self.prd:
+                if p == self.prd:
+                    kinds += (u, d)
+            elif ctr == v:
+                kinds.append(u if p < self.prd else d)
         self._process(kinds, m, p)
         if self.running and self._ev is None:
             t_cur, _ = self._now_tick()                 # a TBPRD load or a sync may have re-anchored the count
@@ -337,8 +373,12 @@ class EPWM(C2000Block):
                 self.aqb = _aq(self.aqb, (qb >> AQ_SHIFT[k]) & 3)
         if "ZRO" in present:
             self.periods += 1
-            if self.get("TZFLG") & TZ_CBC:                  # cycle-by-cycle trip ends at CTR=ZERO
-                self.set("TZFLG", self.get("TZFLG") & ~TZ_CBC)
+            self._cbc_act = False                          # the CBC trip action ends at CTR=ZERO (TZFLG.CBC stays)
+        if self._csf_pending:
+            rl = (self.get("AQSFRC") >> 6) & 3
+            if (rl in (0, 2) and "ZRO" in present) or (rl in (1, 2) and "PRD" in present):
+                self._csf_pending = False
+                self._csf = self.get("AQCSFRC") & 0xF
         self._et(present)
         so = (self.get("TBCTL") >> 4) & 3
         if (so == 1 and "ZRO" in present) or (so == 2 and present & {"CBU", "CBD"}):
@@ -381,7 +421,7 @@ class EPWM(C2000Block):
             prd = (ps >> prd_sh) & 3
             if not prd:
                 continue
-            self._cnt[name] = min(self._cnt[name] + 1, 3)
+            self._cnt[name] = min(self._cnt[name] + 1, prd)        # stops at xxPRD (flag pending)
             if self._cnt[name] >= prd:
                 if name == "INT":
                     if not self.get("ETFLG") & ET_INT:
@@ -442,7 +482,7 @@ class EPWM(C2000Block):
         if self.chip is None:
             return
         a, b = self.aqa, self.aqb
-        cs = self.get("AQCSFRC")
+        cs = self._csf
         a = {1: False, 2: True}.get(cs & 3, a)
         b = {1: False, 2: True}.get((cs >> 2) & 3, b)
         db = self.get("DBCTL")
@@ -483,15 +523,14 @@ class EPWM(C2000Block):
 
     def _final(self, a: bool | None, b: bool | None) -> None:
         if a is None:
-            cs = self.get("AQCSFRC")
+            cs = self._csf
             a = {1: False, 2: True}.get(cs & 3, self.aqa)
             b = {1: False, 2: True}.get((cs >> 2) & 3, self.aqb)
         db = self.get("DBCTL")
         om, pol = db & 3, (db >> 2) & 3
         oa = (self._red ^ bool(pol & 1)) if om & 2 else a
         ob = (self._fed ^ bool(pol & 2)) if om & 1 else b
-        tz = self.get("TZFLG")
-        if tz & (TZ_OST | TZ_CBC):
+        if self.get("TZFLG") & TZ_OST or self._cbc_act:
             ctl = self.get("TZCTL")
             oa = {0: False, 1: True, 2: False}.get(ctl & 3, oa)
             ob = {0: False, 1: True, 2: False}.get((ctl >> 2) & 3, ob)
@@ -506,19 +545,16 @@ class EPWM(C2000Block):
 
     # ------------------------------------------------------------ register hooks
     def _tbctl_write(self, blk, reg, old, new):
-        if self.running and (old ^ new) & 0x1F83:        # mode / clock divider changed while running
-            ctr, up = self._state_now()
-            self._store(reg, new)
-            self.tick = self._tbclk_div()
-            self.set("TBCTR", ctr)
-            self._dir_up = up
-            self._stop()
-        else:
-            self._store(reg, new)
-        self._update_run()
+        was = self.running
+        changed = was and bool((old ^ new) & 0x1F83)      # mode / clock divider changed while running
+        if changed:
+            self._store(reg, old)                         # (the bus stored `new` already)
+            self._stop()                                  # freeze TBCTR / CTRDIR under the old settings first
+        self._store(reg, new)
+        self._update_run(first=not changed)               # restart (or start) with the new settings
         if new & SWFSYNC:
             self.sync_in()
-        if self.running:
+        if self.running and was and not changed:          # a fresh start was just scheduled by _update_run
             self._reschedule(first=False)
         return new & ~SWFSYNC
 
@@ -574,6 +610,11 @@ class EPWM(C2000Block):
 
     def _cfg_write(self, blk, reg, old, new):
         self._store(reg, new)
+        if reg.name == "AQCSFRC":
+            if (self.get("AQSFRC") >> 6) & 3 == 3:          # RLDCSF = 11: the CPU writes the active register
+                self._csf, self._csf_pending = new & 0xF, False
+            else:
+                self._csf_pending = True                   # loaded at CTR=ZERO / PRD per RLDCSF
         if reg.name in ("AQCSFRC", "DBCTL", "TZCTL"):
             self._outputs()
         if self.running:
@@ -585,12 +626,19 @@ class EPWM(C2000Block):
             self.aqa = _aq(self.aqa, new & 3)
         if new & (1 << 5):                                  # OTSFB
             self.aqb = _aq(self.aqb, (new >> 3) & 3)
+        if (new >> 6) & 3 == 3 and self._csf_pending:       # switched to immediate: the shadow value applies now
+            self._csf, self._csf_pending = self.get("AQCSFRC") & 0xF, False
+        self._store(reg, new & ~((1 << 2) | (1 << 5)))
         self._outputs()
-        return new & ~((1 << 2) | (1 << 5))
+        if self.running:
+            self._reschedule(first=False)
+        return None
 
     def _tzfrc_write(self, blk, reg, old, new):
         trips = new & (TZ_CBC | TZ_OST)
         if trips:
+            if trips & TZ_CBC:
+                self._cbc_act = True
             flg = self.get("TZFLG") | trips
             if self.get("TZEINT") & trips:
                 flg |= TZ_INT
@@ -602,10 +650,15 @@ class EPWM(C2000Block):
         return 0
 
     def _tzclr_write(self, blk, reg, old, new):
+        """Clears TZFLG bits.  TZCLR.CBC clears only the flag: the CBC action is held until the next CTR=ZERO.
+        TZCLR.INT with an enabled OST/CBC flag still set generates another EPWMx_TZINT pulse (SPRUG04 TZCLR)."""
         flg = self.get("TZFLG") & ~(new & 7)
-        self.set("TZFLG", flg)
         if not flg & TZ_INT:
             self._tz_set(False)
+            if new & TZ_INT and flg & self.get("TZEINT") & (TZ_CBC | TZ_OST):
+                flg |= TZ_INT
+                self._tz_set(True)
+        self.set("TZFLG", flg)
         self._outputs()
         return 0
 
@@ -631,6 +684,7 @@ class EPWM(C2000Block):
         return 0
 
     def _pcctl_write(self, blk, reg, old, new):
-        if new & 1:
+        if new & 1 and not self._chop_warned:
+            self._chop_warned = True
             self.emit("warn", block=self.name, msg=f"{self.name}: PWM chopper (PCCTL.CHPEN) is not modelled")
         return None

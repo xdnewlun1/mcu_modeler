@@ -32,7 +32,8 @@ NCH = 16
 TCD_BASE = 0x1000
 ALWAYS_ON = range(54, 64)
 # K22 DMA request sources (subset), K22P100M120SF5V2RM Table 3-25 "DMA request sources - MUX 0" (section 3.3.9.1).
-# 11 and 46 are Reserved there (no UART5 / DAC1 on the 100-pin K22); 20-39 are FTM channels (no FTM model).
+# 11 and 46 are Reserved there (no UART5 / DAC1 on the 100-pin K22); 20-39 are FTM channels
+# (the FTM model does not raise DMA requests: CnSC.DMA is stored only).
 SOURCES = {"UART0_RX": 2, "UART0_TX": 3, "UART1_RX": 4, "UART1_TX": 5, "UART2_RX": 6, "UART2_TX": 7,
            "UART3_RX": 8, "UART3_TX": 9, "UART4": 10, "I2S0_RX": 12, "I2S0_TX": 13,
            "SPI0_RX": 14, "SPI0_TX": 15, "SPI1": 16, "SPI2": 17, "I2C0": 18, "I2C1": 19, "I2C2": 19,
