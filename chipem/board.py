@@ -13,6 +13,8 @@ Board description (`boards/<name>.yaml`, paths relative to the board file)::
     links:                             # byte-level peripheral links (fast path)
       - {type: uart, from: A.UART0, to: B.UART0}           # bidirectional unless dir: tx
       - {type: can, name: CANBUS, nodes: [A.CAN0, B.CAN0]}   # CAN bus (any number of nodes; short: {can: [..]})
+      - {type: eth, name: LAN, nodes: [A.ETH], phy: {model: lan8742, addr: 0, aneg: 2ms},   # Ethernet segment
+         host: {ip: 192.168.0.1, ping: 192.168.0.10, count: 3}, pcap: lan.pcap}            # (chipem/ethernet.py)
     devices:
       - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}     # same options as --spi-flash
       - {type: sram, chip: A, bus: XINTF6, size: 256K, width: 16}   # parallel SRAM on an external bus (chipem/devices)
@@ -21,6 +23,8 @@ Board description (`boards/<name>.yaml`, paths relative to the board file)::
       - {id: SW1, type: switch, level: H, ports: {out: BTN}}
       - {id: LED1, type: led, active: L, ports: {in: A.PTC5}}
     stimulus: ["A.PTC6=1", "10ms:B.PTC6=0", "5ms:SW1=L"]
+    host_serial: [{uart: A.UART0, pty: /tmp/ttyK22}]   # PC software on a UART (chipem/hostserial.py; tcp: / port:)
+    realtime: true                     # lock virtual time to the wall clock (default: on with a host_serial entry)
 
 Runtime (`Board`):
 
@@ -119,6 +123,7 @@ class LinkSpec:
     nodes: list[tuple[str, str]] = field(default_factory=list)   # can: every node on the bus
     name: str | None = None             # can: bus name
     host: bool = False                  # can: add an acknowledging host node
+    options: dict = field(default_factory=dict)   # eth: per-node PHY options, host, pcap, caps, inject
 
 
 @dataclass
@@ -147,6 +152,8 @@ class BoardDesc:
     stimulus: list[str] = field(default_factory=list)
     quantum_ns: float | None = None
     parts: list[PartSpec] = field(default_factory=list)
+    host_serial: list[dict] = field(default_factory=list)   # [{uart, pty|port|tcp, ...}] (chipem/hostserial.py)
+    realtime: Any = None                # None (auto: on with a host bridge) | bool | speed factor
 
     def chip_ids(self) -> list[str]:
         return [c.id for c in self.chips]
@@ -303,8 +310,40 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
             links.append(LinkSpec(type="can", a=nodes[0], b=nodes[-1], nodes=nodes,
                                   name=str(ln["name"]) if ln.get("name") else None, host=bool(ln.get("host", False))))
             continue
+        if typ in ("eth", "ethernet"):
+            from .ethernet import phy_options
+            eps = ln.get("nodes", ln.get("eth"))
+            if not isinstance(eps, list) or not eps:
+                raise ValueError(f"board: link {i}: an eth link needs `nodes: [CHIP.ETH, ...]`")
+            default_phy = phy_options(ln.get("phy"), f"board: link {i}")
+            enodes, phys = [], []
+            for e in eps:
+                opts = dict(default_phy)
+                if isinstance(e, dict):
+                    opts.update(phy_options(e.get("phy"), f"board: link {i}"))
+                    e = e.get("node")
+                c, p = _qual(e, ids, "eth node")
+                enodes.append((c, p))
+                phys.append(opts)
+            links.append(LinkSpec(type="eth", a=enodes[0], b=enodes[-1], nodes=enodes,
+                                  name=str(ln["name"]) if ln.get("name") else None,
+                                  options={"phy": phys, "host": ln.get("host"),
+                                           "pcap": str(Path(base or ".") / ln["pcap"]) if ln.get("pcap") else None,
+                                           "caps": ln.get("caps"), "inject": ln.get("inject")}))
+            continue
+        if typ == "usb":                                         # chipem/usbbus.py: device port -> host
+            from .usbbus import host_options
+            dev = ln.get("device", ln.get("usb"))
+            if dev is None:
+                raise ValueError(f"board: link {i}: a usb link needs `device: CHIP.PORT` (e.g. A.OTG_FS)")
+            c, p = _qual(dev, ids, "usb device")
+            hopts = ln.get("host")
+            links.append(LinkSpec(type="usb", a=(c, p.upper()), b=(c, p.upper()), nodes=[(c, p.upper())],
+                                  name=str(ln["name"]) if ln.get("name") else None,
+                                  options=host_options(hopts if isinstance(hopts, dict) else {}, f"board: link {i}")))
+            continue
         if typ != "uart":
-            raise ValueError(f"board: link {i}: unsupported type {typ!r} (supported: uart, can)")
+            raise ValueError(f"board: link {i}: unsupported type {typ!r} (supported: uart, can, eth, usb)")
         a = _qual(ln.get("from"), ids, "link endpoint")
         b = _qual(ln.get("to"), ids, "link endpoint")
         d = str(ln.get("dir", "both")).lower()
@@ -356,9 +395,14 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
         stim = [stim]
     q = data.get("quantum")
     quantum = parse_time(q) if q is not None else None
+    hs = data.get("host_serial") or []
+    if isinstance(hs, dict):
+        hs = [hs]
+    if not isinstance(hs, list) or not all(isinstance(h, dict) and h.get("uart") for h in hs):
+        raise ValueError("board: host_serial entries must be mappings with `uart` and one of pty/port/tcp")
     return BoardDesc(name=str(data.get("name") or (path.stem if path else "board")), path=path, chips=chips,
                      nets=nets, links=links, devices=devices, stimulus=[str(s) for s in stim], quantum_ns=quantum,
-                     parts=parts)
+                     parts=parts, host_serial=[dict(h) for h in hs], realtime=data.get("realtime"))
 
 
 def parse_part_spec(spec: str) -> PartSpec:
@@ -698,6 +742,7 @@ class Board:
         self.nets: list[Net] = []
         self.links: list[UartLink] = []
         self.can_links: list[CanLink] = []      # CAN buses (chipem.canbus)
+        self.eth_links: list = []               # Ethernet segments (chipem.ethernet.EthLink)
         self._net_of: dict[tuple[str, str], Net] = {}
         self._auto: dict[str, dict[tuple[tuple[str, str], tuple[str, str]], UartLink]] = {}   # net -> links
         self.wiring = 0                     # bumped on every net/link change (UIs redraw the wiring)
@@ -949,6 +994,54 @@ class Board:
         self._changed()
         return link
 
+    def add_eth_link(self, nodes: list, *, name: str | None = None, host: dict | None = None,
+                     pcap: str | None = None, caps=None, inject: list | None = None):
+        """Put Ethernet MACs on one segment (chipem.ethernet.EthLink): nodes = [(chip id, MAC name[, PHY options])]."""
+        from .ethernet import EthLink
+        full = [(self.chip_id(n[0]), n[1], dict(n[2]) if len(n) > 2 and n[2] else {}) for n in nodes]
+        for ln in self.eth_links:
+            both = {(c, p.upper()) for c, p, _ in full} & {(c, p.upper()) for c, p in ln.nodes}
+            if both:
+                raise ValueError(f"board: {', '.join(f'{c}.{p}' for c, p in both)} already on Ethernet segment "
+                                 f"{ln.name}")
+        name = name or ("LAN" if not self.eth_links else f"LAN{len(self.eth_links)}")
+        link = EthLink(self, name, full, host=host, pcap=pcap, caps=caps, inject=inject)
+        self.eth_links.append(link)
+        self._changed()
+        return link
+
+    def eth_segment(self, name: str | None = None):
+        """The EthSegment named `name` (default: the first one)."""
+        for ln in self.eth_links:
+            if name is None or ln.name.upper() == str(name).upper():
+                return ln.segment
+        raise ValueError(f"board: no Ethernet segment {name!r}")
+
+    def add_usb_link(self, device: tuple[str, str], *, name: str | None = None, options: dict | None = None):
+        """Plug a chip's USB device port (stm32.otg_fs, kinetis.usbfs, ...) into a host (chipem.usbbus.UsbLink)."""
+        from .usbbus import UsbLink
+        cid = self.chip_id(device[0])
+        chip = self.chips[cid]
+        port = chip.find_usb(device[1]) if hasattr(chip, "find_usb") else None
+        if port is None:
+            raise ValueError(f"board: {cid}.{device[1]} is not a USB device port (ports: "
+                             f"{', '.join(getattr(chip, 'usb_blocks', dict)()) or 'none'})")
+        links = self.__dict__.setdefault("usb_links", [])
+        if any(ln.chip_id == cid and ln.port == port for ln in links):
+            raise ValueError(f"board: {cid}.{port} already has a usb link")
+        link = UsbLink(name or ("USB" if not links else f"USB{len(links)}"), cid, port, chip.peripherals[port],
+                       options)
+        links.append(link)
+        self._changed()
+        return link
+
+    def usb_host(self, name: str | None = None):
+        """The UsbHost of the usb link named `name` (or of the chip port `name`; default: the first link)."""
+        for ln in getattr(self, "usb_links", []):
+            if name is None or str(name).upper() in (ln.name.upper(), ln.port.upper(), f"{ln.chip_id}.{ln.port}".upper()):
+                return ln.host
+        raise ValueError(f"board: no usb link {name!r}")
+
     def can_bus(self, name: str | None = None):
         """The CanBus named `name` (default: the first one)."""
         for ln in self.can_links:
@@ -1114,6 +1207,8 @@ class Board:
                 d["dir"] = "tx"
             links.append(d)
         links.extend(ln.to_dict() for ln in self.can_links)
+        links.extend(ln.to_dict() for ln in getattr(self, "eth_links", []))
+        links.extend(ln.to_dict() for ln in getattr(self, "usb_links", []))
         out: dict[str, Any] = {"name": self.name, "quantum": f"{self.quantum_ns / 1e3:g}us", "chips": chips}
         if nets:
             out["nets"] = nets
@@ -1130,6 +1225,10 @@ class Board:
             out["devices"] = devs
         if self.parts:
             out["parts"] = [p.to_dict() for p in self.parts.values()]
+        if self.desc is not None and getattr(self.desc, "host_serial", None):
+            out["host_serial"] = [dict(h) for h in self.desc.host_serial]
+        if self.desc is not None and getattr(self.desc, "realtime", None) is not None:
+            out["realtime"] = self.desc.realtime
         if self.desc is not None and self.desc.stimulus:
             out["stimulus"] = list(self.desc.stimulus)
         return out
@@ -1149,13 +1248,15 @@ class Board:
             p["ports"] = {k: v for k, v in p["ports"].items() if v is not None}
         lines = [f"# board {self.name}: exported by chipem", f"name: {flow(d['name'])}", f"quantum: {d['quantum']}"]
         auto = [ln for ln in self.links if ln.auto]
-        for key in ("chips", "nets", "links", "devices", "parts"):
+        for key in ("chips", "nets", "links", "devices", "parts", "host_serial"):
             if key in d:
                 lines.append(f"{key}:")
                 lines.extend(f"  - {flow(item)}" for item in d[key])
         if auto:
             lines.append("# automatic UART links (derived from the nets and the pins' current owners; not stored):")
             lines.extend(f"#   net {ln.net}: {ln.describe()}" for ln in auto)
+        if "realtime" in d:
+            lines.append(f"realtime: {flow(d['realtime'])}")
         if "stimulus" in d:
             lines.append(f"stimulus: {flow(d['stimulus'])}")
         return "\n".join(lines) + "\n"
@@ -1337,6 +1438,11 @@ class Board:
             for port, to in (ports or {}).items():
                 if to not in (None, ""):
                     self.connect_port(pid, port, to)
+            # parts that wait for another part (a cable plugged into a connector; chipem/parts/serial.py)
+            for other in list(self.parts.values()):
+                hook = getattr(other, "part_added", None)
+                if hook is not None:
+                    hook(part)
         except Exception:
             self.remove_part(pid)
             raise
@@ -1496,3 +1602,10 @@ class Board:
         self._auto.clear()
         for cl in self.can_links:
             cl.close()
+        for el in getattr(self, "eth_links", []):
+            el.close()
+        for ul in getattr(self, "usb_links", []):
+            ul.close()
+        sr = getattr(self, "_serial_router", None)     # serial cable chains (chipem/parts/serial.py)
+        if sr is not None:
+            sr.close()

@@ -305,6 +305,12 @@ class UnicornCortexM(Core):
             self.running = False
 
         if err is not None:
+            if getattr(err, "errno", None) == UCC.UC_ERR_INSN_INVALID and self._is_wfe_fault():
+                # Unicorn 2.1 raises WFE as an invalid instruction with PC already past it: it is a halt like WFI
+                n = self._executed(max_insns, early=True, fault=True, err=err)
+                self.last_fault = None
+                self.stop_info = "wfe"
+                return StopReason.WFI, min(n if self.precise else n + 1, max_insns)
             return StopReason.FAULT, self._executed(max_insns, early=True, fault=True, err=err)
         reason = self._stop
         if reason is not None:
@@ -340,8 +346,16 @@ class UnicornCortexM(Core):
                     prev = 0
                 if (prev >> 11) in (0b11101, 0b11110, 0b11111):
                     return StopReason.COUNT, max_insns
+            self.stop_info = "wfe" if hw == 0xBF20 else "wfi"
             return StopReason.WFI, self._executed(max_insns, early=True)
         return StopReason.COUNT, max_insns
+
+    def _is_wfe_fault(self) -> bool:
+        try:
+            pc = self.uc.reg_read(A.UC_ARM_REG_PC)
+            return int.from_bytes(self.uc.mem_read(pc - 2, 2), "little") == 0xBF20
+        except UcError:
+            return False
 
     def _executed(self, max_insns: int, *, early: bool, fault: bool = False, err: UcError | None = None) -> int:
         if fault:

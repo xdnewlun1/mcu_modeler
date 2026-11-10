@@ -1,0 +1,10 @@
+# STM32F405ZG running ST's own USB stack (STM32CubeF4 HAL PCD + ST USB Device Library CDC class, unmodified) on
+# OTG_FS, plugged into an emulated PC (chipem/usbbus.py).  VBUS sensing is off in this firmware (NOVBUSSENS), so the
+# device connects as soon as HAL_PCD_Start clears DCTL.SDIS.  The host enumerates "STM32 HAL Virtual ComPort",
+# opens the port (the firmware prints "HAL CDC ready") and types "hello usb" at 300 ms (echoed upper-cased).
+#   chipem run --board boards/stm32_usb_cdc_hal.yaml --for 400ms
+name: stm32_usb_cdc_hal
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32_hal/build/usb_cdc_hal.elf}
+links:
+  - {type: usb, name: USB1, device: A.OTG_FS, host: {cdc_send: "hello usb\r\n", cdc_send_at: 300ms}}

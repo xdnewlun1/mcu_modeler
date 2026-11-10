@@ -9,7 +9,11 @@ EXTI (RM0090 ch. 12), lines 0-22:
   event path (EMR) has no visible effect here. PR is write-1-to-clear; clearing PR also clears SWIER.
 * Lines 16-22 (PVD, RTC alarm, OTG FS wakeup, Ethernet wakeup, OTG HS wakeup, tamper/timestamp, RTC wakeup) respond
   to SWIER and to `line_event(line, rising)` from internal sources (stm32.rtc: alarm line 17, wakeup line 22, through
-  `_util.exti_input`); the other sources are not modelled.
+  `_util.exti_input`); the other sources are not modelled. A rising RTC alarm (17), tamper/time-stamp (21) or
+  wakeup (22) input is also a PWR wake-up event (PWR_CSR.WUF, Standby exit), whatever the EXTI configuration.
+* Event mode (EMR): a selected edge (or a SWIER 0 -> 1 write) on a line with its EMR bit set is a wake-up event for
+  WFE (stm32.pwr `exti_event`: wakes a core sleeping in WFE, else sets the WFE event register); with SCR.SEVONPEND
+  an interrupt line that becomes pending is one too.
 * NVIC lines (level, asserted while PR & IMR has a bit of the group): EXTI0..EXTI4 (lines 0-4), EXTI9_5 (5-9),
   EXTI15_10 (10-15), PVD (16), RTC_Alarm (17), OTG_FS_WKUP (18), ETH_WKUP (19), OTG_HS_WKUP (20),
   TAMP_STAMP (21), RTC_WKUP (22); numbers are looked up by name in the chip YAML.
@@ -84,10 +88,12 @@ class EXTI(MMIOBlock):
         self._lines: dict[int, bool] = {}                   # NVIC line -> asserted
         self.pr_count = [0] * NLINES
         self.x_mask = 0
+        self._pwr: Any = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         self._syscfg = find_model(chip, "stm32.syscfg", "SYSCFG")
+        self._pwr = find_model(chip, "stm32.pwr", "PWR")
         for ln in range(NLINES):
             self._irqn[ln] = irq_number(chip, LINE_IRQS[ln])
         board = getattr(chip, "pins", None)
@@ -124,18 +130,29 @@ class EXTI(MMIOBlock):
         """Edge on an internal EXTI input (16 PVD, 17 RTC alarm, 21 tamper/timestamp, 22 RTC wakeup, ...): sets PR
         when the edge is selected (RTSR for rising, FTSR for falling) and IMR enables the line. Returns True if PR was
         set."""
+        if rising and line in (17, 21, 22) and self._pwr is not None:
+            self._pwr.wakeup_event(LINE_IRQS[line])
         sel = self.get("RTSR") if rising else self.get("FTSR")
+        if sel >> line & 1 and self.get("EMR") >> line & 1:
+            self._event()
         if not (sel >> line & 1 and self.get("IMR") >> line & 1):
             return False
         self._set_pending(line)
         return True
 
+    def _event(self) -> None:
+        if self._pwr is not None:
+            self._pwr.exti_event()
+
     def _set_pending(self, line: int) -> None:
         if not self.get("IMR") >> line & 1:
             return
         self.pr_count[line] += 1
-        self.set("PR", self.get("PR") | (1 << line))
+        pr = self.get("PR")
+        self.set("PR", pr | (1 << line))
         self._update_irqs()
+        if not pr >> line & 1 and self._pwr is not None and getattr(self.chip.arch, "sevonpend", False):
+            self._pwr.exti_event()
 
     def _update_irqs(self) -> None:
         act = self.get("PR") & self.get("IMR")
@@ -162,6 +179,8 @@ class EXTI(MMIOBlock):
         if lvl == "X":
             self.x_mask |= 1 << line
         if (b and self.get("RTSR") >> line & 1) or (not b and self.get("FTSR") >> line & 1):
+            if self.get("EMR") >> line & 1:
+                self._event()
             self._set_pending(line)
 
     # ------------------------------------------------------------ register hooks
@@ -173,6 +192,8 @@ class EXTI(MMIOBlock):
         rising = new & ~old & LINE_MASK
         for ln in range(NLINES):
             if rising >> ln & 1:
+                if self.get("EMR") >> ln & 1:
+                    self._event()
                 self._set_pending(ln)
         return None
 

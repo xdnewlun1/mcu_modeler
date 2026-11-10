@@ -115,8 +115,14 @@ class Chip:
         self.masked_slice = 1
         self._masked_runs = 0
         self.halt_on_fault = False
+        self.lockup_reset = bool(desc.extra.get("lockup_reset", False))   # chip YAML: a core LOCKUP resets the chip
         self.firmware: Any = None
         self.sleeping = False
+        # low-power hooks (vendor-free; see CONTRACTS.md "Low-power modes"): objects with optional
+        # on_sleep(chip) / on_wake(chip), called when the core stops in WFI/WFE/IDLE and when it resumes
+        self.power_hooks: list = []
+        self.wake_gate = None          # callable() -> bool: False keeps pending interrupts from ending the sleep
+        self._wake_req = False         # chip.wake(): a non-interrupt wake-up source (C2000 GPIO, reset-type wakes)
         self.insns = 0                 # instructions executed since construction (cumulative, survives resets)
         self.last_fault: dict | None = None
         self._stop_flag = False
@@ -264,6 +270,7 @@ class Chip:
                 sp = max(r.end for r in ram) if ram else 0
                 self.core.reset(self.firmware.entry & ~1, sp)
             self.sleeping = False
+            self._wake_req = False
             self.last_fault = None
             self._was_reset = True
 
@@ -277,6 +284,7 @@ class Chip:
             entry = getattr(self.firmware, "entry", None) if self.firmware is not None else None
             self.arch.reset(entry)
             self.sleeping = False
+            self._wake_req = False
             self.last_fault = None
             self._was_reset = True
 
@@ -330,13 +338,19 @@ class Chip:
                     return StopReason.COUNT
                 nd = sched.next_due()
                 if self.sleeping:
-                    if arch.wakeup_pending():
-                        self.sleeping = False
+                    if self._wake_req or (arch.wakeup_pending()
+                                          and (self.wake_gate is None or self.wake_gate())):
+                        self._end_sleep()
                     else:
                         to = target if nd is None else min(nd, target)
                         clock.advance(max(to - now, 0))
                         continue
                 if arch.lockup:
+                    if self.lockup_reset and not self.halt_on_fault:   # parts whose reset controller resets on core LOCKUP (Kinetis)
+                        self._log_fault({"type": "lockup", "pc": core.pc, "msg": "core lockup → chip reset"},
+                                        handled=False)
+                        self.reset("lockup")
+                        continue
                     return self._fault_stop({"type": "lockup", "pc": core.pc})
                 try:
                     masked = False
@@ -372,23 +386,62 @@ class Chip:
                         if not arch.on_stop(r, core.stop_info):
                             return self._fault_stop({"type": "lockup", "pc": core.pc,
                                                      "msg": f"{r.value} could not be taken"})
+                        if r is StopReason.EXC_RETURN and not arch.active and arch.sleep_on_exit():
+                            self._start_sleep()          # SCR.SLEEPONEXIT: back to sleep without running thread code
                         continue
                     if r is StopReason.WFI:
-                        if not arch.wakeup_pending():
-                            self.sleeping = True
+                        self._start_sleep()
                         continue
                     if r is StopReason.FAULT:
                         info = dict(core.last_fault or {})
                         self.last_fault = info
                         entered = arch.on_stop(r, info)
                         self._log_fault(info, handled=entered)
-                        if not entered or self.halt_on_fault:
+                        if self.halt_on_fault:
+                            return StopReason.FAULT
+                        if not entered:
+                            if arch.lockup and self.lockup_reset:
+                                continue                     # the top of the loop resets the chip ("lockup")
                             return StopReason.FAULT
                         continue
                     if r is StopReason.BREAKPOINT:
                         return r
                 except ArchFault as e:
+                    if arch.lockup and self.lockup_reset and not self.halt_on_fault:
+                        self._log_fault({"type": "exception_model", "pc": core.pc, "msg": str(e)}, handled=False)
+                        continue                         # the lockup branch resets the chip
                     return self._fault_stop({"type": "exception_model", "pc": core.pc, "msg": str(e)})
+
+    # ------------------------------------------------------------------ low-power modes (generic part)
+    def _start_sleep(self) -> None:
+        """The core stopped in WFI/WFE/IDLE (or SLEEPONEXIT). Without power hooks this is plain sleep: skip to the
+        next event until an interrupt can wake the core. Hooks (family power controllers) decide the mode, stop
+        clocks, and may call wake() at once (a level wake-up source already active) or request a reset."""
+        hooks = self.power_hooks
+        if not hooks:
+            if not self.arch.wakeup_pending():
+                self.sleeping = True
+            return
+        self._wake_req = False
+        self.sleeping = True
+        for h in list(hooks):
+            fn = getattr(h, "on_sleep", None)
+            if fn is not None:
+                fn(self)
+
+    def _end_sleep(self) -> None:
+        self.sleeping = False
+        self._wake_req = False
+        for h in list(self.power_hooks):
+            fn = getattr(h, "on_wake", None)
+            if fn is not None:
+                fn(self)
+
+    def wake(self) -> None:
+        """Wake the sleeping core from a source that is not a pending interrupt (taken at the next loop turn;
+        ignored while the core is running)."""
+        if self.sleeping:
+            self._wake_req = True
 
     def _clock_changed(self, old_hz: float, new_hz: float) -> None:
         """clock.set_hz from an MMIO write mid-slice: the slice length was computed in old-clock cycles (next event,
@@ -426,7 +479,8 @@ class Chip:
             self.sched.run_due()
             if self.arch.pending:
                 self.arch.service()
-            self.sleeping = False
+            if self.sleeping:
+                self._end_sleep()
             r, ex = self.core.run(1)
             self.clock.advance(max(ex, 1) if r is not StopReason.FAULT else 0)
             self.insns += ex
@@ -496,6 +550,33 @@ class Chip:
                 mm = pat.fullmatch(re.sub(r"[^A-Z0-9]", "", n.upper()))
                 if mm and mm.group(1) == m.group(1):
                     return n
+        return None
+
+    def usb_blocks(self) -> dict[str, Any]:
+        """USB device controllers (models exposing the chipem/usbbus.py hook `usb_attach(bus)`: stm32.otg_fs,
+        stm32.otg_hs, kinetis.usbfs), in chip YAML order."""
+        return {n: b for n, b in self.peripherals.items() if hasattr(b, "usb_attach")}
+
+    def find_usb(self, name: str | None = None) -> str | None:
+        """Resolve a USB port name: exact (case-insensitive), ignoring separators and a "_GLOBAL" suffix, "USB" ->
+        the first port, "FS"/"HS" -> OTG_FS/OTG_HS, "USB0"/"USBOTG" -> the Kinetis USB0; None -> the first port."""
+        import re
+        usbs = self.usb_blocks()
+        if not usbs:
+            return None
+        if name is None:
+            return next(iter(usbs))
+        key = re.sub(r"[^A-Z0-9]", "", str(name).strip().upper())
+        key = key.removesuffix("GLOBAL")
+        for n in usbs:
+            if re.sub(r"[^A-Z0-9]", "", n.upper()).removesuffix("GLOBAL") == key:
+                return n
+        if key in ("USB", "USBOTG", "OTG"):
+            return next(iter(usbs))
+        for n in usbs:
+            nn = re.sub(r"[^A-Z0-9]", "", n.upper())
+            if key in ("FS", "HS") and nn.startswith(f"OTG{key}") or key == "USB0" and nn.startswith("USB"):
+                return n
         return None
 
     def find_uart(self, name: str, *, fallback: bool = False) -> str | None:

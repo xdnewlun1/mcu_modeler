@@ -59,9 +59,13 @@ QEPSTS.UPEVNT, COEF, CDEF and FIMF are write-1-to-clear.  An event flag enabled 
 and raises EQEPx_INT (PIE 5.x, looked up by name); the line is held until QCLR.INT, which raises another interrupt if
 enabled flags are still set (same scheme as eCAP / ePWM ETFLG).  Chip reset cancels every scheduled event.
 
-Not modelled: the position-compare sync output (QDECCTL.SOEN / SPSEL, QPOSCTL.PCSPW / PCPOL are stored; the
-EQEPxI / EQEPxS pins are never driven), emulation suspend (QEPCTL.FREE_SOFT is stored; the timers always run),
-GPIO input qualification and the SYSCLKOUT synchronization delay (an edge counts on the cycle it reaches the pin),
+Position-compare sync output (SPRUI07 6.4.3): with QDECCTL.SOEN the pin muxed to EQEPxI (SPSEL = 0) or EQEPxS
+(SPSEL = 1) becomes an output; each compare match drives PCSOUT active (high, low with QPOSCTL.PCPOL) for
+4 x (PCSPW + 1) SYSCLKOUT, retriggered by a new match while active.  That pin is then not an index / strobe input
+for this module (our choice: the guide does not say whether the module sees its own pulse).
+
+Not modelled: emulation suspend (QEPCTL.FREE_SOFT is stored; the timers always run: there is no debugger halt),
+the SYSCLKOUT synchronization delay (inputs pass the GPIO input qualification, `_util.listen_input`),
 the 1-SYSCLKOUT boundary case of SPRUI07 6.5.1.1's note (an index marker is always the QCLK after the index edge).
 Changing the polarity / gating bits does not produce an edge.
 """
@@ -70,7 +74,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..registry import register
-from ._util import C2000Block, build_regs, irq_line, sysctrl
+from ._util import C2000Block, build_regs, gpio_resync, irq_line, sysctrl, listen_input, unlisten_input
 
 MASK32 = 0xFFFFFFFF
 # QDECCTL
@@ -81,7 +85,7 @@ SWI, SELB, QPEN, QCLM, UTE, WDE = 1 << 7, 1 << 6, 1 << 3, 1 << 2, 1 << 1, 1 << 0
 # QCAPCTL
 CEN = 1 << 15
 # QPOSCTL
-PCSHDW, PCLOAD, PCE_EN = 1 << 15, 1 << 14, 1 << 12
+PCSHDW, PCLOAD, PCPOL, PCE_EN = 1 << 15, 1 << 14, 1 << 13, 1 << 12
 # QFLG / QEINT / QCLR / QFRC
 INT, PCE, PHE, QDC, WTO, PCU, PCO, PCR, PCM, SEL, IEL, UTO = (1 << i for i in range(12))
 EVENT_FLAGS = 0x0FFE
@@ -110,6 +114,7 @@ def _to_match(v0: int, prd: int, mod: int) -> int:
 
 @register("ti_c2000.eqep")
 class EQEP(C2000Block):
+    cycle_anchors = ("_ut_c0", "_wd_c0", "_wd_p0", "_ct_c0", "_ct_p0")
     eallow_regs = None                     # SPRUI07 Table 6-4: no eQEP register is EALLOW-protected
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
@@ -123,6 +128,7 @@ class EQEP(C2000Block):
             "QWDTMR": {"on_read": self._qwdtmr_read, "on_write": self._qwdtmr_write},
             "QWDPRD": {"on_write": self._qwdprd_write},
             "QDECCTL": {"on_write": self._qdecctl_write},
+            "QPOSCTL": {"on_write": self._qposctl_write},
             "QEPCTL": {"on_write": self._qepctl_write},
             "QCAPCTL": {"on_write": self._qcapctl_write},
             "QEINT": {"on_write": self._qeint_write},
@@ -143,6 +149,9 @@ class EQEP(C2000Block):
         self._int_line = None
         self._int_lvl = False
         self._ut_ev = self._wd_ev = None
+        self._pcs_ev = None
+        self._pcs_active = False                      # position-compare sync output pulse (PCSOUT) active
+        self.pcs_pulses = 0
         self._clock = False                           # PCLKCR1 gate (cached; updated by the sysctrl listener)
         self._init_state()
         self.edges = 0                                # QCLKs counted (statistics)
@@ -183,7 +192,7 @@ class EQEP(C2000Block):
                 self._pins[k] = list(board.signal_pins(sig))
                 for p in self._pins[k]:
                     self._pin_key[p.id] = k
-                    board.input_listeners[p.id].append(self._pin_changed)
+                    listen_input(chip, p, self._pin_changed)
             if self._pin_key:
                 board.subscribe(self._pin_event)
         self._clock = self._clock_on()
@@ -191,13 +200,17 @@ class EQEP(C2000Block):
 
     def reset(self) -> None:
         if self.chip is not None:
-            for ev in (self._ut_ev, self._wd_ev):
+            for ev in (self._ut_ev, self._wd_ev, self._pcs_ev):
                 if ev is not None:
                     self.chip.sched.cancel(ev)
             if self._int_lvl and self._int_line is not None:
                 self.irq(self._int_line, False)
-        self._ut_ev = self._wd_ev = None
+        self._ut_ev = self._wd_ev = self._pcs_ev = None
+        was_out = self._pcs_active or self._sync_key() is not None
         super().reset()
+        self._pcs_active = False
+        if was_out and self.chip is not None:
+            self._pcs_resync()
         self._int_lvl = False
         self._init_state()
         if self.chip is not None:
@@ -253,6 +266,8 @@ class EQEP(C2000Block):
         k = self._pin_key.get(pin.id)
         if k is None or not self.chip.pins.signal_matches(pin.owner, self.signals[k]):
             return
+        if k == self._sync_key():
+            return                                    # the pin carries our own sync output
         lvl = pin.level()
         if lvl == "X":
             return
@@ -370,6 +385,7 @@ class EQEP(C2000Block):
         flags = 0
         if cnt == self.get("QPOSCMP"):
             flags |= PCM
+            self._pcs_pulse(pc)
             if pc & PCSHDW and pc & PCLOAD and self._cmp_pending:
                 flags |= self._load_cmp()
         if cnt == 0 and pc & PCSHDW and not pc & PCLOAD and self._cmp_pending:
@@ -643,7 +659,59 @@ class EQEP(C2000Block):
     def _qdecctl_write(self, blk, reg, old, new):
         self._store(reg, new)
         self._qi, self._qs = self._eff_is()
+        if (old ^ new) & (SOEN | SPSEL):
+            self._pcs_resync()
         return None
+
+    def _qposctl_write(self, blk, reg, old, new):
+        if (old ^ new) & PCPOL:
+            self._store(reg, new)
+            self._pcs_resync()
+        return None
+
+    # ------------------------------------------------------------ position-compare sync output (SPRUI07 6.4.3)
+    def owned_signals(self):
+        return (self.signals["I"], self.signals["S"])
+
+    def _sync_key(self) -> str | None:
+        dc = self.get("QDECCTL")
+        if not dc & SOEN:
+            return None
+        return "S" if dc & SPSEL else "I"
+
+    def signal_state(self, sig: str):
+        """EQEPxI / EQEPxS: an output carrying PCSOUT while QDECCTL.SOEN selects it (SPSEL), else the static input."""
+        k = self._sync_key()
+        if k is not None and sig == self.signals[k]:
+            return ("out", "H" if self._pcs_active != bool(self.get("QPOSCTL") & PCPOL) else "L")
+        return None
+
+    def _pcs_resync(self) -> None:
+        if self.chip is None:
+            return
+        gpio_resync(self.chip, self.signals["I"])
+        gpio_resync(self.chip, self.signals["S"])
+
+    def _pcs_pulse(self, pc: int) -> None:
+        """Position-compare match with SOEN: PCSOUT active for 4 x (PCSPW + 1) SYSCLKOUT; a new match while active
+        restarts the width (pulse stretcher, Figure 6-14)."""
+        if self._sync_key() is None or self.chip is None:
+            return
+        sched = self.chip.sched
+        if self._pcs_ev is not None:
+            sched.cancel(self._pcs_ev)
+        self._pcs_ev = sched.in_cycles(4 * ((pc & 0xFFF) + 1), self._pcs_end)
+        self.pcs_pulses += 1
+        if not self._pcs_active:
+            self._pcs_active = True
+            gpio_resync(self.chip, self.signals[self._sync_key()])
+
+    def _pcs_end(self) -> None:
+        self._pcs_ev = None
+        self._pcs_active = False
+        k = self._sync_key()
+        if k is not None:
+            gpio_resync(self.chip, self.signals[k])
 
     def _qepctl_write(self, blk, reg, old, new):
         self._store(reg, new)

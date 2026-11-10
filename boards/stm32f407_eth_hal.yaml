@@ -1,0 +1,19 @@
+# STM32F407ZG running ST's STM32CubeF4 HAL Ethernet driver (HAL_ETH_Init / ReadData / Transmit, enhanced
+# descriptors, checksum insertion) with a LAN8742A PHY, and a host PC that pings it.
+#   A (STM32F407ZG) runs eth_hal: PHY bring-up through HAL_ETH_Read/WritePHYRegister, gratuitous ARP, answers ARP and
+#     ICMP echo for 192.168.0.20; USART1 prints "ETH HAL", "PHY 0007:C131", "link 100FD", "garp", "ping 1" ...
+#   HOST = 192.168.0.1 pings it four times every 2 ms from t = 16 ms (HAL_ETH_Init and the PHY bring-up take ~13 ms:
+#   the HAL waits 1 ms after each MAC/DMA register write, ETH_REG_WRITE_DELAY).
+# Auto-negotiation is shortened to 1 ms (a real LAN8742A takes about 1.5 s).
+# Run:   chipem run --board boards/stm32f407_eth_hal.yaml --for 30ms [--eth-pcap lan.pcap]
+# Build: firmware/samples_stm32_hal_eth/build.sh
+name: stm32f407_eth_hal
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f407zg, firmware: ../firmware/samples_stm32_hal_eth/build/eth_hal.elf}
+links:
+  - type: eth
+    name: LAN
+    nodes: [A.ETH]
+    phy: {model: lan8742, addr: 0, aneg: 1ms}
+    host: {name: HOST, ip: 192.168.0.1, ping: 192.168.0.20, count: 4, interval: 2ms, start: 16ms}

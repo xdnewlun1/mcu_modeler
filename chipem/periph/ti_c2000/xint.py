@@ -19,6 +19,8 @@ _DEFAULT = {1: "1.4", 2: "1.5", 3: "12.1", 4: "12.2", 5: "12.3", 6: "12.4", 7: "
 
 @register("ti_c2000.xint")
 class XInt(C2000Block):
+    cycle_anchors = ("_edge_cycle",)
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {f"XINT{n}CR": {"on_write": self._cr_write} for n in range(1, 8)}
@@ -82,7 +84,7 @@ class XInt(C2000Block):
         new = lvl == "H"
         old = self._level.get(n, False)
         self._level[n] = new
-        if new == old:
+        if new == old or self.clk_stopped:          # STANDBY/HALT: the SYSCLKOUT-synchronised input is not sampled
             return
         cr = self._cr(n)
         if not cr & 1:

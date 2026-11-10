@@ -213,6 +213,49 @@ class C28xArch:
             return None
         return (m & -m).bit_length()
 
+    # ------------------------------------------------------------------ data-read filter (code security module)
+    def set_read_filter(self, fn, ranges) -> bool:
+        """Route CPU data reads of `ranges` ([(lo, hi_exclusive), ...] in words) through `fn(addr, n, value) -> value`
+        (the CSM returns 0 for secure memory read from unsecure code).  Instruction fetches are not filtered.  The
+        pages of the ranges leave the interpreter's fast path while a filter is installed; `fn=None` removes it.
+        Returns False when the core is not the C28x interpreter."""
+        core = self.core
+        if not hasattr(core, "_rslow") or not hasattr(core, "_slow_rd"):
+            return False
+        orig = getattr(self, "_orig_slow_rd", None)
+        if orig is None:
+            orig = self._orig_slow_rd = core._slow_rd
+        old_pages = getattr(self, "_filter_pages", set())
+        pages: set[int] = set()
+        for lo, hi in ranges if fn is not None else ():
+            pages.update(range(lo >> 10, ((hi - 1) >> 10) + 1))
+        if fn is None:
+            core._slow_rd = orig
+        else:
+            def slow_rd(a, n, _o=orig, _f=fn, _p=pages):
+                v = _o(a, n)
+                return _f(a, n, v) if (a >> 10) in _p else v
+            core._slow_rd = slow_rd
+        core._make_accessors()
+        self._filter_pages = pages
+        for p in old_pages - pages:
+            core._update_page(p)
+        for p in pages:
+            core._rslow[p] = 1
+        core.flush_code_cache()
+        return True
+
+    def live_pc(self) -> int:
+        """PC of the instruction executing now (core.pc is written back only at the end of a slice)."""
+        from ...pinreport import _c28x_live_pc
+        try:
+            return _c28x_live_pc(self.core)
+        except Exception:
+            return self.core.pc
+
+    def sleep_on_exit(self) -> bool:
+        return False                    # no SLEEPONEXIT on the C28x
+
     def wakeup_pending(self) -> bool:
         """IDLE ends on any enabled interrupt (IFR & IER), whether or not INTM masks it."""
         return self.best_pending() is not None

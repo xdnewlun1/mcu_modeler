@@ -757,6 +757,37 @@ class Shell(cmd.Cmd):
         self.s.uart_input(data, uart)
         self.p(f"{uart} <- {data!r} ({len(data)} bytes, sent at the UART's baud while the emulation runs)")
 
+    def do_host(self, arg: str) -> None:
+        """host   host serial bridges (PTY / serial / TCP; --uart-pty etc. or usb_serial_adapter parts) and pacing."""
+        from .cmd_run import print_host_summary
+        st = self.s.host_status()
+        if not st["endpoints"] and not st["realtime"].get("enabled"):
+            self.p("no host serial endpoints; real time off")
+            return
+        import io
+        buf = io.StringIO()
+        print_host_summary(self.s, buf)
+        self.p(buf.getvalue().strip("\n"))
+
+    def do_realtime(self, arg: str) -> None:
+        """realtime [on|off] [SPEED]   lock virtual time to the wall clock (x SPEED); `run` then takes wall time."""
+        a = self._args(arg)
+        if not a:
+            rt = self.s.host_status()["realtime"]
+            self.p(f"real time {'on x' + format(rt['speed'], 'g') if rt.get('enabled') else 'off'}")
+            return
+        on, speed = True, None
+        for tok in a:
+            t = tok.lower()
+            if t in ("on", "1", "true", "yes"):
+                on = True
+            elif t in ("off", "0", "false", "no"):
+                on = False
+            else:
+                speed = float(t.lstrip("x"))
+        self.s.set_realtime(on, speed)
+        self.do_realtime("")
+
     def do_uartout(self, arg: str) -> None:
         """uartout [NAME]   everything NAME (default: all UARTs with output) has transmitted so far."""
         a = self._args(arg)
@@ -940,6 +971,8 @@ def main(args) -> int:
     sh = Shell(session, interactive=args.exec_cmds is None)
     try:
         print(banner(session), file=sh.stdout)
+        from .hostserial import print_endpoints
+        print_endpoints(session, sh.stdout)
         if getattr(args, "exec_cmds", None) is not None:
             sh.last_exit = 0
             for line in str(args.exec_cmds).split("\n"):

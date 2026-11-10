@@ -1,0 +1,7 @@
+# STMicroelectronics STM32F415ZG (STM32F415 = STM32F405 + cryptographic processor (CRYP) and hash processor (HASH),
+# Cortex-M4F, 168 MHz, 1 MB flash, 192 KB RAM incl. 64 KB CCM, LQFP144).
+# DS8597 (STM32F415xx/STM32F417xx) shares the die, pinout and alternate functions with the STM32F405ZG: everything
+# comes from the included stm32f405zg.yaml (pins: DS8626 Table 7 LQFP144 column + Table 9); only the name differs.
+# CRYP/HASH are enabled by their `only: [STM32F415, STM32F417]` params in the base file.
+include: stm32f405zg.yaml
+name: STM32F415ZG

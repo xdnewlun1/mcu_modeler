@@ -94,7 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="add a board part: KEYs naming a port wire it to a pin or net, others are parameters, "
                             "e.g. SW1:switch:out=PTC6,level=H  LED1:led:in=PTC5,active=L  CLK:pulse:out=PTC6,period=2ms "
                             "G1:and:in0=PTC5,in1=CLKNET,out=B.PTC7  P1:probe:in=PTC5. Types: switch button const vcc gnd "
-                            "pulse pattern led probe counter not buf and nand or nor xor xnor mux2 dff latch (repeatable; "
+                            "pulse pattern led probe counter not buf and nand or nor xor xnor mux2 dff latch, serial chain: "
+                            "usb_serial_adapter rs232_transceiver db9 rj50 connector cable (repeatable; "
                             "works on one chip too)")
         p.add_argument("--set", action="append", default=[], metavar="PIN=LEVEL|PART=VALUE",
                        help="drive an input pin at t=0, e.g. PTC6=1, or set a part, e.g. SW1=H, BTN1=pressed "
@@ -116,6 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
                        help="insert an SD card into an SD host (SDIO on the STM32, SDHC on the K22), e.g. "
                             "SDIO:size=64M,image=card.img,save=out.img (writeback=1 saves to the image); empty "
                             "socket otherwise")
+        p.add_argument("--eth-pcap", default=None, metavar="FILE",
+                       help="write every Ethernet frame to a pcap file (Wireshark): the board's segment, or a "
+                            "capture-only segment for a single chip's MAC (its PHY then has a link)")
+        p.add_argument("--eth-host", default=None, metavar="ip=A.B.C.D,ping=A.B.C.D,count=N,interval=T,mac=M",
+                       help="add a host PC to the Ethernet segment (answers ARP and ping; pings `ping` when given), "
+                            "e.g. ip=192.168.0.1,ping=192.168.0.10,count=4,interval=2ms,start=5ms; phy=lan8742, "
+                            "phy_addr=0, aneg=1ms configure the PHY (default LAN8720 at 0, 1.5 s auto-negotiation)")
         p.add_argument("--log-mmio", action="store_true", help="log every peripheral register access")
         p.add_argument("--pin-report", action="store_true", help="after the run, print what the firmware did with each pin (chipem.pinreport)")
         p.add_argument("--vcd", default=None, help="write pin waveforms to a VCD file (board: one file per chip, x.A.vcd)")
@@ -124,6 +132,29 @@ def build_parser() -> argparse.ArgumentParser:
                             "may then be qualified with a chip id, e.g. --at 5ms:B.PTC6=0")
         p.add_argument("--quantum", default=None, metavar="TIME",
                        help="board lockstep quantum: max time one chip runs ahead of the others (default 10us)")
+        # host serial bridges (chipem/hostserial.py) and real-time pacing (chipem/realtime.py)
+        p.add_argument("--uart-pty", action="append", default=[], metavar="UART[=LINK]",
+                       help="connect PC software to a UART through a pseudo-terminal (Linux/macOS); prints the "
+                            "/dev/pts/N path, LINK = a stable symlink to it, e.g. --uart-pty UART0=/tmp/ttyK22")
+        p.add_argument("--uart-port", action="append", default=[], metavar="UART=DEVICE[:BAUD[:8N1]]",
+                       help="connect a UART to a host serial port via pyserial, e.g. UART0=/dev/ttyUSB0:115200 or "
+                            "UART0=COM5 (one end of a com0com/socat null-modem pair)")
+        p.add_argument("--uart-tcp", action="append", default=[], metavar="UART=[HOST:]PORT",
+                       help="connect a UART to a raw TCP listener (one client), e.g. UART0=5555")
+        # USB (chipem/usbbus.py): an emulated PC host on a chip's USB device port
+        p.add_argument("--usb-host", action="append", default=[], metavar="[PORT][:KEY=VAL,...]",
+                       help="plug a USB device port (OTG_FS, OTG_HS, USB0; default the first) into an emulated PC "
+                            "host that enumerates it and binds CDC-ACM/HID/MSC drivers; keys: debounce=100ms, "
+                            "reset=10ms, cdc_send=TEXT, cdc_send_at=TIME, baud=115200, ...")
+        p.add_argument("--usb-cdc", action="append", default=[], metavar="[PORT=]TRANSPORT",
+                       help="open the device's CDC-ACM virtual COM port to PC software: pty, pty:/tmp/link, "
+                            "tcp:5555, serial:/dev/ttyUSB1 (adds a --usb-host when the port has none)")
+        p.add_argument("--usb-cdc-pty", action="append", default=[], metavar="[LINK]", nargs="?", const="",
+                       help="shorthand for --usb-cdc pty[:LINK]")
+        p.add_argument("--realtime", action=argparse.BooleanOptionalAction, default=None,
+                       help="lock virtual time to the wall clock (default: on when a host serial port is attached)")
+        p.add_argument("--speed", type=float, default=None, metavar="X",
+                       help="real-time speed factor (virtual seconds per wall second; implies --realtime)")
 
     # Subcommands run/shell/serve live in their own modules (chipem/cmd_run.py, cmd_shell.py, cmd_serve.py),
     # each exposing add_args(parser) and main(args) -> int.  They are imported lazily so a missing module only

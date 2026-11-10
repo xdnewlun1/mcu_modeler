@@ -534,7 +534,8 @@ firmware/samples_stm32/build/adc_tim_trigger.elf --chip stm32f405zg --for 5ms --
 every millisecond (TIM3 TRGO triggers ADC1).
 
 Exit status: 0 when the run reaches the end of the window, 3 when it stops on a fault (`--stop-on-fault`) or a
-lockup, 1 on a usage or load error. A fault that enters the firmware's HardFault handler still exits 0.
+lockup, 1 on a usage or load error. A fault that enters the firmware's HardFault handler still exits 0. On the K22 a
+lockup resets the chip (`lockup_reset: true` in its YAML, RCM_SRS1.LOCKUP) unless `--stop-on-fault` is given.
 
 UART input timing, the most common surprise. `sci_echo` enables SCI-A at 6.55 ms, after its PLL relocks:
 
@@ -967,6 +968,87 @@ echoes `201#<n>4B32` 6 µs after each frame ends plus its polling time; both pri
 `boards/k22_c2000_stm32_can.yaml` puts all three families on one bus (`201#...` wins the arbitration, `202#...`
 follows).
 
+### 5.1b Ethernet links, the host node and pcap
+
+An STM32F407/F417 Ethernet MAC (`stm32.eth`, peripheral `Ethernet_MAC`, alias `ETH`) sits behind a PHY that the
+board provides. An `eth` link plugs the PHYs of the listed MACs into one segment (a hub: every frame reaches every
+other port when its last bit has been sent) and can add a host PC:
+
+```yaml
+links:
+  - type: eth
+    name: LAN
+    nodes: [A.ETH]                          # or [{node: A.ETH, phy: {model: dp83848, addr: 1}}, B.ETH]
+    phy: {model: lan8742, addr: 0, aneg: 1ms}   # defaults for every node: lan8720 | lan8742 | dp83848 | ksz8081 | generic
+    host: {name: HOST, mac: "02:00:00:00:00:01", ip: 192.168.0.1, ping: 192.168.0.10, count: 4, interval: 2ms, start: 5ms}
+    inject: [{at: 3ms, hex: "ffffffffffff020000000001080600010800060400010200000000010a0000010000000000000a00000a"}]
+    pcap: lan.pcap                          # relative to the board file; Wireshark opens it
+    caps: [100FD, 100HD, 10FD, 10HD]        # what the segment advertises in auto-negotiation
+```
+
+- **PHY.** Clause 22 registers over MDIO (BMCR/BMSR/PHYID/ANAR/ANLPAR/ANER) plus the vendor status register the
+  drivers poll (LAN87xx reg 31 speed indication, DP83848 reg 0x10 PHYSTS, KSZ8081 reg 0x1E). It answers only its own
+  MDIO address (other addresses read 0xFFFF). Auto-negotiation takes `aneg` (default 1.5 s, like real 100BASE-TX
+  PHYs: shorten it on boards meant for quick runs), forced modes `link` (10 ms); BMSR's link bit latches low, so
+  read it twice. A MAC without an `eth` link has no cable: its link stays down.
+- **MAC.** The firmware must do what the hardware needs: select MII/RMII in SYSCFG_PMC, enable ETHMAC/TX/RX
+  clocks, mux the RMII/MII pins (AF11; DMABMR.SR only completes with the REF_CLK pin muxed), use an MDC divider for
+  its HCLK (MACMIIAR.CR), set MACCR.FES/DM to the negotiated mode (frames are lost on a speed mismatch). Frames take
+  their wire time at 10 or 100 Mbit/s; the data pins do not toggle, the 50 MHz / 25 MHz PHY clocks and MDC appear as
+  `wave` summaries.
+- **Host node.** Answers ARP requests for `ip` and ICMP echo requests; with `ping` it ARPs the target and sends
+  `count` echo requests every `interval` from `start` (replies in `host.replies` as (seq, round-trip ns)). `inject`
+  sends raw frames (hex, without FCS) at given times. From Python: `session.board.eth_segment("LAN").hosts[0]`
+  (`send(hex_or_bytes, t_ns)`, `ping(ip, count=, interval=, start=)`, `received`).
+- **Output.** One `eth` event per frame on the sender's log (`ETH Ethernet_MAC 02:00:00:00:00:10 > 02:00:00:00:00:01
+  ICMP 192.168.0.10 > 192.168.0.1 echo reply id 17224 seq 1 (78 bytes)`); the run summary lists the MAC (`Ethernet
+  Ethernet_MAC: RMII, PHY lan8742@0 link 100FD, 5 tx, 4 rx, segment LAN`).
+- **CLI.** `--eth-pcap FILE` writes every frame of the board's segment to a pcap file (nanosecond time stamps, FCS
+  stripped); `--eth-host ip=..,ping=..,count=..,interval=..,start=..,phy=lan8742,aneg=1ms` adds a host node. On a
+  single chip both create a segment for the chip's MAC (its PHY then has a link):
+  `chipem run firmware/samples_stm32/build/eth_ping.elf --chip stm32f407zg --for 12ms --eth-host
+  ip=192.168.0.1,ping=192.168.0.10,count=2,interval=1ms,start=9ms,phy=lan8742,aneg=1ms --eth-pcap /tmp/lan.pcap`.
+- There is no bridge to the real network (TAP): frames stay inside the emulation.
+
+`chipem run --board boards/stm32f407_eth_ping.yaml --for 20ms` runs the bare-metal `eth_ping` sample;
+`boards/stm32f407_eth_hal.yaml` (`--for 30ms`) the same with ST's HAL ETH driver.
+
+### 5.1c USB: plugging a chip into an emulated PC
+
+A chip's USB device port (STM32 `OTG_FS` / `OTG_HS`, Kinetis `USB0`) can be plugged into an emulated PC host
+(chipem/usbbus.py). The host powers VBUS, waits for the D+ pull-up, debounces 100 ms, resets the port (10 ms),
+enumerates the device the way Linux does (GET_DESCRIPTOR, second reset, SET_ADDRESS, device / configuration /
+string descriptors, SET_CONFIGURATION) and binds class drivers: CDC-ACM (SET_LINE_CODING, DTR|RTS, bulk IN reads and
+bulk OUT writes), HID (interrupt IN polling at bInterval) and MSC bulk-only (INQUIRY, READ CAPACITY). Every packet
+takes its real full-speed wire time (CRC and bit stuffing included), frames start every 1 ms with a SOF, and the
+device sees reset / suspend (3 ms idle) / resume like on a real cable. The firmware needs a correct 48 MHz USB clock
+(STM32: PLL48CLK from PLLQ; K22: SIM_CLKDIV2 USBDIV/USBFRAC), the DP/DM pins in their USB function and (when it
+senses VBUS) the VBUS pin: otherwise the host reports "device not recognised" exactly as a PC would.
+
+```yaml
+links:
+  - {type: usb, name: USB1, device: A.OTG_FS, host: {debounce: 100ms, cdc_send: "hello\r\n", cdc_send_at: 200ms}}
+```
+
+Host options (all optional): `debounce`, `reset`, `reset_recovery`, `set_address_recovery`, `resume`,
+`resume_recovery`, `ctrl_nak_retry`, `ctrl_timeout` (times), `second_reset`, `enum_retries`, `drivers`, `power`,
+`baud` (line coding the CDC driver sets), `cdc_send` + `cdc_send_at` (text typed into the CDC port; without a time,
+as soon as the port opens), and `cdc_pty: true | /tmp/link`, `cdc_tcp: 5555`, `cdc_serial: /dev/ttyUSB1` to open the
+virtual COM port from PC software. Single chip from the command line:
+
+```sh
+chipem run firmware/samples_stm32/build/usb_cdc.elf --chip stm32f405zg --usb-host OTG_FS --for 300ms
+chipem run --board boards/stm32_usb_cdc.yaml --usb-cdc pty --realtime    # prints /dev/pts/N: open it with screen/minicom
+```
+
+The live output shows one `usb` line per transfer (control requests by name, bulk/interrupt data as text or hex) and
+the bus events; the summary lists the enumerated device (`VID:PID "manufacturer" "product" [CDC-ACM, ...]`) and the
+CDC-ACM output. In Python, `session.usb_links()[0].host` is the `UsbHost` (`device`, `cdc.write()`, `cdc_rx`,
+`hid.reports`, `suspend()`, `resume()`, `unplug()`, `reset_port()`, `control(...)`, `start_task(generator)` for a
+scripted sequence). Boards: `stm32_usb_cdc.yaml` (bare-metal driver), `stm32_usb_cdc_hal.yaml` (ST's HAL PCD + USB
+Device Library, unmodified), `k22_usb_cdc.yaml` (K22 USB0 with its buffer descriptor table). Not modelled: high
+speed (OTG_HS runs on its embedded FS PHY only), hubs, isochronous transfers (docs/LIMITATIONS.md "USB").
+
 ### 5.2 Running and watching two chips talk
 
 ```
@@ -1032,7 +1114,12 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `k22_stm32_i2c.yaml` | K22 + STM32F405 | K22 I2C0 master, STM32 I2C1 slave (0x42) on open-drain nets, quantum 1 us | K22 `PASS`, STM32 `SLAVE RX 00:48656C…`, `SLAVE TX 10` |
 | `k22_stm32_spi.yaml` | K22 + STM32F405 | K22 DSPI0 master (`spi_master`) and STM32 SPI1 slave over nets, quantum 1 us | UART0 `M 1 WORLD`, USART1 `S 1 hello` |
 | `k22_i2s_codec.yaml` | K22 | I2S0 master (`i2s_tone`, 8 kHz stereo) and an `i2s_codec` part that records the tone and plays a pattern back | UART0 `I2S 8000 Hz: tx 133 rx 128 ok`, `RX 1234 EDCC 5678 A988 ...` |
+| `stm32_i2s_codec.yaml` | STM32F405 | SPI2 in I2S master mode (PLLI2S, MCK on) + I2S2ext receiver against an `i2s_codec` part | USART1 `I2S 8000 Hz: tx 129 rx 128 ok`, `RX 1234 EDCC 5678 A988 ...` |
+| `stm32f407_eth_ping.yaml` | STM32F407 | bare-metal Ethernet (RMII, LAN8742A) pinged by the host node (5.1b) | USART1 `PHY 0007:C131`, `link 100FD`, `garp`, `ping 1` .. `ping 4` |
+| `stm32f407_eth_hal.yaml` | STM32F407 | the same with ST's HAL ETH driver (`--for 30ms`) | USART1 `ETH HAL`, ..., `ping 4` |
+| `stm32f407_dcmi_camera.yaml` | STM32F407 | a `camera` part on the DCMI pins: snapshot, cropped snapshot and continuous frames through DMA2 | USART1 byte sums, `DCMI continuous frames=3 ovr=0`, `done` |
 | `k22_i2c_eeprom.yaml` | K22 | I2C0 master and an `i2c_eeprom` part (page writes, ack polling, random read) | UART0 `wrote "Hello over I2C!", read "Hello over I2C!"`, `PASS` |
+| `k22_rs232_console.yaml` | K22 | the cable chain to PC software: UART0 → RS-232 transceiver → RJ50 jack → DB9-RJ50 cable → USB-serial adapter → PTY (section 6.2; runs until Ctrl-C) | open the printed `/dev/pts/N`: `CHIP_EM K22 console - type help` |
 | `pwm_capture_3way.yaml` | STM32F405 + K22 + F28232 | one STM32 PWM (PA6, 1 kHz 25 %) measured by a probe, a K22 FTM capture and a C2000 eCAP (`--for 12ms`) | probe 1000 Hz, K22 `period 60000`, eCAP 100000 / 25000 cycles |
 
 ### 5.4 Pin report on a board
@@ -1090,7 +1177,8 @@ input port reads the net (H/L/X). Gates are zero-delay. The catalog (from `GET /
 | `latch` | d, en, q | `init` (L) | transparent while en is H |
 | `i2c_eeprom` | sda, scl (open drain) | `address` (0x50), `size` (256), `page` (auto), `twr` (5ms), `fill` (0xFF), `init` (""), `pullup` (true) | 24Cxx serial EEPROM on the I2C bus |
 | `i2c_register_device` | sda, scl (open drain) | `address` (0x48), `regs` ({}), `readonly` ([]), `default` (0), `pullup` (true) | generic register-map target (sensor, expander) |
-| `i2s_codec` | bclk, ws, sdin (in), sdout (out) | `bits` (16), `format` (i2s / left_justified), `edge` (rising: sample edge), `pattern` ("": comma-separated L,R samples), `wav` ("": 16-bit PCM file), `echo` (false), `record_max` (100000) | I2S slave codec: records every received stereo frame (`frames`, signed), plays back the pattern / WAV / echo on sdout; `set reset_record=true` |
+| `i2s_codec` | bclk, ws, sdin (in), sdout (out) | `bits` (16), `format` (i2s / left_justified), `edge` (rising: sample edge), `pattern` ("": comma-separated L,R samples), `wav` ("": 16-bit PCM file), `echo` (false), `record_max` (100000) | I2S slave codec: records every received stereo frame (`frames`, signed), plays back the pattern / WAV / echo on sdout; `set reset_record=true`. Works with the K22 SAI and the STM32 I2S (SPI2/SPI3 + I2SxEXT): `chipem run --board boards/stm32_i2s_codec.yaml --for 15ms`; an external I2S_CKIN clock is the RCC param `i2s_ckin_hz` |
+| `camera` | pixclk, hsync, vsync, d0..d13 (out) | `width`, `height`, `bits` (8..14), `format` (gray / raw, or rgb565 / yuv422 = 2 bytes per pixel), `pixclk` (Hz), `hblank` (pixel clocks), `vblank` (lines), `fps` (0 = free running), `pattern` (bars / gradient / counter / checker) or `image` (binary PGM P5 or raw file), `sync` (hardware / embedded), `hsync_blank` / `vsync_blank` (blanking levels, L / H), `start` | parallel (DVP) camera, see 6.3 |
 
 A port is wired to a net name (created if absent) or to `CHIP.PIN` (an anonymous net `<id>_<port>` is created).
 
@@ -1223,9 +1311,110 @@ $ .venv/bin/chipem run --board boards/k22_i2c_eeprom.yaml --for 30ms -q
   EE1      i2c_eeprom sda=SDA scl=SCL                    address=0x50 size=256 pointer=31 busy=False writes=2 reads=15 transfers=90 naks=84
 ```
 
-Parts are digital only: no analog values, no propagation delay, no UART bytes.
+Parts are digital only: no analog values, no propagation delay. UART bytes travel only through the serial cable
+parts of 6.2.
+
+### 6.2 Connecting PC software to a simulated UART (host serial)
+
+PC software that talks to a real device over a COM port can talk to the emulated MCU instead. chipem opens a port on
+the machine it runs on and bridges it to a UART. Three transports:
+
+| option | transport | PC software opens |
+|---|---|---|
+| `--uart-pty UART0[=/tmp/ttyK22]` | pseudo-terminal (Linux, macOS) | the printed `/dev/pts/N`, or the symlink you named |
+| `--uart-tcp UART0=5555` (`=0.0.0.0:5555` for other hosts) | raw TCP listener, one client at a time | `localhost:5555` (nc, PuTTY "Raw", socat, a TCP-aware tool) |
+| `--uart-port UART0=COM5[:115200[:8N1]]` | an existing serial port, via pyserial (`pip install pyserial`, extra `chipem[serial]`) | the other end of a null-modem pair |
+
+```
+$ .venv/bin/chipem run firmware/samples/build/uart_console.elf --clock 120e6 --uart-pty UART0=/tmp/ttyK22
+host serial: UART0 <-> pty /dev/pts/7 (link /tmp/ttyK22)
+real-time: on (speed x1); Ctrl-C stops
+...
+$ picocom -b 115200 /tmp/ttyK22        # second terminal; or screen /tmp/ttyK22 115200, minicom -D, your tool
+CHIP_EM K22 console - type help
+> help
+commands: help, led on, led off, dtr, uptime, echo TEXT
+```
+
+- **Real time.** With a host port attached, `run`, `shell` and `serve` lock virtual time to the wall clock
+  (`--no-realtime` turns it off, `--speed 0.5` runs at half speed, `--realtime` forces it without a port). `run`
+  then runs until Ctrl-C unless you give `--for`. An idle firmware (WFI) costs no CPU and still answers within a few
+  ms. A firmware that busy-polls at 120 MHz cannot keep up (the emulator runs it at 0.05-0.2x): one `warn` says so,
+  the summary and the web UI show the lag, and host bytes are delivered late but never lost.
+- **The wire rules apply.** Host bytes go out one character time apart at the host's speed and reach the UART at
+  their stop bit; they are dropped when the receiver is not listening (RX off, clock gated, pin not muxed) or
+  overruns, as on silicon. If the PC program sets another baud rate than the UART uses (a PTY reports it), both
+  directions are dropped as framing errors and one `warn` names both settings. Bytes the chip sends while no program
+  has the port open are lost.
+- **Linux, null-modem pair:** `socat -d -d pty,raw,echo=0,link=/tmp/ttyA pty,raw,echo=0,link=/tmp/ttyB`, then
+  `--uart-port UART0=/tmp/ttyA:115200` and point the PC software at `/tmp/ttyB` (useful when the software insists on
+  a real tty with modem lines; `--uart-pty` is simpler otherwise).
+- **Windows:** install com0com, create a pair (e.g. COM20 <-> COM21), run
+  `chipem run ... --uart-port UART0=COM20:115200`, open COM21 in the PC software. Without com0com use
+  `--uart-tcp UART0=5555` with a program that can open a TCP port (or a TCP-to-COM redirector). PTYs do not exist
+  on Windows.
+- **Board YAML:** `host_serial: [{uart: A.UART0, pty: /tmp/ttyK22}]` (or `tcp: 5555`, or `port: COM20, baud: 115200,
+  format: 8N1`), optional `realtime: true|false|SPEED`.
+- **Shell / web:** shell `host` lists the endpoints and the pacing, `realtime on|off [SPEED]` switches it. In the web
+  UI the UART pane has a "host serial" box (transport, path, connected, bytes in/out, lost, real-time lag) with a real
+  time checkbox and speed factor; `GET /api/hostserial`, `POST /api/realtime {on, speed}`. Press Run (or start with
+  `serve --start`): the emulation only runs while the UI runs it.
+
+A direct bridge is a TTL wire on the UART's TX/RX pins (like a USB-TTL cable). To model the real cable chain, use
+parts:
+
+**The chain as parts.** `boards/k22_rs232_console.yaml` replicates a typical service port: the K22's UART0 → an RS-232
+transceiver → an RJ50 jack on the device → a DB9-to-RJ50 cable → a USB-serial adapter on the PC → a PTY.
+
+```
+$ .venv/bin/chipem run --board boards/k22_rs232_console.yaml
+host serial: PC <-> pty /dev/pts/7
+real-time: on (speed x1); Ctrl-C stops
+```
+
+Open the printed `/dev/pts/N` in your PC tool at 115200 baud (add `port: pty:/tmp/ttyK22` to the PC part for a
+fixed name). Type `help`, `led on` (LED1 lights in the web UI), `dtr` (the firmware reads the PC's DTR through the
+transceiver: PTY host programs raise DTR when they open the port).
+
+| part | ports | what it does |
+|---|---|---|
+| `usb_serial_adapter` | `dcd rxd txd dtr gnd dsr rts cts ri` (DE-9 male DTE pins 1-9) | the PC end: `port: pty \| pty:LINK \| tcp:PORT \| serial:DEV[:BAUD] \| memory \| none`; `baud`, `format` (when the transport does not tell); `levels: rs232` (mark = -6 V) or `ttl` (FTDI-cable style, active-low RTS#/DTR#). Without a port, `--at 5ms:PC=help\r` types into it. |
+| `rs232_transceiver` | `t1in t1out ... r1in r1out ... gnd` (+ `shdn_n`, `en_n`) | MAX3232-like: `drivers`, `receivers` (2+2); inverting; needs `gnd` on a grounded net; `shdn: true` / `en: true` add the MAX3222 control pins |
+| `db9`, `rj50`, `connector` | `1`..`N` | board connectors (`gender` for D-sub; `connector` takes `kind`, `pins`); `names` labels pins |
+| `cable` | `a1..aN`, `b1..bM` | ends `a`/`b` (`db9m`, `db9f`, `db25m/f`, `rj11`, `rj45`, `rj50`, `pins:N`), `plug_a`/`plug_b` = the connector part (or adapter) each end is plugged into, `map: {A_PIN: B_PIN or [B_PINS]}` or `preset: straight \| null_modem \| null_modem_3wire` (DE-9 to DE-9) |
+
+```yaml
+  - {id: W1, type: cable, a: rj50, b: db9f, plug_a: J1, plug_b: PC,
+     map: {3: 2, 4: 3, 2: 5, 5: 4, 6: 8}}   # device RJ50 pin: PC DB9 pin (TXD->RXD, RXD<-TXD, GND, DTR, CTS)
+```
+
+DB9-to-RJ50 pinouts differ between vendors (there is no standard), so the map is always explicit: copy it from the
+device's documentation or measure the cable. Genders must mate (a `db9m` end onto the adapter's male DB9 is an error).
+
+**It fails like the bench.** Bytes reach a receiver only through a sound path: TXD to RXD through the cable, the
+right number of inversions, compatible levels and a common ground. A cable with TXD/RXD wrong reaches no receiver
+(TXD meets TXD: nothing arrives); a TTL UART wired straight to the RS-232 port idles at "space" and the PC sees a
+break and no characters; the adapter's ±6 V on a 3.3 V pin is reported as over-voltage; without the GND wire the two
+ends share no ground; an unplugged cable (`--at 2s:W1.plug_b=none`, or `set(plug_b=...)`) disconnects. Each case is
+a `uart` drop event with the reason (`polarity`, `over_voltage`, `no_ground`, `framing`, `stage_off`) plus one
+`warn` with the path. The nets show the idle levels: an RS-232 line at mark is L (H means a positive voltage); part
+states show volts (`U1 t1out=-6.0V`, `PC txd=-6.0V`). Modem lines are plain nets: the PC's DTR/RTS drive pins 4/7,
+CTS/DSR/DCD/RI are read from pins 8/6/1/9 and passed to the host where the transport has them (pyserial; a PTY or
+TCP has none, so DTR/RTS read asserted while a program has the port open).
+
 
 ---
+
+### 6.3 Camera (parallel DVP sensor)
+
+The `camera` part drives a parallel camera bus: ports `pixclk`, `hsync`, `vsync`, `d0`..`d<bits-1>`. Wire each port
+to the chip pins muxed to the camera interface (STM32F407: DCMI_PIXCLK/HSYNC/VSYNC/Dn, AF13). HSYNC and VSYNC toggle
+on the nets (line and frame timing from `pixclk`, `width`, `hblank`, `height`, `vblank`, `fps`); the pixel data
+reach the camera interface line by line (a vendor-free hook, `dvp_line`, on the peripherals of the chips on the
+pixclk net), and PIXCLK is summarised as a `wave` event instead of toggling. With `sync: embedded` the lines carry
+ITU-656 style codes instead of HSYNC/VSYNC. `image:` takes a binary PGM (P5) or a raw file (relative to the current
+directory, then to the board file); otherwise a `pattern` is generated. `--set CAM=checker` changes the pattern at
+run time. One `part` event per frame. Example: `chipem run --board boards/stm32f407_dcmi_camera.yaml --for 50ms`.
 
 ## 7. Adding a new chip
 
@@ -1517,6 +1706,8 @@ since the F28232 watchdog fires about 6.5 ms after reset. Start from `f28232.h` 
 | No UART output at all | wrong UART name, UART never enabled, or firmware stuck before it | `chipem info` (UART handler/references?); `--events uart,warn`; shell `periph UART0`; `pinreport` (is a pin muxed to UARTn_TX?) |
 | UART output is garbage on a board, or a `baud mismatch` warning | the two ends run different clocks | check the clock with `--events info`; set `--clock`/`clock_hz` for firmware that assumes a clock |
 | `RX dropped N byte(s): clock_gated` / `rx_disabled` / `pin_not_muxed` | input sent before the firmware enabled its receiver | send later: `--at 100ms:UART2=...` instead of `--uart-in` |
+| STM32 `RX dropped: clock_stopped` / `mute`, or a USART that never transmits | the chip was in Stop mode (`--events info` shows `enter Stop mode`), the receiver is in mute mode (CR1.RWU), or CTSE is set and the USARTn_CTS pin is high | wake the chip first (EXTI pin / RTC); drive the CTS pin low (`--set PA11=0`) or wire it to the peer's RTS |
+| Kinetis `RX dropped: stop_mode`, a K22 UART that never transmits, or a K22 that stops running | the chip is in STOP/VLPS/LLS/VLLS (`--events info` shows `power mode LLS`; `SMC.history`), TXCTSE is set and the UARTn_CTS_b pin is high, or the MCG runs from a stopped crystal (`MCGOUTCLK lost` warning) | wake it through the LLWU (pin edge, LPTMR, RTC) or an interrupt for STOP/VLPS (S2.RXEDGIF with BDH.RXEDGIE); drive CTS_b low (`--set PTB3=0`) or wire it to the peer's RTS_b; `MCG.set_external_clock(True)` |
 | `RX dropped ...: overrun` | firmware did not read the previous byte in time (busy printing, interrupts off) | send later or slower (one line at a time with several `--at`); this is what silicon does too |
 | Timing is 5–6x slower than expected on a K22 | the chip runs at its 20.97 MHz reset clock | `--clock 120e6` if the firmware never programs the MCG |
 | Run gets slow, and `stop` shows the same PC every time | firmware polls a status bit of a stub peripheral | `chipem shell fw --exec "run 1s; state; dis; bt"`, then `--log-mmio --events mmio --for 1ms` to see the register it reads; that block needs a model |
@@ -1584,15 +1775,23 @@ Options shared by `run`, `shell` and `serve`:
 | `--set PIN=LEVEL\|PART=VALUE` | drive a pin / set a part from t=0 (repeatable) |
 | `--at TIME:PIN=LEVEL\|TIME:PART=VALUE\|TIME:UART=TEXT` | timed stimulus (repeatable) |
 | `--uart-in [UART:]TEXT` | host input from t=0 (default UART0) |
+| `--uart-pty UART[=LINK]` | bridge a UART to a pseudo-terminal for PC software (6.2) |
+| `--uart-tcp UART=[HOST:]PORT` | bridge a UART to a raw TCP listener |
+| `--usb-host [PORT][:KEY=VAL,...]` | plug a USB device port into an emulated PC host (section 5.1c) |
+| `--usb-cdc [PORT=]TRANSPORT`, `--usb-cdc-pty [LINK]` | open the device's CDC-ACM virtual COM port to PC software (pty, tcp:N, serial:DEV) |
+| `--uart-port UART=DEV[:BAUD[:8N1]]` | bridge a UART to a host serial port (pyserial; com0com / socat pair) |
+| `--realtime` / `--no-realtime`, `--speed X` | lock virtual time to the wall clock (default on with a host bridge) |
 | `--adc CHANNEL=VALUE` | analog input: integer = raw code (`ADC0_SE14=2048`; bare `SE14` = ADC0; C2000 `ADCINA3=2048`), decimal or V/mV = volts (STM32 `PA0=1.65V`; Kinetis comparator `CMP0_IN0=1.2V`, volts only) |
 | `--spi-flash SPIn:cs=PIN[,jedec=ID,size=N,file=PATH]` | SPI NOR flash on a Kinetis DSPI or STM32 SPI |
+| `--eth-pcap FILE` | write every Ethernet frame to a pcap file (5.1b) |
+| `--eth-host ip=..,ping=..,count=..,interval=..` | add a host PC to the Ethernet segment (5.1b) |
 | `--part ID:TYPE[:KEY=VAL,...]` | add a part (repeatable) |
 | `--log-mmio` | log every peripheral access |
 | `--pin-report` | print the pin discovery report after `run` |
 | `--vcd FILE` | VCD output (board: one file per chip) |
 
-`run` only: `--for TIME` (default 100ms), `-q`/`--quiet`/`--summary-only`, `--events KINDS`, `--max-slice N`,
-`--stop-on-fault`. `shell` only: `--exec CMDS`. `serve` only: `--host`, `--port`, `--open`, `--realtime`,
+`run` only: `--for TIME` (default 100ms; until Ctrl-C with a host bridge, or `--for forever`), `-q`/`--quiet`/`--summary-only`, `--events KINDS`, `--max-slice N`,
+`--stop-on-fault`. `shell` only: `--exec CMDS`. `serve` only: `--host`, `--port`, `--open`,
 `--chunk MS`, `--start`, `--verbose`, `--view CHIP`.
 
 Times: `<number><ns|us|ms|s>`, bare number = ms. Levels: `1/H/high`, `0/L/low`, `X`, `Z/none/float`.
@@ -1611,6 +1810,9 @@ Times: `<number><ns|us|ms|s>`, bare number = ms. Levels: `1/H/high`, `0/L/low`, 
 | `info` | clock changes, peripheral enable, auto links | `INFO core clock 168.000 MHz (SYSCLK PLL ...)` |
 | `warn` | gated clock access, floating reads, unmodelled access, baud mismatch | |
 | `part` | part added or changed | `LED1 ON`, `SW1.out L` |
+| `i2s` | every 64 I2S frames per direction (Kinetis SAI, STM32 I2S) | `I2S I2S0 tx: 64 frames, ch0 ...` |
+| `usb` | USB transfer completed, bus event (attach, reset, suspend, resume, enumerated) | `USB OTG_FS: GET_DESCRIPTOR(DEVICE, 18): 18 bytes in (1 NAKs)`, `USB OTG_FS: bulk IN ep 0x81: 13 bytes 'echo: hello\r\n'` |
+| `eth` | Ethernet frame sent on a segment | `ETH HOST 02:00:00:00:00:01 > ff:ff:ff:ff:ff:ff ARP who-has 192.168.0.10 tell 192.168.0.1 (64 bytes)` |
 
 ### 10.3 File layout
 

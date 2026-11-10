@@ -4,6 +4,7 @@
 #   uart_dma_hal.c -> build/uart_dma_hal.elf/.bin/.map   (HAL_UART_Transmit_DMA / HAL_UART_Receive_DMA)
 #   i2c_eeprom_hal.c -> build/i2c_eeprom_hal.elf/.bin/.map (HAL_I2C_Mem_Write/Mem_Read, Master_Transmit/Receive)
 #   sd_hal.c       -> build/sd_hal.elf/.bin/.map         (HAL_SD_Init / WriteBlocks / ReadBlocks / Erase, SDIO)
+#   usb_cdc_hal.c  -> build/usb_cdc_hal.elf/.bin/.map    (HAL PCD + ST USB Device Library CDC-ACM on OTG_FS)
 # The HAL, startup and runtime objects are compiled once and linked into each sample.
 #
 # The HAL comes from ../vendor/STM32CubeF4 (STM32CubeF4 at a depth-1 sparse clone + its two submodules,
@@ -28,6 +29,7 @@ DEFS="-DSTM32F405xx -DUSE_HAL_DRIVER -DHSE_VALUE=8000000U"
 INC="-I. -I$HAL/Inc -I$CUBE/CMSIS/Device/ST/STM32F4xx/Include -I$CUBE/CMSIS/Include"
 CFLAGS="$ARCH $DEFS $INC -Os -g -ffreestanding -nostdlib -fno-builtin -ffunction-sections -fdata-sections"
 LDFLAGS="-T link.ld -fuse-ld=lld -nostdlib -Wl,--image-base=0x08000000 -Wl,-e,Reset_Handler -Wl,--gc-sections"
+MW=${MW:-../vendor/STM32CubeF4/Middlewares/ST/STM32_USB_Device_Library}
 HAL_SRCS="stm32f4xx_hal.c stm32f4xx_hal_cortex.c stm32f4xx_hal_rcc.c stm32f4xx_hal_rcc_ex.c stm32f4xx_hal_gpio.c
  stm32f4xx_hal_uart.c stm32f4xx_hal_dma.c stm32f4xx_hal_pwr.c stm32f4xx_hal_pwr_ex.c stm32f4xx_hal_flash.c
  stm32f4xx_hal_flash_ex.c stm32f4xx_hal_exti.c stm32f4xx_hal_i2c.c stm32f4xx_hal_sd.c stm32f4xx_ll_sdmmc.c"
@@ -57,3 +59,21 @@ for pair in main.c:uart_chat_hal uart_dma_hal.c:uart_dma_hal i2c_eeprom_hal.c:i2
     fi
     echo "ok: build/$name.elf ($(wc -c < "build/$name.bin") bytes)"
 done
+# USB CDC-ACM: HAL PCD / LL USB + the ST USB Device Library (vendored, see $MW/VENDORED.md), only linked here
+usb_objs=""
+for s in $HAL/Src/stm32f4xx_hal_pcd.c $HAL/Src/stm32f4xx_hal_pcd_ex.c $HAL/Src/stm32f4xx_ll_usb.c \
+         $MW/Core/Src/usbd_core.c $MW/Core/Src/usbd_ctlreq.c $MW/Core/Src/usbd_ioreq.c $MW/Class/CDC/Src/usbd_cdc.c; do
+    o=build/obj/$(basename "${s%.c}").o
+    $CC $CFLAGS -I$MW/Core/Inc -I$MW/Class/CDC/Inc -w -c "$s" -o "$o"
+    usb_objs="$usb_objs $o"
+done
+$CC $CFLAGS -I$MW/Core/Inc -I$MW/Class/CDC/Inc -Wall -Wextra -c usb_cdc_hal.c -o build/obj/usb_cdc_hal.o
+echo "LD  usb_cdc_hal"
+# shellcheck disable=SC2086
+$CC $ARCH $LDFLAGS -o build/usb_cdc_hal.elf build/obj/usb_cdc_hal.o $usb_objs $objs -Wl,-Map,build/usb_cdc_hal.map
+if command -v llvm-objcopy >/dev/null 2>&1; then
+    llvm-objcopy -O binary build/usb_cdc_hal.elf build/usb_cdc_hal.bin
+else
+    "$PY" ../samples/elf2bin.py build/usb_cdc_hal.elf build/usb_cdc_hal.bin
+fi
+echo "ok: build/usb_cdc_hal.elf ($(wc -c < build/usb_cdc_hal.bin) bytes)"

@@ -174,6 +174,8 @@ class Chip:              # runtime assembly: description + clock + sched + pins 
     def adc_blocks(self) -> dict[str, MMIOBlock]      # analog-input blocks: every model exposing set_channel(name, value)
     def can_blocks(self) -> dict[str, MMIOBlock]      # CAN controllers: every model exposing can_attach(bus) (any family)
     def find_can(self, name) -> str | None            # "CAN0"/"FlexCAN0"/"ECANA"/"eCAN-A"/"CANA" -> block name
+    def usb_blocks(self) -> dict[str, MMIOBlock]      # USB device controllers: models exposing usb_attach(bus)
+    def find_usb(self, name=None) -> str | None        # "OTG_FS"/"fs"/"OTG_HS_GLOBAL"/"USB0"/"USB"/None -> block name
     # analog-input model conventions (any family):
     #   set_channel(name, value) -> bool | None   value as below; False = not this block's channel
     #   set_input(name, value) -> bool            optional: resolve other names (pins "PA0", "ADC123_IN0", "CMP0_IN3");
@@ -184,13 +186,41 @@ class Chip:              # runtime assembly: description + clock + sched + pins 
                                                        # fallback: unknown -> lowest-numbered UART (default "UART0")
 ```
 `Clock.slice_offset` (set by the Chip to `core.insns_in_slice`): `set_hz` re-bases at the current instruction.
+
+### Low-power modes (generic part, 2026-11-10)
+The Chip knows only "the core sleeps"; which clocks stop and what wakes the part is family logic.
+- `chip.power_hooks: list` — objects (normally the family power controller: Kinetis SMC, STM32 PWR, C2000 SysCtrl
+  LPMCR0) with optional `on_sleep(chip)` and `on_wake(chip)`. `on_sleep` runs when the core stops in WFI / WFE / IDLE
+  (or on an exception return with SCR.SLEEPONEXIT), with `chip.sleeping` already True and `core.stop_info` =
+  `"wfi"`, `"wfe"` or `"idle"`; `on_wake` runs when the sleep ends (interrupt or `wake()`), before the core resumes.
+  Without hooks a WFI with a wake-up already pending does not sleep at all (the original behaviour).
+- `chip.wake_gate: callable() -> bool | None` — while it returns False, pending interrupts (`arch.wakeup_pending()`)
+  do not end the sleep (deep modes whose wake-up logic is not the interrupt controller).
+- `chip.wake()` — ends the sleep at the next loop turn from a source that is not an interrupt (C2000 GPIO wake,
+  STM32 WFE events). A reset-type wake (Kinetis VLLS, STM32 Standby) calls `arch.request_reset(reason)` instead.
+- While sleeping the loop runs scheduler events and jumps time to the next one (clocks/timers that keep running in
+  the mode are the events that remain scheduled). Peripherals whose clock stops in a mode implement the optional
+  `clock_stop(stopped: bool, mode: str)`; the family controller calls it on entry and exit (a model freezes its
+  counters / cancels its events and resumes them). Models without it keep running (documented per family).
+- `ArmV7M.sleep_on_exit()`, `ArmV7M.sleep_deep` (SCR.SLEEPDEEP), `ArmV7M.sevonpend`; `C28xArch.sleep_on_exit()` is
+  always False.
 `regtable.RegTable.unit_bits` (from `address_unit_bits`); `Register.full_mask/ro_mask` and
 `PeripheralRegs.reg_specs(unit_bits=None)` span `width * unit_bits` bits; specs carry `unit_bits`.
 Chip YAML keys: `name, core{arch, backend, cpu, fpu, clock_hz, addr_unit_bits}, family, memory[], peripherals[], irqs{n: name}, pins[]`.
 
 ## Events / logging
 All runtime observations go through `chip.log` (a `chipem.log.EventLog`): `log.event(kind, t_ns, **fields)` with kinds
-`pin`, `mmio`, `irq`, `uart`, `can`, `i2s`, `reset`, `fault`, `info`, `warn`, `part`. The CLI/VCD/web subscribe to it.
+`pin`, `mmio`, `irq`, `uart`, `can`, `i2s`, `eth`, `usb`, `reset`, `fault`, `info`, `warn`, `part`. The CLI/VCD/web
+subscribe to it.
+`usb` (chipem/usbbus.py, on the device chip's log; per transfer, never per packet): bus events `{link, dev, event:
+"attach"|"detach"|"vbus"|"reset"|"suspend"|"resume"|"wakeup"|"enumerated"|"error", msg}` (`enumerated` adds `device`:
+`UsbDeviceInfo.summary()`), control transfers `{link, dev, xfer: "control", req ("GET_DESCRIPTOR(DEVICE, 18)"), setup
+(hex), dir, len, data (hex, <= 64 bytes), status ("ok"|"stall"|"timeout"), naks, addr, msg}`, bulk/interrupt transfers
+`{link, dev, xfer: "bulk"|"interrupt", ep (0x81), dir, len, data, text, status, addr, msg}`; `t_ns` = end of the
+transfer.
+`eth` (chipem/ethernet.py, one per frame sent on a segment, on the sender's log; host frames on the first chip's):
+`{link, node, dir: "tx", len (bytes incl. FCS), dst, src, type ("0x0800"), info (ARP/IPv4/ICMP/UDP/TCP summary),
+sof_ns, msg}`, `t_ns` = end of the frame. `i2s` is also emitted by the STM32 I2S mode (same fields).
 `can` (chipem/canbus.py, one per completed frame, on the transmitter's log): `{link, node, dir: "tx", id, ext, rtr,
 dlc, data: hex str, bits, sof_ns}`, `t_ns` = end of EOF; a failed attempt adds `err` ("ack" | "bit0") and `msg`.
 `i2s` (kinetis.sai, one per `event_frames` frames and direction, at the end of the last frame): `{block, dir: "tx" |
@@ -470,3 +500,156 @@ tec, rec, state, bus}` (run summary). A controller not on a board bus sits alone
 Board: `links: [{type: can, name?, nodes: [CHIP.CAN, ...], host?: bool}]` (short `{can: [...]}`) ->
 `Board.add_can_link(nodes, name=None, host=False) -> CanLink` (`can_links`, `can_bus(name)`, `CanLink.bus`,
 `to_dict()`); `LinkSpec.type == "can"` with `nodes`, `name`, `host`.
+
+## USB bus (chipem/usbbus.py; 2026-11-10)
+Generic, vendor-free; one host port and one device controller per `UsbBus` (no hubs). Device models: `stm32.otg_fs`,
+`stm32.otg_hs`, `kinetis.usbfs`.
+```python
+crc5(value, nbits=11), crc16(data), packet_bits(pid, payload), token_bits(pid, addr, ep), data_bits(pid, data),
+    handshake_bits(pid)                               # wire length in bit times (SYNC..EOP, stuff bits counted)
+FS_BIT_NS, LS_BIT_NS, FRAME_NS; describe_setup(setup8) -> "GET_DESCRIPTOR(DEVICE, 18)"; build_setup(bm, req, ...)
+class Transaction: kind ("SETUP"|"OUT"|"IN"), addr, ep, pid ("DATA0"|"DATA1"|None), data: bytes, t (ns)
+class UsbBus(name="USB"):
+    device, host, listeners (cb(bus, kind, info)), vbus, state ("detached"|"attached"|"reset"|"default"|"suspended"|
+    "resume"), speed ("fs"|"ls"), counters packets/transactions/naks/stalls/timeouts/sofs/bytes_in/bytes_out
+    attach(device), detach(), add_host(**UsbHost kw) -> UsbHost, device_changed(), remote_wakeup(), set_vbus(on)
+class UsbHost(bus, *, power=True, debounce_ns=100e6, reset_ns=10e6, reset_recovery_ns=10e6,
+              set_address_recovery_ns=2e6, resume_ns=20e6, resume_recovery_ns=10e6, ctrl_nak_retry_ns=20e3,
+              ctrl_timeout_ns=5e9, second_reset=True, enum_retries=2, auto_enumerate=True, drivers=True,
+              line_coding=(115200, 0, 0, 8), cdc_open=True)
+    state ("off"|"powered"|"debounce"|"enumerating"|"configured"|"failed"|"suspended"), device: UsbDeviceInfo | None,
+    devices (every enumeration), failures, frame, cdc / hid / msc (bound class drivers), driver(kind)
+    power(on), plug(), unplug(), reset_port(), suspend(), resume(), summary() -> dict
+    control(bm, req, value, index, data_or_len, cb) / bulk_out(ep, data, cb) / bulk_in(ep, n, cb) /
+    interrupt_in(ep, n, interval, cb) / interrupt_out(...) -> Transfer (.status "ok"|"stall"|"timeout", .data)
+    start_task(generator)       # a script: yield Transfer(...) -> the completed transfer, yield Delay(ns), Reset()
+    cdc_write(data)             # to the CDC-ACM port (held until it is open); cdc_rx (all bytes received),
+    cdc_listeners               # cb(bytes) for every bulk IN transfer of any CDC-ACM driver (survive re-enumeration)
+class UsbDeviceInfo: address, speed, vid, pid, bcd_usb, cls, mps0, strings, manufacturer, product, serial,
+    interfaces [UsbInterfaceInfo(number, alt, cls, subclass, protocol, endpoints [UsbEndpointInfo], extra)],
+    configured, remote_wakeup, drivers; class_names(), describe(), summary()
+class CdcAcm: open, rx, write(data), take(), rx_listeners, serial_state, notifications, line_coding
+class HidDevice: report_desc, reports [(t_ns, bytes)], listeners ; class MscDevice: vendor, product, blocks,
+    block_size, command(cdb, n) (task generator), read_blocks(lba, n, cb)
+class UsbLink(name, chip_id, port, block, opts)   # board link: .bus, .host, .endpoint, cdc_output, to_dict(), close()
+class UsbCdcBridge(host, port: HostPort, *, label, blk)   # CDC-ACM <-> chipem.hostserial port; pump(), info(), close()
+host_options(dict, what) -> validated `host:` options of a board usb link
+```
+Device protocol (every callback gets the bus first; see the module docstring): `chip`, `log`, `usb_name`,
+`usb_attach(bus)` / `usb_detach()` (also the `Chip.usb_blocks()` hook), `usb_pullup(bus) -> "fs"|"ls"|None`,
+`usb_vbus(bus, on, t)`, `usb_reset(bus, active, t)`, `usb_suspend(bus, t)`, `usb_resume(bus, t)`,
+`usb_sof(bus, frame, t)` (optional `usb_keepalive(bus, t)` for low speed), `usb_setup(bus, x) -> "ACK"|None`,
+`usb_out(bus, x) -> "ACK"|"NAK"|"STALL"|None`, `usb_in(bus, x) -> ("DATA0"|"DATA1", bytes)|"NAK"|"STALL"|None`,
+`usb_in_done(bus, x, acked, t)` (commit the IN data on the host's ACK). None = no response (wrong address, not
+ready): the host times out. The device calls `bus.device_changed()` when its pull-up may have changed and
+`bus.remote_wakeup()` when it drives resume. Optional `usb_stats()` for summaries.
+Board: `links: [{type: usb, name?, device: CHIP.PORT, host?: {debounce, reset, reset_recovery, set_address_recovery,
+resume, resume_recovery, ctrl_nak_retry, ctrl_timeout (times), second_reset, enum_retries, drivers, power, baud,
+cdc_open, cdc_send, cdc_send_at, cdc_pty, cdc_tcp, cdc_serial}}]` -> `Board.add_usb_link((chip, port), name=None,
+options=None) -> UsbLink` (`usb_links`, `usb_host(name)`); `LinkSpec.type == "usb"` with `a` = the port and
+`options`. Session: `attach_usb_host("[CHIP.]PORT[:k=v,...]")`, `attach_usb_cdc("[PORT=]pty|pty:LINK|tcp:N|serial:DEV|
+memory")` (the bridge joins `host_bridges`, pumped like a UartBridge), `usb_links()`; CLI `--usb-host`, `--usb-cdc`,
+`--usb-cdc-pty`.
+
+## Host serial ports and real-time pacing (chipem/hostserial.py, chipem/realtime.py; 2026-11-10)
+Vendor-free. A `HostPort` is a byte stream to host software, serviced by its own I/O threads; every method below is
+safe to call from the emulation thread (and only `listeners` callbacks run on I/O threads). Any device model that
+needs a host byte stream (e.g. a USB CDC-ACM function) can use it directly.
+```python
+class LineSettings(baud, bits=8, parity="N", stop=1.0, framed=True)   # char_bits(), char_ns(); framed=False: only the
+                                                                      # baud is known (Linux PTYs drop CSIZE/PARENB)
+class HostPort:
+    kind: str                                   # "pty" | "serial" | "tcp" | "memory"
+    connected: bool; connects: int              # a host program has the port open / opens so far
+    bytes_in; bytes_out; dropped_out; error     # dropped_out: written while nobody was connected (or host not reading)
+    listeners: list[callable()]                 # called on the I/O thread on input / connection / modem changes
+    def read(self) -> bytes                     # drain host -> emulation bytes
+    def write(self, data: bytes) -> int         # queue emulation -> host; 0 (dropped) when not connected
+    def line(self) -> LineSettings | None       # host settings if the transport knows them (PTY: baud set by the program)
+    def modem_from_host(self) -> {"rts", "dtr"} # bool | None; PTY/TCP: asserted while connected; serial: null-modem
+                                                # (host RTS = our CTS, host DTR = our DSR)
+    def set_modem_to_host(self, *, cts=, dsr=, dcd=, ri=)    # serial: our RTS <- cts, our DTR <- dsr|dcd; else recorded
+    def describe(self) -> str; def info(self) -> dict; def close(self)
+PtyPort(link=None)  .path (slave), .link ;  SerialPort(path, line) (pyserial, lazy import; ValueError if missing)
+TcpPort(port, host="127.0.0.1") .port ;     MemoryPort(line=None): host_send(data), host_recv(timeout), set_line(),
+                                            set_host_modem(rts=, dtr=), set_connected()
+def open_port(spec, *, line=None) -> HostPort | None   # "pty[:LINK]" "tcp:[HOST:]PORT" "serial:DEV[:BAUD[:8N1]]" "memory"
+                                                       # "none"; a bare path / COMn = serial
+def framing_mismatch(baud, bits, line) -> str | None   # > 3 % baud or another frame length
+class UartBridge(chip, uart_block, port, *, label)     # host port on a UART's pins (TTL); pump(), info(), close()
+```
+Rules: host bytes are paced at the host's character time (`line()`, else the UART's) and enter through the UART's
+`_rx_arrive(b, "host")` (not listening / pin not muxed / overrun as for `feed`); chip bytes are written when their
+stop bit completes. A `framing_mismatch` drops the byte (`uart` event dir=drop reason=framing; the UART's `_rx_drop`
+for host->chip) with one `warn` per direction.
+
+Session additions:
+```python
+Session.host_bridges: list[UartBridge]; Session.pacer: RealTime | None
+def attach_host_serial(self, uart: str, transport: str) -> UartBridge   # CLI --uart-pty/--uart-port/--uart-tcp
+def host_endpoints(self, transport_only=False) -> list   # bridges + board parts with `pump()` and `host_port`
+def set_realtime(self, on=True, speed=None)               # CLI --realtime/--no-realtime/--speed; default on with a
+                                                          # host transport attached (from_args / from_board)
+def host_status(self) -> {"realtime": {enabled, speed, lag_ms, max_lag_ms, behind, rebases, ratio, waited_s},
+                          "endpoints": [info, ...]}       # web state.host, GET /api/hostserial
+def close_hosts(self)                                     # also from close()
+```
+`run_for` with a pacer or any endpoint runs `realtime.run_paced`: slices of at most 2 ms virtual time, `pump()` of
+every endpoint between slices (the only place host bytes enter the emulation), waits on a threading.Event that I/O
+threads and `stop()` set; when every chip sleeps it waits for the wall clock to reach the next scheduled event.
+Board YAML: `host_serial: [{uart: A.UART0, pty: LINK|true | tcp: PORT | port: DEV, baud:, format:}]`,
+`realtime: true|false|SPEED` (`BoardDesc.host_serial`, `BoardDesc.realtime`). Web: `POST /api/realtime {on, speed}`.
+
+## Serial cable parts (chipem/parts/serial.py; 2026-11-10)
+Types `usb_serial_adapter`, `rs232_transceiver`, `connector` / `db9` / `rj50`, `cable` (params and ports: USER_GUIDE
+6.2). Optional part hooks used by the board's `SerialRouter` (`serial_router(board)`, created by the first serial
+part; it hooks every UART's `tx_listeners`):
+- `serial_paths(port) -> [(out_port, invert: bool, out_domain: "ttl"|"rs232"|None, blocked_reason|None)]`: where a
+  signal entering `port` comes out (None domain = passive conductor). std `buf`/`not` are treated as such stages.
+- `serial_input_domain(port)`; `serial_sink(port) -> {"inv": 0|1, "domain"}` (a byte receiver: `serial_receive(b)`,
+  `serial_drop(b, reason)`, `line()`); `gnd_port` (ground reference for the common-ground check);
+  `conductor_groups()` (cable wires: ports joined electrically); `connector = (kind, gender, pins)` +
+  `connector_port(pin) -> port name` (plug targets).
+- `Board.add_part` calls `part_added(new_part)` on every part that has it (a cable plugs into a connector added
+  after it). `Board.close()` closes the router.
+- A byte reaches a sink only if the path's inversion parity matches the sink, no RS-232 level reaches a TTL input,
+  every segment's driver and receiver share a ground component and no stage is off; otherwise `uart` drop with
+  reason `polarity | over_voltage | no_ground | stage_off | framing | pin_not_muxed` and one `warn` per path/reason.
+  Chip-pin sinks on the source's own net are left to the board's automatic UART links.
+
+## Ethernet (chipem/ethernet.py; 2026-11-10)
+Generic, vendor-free; the MAC models (`stm32.eth`) own an `EthPhy`.
+```python
+fcs(data) -> 4 bytes ; fcs_ok(wire) ; wire_ns(nbytes_incl_fcs, rate) ; inet_checksum(data, start=0) ; describe(frame)
+class EthPhy(mac, *, model="lan8720"|"lan8742"|"dp83848"|"ksz8081"|"generic", addr=0, aneg="1.5s", link="10ms",
+             reset="1ms", id1=None, id2=None)
+    configure(**same) ; mdio_read(phyad, reg) -> int (0xFFFF for another address) ; mdio_write(phyad, reg, v)
+    transmit(wire, rate, t_sof, t_end) -> None | "nolink" | "speed" | "nocable" ; deliver(wire, rate, t_end)
+    link_up, speed (10|100), full_duplex, mode() -> "100FD" | "down", segment, power_on()
+    # MAC protocol: mac.chip, mac.log, mac.name, mac.phy_rx(phy, wire, rate, t_end), optional mac.phy_link_changed(phy)
+class EthSegment(name="LAN", *, caps=("100FD","100HD","10FD","10HD"), pcap=None, chip=None)
+    attach(port) ; detach(port) ; send(src_port, wire, rate, t_sof, t_end) ; add_host(name, **opts) -> EthHost
+    set_pcap(path) ; close() ; ports, hosts, listeners (cb(seg, wire, info)), frames, bytes
+    # port protocol: chip, log, eth_name, deliver(wire, rate, t_end)
+class EthHost(segment, name, *, mac, ip, arp=True, echo=True, ping=None, count=4, interval="1ms", start=0, size=32)
+    send(frame_hex_or_bytes, t_ns=None) ; ping(ip, count=, interval=, start=, size=) ; received, sent,
+    replies [(seq, rtt_ns)], arp_cache, state()
+class PcapWriter(path)   # nanosecond pcap, LINKTYPE_ETHERNET, frames without FCS
+eth_blocks(chip) -> {name: block}     # peripherals with the hook eth_attach(segment, **phy_opts) (not absent)
+find_eth(chip, name) -> str | None    # exact name, or ETH/ETHERNET/MAC for the only MAC
+class EthLink(board, name, nodes=[(chip id, MAC, phy opts)], *, host=None, pcap=None, caps=None, inject=None)
+    segment, host, macs, describe(), to_dict(), close() (host + pcap), unplug()
+```
+MAC models expose `eth_attach(segment, **phy)`, `eth_detach()`, `eth_stats()` -> `{tx, rx, filtered, crc, missed, lost,
+link, phy, phy_addr, iface, segment}`, `phy` (the EthPhy). Board: `links: [{type: eth, name?, nodes: [CHIP.ETH |
+{node, phy}], phy?: {model, addr, aneg, link, reset}, host?: {...EthHost options}, inject?: [{at, hex}], pcap?, caps?}]`
+-> `LinkSpec(type="eth", nodes, name, options={phy: [per node], host, pcap (resolved), caps, inject})` ->
+`Board.add_eth_link(nodes=[(cid, mac, phy)], name=None, host=None, pcap=None, caps=None, inject=None) -> EthLink`
+(`eth_links`, `eth_segment(name)`). Session: `eth_link(pcap=None, host=None)` (CLI `--eth-pcap`, `--eth-host`).
+
+## Die-family gating and parallel camera hook (2026-11-10)
+- `chipem.periph.stm32._util.part_present(chip, params)`: `params.only` = list of part-name prefixes; `make_absent(block,
+  what)` turns a model into the `stub` behaviour (RAM-like, one `warn` on first access, `block.absent = True`).
+- Camera part (`chipem/parts/camera.py`) -> receivers: peripherals of the chips on the part's pixclk net that expose
+  `dvp_accepts(pin) -> bool` and `dvp_line(src, t0_ns, period_ns, samples, ports)` get each line (see the part's
+  docstring); HSYNC/VSYNC are real net levels.

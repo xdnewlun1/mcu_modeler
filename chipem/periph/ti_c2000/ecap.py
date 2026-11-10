@@ -41,7 +41,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..registry import register
-from ._util import C2000Block, build_regs, irq_line, sysctrl
+from ._util import C2000Block, build_regs, irq_line, sysctrl, listen_input, unlisten_input
 
 MASK32 = 0xFFFFFFFF
 WRAP = 1 << 32
@@ -57,6 +57,7 @@ EVENT_FLAGS = 0xFE
 
 @register("ti_c2000.ecap")
 class ECAP(C2000Block):
+    cycle_anchors = ("_cyc0",)
     eallow_regs = None                     # SPRUFG4A: no eCAP register is EALLOW-protected
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
@@ -116,7 +117,7 @@ class ECAP(C2000Block):
             self._pins = list(board.signal_pins(self.signal))
             self._pin_ids = {p.id for p in self._pins}
             for p in self._pins:
-                board.input_listeners[p.id].append(self._pin_changed)
+                listen_input(chip, p, self._pin_changed)
                 self._last[p.id] = p.level()
             if self._pins:
                 board.subscribe(self._pin_event)

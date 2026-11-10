@@ -209,7 +209,11 @@ class GPIO(GatedBlock):
         periphs = getattr(self.chip, "peripherals", None) or {}
         for part in owner.split("/"):
             part = part.strip()
-            f = getattr(periphs.get(part.split("_", 1)[0]), "signal_state", None)
+            pre = part.split("_", 1)[0]
+            blk = periphs.get(pre)
+            if blk is None and pre.startswith("I2S") and pre[3:].isdigit():
+                blk = periphs.get("SPI" + pre[3:])          # I2S2_MCK -> SPI2 (I2S mode of the SPI block)
+            f = getattr(blk, "signal_state", None)
             if f is not None:
                 r = f(part)
                 if r is not None:

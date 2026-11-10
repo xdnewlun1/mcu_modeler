@@ -72,7 +72,12 @@ def test_scaffold_yaml_loads_and_maps_models(scaffold):
     assert models["RCC"].model == "stm32.rcc" and models["IWDG"].model == "stm32.iwdg"
     assert models["TIM2"].model == "stm32.tim" and models["TIM9"].model == "stm32.tim"
     assert models["EXTI"].model == "stm32.exti" and models["SPI1"].model == "stm32.spi"
-    assert models["SPI3"].model == "stm32.spi" and models["I2S2ext"].model == "stub"
+    assert models["SPI3"].model == "stm32.spi" and models["I2S2ext"].model == "stm32.i2s_ext"
+    assert models["I2S3ext"].params == {"main": "SPI3"}
+    assert models["Ethernet_MAC"].model == "stm32.eth" and models["Ethernet_MAC"].size == 0x1400
+    assert not {"Ethernet_MMC", "Ethernet_PTP", "Ethernet_DMA"} & set(models)      # inside the stm32.eth block
+    assert (models["DCMI"].model, models["CRYP"].model, models["HASH"].model) == ("stm32.dcmi", "stm32.cryp",
+                                                                                    "stm32.hash")
     assert (models["CRC"].model, models["RNG"].model, models["DAC"].model, models["RTC"].model,
             models["WWDG"].model) == ("stm32.crc", "stm32.rng", "stm32.dac", "stm32.rtc", "stm32.wwdg")
     assert models["DMA1"].model == "stm32.dma" and models["DMA1"].params == {"controller": 1}
@@ -170,6 +175,19 @@ def test_model_rule_requires_matching_registers():
     bxcan = ["MCR", "MSR", "TSR", "RF0R", "RF1R", "IER", "ESR", "BTR", "TI0R", "TDT0R", "RI0R", "FMR", "FA1R"]
     assert new_chip.map_model("stm32", "CAN2", bxcan)[:2] == ("stm32.can", {"index": 2})
     assert new_chip.map_model("stm32", "CAN1", ["CREL", "ENDN", "DBTP", "NBTP"])[0] == "stub"   # FDCAN layout
+    # USB: STM32 OTG (DWC2) whole 256 KB windows renamed OTG_FS/OTG_HS, Kinetis USB0 + USBDCD; other layouts -> stub
+    otg = ["FS_GOTGCTL", "FS_GOTGINT", "FS_GAHBCFG", "FS_GUSBCFG", "FS_GRSTCTL", "FS_GINTSTS", "FS_GINTMSK",
+           "FS_GRXFSIZ", "FS_GCCFG", "FS_CID"]
+    assert new_chip.map_model("stm32", "OTG_FS_GLOBAL", otg)[:3] == ("stm32.otg_fs", {}, "OTG_FS")
+    assert new_chip.map_model("stm32", "OTG_HS_GLOBAL", ["OTG_HS_" + n[3:] for n in otg])[:3] == ("stm32.otg_hs", {},
+                                                                                                  "OTG_HS")
+    assert new_chip.map_model("stm32", "OTG_FS_GLOBAL", ["CNTR", "ISTR", "FNR", "DADDR"])[0] == "stub"   # USB FS dev
+    usb0 = ["PERID", "IDCOMP", "ISTAT", "INTEN", "ERRSTAT", "STAT", "CTL", "ADDR", "BDTPAGE1", "ENDPT0", "USBCTRL",
+            "CONTROL", "USBTRC0"]
+    assert new_chip.map_model("kinetis", "USB0", usb0)[:2] == ("kinetis.usbfs", {})
+    assert new_chip.map_model("kinetis", "USB0", usb0[:-2])[0] == "stub"           # no CONTROL/USBTRC0: other USB IP
+    assert new_chip.map_model("kinetis", "USBDCD", ["CONTROL", "CLOCK", "STATUS", "TIMER0", "TIMER1"])[0] == \
+        "kinetis.usbdcd"
     ecan = ["CANME", "CANMD", "CANTRS", "CANTRR", "CANTA", "CANRMP", "CANMC", "CANBTC", "CANES", "CANGIF0", "CANGIM",
             "MBOX0_MSGID"]
     assert new_chip.map_model("ti_c2000", "ECANB", ecan)[:2] == ("ti_c2000.ecan", {"gate": "ECANBENCLK"})

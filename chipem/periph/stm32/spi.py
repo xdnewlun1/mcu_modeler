@@ -40,7 +40,10 @@ Registers from the SVD (CR1, CR2, SR, DR, CRCPR, RXCRCR, TXCRCR, I2SCFGR, I2SPR)
   Tables 42/43, through `_util.dma_request`).
 Every frame is recorded in `frames` (tx, rx) and the transmitted words in `tx_bytes` (bytes; 16-bit words big
 endian; not `output`, which marks UART-like blocks for Session.uart_output).
-Not modelled: I2S mode (I2SCFGR.I2SMOD = 1: one `warn`, the block does nothing in I2S mode), TI frame format
+I2S mode (I2SCFGR.I2SMOD = 1) of SPI2/SPI3: chipem/periph/stm32/i2s.py (`I2SEngine`; SPI1 has no I2S mode on the F4:
+setting I2SMOD there logs one `warn` and the block stays idle); the I2S2ext/I2S3ext blocks are `stm32.i2s_ext` below.
+The IRQ line goes through `_util.shared_irq` (SPIx and I2SxEXT share it).
+Not modelled: TI frame format
 (CR2.FRF: one `warn`, Motorola timing is used), slave BIDIMODE, the NSS pulse / inter-frame gaps of later families,
 pin speed / slew. The Kinetis DSPI (kinetis.dspi) works the same way (boards/k22_stm32_spi.yaml).
 """
@@ -51,7 +54,8 @@ from typing import Any, Callable
 
 from ..base import MMIOBlock
 from ..registry import register
-from ._util import GatedBlock, build_regs, dma_request, gpio_resync, irq_number
+from ._util import GatedBlock, build_regs, dma_request, gpio_resync, irq_number, shared_irq
+from .i2s import FRE, I2SE, UDR, I2SEngine, block_index
 
 CPHA, CPOL, MSTR, SPE, LSBFIRST, SSI, SSM, RXONLY = 1, 2, 4, 0x40, 0x80, 0x100, 0x200, 0x400
 DFF, CRCNEXT, CRCEN, BIDIOE, BIDIMODE = 0x800, 0x1000, 0x2000, 0x4000, 0x8000
@@ -86,9 +90,11 @@ class SPI(GatedBlock):
               "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
               "CRCPR": {"on_write": self._crcpr_write},
               "RXCRCR": {"ro_mask": 0xFFFFFFFF}, "TXCRCR": {"ro_mask": 0xFFFFFFFF},
-              "I2SCFGR": {"on_write": self._i2s_write}}
+              "I2SCFGR": {"on_write": self._i2s_write}, "I2SPR": {"on_write": self._i2spr_write}}
         r = build_regs((name, "SPI1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        i2s = params.get("i2s", name in ("SPI2", "SPI3"))
+        self.i2s: I2SEngine | None = I2SEngine(self, block_index(name)) if i2s else None
         self.responder: Callable[[int, int, int], int] | None = None
         self.frame_end: Callable[[bool, bool], None] | None = None
         self.frames: deque[tuple[int, int]] = deque(maxlen=100_000)
@@ -127,10 +133,15 @@ class SPI(GatedBlock):
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         self._irqn = irq_number(chip, self.name)
+        if self.i2s is not None and self._rcc is not None:
+            self._rcc.listeners.append(self.i2s.clock_changed)
         board = getattr(chip, "pins", None)
         if board is not None:
-            for k in ("SCK", "MOSI", "NSS"):
-                for p in board.signal_pins(self.sig[k]):
+            sigs = [self.sig[k] for k in ("SCK", "MOSI", "NSS")]
+            if self.i2s is not None and not self.i2s.ext:
+                sigs.append(self.i2s.sig["CK"])
+            for sig in sigs:
+                for p in board.signal_pins(sig):
                     if p.id not in self._listen:
                         self._listen.add(p.id)
                         board.input_listeners[p.id].append(self._pin_changed)
@@ -140,8 +151,18 @@ class SPI(GatedBlock):
             self.chip.sched.cancel(self._ev)
         had_out = any(v is not None for v in getattr(self, "_out", {}).values())
         if getattr(self, "_line", False) and self.chip is not None:
-            self.irq(self._irqn, False)
+            shared_irq(self.chip, self._irqn, self.name, False)
         self._line = False
+        eng = getattr(self, "i2s", None)
+        if eng is not None and self.chip is not None:
+            self.chip.sched.cancel(eng.ev)
+            self.chip.sched.cancel(eng.mck_ev)
+            eng.mck_ev = None
+            eng.mck_hz = 0.0
+            eng._wave.reset()
+            eng.release_all()
+        if eng is not None:
+            eng.init()
         if self.chip is not None:
             for i, on in enumerate(self._dma):
                 if on:
@@ -205,11 +226,27 @@ class SPI(GatedBlock):
     # ------------------------------------------------------------------ pins
     def signal_state(self, sig: str) -> tuple[str, str | None] | None:
         """Live (direction, idle drive) of one of this block's pins, for the GPIO model."""
+        eng = self.i2s
+        if eng is not None:
+            role = self._i2s_role(sig)
+            if role is not None:
+                return eng.pin_state(role) if role != "-" else ("in", None)
         for k, s in self.sig.items():
             if s == sig:
                 lvl = self._out[k]
                 return ("out", lvl) if lvl is not None else ("in", None)
         return None
+
+    def _i2s_role(self, sig: str) -> str | None:
+        """I2S pin role ("CK", "WS", "SD", "MCK", "-" = unused) of signal `sig` while in I2S mode, else None."""
+        eng = self.i2s
+        for k, v in eng.sig.items():
+            if v == sig:
+                return k if eng.i2s_on() else ("-" if k != "MCK" else "MCK")
+        if not eng.i2s_on() or eng.ext:
+            return None
+        return {"SCK": "CK", "NSS": "WS", "MOSI": "SD", "MISO": "-"}.get(
+            next((k for k, v in self.sig.items() if v == sig), ""))
 
     def _want_out(self) -> dict[str, str | None]:
         """Signals this block should drive now and their idle level (None = released)."""
@@ -271,10 +308,10 @@ class SPI(GatedBlock):
             return
         sr, cr2 = self.get("SR"), self.get("CR2")
         line = bool((sr & TXE and cr2 & TXEIE) or (sr & RXNE and cr2 & RXNEIE)
-                    or (sr & (OVR | MODF | CRCERR) and cr2 & ERRIE))
+                    or (sr & (OVR | MODF | CRCERR | UDR | FRE) and cr2 & ERRIE))
         if line != self._line and self._irqn is not None:
             self._line = line
-            self.irq(self._irqn, line)
+            shared_irq(self.chip, self._irqn, self.name, line)
         tx = bool(cr2 & TXDMAEN and sr & TXE)
         rx = bool(cr2 & RXDMAEN and sr & RXNE)
         if tx != self._dma[0]:
@@ -468,6 +505,9 @@ class SPI(GatedBlock):
         board = self.chip.pins
         cr1 = self._cr1()
         owner = pin.owner
+        if self.i2s is not None and self.i2s.i2s_on():
+            self.i2s.pin_changed(pin)
+            return
         if board.signal_matches(owner, self.sig["NSS"]):
             if cr1 & MSTR:
                 if (cr1 & SPE and not cr1 & SSM and not self.get("CR2") & SSOE and pin.level() == "L"):
@@ -577,8 +617,37 @@ class SPI(GatedBlock):
         return None
 
     def _i2s_write(self, blk, reg, old, new):
-        if new & I2SMOD:
-            self._warn_once("i2s", f"{self.name}: I2S mode (I2SCFGR.I2SMOD) is not modelled: the block is idle")
+        eng = self.i2s
+        if eng is None:
+            if new & I2SMOD:
+                self._warn_once("i2s", f"{self.name}: no I2S mode on this SPI (I2SCFGR.I2SMOD ignored): the block "
+                                f"is idle")
+            return None
+        self._store(reg, new)
+        on_old, on_new = old & I2SMOD and old & I2SE, new & I2SMOD and new & I2SE
+        if (old ^ new) & I2SMOD and self.get("CR1") & SPE:
+            self._warn_once("i2sspe", f"{self.name}: I2SMOD changed while SPI SPE = 1")
+        if on_old and not on_new:
+            eng.disable()
+        elif on_new and not on_old:
+            self._i2s_enable()
+        elif on_new and (old ^ new) & 0x3BF:
+            self._warn_once("i2scfg", f"{self.name}: I2SCFGR changed while I2SE = 1 (RM0090: configure with I2SE = "
+                            f"0): applied at the next enable")
+        eng.mck_update()
+        self._update()
+        return None
+
+    def _i2s_enable(self) -> None:
+        self.i2s.start()
+
+    def _i2spr_write(self, blk, reg, old, new):
+        eng = self.i2s
+        if eng is not None and old != new:
+            self._store(reg, new)
+            if eng.running and eng.is_master():
+                self._warn_once("i2spr", f"{self.name}: I2SPR changed while the I2S master runs")
+            eng.clock_changed()
         return None
 
     def _crcpr_write(self, blk, reg, old, new):
@@ -586,6 +655,9 @@ class SPI(GatedBlock):
 
     def _sr_read(self, blk, reg):
         sr = self.get("SR")
+        if sr & (UDR | FRE):
+            self.set("SR", sr & ~(UDR | FRE))           # I2S: UDR / FRE clear when SR is read (returned set)
+            self._update()
         if sr & MODF:
             self._modf_seen = True
         if sr & OVR and self._ovr_dr_read:
@@ -612,9 +684,50 @@ class SPI(GatedBlock):
 
     def _dr_write(self, blk, reg, old, new):
         if self.get("I2SCFGR") & I2SMOD:
+            if self.i2s is not None:
+                self.txbuf = new & 0xFFFF
+                self._sr_mod(clr_bits=TXE)
             return old
         self.txbuf = new & ((1 << self._bitsize()) - 1)
         self._sr_mod(clr_bits=TXE)
         if self.is_master():
             self._master_kick()
         return old
+
+
+@register("stm32.i2s_ext")
+class I2SExt(SPI):
+    """I2S2ext / I2S3ext (RM0090 28.4.4 full duplex): see chipem/periph/stm32/i2s.py.  `params.main` names the SPI block
+    whose I2S clock it uses (default: SPI2 for I2S2ext, SPI3 for I2S3ext)."""
+
+    def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
+        params = dict(params or {})
+        idx = block_index(name)
+        main = str(params.get("main", f"SPI{idx}"))
+        params["i2s"] = False
+        super().__init__(name, base, size, regs, params=params, log=log)
+        self.main_name = main
+        self.gate = main                                 # no own RCC bit: SPIx's clock enable
+        self.i2s = I2SEngine(self, block_index(main), ext=True)
+        self._dma_names = (f"I2S{block_index(main)}_EXT_TX", f"I2S{block_index(main)}_EXT_RX")
+        self.main: Any = None
+
+    def attach(self, chip: Any) -> None:
+        super().attach(chip)
+        self._irqn = irq_number(chip, self.main_name)
+        self.main = (getattr(chip, "peripherals", {}) or {}).get(self.main_name)
+        meng = getattr(self.main, "i2s", None)
+        if meng is not None:
+            meng.partner = self.i2s
+            self.i2s.partner = meng
+
+    def _i2s_enable(self) -> None:
+        meng = self.i2s.partner
+        if meng is not None and meng.running:
+            self.i2s.arm()
+
+    def _cr1_write(self, blk, reg, old, new):
+        if new & SPE:
+            self._warn_once("spimode", f"{self.name}: an I2S extension has no SPI mode (CR1.SPE ignored)")
+        self._store(reg, new & ~SPE)
+        return None

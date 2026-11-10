@@ -104,7 +104,7 @@ peripherals:
       - {name: FOPT, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
           {name: ENPIPE, lsb: 0, width: 1},
         ]}
-      - {name: FPWR, offset: 0x02, width: 1, reset: 0x0003, reset_mask: 0xFFFF, access: read-write, fields: [
+      - {name: FPWR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [  # SPRUI07 Fig. 1-5: R/W-0
           {name: PWR, lsb: 0, width: 2, enum: {0: "sleep", 1: "standby", 3: "active"}},
         ]}
       - {name: FSTATUS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
@@ -141,7 +141,7 @@ peripherals:
       - {name: KEY5, offset: 0x05, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
       - {name: KEY6, offset: 0x06, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
       - {name: KEY7, offset: 0x07, width: 1, reset: 0xFFFF, reset_mask: 0xFFFF, access: read-write}
-      - {name: CSMSCR, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+      - {name: CSMSCR, offset: 0x0F, width: 1, reset: 0x005F, reset_mask: 0xFFFF, access: read-write, fields: [
           {name: SECURE, lsb: 0, width: 1, access: read-only},
           {name: FORCESEC, lsb: 15, width: 1},
         ]}

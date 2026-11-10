@@ -7,6 +7,8 @@ so the period is LDVAL+1 bus clocks.  One scheduler event per expiry (wall-clock
 the bus clock at (re)load time).  A new LDVAL written while running takes effect at the next reload.
 Chained channels (CHN=1, n>0) count expirations of channel n-1 instead of clocks.
 IRQ line of channel n (IRQ "PIT<n>") is level = TIF & TIE; clearing TIF/TIE deasserts it.
+Low-power modes: `clock_stop()` (called by the SMC in STOP/VLPS/LLS/VLLS) holds the counters. The K22 PIT has no
+lifetime timer (LTMR64H/L are not in the K22 memory map, RM ch. 41 register table).
 Trigger output: every timeout of channel n (each time TIF is set, chained channels included, whatever TIE) calls
 `trigger_listeners` cb(pit, n): the PIT trigger n of the PDB (TRGSEL 4-7) and of the ADC alternate trigger
 (SIM_SOPT7 ADCnTRGSEL 4-7). DMAMUX periodic triggering is not modelled.
@@ -65,6 +67,7 @@ class PIT(MMIOBlock):
                 self.add_reg(r)
         self.ch = [_Chan(n) for n in range(NCH)]
         self.trigger_listeners: list = []          # cb(pit, n) at each timeout of channel n
+        self._frozen_at: float | None = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -72,6 +75,7 @@ class PIT(MMIOBlock):
             c.irq = irq_number(chip, f"PIT{c.n}")
 
     def reset(self) -> None:
+        self._frozen_at = None
         for c in getattr(self, "ch", ()):
             self._stop(c)
             c.chain_cnt = 0
@@ -147,8 +151,27 @@ class PIT(MMIOBlock):
             return self.get(f"CVAL{n}")
         if self._chained(c):
             return c.chain_cnt
-        el = int((now_ns(self.chip) - c.start_ns) * c.hz / 1e9 + 1e-6)
+        t = now_ns(self.chip) if self._frozen_at is None else self._frozen_at
+        el = int((t - c.start_ns) * c.hz / 1e9 + 1e-6)
         return max(c.load - el, 0) & 0xFFFFFFFF
+
+    def clock_stop(self, stopped: bool, mode: str) -> None:
+        """Bus clock stopped in a low-power mode (SMC): counters hold their value and resume after it."""
+        if self.chip is None:
+            return
+        if stopped:
+            self._frozen_at = now_ns(self.chip)
+            for c in self.ch:
+                if c.ev is not None:
+                    self.chip.sched.cancel(c.ev)
+                    c.ev = None
+        elif self._frozen_at is not None:
+            d = now_ns(self.chip) - self._frozen_at
+            self._frozen_at = None
+            for c in self.ch:
+                if c.running and not self._chained(c):
+                    c.start_ns += d
+                    c.ev = self.chip.sched.at_ns(c.start_ns + c.period_ns, self._expire, c)
 
     # ------------------------------------------------------------------ register hooks
     def _mcr_write(self, blk, reg, old, new):

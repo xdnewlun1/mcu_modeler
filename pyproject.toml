@@ -11,6 +11,7 @@ dependencies = ["unicorn", "capstone", "pyelftools", "pyyaml"]
 
 [project.optional-dependencies]
 test = ["pytest", "keystone-engine"]
+serial = ["pyserial"]               # --uart-port / usb_serial_adapter port: serial:... (chipem/hostserial.py)
 
 [project.scripts]
 chipem = "chipem.cli:main"

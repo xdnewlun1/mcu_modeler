@@ -330,7 +330,7 @@ def format_part_event(f: dict) -> str:
 
 
 class PinEventPrinter:
-    DEFAULT_KINDS = frozenset({"pin", "uart", "can", "irq", "reset", "fault", "warn", "info"})
+    DEFAULT_KINDS = frozenset({"pin", "uart", "can", "eth", "usb", "irq", "reset", "fault", "warn", "info"})
 
     NOT_PERIPHERAL = frozenset({"GPIO", "disabled", "analog", "power", "special", None})
 
@@ -610,6 +610,8 @@ class PinEventPrinter:
             if f.get("err") and msg:
                 line += f" ({msg.split(': ', 1)[-1]})"
             self._emit_t(ev.t_ns, line)
+        elif kind == "usb" and msg:
+            self._emit_t(ev.t_ns, f"{tag}USB {f.get('dev', '')}: {msg}")
         elif kind == "mmio" and not msg:
             reg = f.get("reg") or f"+0x{f.get('offset', 0):x}"
             acc = "W" if f.get("access") == "w" else "R"

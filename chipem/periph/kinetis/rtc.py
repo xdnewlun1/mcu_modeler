@@ -50,6 +50,7 @@ class RTC(MMIOBlock):
         self._ev = None
         self._sec_start_ns = 0.0     # time at which TPR was 0 (start of the current second)
         self.trigger_listeners: list = []      # cb(rtc, "alarm" | "seconds")
+        self.flag_listeners: list = []         # cb(rtc) when SR.TAF may have changed (LLWU module 5)
         self._line = False
         self._irq: int | None = None
         self._irq_sec: int | None = None
@@ -99,6 +100,8 @@ class RTC(MMIOBlock):
         sr, ier = self.get("SR"), self.get("IER")
         self._set_line(bool((sr & SR_TIF and ier & IER_TIIE) or (sr & SR_TOF and ier & IER_TOIE)
                             or (sr & SR_TAF and ier & IER_TAIE)))
+        for cb in self.flag_listeners:
+            cb(self)
 
     def _start(self) -> None:
         """Start counting with the current TPR as the phase within the second."""

@@ -60,7 +60,7 @@ from collections import deque
 from typing import Any, Callable
 
 from ..registry import register
-from ._util import C2000Block, build_regs, fmt_hz, gpio_resync, irq_line, lspclk_hz
+from ._util import C2000Block, build_regs, fmt_hz, gpio_resync, irq_line, lspclk_hz, listen_input, unlisten_input
 
 # SPCR1
 RRST, RRDY, RFULL, RSYNCERR, DXENA, DLB = 1, 2, 4, 8, 0x80, 0x8000
@@ -246,7 +246,7 @@ class McBSP(C2000Block):
                     key = (k, p.id)
                     if key not in self._listen:
                         self._listen.add(key)
-                        board.input_listeners[p.id].append(self._make_listener(k))
+                        listen_input(chip, p, self._make_listener(k))
         sc = self._sysctrl
         if sc is not None and hasattr(sc, "pclk_listeners"):
             sc.pclk_listeners.append(self._gate_changed)
@@ -618,6 +618,8 @@ class McBSP(C2000Block):
         return cb
 
     def _pin_changed(self, k: str, pin: Any) -> None:
+        if self.clk_stopped:
+            return                                          # STANDBY / HALT: no SYSCLKOUT
         if self.chip is None or not self.chip.pins.signal_matches(pin.owner, self.sig[k]):
             return
         if self._out[k] is not None:
@@ -980,8 +982,7 @@ class McBSP(C2000Block):
 
     def _spcr2_write(self, blk, reg, old, new):
         self._store(reg, new)
-        if new & 0x300:
-            self._warn_once("free", "FREE/SOFT stored only (no emulation suspend)")
+        # FREE/SOFT (0x300): stored only, like every C2000 model (no debugger halt, so no emulation suspend)
         if new & GRST and not old & GRST:
             self._srg_setup(True)
             if not self._srg_internal() and not self._pcr() & SCLKME:

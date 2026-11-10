@@ -59,7 +59,7 @@ from collections import deque
 from typing import Any, Callable
 
 from ..registry import register
-from ._util import C2000Block, build_regs, gpio_resync, irq_line, lspclk_hz
+from ._util import C2000Block, build_regs, gpio_resync, irq_line, lspclk_hz, listen_input, unlisten_input
 
 # SPICCR
 SPICHAR, SPILBK, CLKPOLARITY, SPISWRESET = 0xF, 1 << 4, 1 << 6, 1 << 7
@@ -76,6 +76,8 @@ FIFO_DEPTH = 16
 
 @register("ti_c2000.spi")
 class SPI(C2000Block):
+    cycle_anchors = ("_t0",)
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         self.letter = str(params.get("instance") or name[-1]).upper()
@@ -143,7 +145,7 @@ class SPI(C2000Block):
                 for p in board.signal_pins(self.sig[k]):
                     if p.id not in self._listen:
                         self._listen.add(p.id)
-                        board.input_listeners[p.id].append(self._pin_changed)
+                        listen_input(chip, p, self._pin_changed)
 
     def reset(self) -> None:
         if getattr(self, "_ev", None) is not None and self.chip is not None:

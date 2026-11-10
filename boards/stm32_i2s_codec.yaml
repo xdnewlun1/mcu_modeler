@@ -1,0 +1,23 @@
+# An STM32F405 SPI2 in I2S mode (master transmitter) plus its I2S2ext (full-duplex receiver) and an I2S codec part:
+# the STM32 plays a 1 kHz tone (8 kHz stereo, 16 bit, Philips, 256 kHz bit clock, 2.048 MHz MCK from PLLI2S) and
+# records what the codec sends back.
+#   A (STM32F405ZG) runs i2s_tone: PB13 I2S2_CK / PB12 I2S2_WS / PB15 I2S2_SD (to the codec), PB14 I2S2ext_SD (from
+#                   the codec), PC6 I2S2_MCK; after 64 received frames prints "I2S 8000 Hz: tx .. rx .. ok" and the
+#                   first received words on USART1 (PA9).
+#   CODEC (i2s_codec part): records every frame from SDIN (`frames`), plays back the pattern on SDOUT.
+# Run:   chipem run --board boards/stm32_i2s_codec.yaml --for 15ms
+#        chipem serve --board boards/stm32_i2s_codec.yaml
+# Build: firmware/samples_stm32/build.sh
+name: stm32_i2s_codec
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/i2s_tone.elf}
+nets:
+  - {name: BCLK, pins: [A.PB13]}
+  - {name: WS, pins: [A.PB12]}
+  - {name: SDIN, pins: [A.PB15]}
+  - {name: SDOUT, pins: [A.PB14], pull: down}
+  - {name: MCLK, pins: [A.PC6]}
+parts:
+  - {id: CODEC, type: i2s_codec, bits: 16, format: i2s, pattern: "4660,-4660,22136,-22136",
+     ports: {bclk: BCLK, ws: WS, sdin: SDIN, sdout: SDOUT}}

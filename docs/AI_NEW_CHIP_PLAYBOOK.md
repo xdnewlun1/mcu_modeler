@@ -198,7 +198,7 @@ flash configuration field at 0x400).
 - **SVD supersets**: ST's `STM32F405.svd` also describes F42x blocks (UART7/8, SPI4-6, SAI1, LTDC, GPIOJ/K). Delete
   every block that is not in the data sheet's register boundary table (STM32 DS8626 Table 10, K22 RM memory map), or
   pass `--exclude`. Keep F407-only blocks such as Ethernet as `stub` with a comment if they are harmless.
-- **Large windows**: map USB OTG as one 256 KB stub (`OTG_HS_GLOBAL size 0x40000`) instead of the SVD's sub-blocks.
+- **Large windows**: map USB OTG as one 256 KB block (`{name: OTG_FS, model: stm32.otg_fs, size: 0x40000}`, the scaffold does it) instead of the SVD's sub-blocks (GLOBAL/HOST/DEVICE/PWRCLK); the FIFO windows live in the same span.
   The F405 SVD's `OTG_HS_PWRCLK` claims 0x3F200 bytes.
 - **Catch-all windows**: accesses outside listed blocks and memory are bus faults, except in the auto-stub windows
   (`bus.DEFAULT_CATCH_ALL` = 0x40000000–0x400FFFFF and 0xE0000000–0xE00FFFFF). STM32 AHB blocks at

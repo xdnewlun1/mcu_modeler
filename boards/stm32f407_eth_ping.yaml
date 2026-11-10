@@ -1,0 +1,21 @@
+# STM32F407ZG Ethernet (RMII) with a LAN8742A PHY on a LAN segment and a host PC that pings it.
+#   A (STM32F407ZG) runs eth_ping: brings the PHY up over MDIO, sends a gratuitous ARP and answers ARP + ICMP echo
+#     itself (no IP stack); USART1 prints "PHY 0007:C131", "link 100FD", "garp", "arp 192.168.0.1", "ping 1" ...
+#   LAN: the segment (hub); HOST = a PC at 192.168.0.1 that pings 192.168.0.10 four times every 2 ms from t = 5 ms
+#     (ARP first).  Every frame is an `eth` event; lan.pcap (next to this file) opens in Wireshark.
+# Auto-negotiation is shortened to 1 ms here (a real LAN8742A takes about 1.5 s, the PHY model's default).
+# Run:   chipem run --board boards/stm32f407_eth_ping.yaml --for 20ms
+#        chipem run --board boards/stm32f407_eth_ping.yaml --for 20ms --eth-pcap /tmp/lan.pcap
+#        chipem serve --board boards/stm32f407_eth_ping.yaml
+# Build: firmware/samples_stm32/build.sh
+name: stm32f407_eth_ping
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f407zg, firmware: ../firmware/samples_stm32/build/eth_ping.elf}
+links:
+  - type: eth
+    name: LAN
+    nodes: [A.ETH]
+    phy: {model: lan8742, addr: 0, aneg: 1ms}
+    host: {name: HOST, mac: "02:00:00:00:00:01", ip: 192.168.0.1, ping: 192.168.0.10, count: 4, interval: 2ms,
+           start: 5ms}

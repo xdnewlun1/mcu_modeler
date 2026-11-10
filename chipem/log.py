@@ -1,5 +1,5 @@
-"""EventLog: the single stream of runtime observations (pin, mmio, irq, uart, can, i2s, reset, fault, info, warn,
-part).
+"""EventLog: the single stream of runtime observations (pin, mmio, irq, uart, can, i2s, eth, usb, reset, fault, info,
+warn, part).
 
 `log.event(kind, t_ns, **fields)` appends and notifies subscribers; CLI/VCD/web subscribe. See docs/CONTRACTS.md.
 
@@ -20,7 +20,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator
 
-KINDS = ("pin", "mmio", "irq", "uart", "can", "i2s", "reset", "fault", "info", "warn", "part")
+KINDS = ("pin", "mmio", "irq", "uart", "can", "i2s", "eth", "usb", "reset", "fault", "info", "warn", "part")
 
 
 @dataclass
@@ -251,6 +251,9 @@ def format_event(ev: LogEvent) -> str:
         s = f"{head} {format_can(f)}"
         for k in ("link", "node", "dir", "id", "ext", "rtr", "dlc", "data", "msg"):
             f.pop(k, None)
+    elif ev.kind == "usb" and "msg" in f:
+        s = f"{head} {f.get('dev', '')} {f['msg']}"           # chipem/usbbus.py: the message says it all
+        f = {k: f[k] for k in ("chip",) if k in f}
     elif "msg" in f:
         s = f"{head} {f.pop('msg')}"
     else:

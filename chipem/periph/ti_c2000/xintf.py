@@ -105,12 +105,32 @@ class Xintf(C2000Block):
     # ------------------------------------------------------------------ lifecycle
     def attach(self, chip: Any) -> None:
         super().attach(chip)
+        from ..sdbus import ClockWave
+        self.wave = ClockWave(self, "XCLKOUT")
+        board = getattr(chip, "pins", None)
+        if board is not None:
+            for p in board.signal_pins("XCLKOUT"):
+                board.mcu_update(p, owner="XCLKOUT", direction="out", drive="L")
+        chip.clock.on_change(lambda old, new: self._xclkout_update())
         self._recompute()
 
     def reset(self) -> None:
         super().reset()
         self._soft()
         self._warned.clear()
+        self._xclkout_update()
+
+    def clock_stop(self, stopped: bool, mode: str = "") -> None:
+        super().clock_stop(stopped, mode)
+        self._xclkout_update()
+
+    def _xclkout_update(self) -> None:
+        """XCLKOUT (pin 138) runs at xclkout_hz() from reset (SPRUI07 1.3.2.3: active even during reset, not gated
+        by PCLKCR3.XINTFENCLK); summarised as `wave` pin events (chipem/periph/sdbus.ClockWave), not toggled."""
+        w = getattr(self, "wave", None)
+        if w is None or self.chip is None:
+            return
+        w.set(0.0 if self.clk_stopped else self.xclkout_hz(), False)
 
     def _soft(self) -> None:
         self._busy = 0
@@ -122,6 +142,8 @@ class Xintf(C2000Block):
     def _cfg_write(self, blk, reg, old, new):
         self._store(reg, new)
         self._recompute()
+        if reg.name == "XINTCNF2":
+            self._xclkout_update()
         if reg.name == "XINTCNF2" and (new >> 16 & 7) > 1:
             self._warn("xtimclk", f"{self.name}: XINTCNF2.XTIMCLK = {new >> 16 & 7} is reserved; XTIMCLK = "
                        "SYSCLKOUT/2 used")
@@ -146,6 +168,7 @@ class Xintf(C2000Block):
             self.set("XINTCNF2", XINTCNF2_RESET)
             self.set("XBANK", XBANK_RESET)
             self._soft()
+            self._xclkout_update()
             self.emit("info", block=self.name, msg=f"{self.name}: XHARDRESET (timing registers reset, write buffer "
                       "dropped)")
         return 0

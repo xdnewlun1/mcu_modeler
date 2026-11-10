@@ -58,7 +58,8 @@ loop:
   scheduler events due?          → sched.run_due()           (timers, stimulus, UART pacing ...)
   now >= target?                 → return COUNT
   sleeping (after WFI)?
-      wake-up pending?           → sleeping = False
+      chip.wake() or (wake-up pending and wake_gate allows)
+                                 → sleeping = False; power_hooks.on_wake
       else                       → clock.advance(to next event or target); continue   ← time skip
   arch.lockup?                   → return FAULT
   arch.pending?                  → arch.service()            (exception entry, between slices)
@@ -68,8 +69,9 @@ loop:
   reason, executed = core.run(n)                             (Unicorn emu_start(count=n))
   clock.advance(executed)
   COUNT / USER   → continue
-  EXC_RETURN/SVC → arch.on_stop(...)                         (unstack / enter SVCall)
-  WFI            → sleeping = True unless a wake-up is already pending
+  EXC_RETURN/SVC → arch.on_stop(...)                         (unstack / enter SVCall; SLEEPONEXIT → sleep)
+  WFI            → sleeping = True (+ power_hooks.on_sleep: the family picks the mode); without hooks only
+                   when no wake-up is already pending
   FAULT          → arch.on_stop → HardFault entry (or lockup / --stop-on-fault → return FAULT)
   BREAKPOINT     → return
 ```
@@ -86,7 +88,9 @@ Properties of this loop:
   the end of the slice, up to 2000 instructions late.
 - **WFI/WFE skip time.** After a WFI the chip advances the clock directly to the next scheduler event. That
   is why idle RTOS firmware runs faster than real time (the Withings image: about 140 M "insn"/s of virtual
-  cycles).
+  cycles). Deep-sleep modes are family logic: the power controller (Kinetis SMC, STM32 PWR, C2000 LPMCR0) is a
+  `chip.power_hooks` entry that stops peripheral clocks (`clock_stop(stopped, mode)`), restricts wake-up sources
+  (`chip.wake_gate`, `chip.wake()`) or turns the wake-up into a reset (CONTRACTS.md "Low-power modes").
 - **Instruction counts.**
   - Fast mode (default): Unicorn runs `count=n` with no Python hooks. For early stops (WFI, SVC,
     EXC_RETURN, MMIO stop, fault) the number executed is read from Unicorn's private `emu_counter` through
@@ -408,6 +412,62 @@ Parts (switches, buttons, clocks, LEDs, probes, counters, gates, flip-flops) are
 - **Running:** `run_for`, `run_cycles` and `step` take `_run_lock` and set `running`. `stop()` is the only
   thread-safe call: it sets the chip's stop flag and calls `core.request_stop()`, which calls Unicorn's
   `emu_stop`.
+
+## Host serial bridges, real-time pacing and serial cable chains
+
+PC software on the machine running chipem can talk to a simulated UART (`chipem/hostserial.py`, vendor-free).
+
+```
+  PC program ──► /dev/pts/N | COMx (pyserial) | TCP ──► HostPort I/O threads ──► lock-protected rx buffer
+                                                                                     │ pump() between run slices
+  emulation thread: Session.run_for → realtime.run_paced ─ slice (≤ 2 ms) ─ pump ─ wait(wall clock | Event) ─ ...
+                                                                                     │ UartBridge / usb_serial_adapter
+                              chip UART ◄── _rx_arrive at each stop bit (paced at the host's character time)
+                              chip UART ──► tx_listeners ──► event at the stop bit ──► HostPort.write ──► writer thread
+```
+
+- **Threading.** The Session/Chip is not thread-safe, so I/O threads never touch it. Host bytes wait in the port's
+  buffer until the emulation thread drains it (`pump()`, called by `run_paced` between slices of at most 2 ms of
+  virtual time); chip bytes go out through a queue that the port's writer thread empties. I/O threads only set a
+  `threading.Event` (port `listeners`) so a waiting run wakes at once. Without endpoints and pacing `run_for` is
+  unchanged (no slicing, no cost).
+- **Pacing** (`chipem/realtime.py`, on by default with a host transport, `--speed X`): virtual time may run at most
+  one slice ahead of the wall clock, then the loop waits. When every chip sleeps (WFI) it does not run ahead at all:
+  it waits until the wall clock reaches the next scheduled event (≤ 100 ms per wait), or host input arrives, then
+  jumps there, so idle firmware costs no CPU and host bytes are taken within a few ms. When the emulation is slower
+  than real time the lag grows; past 200 ms the anchor moves (no burst), one `warn` reports it, `host_status()` keeps
+  the lag and the achieved ratio. A new `run_for` after a pause > 50 ms re-anchors silently.
+- **Wire rules.** A host byte is a character on the UART's RX wire: paced at the host's character time (PTY: the baud
+  the program set with tcsetattr), arriving at its stop bit through `UartRx._rx_arrive`, so it is dropped when the
+  receiver is not listening and overruns like silicon. Settings that disagree (baud > 3 %, or frame length where
+  known) drop the byte as a framing error in both directions, with one `warn`.
+- **Transports.** PTY: the master stays with chipem, the slave is closed after opening (set raw), so "a program has
+  it open" = reads do not fail with EIO; nothing is written while nobody is connected and stale output is flushed on
+  disconnect. Serial: pyserial, null-modem modem-line mapping. TCP: one client at a time.
+
+**Serial cable chains** (`chipem/parts/serial.py`). The physical chain (MCU UART → RS-232 transceiver → connector →
+cable → USB-serial adapter → host port) is built from parts on nets:
+
+- *Levels* are net levels. On RS-232 nets H means a positive voltage (space / control asserted), L a negative one
+  (mark, the idle state). That keeps generic code (pins, nets, VCD, UI) unchanged: an RS-232 TXD idles at L, the
+  TTL side at H; part states show volts. A transceiver inverts levels; its receiver inputs have the RS-232 input
+  resistance (pull-down: an open input reads mark). The adapter's DTR/RTS/CTS/DSR/DCD/RI are plain nets.
+- *Cables* are passive conductors: each wire drives every net it joins with what the *other* nets of that conductor
+  carry (their real drivers, never its own drive echoed back), re-evaluated on every resolution of those nets. A
+  driver on each side at different levels is a conflict on the nets; a driver that goes away is gone everywhere.
+  `plug_a`/`plug_b` wire a cable end to a connector part's (or the adapter's built-in DE-9's) pins and check that the
+  connectors mate.
+- *Bytes* travel by path resolution, not bit edges (UART models do not toggle their pins). The board's
+  `SerialRouter` hooks every UART's `tx_listeners`; a byte from a chip UART (from the pins currently muxed to its TX)
+  or from the adapter's TXD walks nets and parts via `serial_paths` (cable wires pass, transceiver channels invert
+  and change the level domain, `buf`/`not` pass/invert) to the receivers it reaches: chip pins offering a UART RX
+  function and the adapter's RXD. The verdict per path (inversion parity, RS-232 levels on TTL inputs, a common
+  ground per segment, stages switched off, framing) is cached until the wiring, a pin owner or a part state changes,
+  so the per-byte cost is a lookup. A sound path delivers at the stop bit (`receive()` on the chip UART, which
+  applies its own listening/overrun/pin-mux rules); a broken one drops with the reason, the way the bench fails: a
+  swapped cable reaches no receiver, a TTL UART on the RS-232 port idles at break, the adapter's ±6 V on a 3.3 V pin
+  is an over-voltage, a missing GND wire leaves no common ground. Direct chip-to-chip nets remain the board's
+  automatic UART links.
 
 ## Web server threading (`web/server.py`)
 

@@ -1,0 +1,300 @@
+/* eth_ping: bare-metal Ethernet on the STM32F407 (RMII, PHY LAN8742A at MDIO address 0), no IP stack.
+ * 168 MHz (HSE 8 MHz PLL), console on USART1 (PA9, 115200).
+ * RMII pins (AF11): PA1 REF_CLK, PA2 MDIO, PA7 CRS_DV, PB11 TX_EN, PB12 TXD0, PB13 TXD1, PC1 MDC, PC4 RXD0, PC5 RXD1.
+ * Steps: SYSCFG_PMC selects RMII before the MAC clocks are enabled, DMABMR software reset (needs the PHY's 50 MHz
+ * REF_CLK), PHY identification and soft reset over MDIO (MDC = HCLK/102), wait for auto-negotiation (BMSR read twice:
+ * the link bit latches low), speed/duplex from the LAN8742 special status register 31 -> MACCR.FES/DM, then four
+ * chained TX and RX descriptors (normal format), MAC address 02:00:00:00:00:10, IP 192.168.0.10.
+ * It sends a gratuitous ARP, then answers ARP requests for its address and ICMP echo requests (the reply checksums
+ * are inserted by the MAC: TDES0.CIC = 11) and prints one line per event:
+ *   "PHY 0007:C131", "link 100FD", "garp", "arp 192.168.0.1", "ping 1" ...
+ * Run: chipem run --board boards/stm32f407_eth_ping.yaml --for 20ms   (the board's host node pings it) */
+#include "stm32f405.h"
+
+#define ETH_BASE     0x40028000u
+#define ETH_MACCR    REG32(ETH_BASE + 0x0000)
+#define ETH_MACFFR   REG32(ETH_BASE + 0x0004)
+#define ETH_MACMIIAR REG32(ETH_BASE + 0x0010)
+#define ETH_MACMIIDR REG32(ETH_BASE + 0x0014)
+#define ETH_MACA0HR  REG32(ETH_BASE + 0x0040)
+#define ETH_MACA0LR  REG32(ETH_BASE + 0x0044)
+#define ETH_DMABMR   REG32(ETH_BASE + 0x1000)
+#define ETH_DMATPDR  REG32(ETH_BASE + 0x1004)
+#define ETH_DMARPDR  REG32(ETH_BASE + 0x1008)
+#define ETH_DMARDLAR REG32(ETH_BASE + 0x100C)
+#define ETH_DMATDLAR REG32(ETH_BASE + 0x1010)
+#define ETH_DMASR    REG32(ETH_BASE + 0x1014)
+#define ETH_DMAOMR   REG32(ETH_BASE + 0x1018)
+#define SYSCFG_PMC   REG32(0x40013804u)
+#define RCC_AHB1ENR_ETH (7u << 25)                    /* ETHMAC, ETHMACTX, ETHMACRX */
+
+#define MACCR_RE   (1u << 2)
+#define MACCR_TE   (1u << 3)
+#define MACCR_IPCO (1u << 10)
+#define MACCR_DM   (1u << 11)
+#define MACCR_FES  (1u << 14)
+#define MACCR_CSTF (1u << 25)
+#define DMAOMR_SR  (1u << 1)
+#define DMAOMR_ST  (1u << 13)
+#define DMAOMR_TSF (1u << 21)
+#define DMAOMR_RSF (1u << 25)
+#define DMASR_TBUS (1u << 2)
+#define DMASR_RBUS (1u << 7)
+
+#define TDES0_OWN  (1u << 31)
+#define TDES0_IC   (1u << 30)
+#define TDES0_LS   (1u << 29)
+#define TDES0_FS   (1u << 28)
+#define TDES0_CIC3 (3u << 22)
+#define TDES0_TCH  (1u << 20)
+#define RDES0_OWN  (1u << 31)
+#define RDES0_ES   (1u << 15)
+#define RDES1_RCH  (1u << 14)
+
+#define PHY_ADDR 0u
+#define NDESC 4u
+#define BUFSZ 1524u
+
+struct desc { volatile uint32_t d0, d1, d2, d3; };
+static struct desc txd[NDESC] __attribute__((aligned(4)));
+static struct desc rxd[NDESC] __attribute__((aligned(4)));
+static uint8_t txbuf[NDESC][BUFSZ] __attribute__((aligned(4)));
+static uint8_t rxbuf[NDESC][BUFSZ] __attribute__((aligned(4)));
+static unsigned tx_i, rx_i;
+
+static const uint8_t my_mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x10};
+static const uint8_t my_ip[4] = {192, 168, 0, 10};
+volatile uint32_t pings, arps, frames_rx;
+
+static void clock_168mhz(void)
+{
+    RCC_APB1ENR |= RCC_APB1ENR_PWREN;
+    PWR_CR |= PWR_CR_VOS;
+    RCC_CR |= RCC_CR_HSEON;
+    while (!(RCC_CR & RCC_CR_HSERDY)) { }
+    RCC_PLLCFGR = 8u | (336u << 6) | (0u << 16) | RCC_PLLCFGR_SRC_HSE | (7u << 24);   /* M=8 N=336 P=2 Q=7 */
+    RCC_CR |= RCC_CR_PLLON;
+    while (!(RCC_CR & RCC_CR_PLLRDY)) { }
+    FLASH_ACR = FLASH_ACR_LATENCY_5WS | FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN;
+    RCC_CFGR = RCC_CFGR_PPRE1_DIV4 | RCC_CFGR_PPRE2_DIV2 | RCC_CFGR_SW_PLL;
+    while ((RCC_CFGR & RCC_CFGR_SWS_MASK) != RCC_CFGR_SWS_PLL) { }
+}
+
+static void putc_(char c)
+{
+    while (!(USART1->SR & USART_SR_TXE)) { }
+    USART1->DR = (uint8_t)c;
+}
+
+static void puts_(const char *s)
+{
+    while (*s)
+        putc_(*s++);
+}
+
+static void putu(uint32_t v)
+{
+    char b[11];
+    int i = 0;
+    do { b[i++] = (char)('0' + v % 10u); v /= 10u; } while (v);
+    while (i)
+        putc_(b[--i]);
+}
+
+static void puthex16(uint32_t v)
+{
+    for (int s = 12; s >= 0; s -= 4)
+        putc_("0123456789ABCDEF"[(v >> s) & 0xFu]);
+}
+
+static void putip(const uint8_t *ip)
+{
+    for (int i = 0; i < 4; i++) {
+        putu(ip[i]);
+        if (i < 3)
+            putc_('.');
+    }
+}
+
+static uint32_t mdio_read(uint32_t reg)
+{
+    ETH_MACMIIAR = (PHY_ADDR << 11) | (reg << 6) | (4u << 2) | 1u;    /* CR=100: HCLK 150-168 MHz, /102 */
+    while (ETH_MACMIIAR & 1u) { }
+    return ETH_MACMIIDR & 0xFFFFu;
+}
+
+static void mdio_write(uint32_t reg, uint32_t v)
+{
+    ETH_MACMIIDR = v;
+    ETH_MACMIIAR = (PHY_ADDR << 11) | (reg << 6) | (4u << 2) | 2u | 1u;
+    while (ETH_MACMIIAR & 1u) { }
+}
+
+static void copy(uint8_t *d, const uint8_t *s, unsigned n)
+{
+    while (n--)
+        *d++ = *s++;
+}
+
+static int same(const uint8_t *a, const uint8_t *b, unsigned n)
+{
+    while (n--)
+        if (*a++ != *b++)
+            return 0;
+    return 1;
+}
+
+/* send `len` bytes already placed in the current TX buffer */
+static void tx_send(unsigned len, uint32_t cic)
+{
+    struct desc *d = &txd[tx_i];
+    d->d1 = len;
+    d->d0 = TDES0_OWN | TDES0_FS | TDES0_LS | TDES0_TCH | cic;
+    tx_i = (tx_i + 1u) % NDESC;
+    if (ETH_DMASR & DMASR_TBUS) {
+        ETH_DMASR = DMASR_TBUS;
+    }
+    ETH_DMATPDR = 0;                                  /* poll demand: resume a suspended transmit process */
+}
+
+static uint8_t *tx_buffer(void)
+{
+    while (txd[tx_i].d0 & TDES0_OWN) { }              /* wait until the DMA released it */
+    return txbuf[tx_i];
+}
+
+static void arp(uint16_t op, const uint8_t *tha, const uint8_t *tpa, const uint8_t *dst)
+{
+    uint8_t *f = tx_buffer();
+    copy(f, dst, 6);
+    copy(f + 6, my_mac, 6);
+    f[12] = 0x08; f[13] = 0x06;
+    f[14] = 0; f[15] = 1; f[16] = 0x08; f[17] = 0; f[18] = 6; f[19] = 4;
+    f[20] = 0; f[21] = (uint8_t)op;
+    copy(f + 22, my_mac, 6);
+    copy(f + 28, my_ip, 4);
+    copy(f + 32, tha, 6);
+    copy(f + 38, tpa, 4);
+    tx_send(42, 0);                                   /* the MAC pads to 60 bytes and appends the FCS */
+}
+
+static void handle(const uint8_t *f, unsigned len)
+{
+    static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    unsigned type = (unsigned)f[12] << 8 | f[13];
+    if (type == 0x0806 && len >= 42 && f[21] == 1 && same(f + 38, my_ip, 4)) {
+        arp(2, f + 22, f + 28, f + 6);                /* ARP reply to the requester */
+        arps++;
+        puts_("arp ");
+        putip(f + 28);
+        puts_("\r\n");
+    } else if (type == 0x0800 && len >= 42 && f[23] == 1 && same(f + 30, my_ip, 4) && f[34] == 8) {
+        unsigned ihl = (f[14] & 0xFu) * 4u;
+        unsigned tot = (unsigned)f[16] << 8 | f[17];
+        if (14u + tot > len || tot > BUFSZ - 14u)
+            return;
+        uint8_t *r = tx_buffer();
+        copy(r, f + 6, 6);
+        copy(r + 6, my_mac, 6);
+        copy(r + 12, f + 12, 14u + tot - 12u);
+        copy(r + 26, f + 30, 4);                      /* swap the IP addresses */
+        copy(r + 30, f + 26, 4);
+        r[22] = 64;                                   /* TTL */
+        r[24] = r[25] = 0;                            /* IP header checksum: inserted by the MAC */
+        r[14 + ihl] = 0;                              /* echo reply */
+        r[14 + ihl + 2] = r[14 + ihl + 3] = 0;        /* ICMP checksum: inserted by the MAC */
+        tx_send(14u + tot, TDES0_CIC3);
+        pings++;
+        puts_("ping ");
+        putu((unsigned)f[14 + ihl + 6] << 8 | f[14 + ihl + 7]);
+        puts_("\r\n");
+    }
+    (void)bcast;
+}
+
+int main(void)
+{
+    clock_168mhz();
+    RCC_AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN | (1u << 2);        /* GPIOA-C */
+    RCC_APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_SYSCFGEN;
+    gpio_af(GPIOA, 9, 7);
+    USART1->BRR = USART_BRR(84000000u, 115200u);
+    USART1->CR1 = USART_CR1_UE | USART_CR1_TE;
+    puts_("eth_ping\r\n");
+
+    static const struct { GPIO_TypeDef *g; unsigned pin; } rmii[] = {
+        {GPIOA, 1}, {GPIOA, 2}, {GPIOA, 7}, {GPIOB, 11}, {GPIOB, 12}, {GPIOB, 13}, {GPIOC, 1}, {GPIOC, 4}, {GPIOC, 5}};
+    for (unsigned i = 0; i < sizeof rmii / sizeof rmii[0]; i++) {
+        rmii[i].g->OSPEEDR |= 3u << (2 * rmii[i].pin);
+        gpio_af(rmii[i].g, rmii[i].pin, 11);
+    }
+    SYSCFG_PMC |= 1u << 23;                           /* RMII: before the MAC clocks are enabled */
+    RCC_AHB1ENR |= RCC_AHB1ENR_ETH;
+    ETH_DMABMR |= 1u;                                 /* software reset: completes with the PHY's REF_CLK */
+    while (ETH_DMABMR & 1u) { }
+
+    uint32_t id1 = mdio_read(2), id2 = mdio_read(3);
+    puts_("PHY ");
+    puthex16(id1);
+    putc_(':');
+    puthex16(id2);
+    puts_("\r\n");
+    mdio_write(0, 0x8000u);                           /* PHY soft reset */
+    while (mdio_read(0) & 0x8000u) { }
+    mdio_write(4, 0x01E1u);                           /* advertise 10/100 half/full */
+    mdio_write(0, 0x1200u);                           /* auto-negotiation enable + restart */
+    while (1) {
+        (void)mdio_read(1);                           /* link status latches low: read twice */
+        uint32_t bmsr = mdio_read(1);
+        if ((bmsr & 0x24u) == 0x24u)
+            break;
+    }
+    uint32_t sp = (mdio_read(31) >> 2) & 7u;          /* 1 10HD, 5 10FD, 2 100HD, 6 100FD */
+    uint32_t cr = MACCR_RE | MACCR_TE | MACCR_IPCO | MACCR_CSTF;
+    if (sp & 2u)
+        cr |= MACCR_FES;
+    if (sp & 4u)
+        cr |= MACCR_DM;
+    puts_("link ");
+    puts_(sp & 2u ? "100" : "10");
+    puts_(sp & 4u ? "FD\r\n" : "HD\r\n");
+
+    for (unsigned i = 0; i < NDESC; i++) {
+        txd[i].d0 = TDES0_TCH;
+        txd[i].d2 = (uint32_t)txbuf[i];
+        txd[i].d3 = (uint32_t)&txd[(i + 1u) % NDESC];
+        rxd[i].d1 = RDES1_RCH | BUFSZ;
+        rxd[i].d2 = (uint32_t)rxbuf[i];
+        rxd[i].d3 = (uint32_t)&rxd[(i + 1u) % NDESC];
+        rxd[i].d0 = RDES0_OWN;
+    }
+    ETH_DMATDLAR = (uint32_t)txd;
+    ETH_DMARDLAR = (uint32_t)rxd;
+    ETH_MACA0HR = (uint32_t)my_mac[5] << 8 | my_mac[4];
+    ETH_MACA0LR = (uint32_t)my_mac[3] << 24 | (uint32_t)my_mac[2] << 16 | (uint32_t)my_mac[1] << 8 | my_mac[0];
+    ETH_MACFFR = 0;                                   /* perfect DA filter + broadcast */
+    ETH_MACCR = cr;
+    ETH_DMAOMR = DMAOMR_TSF | DMAOMR_RSF | DMAOMR_ST | DMAOMR_SR;
+
+    static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    static const uint8_t zero[6] = {0};
+    arp(1, zero, my_ip, bcast);                       /* gratuitous ARP: who-has my_ip tell my_ip */
+    puts_("garp\r\n");
+
+    for (;;) {
+        struct desc *d = &rxd[rx_i];
+        if (d->d0 & RDES0_OWN)
+            continue;
+        uint32_t s = d->d0;
+        if (!(s & RDES0_ES) && (s & (3u << 8)) == (3u << 8)) {      /* FS and LS: whole frame in one buffer */
+            frames_rx++;
+            handle(rxbuf[rx_i], (s >> 16) & 0x3FFFu);
+        }
+        d->d0 = RDES0_OWN;
+        rx_i = (rx_i + 1u) % NDESC;
+        if (ETH_DMASR & DMASR_RBUS) {
+            ETH_DMASR = DMASR_RBUS;
+            ETH_DMARPDR = 0;
+        }
+    }
+}

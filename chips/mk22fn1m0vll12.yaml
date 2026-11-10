@@ -9,6 +9,8 @@ core: {arch: armv7e-m, backend: unicorn, cpu: cortex-m4, fpu: true, clock_hz: 12
 # SysTick has no external reference on the K22 (K22P100M120SF5V2RM section 3.2.1.2): CLKSOURCE always reads 1,
 # SYST_CALIB NOREF=1, TENMS=0.  0 = no reference (armv7m.scs).
 systick_ext_div: 0
+# A core LOCKUP resets the chip (K22P100M120SF5V2RM 6.2.2.9, RCM_SRS1[LOCKUP]) instead of stopping the run.
+lockup_reset: true
 
 memory:
   - {name: FLASH, base: 0x00000000, size: 0x100000, kind: flash}
@@ -30,7 +32,7 @@ peripherals:
   - {name: SPI1, model: kinetis.dspi, base: 0x4002D000, size: 0x1000, params: {index: 1}}
   - {name: I2S0, model: kinetis.sai, base: 0x4002F000, size: 0x1000}   # RM ch. 51; gate SIM_SCGC6[I2S]
   - {name: CRC, model: kinetis.crc, base: 0x40032000, size: 0x1000}
-  - {name: USBDCD, model: stub, base: 0x40035000, size: 0x1000}
+  - {name: USBDCD, model: kinetis.usbdcd, base: 0x40035000, size: 0x1000}   # RM ch. 44; gate SIM_SCGC6[USBDCD]
   - {name: PDB0, model: kinetis.pdb, base: 0x40036000, size: 0x1000}
   - {name: PIT, model: kinetis.pit, base: 0x40037000, size: 0x1000}
   - {name: FTM0, model: kinetis.ftm, base: 0x40038000, size: 0x1000}
@@ -59,7 +61,7 @@ peripherals:
   - {name: UART1, model: kinetis.uart, base: 0x4006B000, size: 0x1000, params: {index: 1, fifo_depth: 8}}
   - {name: UART2, model: kinetis.uart, base: 0x4006C000, size: 0x1000, params: {index: 2}}
   - {name: UART3, model: kinetis.uart, base: 0x4006D000, size: 0x1000, params: {index: 3}}
-  - {name: USB0, model: stub, base: 0x40072000, size: 0x1000}
+  - {name: USB0, model: kinetis.usbfs, base: 0x40072000, size: 0x1000}   # RM ch. 43 (device mode); gate SIM_SCGC4[USBOTG]
   - {name: CMP0, model: kinetis.cmp, base: 0x40073000, size: 0x0008, params: {index: 0}}
   - {name: CMP1, model: kinetis.cmp, base: 0x40073008, size: 0x0008, params: {index: 1}}
   - {name: CMP2, model: kinetis.cmp, base: 0x40073010, size: 0x0FF0, params: {index: 2}}

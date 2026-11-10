@@ -746,3 +746,64 @@ def test_systick_calib_tenms_counts_the_external_reference():
     assert chip.bus.read(SYST + 0xC, 4) == 0x40000000 | 19999  # 16 MHz / 8 = 2 MHz -> 20000 counts per 10 ms
     desc.extra["systick_calib"] = "0x00002903"
     assert Chip(desc).bus.read(SYST + 0xC, 4) == 0x2903
+
+
+SCR = 0xE000ED10
+
+
+def test_sleep_on_exit_skips_thread_code():
+    # SLEEPONEXIT: after the first SysTick handler the core goes back to sleep instead of running the thread loop
+    thread = systick_setup(999) + f"""
+  ldr r0, =0x{SCR:08X}
+  movs r1, #2
+  str r1, [r0]
+  ldr r2, =0x{DATA + 0x84:08X}
+loop:
+  ldr r3, [r2]
+  adds r3, #1
+  str r3, [r2]
+  wfi
+  b loop
+"""
+    chip, _ = make_chip({"reset": thread, "tick": COUNT_HANDLER}, vectors={15: "tick"})
+    chip.run_cycles(10_500)
+    assert word(chip, DATA + 0x80) == 10          # every tick taken
+    assert word(chip, DATA + 0x84) == 1           # the thread loop ran once, before the first WFI
+    assert chip.arch.sleep_on_exit() and not chip.arch.sleep_deep
+
+
+class _Hook:
+    def __init__(self):
+        self.calls = []
+
+    def on_sleep(self, chip):
+        self.calls.append(("sleep", chip.core.stop_info, chip.arch.sleep_deep))
+
+    def on_wake(self, chip):
+        self.calls.append(("wake", chip.clock.cycles))
+
+
+def test_power_hooks_wake_gate_and_wake():
+    thread = systick_setup(999) + f"""
+  ldr r0, =0x{SCR:08X}
+  movs r1, #4
+  str r1, [r0]
+sleep:
+  wfi
+  b sleep
+"""
+    chip, _ = make_chip({"reset": thread, "tick": COUNT_HANDLER}, vectors={15: "tick"})
+    hook = _Hook()
+    chip.power_hooks.append(hook)
+    gate = {"open": False}
+    chip.wake_gate = lambda: gate["open"]
+    chip.run_cycles(5_000)
+    assert hook.calls and hook.calls[0][0] == "sleep" and hook.calls[0][1] == "wfi" and hook.calls[0][2]
+    assert chip.sleeping and word(chip, DATA + 0x80) == 0     # SysTick pending but the gate keeps the core asleep
+    assert ("wake",) not in [c[:1] for c in hook.calls]
+    chip.wake()                                               # non-interrupt wake-up source
+    chip.run_cycles(10)
+    assert any(c[0] == "wake" for c in hook.calls)
+    gate["open"] = True
+    chip.run_cycles(3_000)
+    assert word(chip, DATA + 0x80) >= 2

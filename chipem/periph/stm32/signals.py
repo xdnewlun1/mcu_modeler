@@ -15,6 +15,9 @@ TABLE = SignalTable([
     (r"SPI\d+_(SCK|MOSI)", OUT_L),
     (r"SPI\d+_MISO", IN),
     (r"SPI\d+_NSS", OUT_H),
+    (r"I2S\d+_(CK|WS|SD|MCK)", IN),          # stm32.spi (I2S mode) sets the live direction (master/slave, TX/RX)
+    (r"I2S\d+ext_SD", IN),                   # stm32.i2s_ext: output while a transmitting extension runs
+    (r"I2S_CKIN", IN),
     (r"I2C\d+_(SDA|SCL)", OD),
     (r"I2C\d+_SMBA", IN),
     (r"CAN\d+_TX", OUT_H),
@@ -24,6 +27,16 @@ TABLE = SignalTable([
     (r"SDIO_CK", OUT_L),                     # card clock (not toggled per edge: stm32.sdio summarises it)
     (r"SDIO_CMD", OUT_H),                    # idles high (pulled up)
     (r"SDIO_D\d", IN),
+    (r"DCMI_(D\d+|HSYNC|VSYNC|PIXCLK)", IN),   # camera interface: all inputs (stm32.dcmi)
+    (r"ETH_MDC", OUT_L),                     # MDIO clock (stm32.eth summarises it as a `wave`)
+    (r"ETH_MDIO", OD),                       # management data: pulled up between transactions
+    (r"ETH_(MII|RMII)_(TX_EN|TXD\d)", OUT_L),  # transmit data (not toggled per bit)
+    (r"ETH_(MII|RMII)_(TX_CLK|RX_CLK|REF_CLK|RXD\d|RX_DV|CRS_DV|CRS|COL|RX_ER)", IN),   # clocks / data from the PHY
+    (r"ETH_PPS_OUT", OUT_L),
+    (r"OTG_(FS|HS)_(DP|DM)", IN),             # USB data lines: driven by the PHY on the bus (stm32.otg_fs/_hs)
+    (r"OTG_(FS|HS)_(ID|VBUS)", IN),
+    (r"OTG_(FS|HS)_SOF", OUT_L),              # SOF pulse (GCCFG.SOFOUTEN)
+    (r"OTG_HS_ULPI_\w+", IN),                 # external ULPI PHY: not modelled
     (r"MCO\d*|RTC_OUT", OUT_L),
     (r"TRACE(CLK|D\d+)", OUT_L),
     (r"JTMS-SWDIO|JTCK-SWCLK|JTDI|NJTRST", IN),

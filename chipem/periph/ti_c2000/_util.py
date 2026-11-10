@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from ...regtable import regs_for
 from ..base import MMIOBlock, Reg
 
+_PARKED = 1 << 62                 # cycle stamp of a scheduler event parked while its block's clock is stopped
 DEFAULT_REGS = Path(__file__).resolve().parents[3] / "chips" / "tms320f28232_regs.yaml"
 ST1_EALLOW = 1 << 6
 
@@ -107,6 +108,10 @@ class C2000Block(MMIOBlock):
     unit_bits = 16
     eallow_regs: Any = None
     gate: str | None = None
+    # attributes holding absolute core-cycle anchors of time-derived counters (shifted by the stopped time when the
+    # clock resumes after STANDBY/HALT, so the counters do not advance while SYSCLKOUT is off)
+    cycle_anchors: tuple[str, ...] = ()
+    clk_stopped = False                 # SYSCLKOUT to this block is off (STANDBY / HALT): pin inputs are ignored
 
     def __init__(self, name, base, size, regs=(), *, params=None, log=None, ram_like=True):
         super().__init__(name, base, size, regs, ram_like=ram_like, log=log, params=params, unit_bits=16)
@@ -147,6 +152,61 @@ class C2000Block(MMIOBlock):
             self.emit("warn", block=self.name, msg=f"{self.name} accessed with its clock disabled "
                       f"(PCLKCR {self.gate}=0); real silicon ignores the access")
 
+    # ------------------------------------------------------------------ low-power clock stop (CONTRACTS "Low-power")
+    def clock_stop(self, stopped: bool, mode: str = "") -> None:
+        """SYSCLKOUT to this block stops (STANDBY/HALT) or resumes.  Generic freeze: this block's pending scheduler
+        events (bound methods of the block) are parked and re-armed after the same remaining number of cycles, and
+        the `cycle_anchors` are moved forward by the stopped time, so counters and timing resume where they were."""
+        chip = self.chip
+        if chip is None or stopped == self.clk_stopped:
+            return
+        sched = chip.sched
+        if stopped:
+            self.clk_stopped = True
+            now = chip.clock.cycles
+            self._stop_cycle = now
+            parked = []
+            for ev in sched._heap:
+                if ev.cancelled or getattr(ev.cb, "__self__", None) is not self:
+                    continue
+                parked.append((ev, ev.cycles - now, ev.t_ns is not None))
+                ev.cycles = _PARKED
+                ev.t_ns = None
+            self._parked = parked
+            if parked:
+                import heapq
+                heapq.heapify(sched._heap)
+            return
+        self.clk_stopped = False
+        now = chip.clock.cycles
+        dt = now - getattr(self, "_stop_cycle", now)
+        for ev, rem, wall in getattr(self, "_parked", ()):
+            ev.cycles = now + max(rem, 0)
+            if wall:
+                ev.t_ns = chip.clock.cycles_to_ns(ev.cycles)
+        if getattr(self, "_parked", None):
+            import heapq
+            heapq.heapify(sched._heap)
+        self._parked = []
+        if dt:
+            for a in self.cycle_anchors:
+                v = getattr(self, a, None)
+                if isinstance(v, int):
+                    setattr(self, a, v + dt)
+                elif isinstance(v, dict):
+                    for k in list(v):
+                        if isinstance(v[k], int):
+                            v[k] += dt
+            self.clock_resumed(dt)
+
+    def reset(self) -> None:
+        self.clk_stopped = False            # a reset (XRS, watchdog, missing clock) restarts every clock
+        self._parked = []
+        super().reset()
+
+    def clock_resumed(self, dt_cycles: int) -> None:
+        """Hook for models with state the generic freeze does not cover (called after a STANDBY/HALT stop)."""
+
     def write(self, offset: int, size: int, value: int) -> None:
         if self._protected and offset in self._protected and self.enforce_eallow and not self.eallow():
             if not self._eallow_warned:
@@ -166,3 +226,22 @@ def gpio_resync(chip: Any, sig: str) -> None:
     g = find_model(chip, "ti_c2000.gpio", "GPIO")
     if g is not None:
         g.resync_signal(sig)
+
+
+def listen_input(chip: Any, pin: Any, cb) -> None:
+    """Subscribe a peripheral input to `pin` (cb(pin) on a level change).  Through the GPIO model when it owns the pin,
+    so the change arrives after the pin's input qualification (GPxQSEL / GPxCTRL, SPRUI07 1.4.4: qualification sits
+    in front of the mux and applies to peripheral inputs too); else straight from the pin board."""
+    g = find_model(chip, "ti_c2000.gpio", "GPIO")
+    if g is not None and g.owns_pin(pin):
+        g.periph_listeners.setdefault(pin.id, []).append(cb)
+    else:
+        chip.pins.input_listeners[pin.id].append(cb)
+
+
+def unlisten_input(chip: Any, pin: Any, cb) -> None:
+    g = find_model(chip, "ti_c2000.gpio", "GPIO")
+    for lst in ((g.periph_listeners.get(pin.id) if g is not None else None),
+                chip.pins.input_listeners.get(pin.id)):
+        if lst is not None and cb in lst:
+            lst.remove(cb)

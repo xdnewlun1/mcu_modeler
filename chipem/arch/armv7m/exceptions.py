@@ -375,6 +375,20 @@ class ArmV7M:
         pc = self._read_word(self.vtor + 4)
         self.chip.core.reset(pc & ~1, sp)
 
+    # ----------------------------------------------------------------- low-power support (SCB SCR)
+    def sleep_on_exit(self) -> bool:
+        """SCR.SLEEPONEXIT: the core goes back to sleep on the return to thread mode."""
+        return bool(self.scs.get("SCR") & 0x2)
+
+    @property
+    def sleep_deep(self) -> bool:
+        """SCR.SLEEPDEEP: the family power controller picks its deep-sleep mode (Kinetis STOP, STM32 Stop/Standby)."""
+        return bool(self.scs.get("SCR") & 0x4)
+
+    @property
+    def sevonpend(self) -> bool:
+        return bool(self.scs.get("SCR") & 0x10)
+
     def request_reset(self, why: str) -> None:
         self.reset_requested = why
         core = self.chip.core

@@ -22,6 +22,7 @@ firmware/samples_stm32_variants/build.sh           # STM32F405/F407 package-vari
 .venv/bin/chipem run --board boards/stm32f405rg_f407ig_uart.yaml --for 20ms   # LQFP64 F405RG <-> LQFP176 F407IG
 firmware/samples_c2000_c/build.sh                   # C28x C with TI cl2000 (found under toolchains/; EABI + COFF .out)
 .venv/bin/chipem run --board boards/c2000_stm32_uart.yaml --for 20ms --pin-report
+.venv/bin/chipem run --board boards/k22_rs232_console.yaml   # PC software on the printed /dev/pts/N; real time, until Ctrl-C
 .venv/bin/chipem info firmware/samples_c2000/build/blinky.c28img --chip tms320f28232
 .venv/bin/python -I tools/svd2chip.py svd/dl-Sasv/MK22F12.svd --check chips/mk22fn1m0vll12.yaml
 ```
@@ -107,18 +108,25 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 | pins / trace / log | `pins.py`, `trace.py`, `log.py`; tests `test_pins`, `test_trace`, `test_log` |
 | firmware / analysis | `firmware.py`, `cli.py` (`info`); `test_firmware` |
 | Kinetis system models | `periph/kinetis/{sim,mcg,port,gpio,wdog,power,ftfe,adc,_util}.py`; `test_kinetis_system`, `test_samples_system` |
+| Kinetis low power / clock monitors / UART flow control | `periph/kinetis/power.py` (SMC power hook, `_Freezer`, LLWU, RCM, PMC), `mcg.py` monitors, `clock_stop` in `pit/wdog/uart.py`, `uart.py` MODEM, `lptmr.py` pulse counter, sample `firmware/samples/lls_wakeup.c`; `test_kinetis_lowpower` |
 | Kinetis timers / UART | `periph/kinetis/{pit,lptmr,rtc,uart,clockutil}.py`; `test_kinetis_timers`, `test_kinetis_uart`, `test_samples_timers` |
 | Kinetis DMA / SPI | `periph/kinetis/{dma,dspi}.py` (added late; check their tests before editing); DSPI is bit-level on the pins (master + slave), `firmware/samples/spi_master.c`, `boards/k22_stm32_spi.yaml`; `test_kinetis_dspi`, `test_kinetis_dma` |
 | Kinetis SAI / CMT / system blocks | `periph/kinetis/{sai,cmt,sysblocks,flexbus}.py` (I2S0, CMT, MCM/FMC/AIPS/AXBS/MPU, FlexBus + `FB_SPACE`), `parts/i2s_codec.py`, samples `firmware/samples/{i2s_tone,cmt_nec}.c`, `boards/k22_i2s_codec.yaml`; `test_kinetis_sai`, `test_kinetis_cmt`, `test_kinetis_sysblocks` |
 | STM32 family | `chips/stm32f405*`, `chips/stm32f407*` (package variants, include `stm32f405zg.yaml`), `periph/stm32/*`, `firmware/samples_stm32/*`, `firmware/samples_stm32_variants/*`, `boards/stm32f405rg_f407ig_uart.yaml`, `firmware/samples_stm32_hal/*` (ST HAL; vendor code in `firmware/vendor/`), `boards/k22_stm32_uart.yaml`, `boards/c2000_stm32_chat_hal.yaml`, `boards/k22_stm32_can.yaml` and `boards/k22_c2000_stm32_can.yaml` (bxCAN `periph/stm32/can.py` on `chipem/canbus.py`); `test_stm32*` (variants: `test_stm32_variants`; bxCAN: `test_stm32_can`) |
 | PWM / timer outputs, input capture | `periph/stm32/tim.py` (output compare, PWM, input capture, PWM input, dead time / break, encoder; TIM1-14), `periph/kinetis/ftm.py` (FTM0-3 + `ftm_alias`: PWM, input / dual edge capture, faults, quadrature, external clock), `periph/ti_c2000/epwm.py`, `periph/ti_c2000/ecap.py` (eCAP1-4), `periph/signals.py` and the family `signals.py` tables, `PinBoard.drive_signal`/`release_signal`/`input_listeners` in `pins.py`, samples `firmware/samples/{ftm_pwm,ftm_capture}.c`, `firmware/samples_stm32/{tim_pwm,tim_capture}.c`, `firmware/samples_c2000/{epwm,ecap}.asm`, `firmware/samples_c2000_c/epwm.c`, boards `pwm_led.yaml`, `k22_ftm_capture.yaml`, `c2000_ecap_loopback.yaml`, `pwm_capture_3way.yaml`; `test_stm32_pwm`, `test_stm32_tim_capture`, `test_kinetis_ftm`, `test_kinetis_ftm_capture`, `test_c2000_epwm`, `test_c2000_hrpwm`, `test_c2000_ecap`, `test_integration_families` (3-way board) |
-| C2000 family | `chips/tms320f28232*` (register table hand-written), `periph/ti_c2000/*` (incl. `spi.py`, `mcbsp.py`, `xintf.py`), `arch/c28x/{arch,pie}.py`, `devices/sram.py` (board `sram` device, also usable by other external-bus models via `attach_memory()`), `firmware/samples_c2000/*` (incl. `spi_flash`, `mcbsp`, `xintf_sram`), `boards/c2000_*.yaml` (incl. `c2000_spi_flash`, `c2000_mcbsp_flash`, `c2000_xintf_sram`); `test_c2000_*` (incl. `test_c2000_spi`, `test_c2000_mcbsp`, `test_c2000_xintf`), `test_engine_units` |
+| C2000 family | `chips/tms320f28232*` (register table hand-written), `periph/ti_c2000/*` (incl. `spi.py`, `mcbsp.py`, `xintf.py`), `arch/c28x/{arch,pie}.py`, `devices/sram.py` (board `sram` device, also usable by other external-bus models via `attach_memory()`), `firmware/samples_c2000/*` (incl. `spi_flash`, `mcbsp`, `xintf_sram`, `standby`), `boards/c2000_*.yaml` (incl. `c2000_spi_flash`, `c2000_mcbsp_flash`, `c2000_xintf_sram`); `test_c2000_*` (incl. `test_c2000_spi`, `test_c2000_mcbsp`, `test_c2000_xintf`, `test_c2000_lowpower`), `test_engine_units` |
 | C2000 C samples (TI compiler) | `firmware/samples_c2000_c/*` (C, `codestart.asm`, `f28232.cmd`, `build.sh`; incl. `mcbsp_spi.c`), `boards/c2000_stm32_chat_c.yaml`, `boards/c2000_mcbsp_flash.yaml`; `test_c2000_compiled` (skips if not built) |
 | C28x core / ISA | `core/c28x/*` (interpreter, assembler, disassembler), `arch/c28x/isa.yaml` (instruction table), `tools/c28x_asm.py`; `test_c28x_*`. Encodings are verified against TI's manuals and cl2000/dis2000 25.11.1: see `docs/C28X_CORE.md` before editing |
 | pin report / symbols | `pinreport.py`, `symbols.py`; `test_pinreport` |
 | cross-family integration | `test_integration_families` (UART names, static pin roles, C2000 ↔ STM32 board) |
 | SD cards / external memory buses | `devices/sdcard.py` (SD card device, `--sd-card`, board `sd_card`), `periph/sdbus.py` (clock `wave` summary, line-mux check), `periph/stm32/sdio.py`, `periph/kinetis/sdhc.py`, `periph/stm32/fsmc.py` (NE1-4 windows through `Bus.map_window` / `Core.map_shared`/`unmap`), samples `firmware/samples_stm32/{sdio_card,fsmc_sram}.c`, `firmware/samples/sdhc_card.c`, `firmware/samples_stm32_hal/sd_hal.c`, boards `stm32_sdcard.yaml`, `k22_sdcard.yaml`, `stm32_fsmc_sram.yaml`; `test_stm32_sdio`, `test_kinetis_sdhc`, `test_stm32_fsmc` |
 | parts | `chipem/parts/*`, `tests/test_parts.py` (board parts: switches, LEDs, gates; wiring in `board.py`) |
+| Ethernet | `chipem/ethernet.py` (PHY, segment, host node, pcap, `EthLink`), `periph/stm32/eth.py` (`stm32.eth`, F407/F417), `firmware/samples_stm32/eth_ping.c`, `firmware/samples_stm32_hal_eth/*` (HAL ETH sample, own `build.sh`, STM32F407xx), `boards/stm32f407_eth_{ping,hal}.yaml`, `eth` links in `board.py`, `--eth-pcap`/`--eth-host`; `test_stm32_eth` |
+| STM32 I2S | `periph/stm32/i2s.py`, the I2S parts of `periph/stm32/spi.py` (`stm32.i2s_ext`), `rcc.py` PLLI2S, `firmware/samples_stm32/i2s_tone.c`, `boards/stm32_i2s_codec.yaml`; `test_stm32_i2s` |
+| DCMI / camera | `periph/stm32/dcmi.py`, `parts/camera.py`, `firmware/samples_stm32/dcmi_capture.c`, `boards/stm32f407_dcmi_camera.yaml`; `test_stm32_dcmi` |
+| crypto (CRYP/HASH) | `chipem/crypto_algos.py`, `periph/stm32/{cryp,hash}.py`, `chips/stm32f415zg.yaml`, `chips/stm32f417zg.yaml`; `test_stm32_cryp_hash` |
+| host serial / real time / cable chains | `hostserial.py` (PTY, pyserial, TCP, memory ports; `UartBridge`), `realtime.py` (pacing), `parts/serial.py` (`usb_serial_adapter`, `rs232_transceiver`, connectors, `cable`, `SerialRouter`), `boards/k22_rs232_console.yaml`, `firmware/samples/uart_console.c`; `test_hostserial`, `test_serial_chain`, `test_web` (host serial) |
+| USB | `usbbus.py` (bus engine, `UsbHost` + CDC-ACM/HID/MSC drivers, `UsbLink`, `UsbCdcBridge`), `periph/stm32/otg.py` (`stm32.otg_fs` / `stm32.otg_hs`), `periph/kinetis/{usbfs,usbdcd}.py`, `firmware/samples_stm32/usb_cdc.c`, `firmware/samples_stm32_hal/usb_cdc_hal.c` (+ `usbd_conf.h`; ST USB Device Library vendored in `firmware/vendor/STM32CubeF4/Middlewares`), `firmware/samples/usb_cdc.c`, `boards/{stm32_usb_cdc,stm32_usb_cdc_hal,k22_usb_cdc}.yaml`; `test_usbbus`, `test_stm32_usb`, `test_kinetis_usb` |
 | run / session | `session.py`, `cmd_run.py`; `test_session`, `test_cmd_run` |
 | shell / web | `cmd_shell.py`, `cmd_serve.py`, `web/*`; `test_shell`, `test_web` |
 | samples | `firmware/samples/*` |
@@ -137,6 +145,11 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
   instruction opens a fresh FP context (FPSCR := FPDSCR).
 - **SVC** is intno 2 with PC already past the `svc`. **BKPT** is intno 7. `wfi`/`wfe` end `emu_start` with
   PC just after the instruction. The core detects this by checking the halfword at PC-2 (0xBF30/0xBF20).
+  Unicorn 2.1 actually raises `wfe` as `UC_ERR_INSN_INVALID` (PC past it); the core turns that into a WFI stop with
+  `stop_info = "wfe"`.
+- **Low-power modes** are family logic on top of a generic sleep: `chip.power_hooks` (`on_sleep`/`on_wake`),
+  `chip.wake_gate`, `chip.wake()`, optional `clock_stop(stopped, mode)` on blocks (CONTRACTS.md "Low-power modes").
+  SLEEPONEXIT is handled in `Chip._run`.
 - **VTOR must be preset for images linked above 0.** The Withings image (linked at 0x4000) never writes
   VTOR; its bootloader did. Session sets `vtor = image.start` for raw `.bin` images, and `Chip.reset()`
   falls back to the image start if `[VTOR]` is not a valid vector table. For ELF images VTOR defaults to 0
@@ -165,6 +178,8 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
   bus-faults.
 - **`regs_file` at the top of a chip YAML is informational.** Kinetis models take
   `params.regs_file` (resolved against the current directory) or fall back to `chips/mk22_regs.yaml`.
+- **Die-family gating.** The STM32F405/F407/F415/F417 share one base YAML; Ethernet/DCMI (F407/F417) and CRYP/HASH
+  (F415/F417) carry `params: {only: [...]}` and become stubs elsewhere (`_util.part_present` / `make_absent`).
 - **STM32F405/F407 variants share one die.** `chips/stm32f40[57]*.yaml` `include:` `stm32f405zg.yaml` and override
   only name, package, memory and pins (include is one level deep, so a variant cannot include another variant). The
   pin tables were generated from DS8626 Table 7/9 and checked against ST's open pin data (`chips/README.md`);
@@ -192,6 +207,10 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 - **C28x pipeline/timing**: one cycle per instruction, no pipeline (`RPTB` runs on FPU chips only); EALLOW protection is enforced (a
   protected write without EALLOW is ignored with a warning). `core.pc` is only written back at slice end; use
   `pinreport._c28x_live_pc` (or the `pc` local of `C28xCore.run`) for the current instruction mid-slice.
+- **C2000 peripheral pin inputs go through the GPIO model**: subscribe with `_util.listen_input(chip, pin, cb)` (not
+  `board.input_listeners`) so GPxQSEL qualification applies and STANDBY/HALT (`clk_stopped`) mutes them. A model
+  with a time-derived counter lists its absolute-cycle anchors in `cycle_anchors` so `C2000Block.clock_stop` (the
+  STANDBY/HALT freeze run by `ti_c2000.sysctrl`, a `chip.power_hooks` entry) can shift them.
 - **F28232 XINTF zones are not RAM.** PCLKCR3 resets with XINTFENCLK = 0, and zone data only reaches a board `sram`
   device once firmware enables the clock and muxes the XINTF pins (TI's InitXintf16Gpio); otherwise reads float.
 - **C2000 bidirectional pins** (McBSP clocks/frame syncs, SPI master/slave) get their live role from the owning block:
@@ -204,6 +223,11 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 - **SysTick CLKSOURCE=0** counts at core / `systick_ext_div` (chip YAML, default 8 = STM32 HCLK/8). The K22 has no
   external reference (K22P100M120SF5V2RM §3.2.1.2): its YAML sets `systick_ext_div: 0`, so CLKSOURCE reads 1 and
   ignores writes, and SYST_CALIB = 0x80000000 (NOREF=1, TENMS=0).
+- **Kinetis stop modes hold scheduler events.** In STOP/VLPS/LLS/VLLS the SMC (`kinetis/power.py` `_Freezer`) pulls
+  the pending events of clock-stopped blocks (bound-method callbacks, owner = the block) out of the heap and pushes
+  them back shifted by the sleep time. A model that computes a counter from a start time (`now - start`) must
+  implement `clock_stop(stopped, mode)` (as PIT/WDOG/UART do) or its counter jumps by the time slept. Reset
+  reasons drive the Kinetis reset domains: `reset_kind()` maps the RCM's last reason to por / warm / wakeup (VLLS).
 - **Bus catch-all windows** (auto-stubs) default to 0x40000000–0x400FFFFF and 0xE0000000–0xE00FFFFF
   (`bus.DEFAULT_CATCH_ALL`); a chip YAML can set its own with `auto_stub_ranges` (the C2000 does). Elsewhere,
   unmapped accesses are bus faults. Memory regions must be aligned to
@@ -214,6 +238,15 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 - **Board parts propagate with zero delay** (`Board._propagate`, waves within one event); a net re-resolved more than
   16 times in one event is reported as a combinational loop (one `warn`) and left as is. Timed parts schedule on the
   first chip's scheduler; `Session.reset` restarts them, firmware resets do not.
+- **Host serial bridges keep the threading rule.** Port I/O threads (`chipem/hostserial.py`) never touch the
+  Session/Chip: host bytes wait in the port's buffer until `pump()` drains them on the emulation thread
+  (`realtime.run_paced`, between ≤ 2 ms slices), chip bytes leave through the port's queue, and I/O threads only set
+  the Session's wake Event. A paced `run_for` takes wall time (`chipem run` with a bridge runs until Ctrl-C); tests
+  run the Session on one thread and play the host on another, or use `memory` ports. `run_for` without endpoints or
+  pacing is unchanged.
+- **Serial cable chains carry bytes by path resolution** (`parts/serial.py`): a part that should pass UART bytes
+  implements `serial_paths`; chip-to-chip nets without parts stay with the board's auto UART links. On RS-232 nets
+  H = positive voltage (space), so an idle RS-232 line reads L.
 - **Not thread-safe.** Only the web `Worker` thread touches the Session/Chip. `Session.stop()` is the
   one call that is safe from another thread.
 - The arch layer uses 4 NVIC priority bits for ARMv7-M and 2 for ARMv6-M. These are not read from the

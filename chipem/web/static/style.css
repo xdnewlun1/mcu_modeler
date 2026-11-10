@@ -277,7 +277,7 @@ input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--focus);
 .ev .t { color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
 .ev .kind { font-weight: 600; }
 .ev .msg { color: var(--text); overflow-wrap: anywhere; }
-.k-pin { color: var(--hi); } .k-uart, .k-can, .k-i2s { color: var(--accent); } .k-irq { color: var(--analog); }
+.k-pin { color: var(--hi); } .k-uart, .k-can, .k-i2s, .k-usb { color: var(--accent); } .k-irq { color: var(--analog); }
 .k-reset { color: var(--periph); } .k-fault { color: var(--danger); } .k-warn { color: var(--warn); }
 .k-info { color: var(--muted); } .k-mmio { color: var(--dim); }
 .kind-filter { display: flex; gap: 4px; flex-wrap: wrap; }

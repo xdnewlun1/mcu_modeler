@@ -41,8 +41,24 @@ C5.TDMAS (and C2.TIE) TDRE raises "UART<n> TX" (`dma_request`); the request is r
 DMA drains/fills the FIFO down/up to the watermark.  Source numbers default to the K22 DMAMUX table (UART0 RX/TX =
 2/3, UART1 4/5, UART2 6/7, UART3 8/9, UART4 10 (RX and TX share it); params dma_rx/dma_tx).
 
-Not modelled: parity/noise/framing errors, IDLE, break/LIN, match address, IrDA, ISO-7816, 9-bit data (C3.T8/R8),
-RTS/CTS flow control.
+Hardware flow control (§49.3.14 MODEM, §49.4.1.6/7, §49.4.2.7) on the UARTn_RTS_b / UARTn_CTS_b pins:
+* TXCTSE: before a character moves into the shift register the transmitter samples CTS_b (the pin muxed to
+  UARTn_CTS_b; low = asserted). Deasserted: TXD stays idle (the byte waits in the buffer) until CTS_b goes low; a
+  change during a character does not affect it. No pin muxed to CTS_b: the input reads asserted (one `info`).
+* RXRTSE: RTS_b is asserted (L) while the receive buffer holds fewer than RWFIFO.RXWATER characters and deasserted
+  (H) otherwise; characters still arrive until the buffer is full (overrun).
+* TXRTSE (transceiver driver enable, RS-485): RTS_b asserts when a character is written to the empty transmitter
+  (with TE) and deasserts one bit time after the last stop bit; TXRTSPOL=1 makes it active high. The one-bit lead
+  before the start bit is not inserted (the character starts at once).
+* None of them: RTS_b stays deasserted (H). The level is driven with PinBoard.drive_signal, so nets and board parts
+  see it. Board links still move whole bytes: a sender honours CTS only when its CTS_b pin is wired to the
+  receiver's RTS_b (a net).
+Low-power modes (`clock_stop`, called by the SMC in STOP/VLPS/LLS/VLLS): the UART is static: a character arriving
+is lost (reason stop_mode) and only its start bit counts, as an RX active edge: S2.RXEDGIF (w1c) is set by every
+arriving character (start bit falling edge) and, with BDH.RXEDGIE, raises the status interrupt (wakes STOP/VLPS).
+A transmission in progress is held and resumes after wake-up.
+Not modelled: parity/noise/framing errors, IDLE, break/LIN (LBKDIF never sets), match address, IrDA, ISO-7816, 9-bit
+data (C3.T8/R8: board links carry bytes).
 
 Hot path: S1/TCFIFO/RCFIFO/SFIFO are stored values recomputed on every state change (`_refresh`), so polling them
 is a plain register read; S1 gets a read hook only while OR is set (the S1-then-D clear sequence).
@@ -67,6 +83,9 @@ CFIFO_TXFLUSH, CFIFO_RXFLUSH, CFIFO_RXOFE, CFIFO_TXOFE, CFIFO_RXUFE = 0x80, 0x40
 PFIFO_TXFE, PFIFO_RXFE = 0x80, 0x08
 SFIFO_TXEMPT, SFIFO_RXEMPT, SFIFO_RXOF, SFIFO_TXOF, SFIFO_RXUF = 0x80, 0x40, 0x04, 0x02, 0x01
 C3_ORIE = 0x08
+S2_LBKDIF, S2_RXEDGIF = 0x80, 0x40
+BDH_RXEDGIE = 0x40
+MODEM_RXRTSE, MODEM_TXRTSPOL, MODEM_TXRTSE, MODEM_TXCTSE = 0x08, 0x04, 0x02, 0x01
 
 # PFIFO TXFIFOSIZE/RXFIFOSIZE encoding (§49.3.16)
 FIFO_SIZES = {1: 0, 4: 1, 8: 2, 16: 3, 32: 4, 64: 5, 128: 6}
@@ -103,9 +122,11 @@ class UART(UartRx, MMIOBlock):
         ov = {"S1": dict(ro_mask=0xFF),
               "D": dict(on_read=self._d_read, on_write=self._d_write),
               "C1": dict(on_write=self._ctl_write), "C2": dict(on_write=self._c2_write),
-              "BDH": dict(on_write=self._ctl_write), "BDL": dict(on_write=self._ctl_write),
+              "BDH": dict(on_write=self._c3_write), "BDL": dict(on_write=self._ctl_write),
               "C4": dict(on_write=self._ctl_write), "C5": dict(on_write=self._c5_write),
               "C3": dict(on_write=self._c3_write),
+              "S2": dict(w1c_mask=S2_LBKDIF | S2_RXEDGIF, ro_mask=0x01, on_write=self._c3_write),
+              "MODEM": dict(ro_mask=0xF0, on_write=self._modem_write),
               "PFIFO": dict(ro_mask=0x77, on_write=self._pfifo_write),
               "CFIFO": dict(ro_mask=0x38, on_write=self._cfifo_write),
               "SFIFO": dict(ro_mask=0xF8, w1c_mask=0x07, on_write=self._sfifo_write),
@@ -117,6 +138,9 @@ class UART(UartRx, MMIOBlock):
                 r.reset = (enc << 4) | enc
             self.add_reg(r)
         self._s1_reg = self.regs["S1"]
+        self._modem_off = self.regs["MODEM"].boff
+        self._s2_off = self.regs["S2"].boff
+        self._bdh_off = self.regs["BDH"].boff
         self._o = {n: self.regs[n].boff for n in ("S1", "SFIFO", "TCFIFO", "RCFIFO", "TWFIFO", "RWFIFO", "D")}
         self.output = bytearray()
         self.rx_signal = f"UART{self.index}_RX"
@@ -132,6 +156,15 @@ class UART(UartRx, MMIOBlock):
         self.dma_rx = self.dma_tx = -1
         # board links (chipem.board.UartLink): cb(uart, byte) when a byte starts shifting out
         self.tx_listeners: list = []
+        self.rts_signal = f"UART{self.index}_RTS_b"
+        self.cts_signal = f"UART{self.index}_CTS_b"
+        self._cts_pins: list = []
+        self._rts_level: str | None = None
+        self._txrts_on = False
+        self._rts_ev = None
+        self._cts_wait = False
+        self._cts_noted = False
+        self._lp_stopped = False
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -142,6 +175,11 @@ class UART(UartRx, MMIOBlock):
         rx, tx = (2 + 2 * i, 3 + 2 * i) if i <= 3 else ((10, 10) if i == 4 else (-1, -1))
         self.dma_rx = int(self.params.get("dma_rx", rx))
         self.dma_tx = int(self.params.get("dma_tx", tx))
+        pins = getattr(chip, "pins", None)
+        if pins is not None:
+            self._cts_pins = pins.signal_pins(self.cts_signal)
+            for p in self._cts_pins:
+                pins.input_listeners[p.id].append(self._cts_changed)
         for b in chip.peripherals.values():
             if getattr(b, "model", None) == "kinetis.dmamux" and self.dma_rx >= 0:
                 b.register_source(self.dma_rx, self._rx_dma_active)
@@ -153,6 +191,13 @@ class UART(UartRx, MMIOBlock):
         if ev is not None and self.chip is not None:
             self.chip.sched.cancel(ev)
         self._tx_ev = None
+        rev = getattr(self, "_rts_ev", None)
+        if rev is not None and self.chip is not None:
+            self.chip.sched.cancel(rev)
+        self._rts_ev = None
+        self._txrts_on = False
+        self._cts_wait = False
+        self._lp_stopped = False
         self._shifting = False
         self._txq.clear()
         self._rxq.clear()
@@ -168,6 +213,7 @@ class UART(UartRx, MMIOBlock):
         if hasattr(self, "_o"):
             self._s1_reg.on_read = None
             self._refresh()
+            self._update_rts()
         self._wire_reset()
         # the output log survives a reset (the user's view of the wire); the host keeps sending what it has left
 
@@ -227,6 +273,10 @@ class UART(UartRx, MMIOBlock):
         mem[o["TCFIFO"]] = txn
         mem[o["RCFIFO"]] = rxn
         self._s1_reg.on_read = self._s1_read if s1 & S1_OR else None
+        if self._modem_on:
+            if self.mem[self._modem_off] & MODEM_TXRTSE:
+                self._txrts_check()
+            self._update_rts()
         self._update_line()
 
     # ------------------------------------------------------------------ IRQ
@@ -239,7 +289,8 @@ class UART(UartRx, MMIOBlock):
     def _update_line(self) -> None:
         s1, c2, c5 = self.get("S1"), self.get("C2"), self.get("C5")
         self._set_line(bool((s1 & S1_TDRE and c2 & C2_TIE and not c5 & C5_TDMAS) or (s1 & S1_TC and c2 & C2_TCIE)
-                            or (s1 & S1_RDRF and c2 & C2_RIE and not c5 & C5_RDMAS)))
+                            or (s1 & S1_RDRF and c2 & C2_RIE and not c5 & C5_RDMAS)
+                            or (self.get("S2") & S2_RXEDGIF and self.get("BDH") & BDH_RXEDGIE)))
         sf, cf = self.get("SFIFO"), self.get("CFIFO")
         err = bool((s1 & S1_OR and self.get("C3") & C3_ORIE)
                    or (sf & SFIFO_RXOF and cf & CFIFO_RXOFE) or (sf & SFIFO_TXOF and cf & CFIFO_TXOFE)
@@ -285,6 +336,12 @@ class UART(UartRx, MMIOBlock):
     def _tx_start(self) -> None:
         """Move buffered bytes into the idle shift register (instantly through all of them without a baud)."""
         while self._txq and not self._shifting and self.get("C2") & C2_TE:
+            if self._lp_stopped:
+                return
+            if self._modem_on and self.get("MODEM") & MODEM_TXCTSE and not self._cts_asserted():
+                self._cts_wait = True                  # TXD idles until CTS_b is asserted (§49.4.1.6)
+                return
+            self._cts_wait = False
             b = self._txq.popleft()
             self.output.append(b)
             self.emit("uart", uart=self.name, dir="tx", byte=b)
@@ -301,6 +358,98 @@ class UART(UartRx, MMIOBlock):
         self._tx_start()
         self._refresh()
 
+    # ------------------------------------------------------------------ RTS / CTS (MODEM)
+    @property
+    def _modem_on(self) -> bool:
+        return bool(self.mem[self._modem_off]) or self._txrts_on or self._rts_level not in (None, "H")
+
+    def _cts_asserted(self) -> bool:
+        pins = self._cts_pins
+        sig = self.cts_signal
+        for p in pins:
+            if p.owner == sig or sig in str(p.owner).split("/"):
+                return p.level() == "L"
+        if not self._cts_noted:
+            self._cts_noted = True
+            self.emit("info", block=self.name, msg=f"{self.name}: TXCTSE set but no pin is muxed to {sig}: CTS reads "
+                      "asserted")
+        return True
+
+    def _cts_changed(self, pin) -> None:
+        if self._cts_wait and self._cts_asserted():
+            self._tx_start()
+            self._refresh()
+
+    def _update_rts(self) -> None:
+        m = self.mem[self._modem_off]
+        if m & MODEM_RXRTSE:
+            lvl = "H" if len(self._rxq) >= self.mem[self._o["RWFIFO"]] else "L"
+        elif m & MODEM_TXRTSE:
+            active = self._txrts_on
+            lvl = ("H" if active else "L") if m & MODEM_TXRTSPOL else ("L" if active else "H")
+        else:
+            lvl = "H"
+        if lvl != self._rts_level:
+            self._rts_level = lvl
+            pins = getattr(self.chip, "pins", None) if self.chip is not None else None
+            if pins is not None:
+                pins.drive_signal(self.rts_signal, lvl)
+
+    def _txrts_check(self) -> None:
+        """TXRTSE: assert with data in the transmitter, deassert one bit time after the last stop bit."""
+        if not self.mem[self._modem_off] & MODEM_TXRTSE:
+            return
+        busy = bool(self._txq) or self._shifting
+        if busy:
+            if self._rts_ev is not None:
+                self.chip.sched.cancel(self._rts_ev)
+                self._rts_ev = None
+            if not self._txrts_on and self.get("C2") & C2_TE:
+                self._txrts_on = True
+                self._update_rts()
+        elif self._txrts_on and self._rts_ev is None:
+            b = self.baud()
+            if b > 0:
+                self._rts_ev = self.chip.sched.in_ns(1e9 / b, self._txrts_off)
+            else:
+                self._txrts_off()
+
+    def _txrts_off(self) -> None:
+        self._rts_ev = None
+        if not self._txq and not self._shifting:
+            self._txrts_on = False
+            self._update_rts()
+
+    def _modem_write(self, blk, reg, old, new):
+        if not new & MODEM_TXRTSE:
+            self._txrts_on = False
+        self._update_rts()
+        if (old ^ new) & MODEM_TXCTSE or self._cts_wait:
+            self._tx_start()
+        self._refresh()
+        return None
+
+    # ------------------------------------------------------------------ low-power modes
+    def clock_stop(self, stopped: bool, mode: str) -> None:
+        self._lp_stopped = stopped
+        if self.chip is None:
+            return
+        if stopped:
+            if self._tx_ev is not None:
+                self._held_tx = self._tx_ev.t_ns - self.chip.sched.now_ns()
+                self.chip.sched.cancel(self._tx_ev)
+                self._tx_ev = None
+            else:
+                self._held_tx = None
+        else:
+            held = getattr(self, "_held_tx", None)
+            self._held_tx = None
+            if held is not None:
+                self._tx_ev = self.chip.sched.in_ns(max(held, 0.0), self._tx_done)
+            else:
+                self._tx_start()
+            self._refresh()
+
     def _d_write(self, blk, reg, old, new):
         if not self.get("C2") & C2_TE:
             if not self._warned_te:
@@ -315,6 +464,8 @@ class UART(UartRx, MMIOBlock):
                           "lost (SFIFO.TXOF)")
         else:
             self._txq.append(new & 0xFF)
+            if self.mem[self._modem_off] & MODEM_TXRTSE:
+                self._txrts_check()
             self._tx_start()
         self._refresh()
         return old
@@ -322,6 +473,17 @@ class UART(UartRx, MMIOBlock):
     # ------------------------------------------------------------------ RX
     def rx_pending(self) -> int:
         return self.wire_pending() + len(self._rxq)
+
+    def _rx_arrive(self, b: int, src: str) -> None:
+        if src != "loop":
+            self.mem[self._s2_off] |= S2_RXEDGIF      # the start bit is an active edge on RxD (§49.3.6)
+        if self._lp_stopped:
+            self._rx_drop(b, "stop_mode")
+            self._update_line()
+            return
+        UartRx._rx_arrive(self, b, src)
+        if self.mem[self._bdh_off] & BDH_RXEDGIE:
+            self._update_line()
 
     def _rx_block_reason(self) -> str | None:
         sim = self._sim

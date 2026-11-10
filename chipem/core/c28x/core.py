@@ -437,6 +437,8 @@ class C28xCore(Core):
                     count += 1
                     pc = s.npc
                     reason = StopReason.WFI if s.reason == "idle" else StopReason.BREAKPOINT
+                    if s.reason == "idle":
+                        self.stop_info = "idle"
                     break
                 except _Illegal as e:
                     self.last_fault = {"type": "illegal_opcode", "pc": e.pc, "opcode": e.opcode, "addr": None,

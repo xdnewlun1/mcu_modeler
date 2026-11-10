@@ -172,6 +172,17 @@ mark { background: var(--mark); color: inherit; border-radius: 1px; }
 .link-mon-wrap > summary { cursor: pointer; padding: 2px 8px; color: var(--muted); user-select: none; }
 .link-mon-wrap[open] > summary { border-bottom: 1px solid var(--border); }
 .link-mon { border-top: 0; padding: 4px 8px; max-height: 120px; overflow: auto; }
+/* host serial bridges: fixed-height scrollable table under the UART console */
+.host-ser { padding: 3px 8px; max-height: 132px; overflow: auto; font-size: 11.5px; }
+.host-ctl { display: flex; gap: 10px; align-items: center; padding-bottom: 3px; }
+.host-ctl input[type=text] { width: 4em; font: inherit; }
+.host-rt { color: var(--muted); font-variant-numeric: tabular-nums; }
+.host-rt.warn, .host-tbl td.warn { color: var(--warn); }
+.host-tbl { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.host-tbl th, .host-tbl td { text-align: left; padding: 1px 6px 1px 0; white-space: nowrap; }
+.host-tbl th { color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); }
+.host-tbl td.mono { font-family: var(--mono); max-width: 22em; overflow: hidden; text-overflow: ellipsis; }
+.host-tbl td.dim { color: var(--muted); }
 
 .events { padding: 2px 0; font: 11.5px/1.5 var(--mono); min-height: 0; outline: none; }
 .events:empty::before { content: attr(data-empty); padding: 4px 8px; font-family: var(--mono); }

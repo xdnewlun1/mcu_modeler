@@ -274,7 +274,7 @@ pins:
   - {num: 135, name: "GPIO78/XD1", kind: gpio, port: C, bit: 14, default: GPIO, functions: {GPIO: "GPIO78", MUX1: "GPIO78", MUX2: "XD1", MUX3: "XD1"}}
   - {num: 136, name: "GPIO79/XD0", kind: gpio, port: C, bit: 15, default: GPIO, functions: {GPIO: "GPIO79", MUX1: "GPIO79", MUX2: "XD0", MUX3: "XD0"}}
   - {num: 137, name: "GPIO38/XWE0", kind: gpio, port: B, bit: 6, default: GPIO, functions: {GPIO: "GPIO38", MUX2: "XWE0", MUX3: "XWE0"}}
-  - {num: 138, name: "XCLKOUT", kind: special}
+  - {num: 138, name: "XCLKOUT", kind: special, functions: {MUX1: "XCLKOUT"}}   # clock output (ti_c2000.xintf wave events)
   - {num: 139, name: "VDD", kind: power}
   - {num: 140, name: "VSS", kind: power}
   - {num: 141, name: "GPIO28/SCIRXDA/XZCS6", kind: gpio, port: A, bit: 28, default: GPIO, functions: {GPIO: "GPIO28", MUX1: "SCIRXDA", MUX2: "XZCS6", MUX3: "XZCS6"}}

@@ -18,7 +18,8 @@ class StopReason(Enum):
 
 class Core(ABC):
     last_fault: dict | None = None
-    stop_info: Any = None      # EXC_RETURN value after StopReason.EXC_RETURN
+    stop_info: Any = None      # EXC_RETURN value after StopReason.EXC_RETURN; "wfi"/"wfe" (ARM) or "idle" (C28x)
+                               # after StopReason.WFI
     precise: bool = False
     running: bool = False
     cpu: str = ""

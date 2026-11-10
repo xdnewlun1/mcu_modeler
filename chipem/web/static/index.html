@@ -211,6 +211,19 @@
             <summary>link monitor <span class="count" id="linkMonCount"></span></summary>
             <div id="linkMon" class="link-mon" aria-label="Link monitor: last bytes crossing each link"></div>
           </details>
+          <details class="link-mon-wrap" id="hostSerWrap" hidden>
+            <summary>host serial <span class="count" id="hostSerCount"></span> <span class="host-rt" id="hostRt"></span></summary>
+            <div class="host-ser">
+              <div class="host-ctl">
+                <label class="toggle" title="lock virtual time to the wall clock (needed for PC software on a host serial port; idle firmware costs no CPU)"><input type="checkbox" id="rtOn"> real time</label>
+                <label class="toggle" title="speed factor: virtual seconds per wall second">×<input id="rtSpeed" type="text" value="1" size="4" spellcheck="false" aria-label="real-time speed factor"></label>
+              </div>
+              <table class="host-tbl" aria-label="Host serial endpoints">
+                <thead><tr><th>endpoint</th><th>transport</th><th>path</th><th>conn</th><th>line</th><th title="bytes host → emulation">in</th><th title="bytes emulation → host">out</th><th title="bytes lost: framing mismatch / host not connected">lost</th></tr></thead>
+                <tbody id="hostSerBody"></tbody>
+              </table>
+            </div>
+          </details>
         </div>
       </section>
       <div class="split split-p" role="separator" aria-orientation="horizontal"></div>

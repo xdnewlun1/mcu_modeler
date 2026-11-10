@@ -3,9 +3,13 @@
 * Unlock: 0xC520 then 0xD928 written consecutively to UNLOCK opens the write window (WCT, 256 bus clocks on
   silicon; here at least 4096 core cycles because fast-mode time is slice-granular). STCTRLH/L, TOVALH/L,
   WINH/L, PRESC and TMROUT writes outside the window (or after ALLOWUPDATE was cleared) are ignored
-  with a `warn` (silicon would reset). Any configuration write restarts the counter.
-* Refresh: 0xA602 then 0xB480 written consecutively to REFRESH restarts the counter (warn if WINEN and the
-  counter is below WIN).
+  with one `warn` per register (24.6 does not list them as reset events). Any configuration write restarts the counter.
+* Refresh: 0xA602 then 0xB480 written consecutively to REFRESH restarts the counter.
+* Exceptions (24.6): a value other than the unlock / refresh sequence written to UNLOCK / REFRESH, and a refresh
+  before the window opened (WINEN, counter < WIN), are watchdog resets; with STCTRLH.IRQRSTEN they (and the time-out)
+  set STCTRLL.INTFLG, raise the WDOG_EWM interrupt and reset WCT = 256 bus clocks later. The 20-bus-cycle gap rule
+  between the two writes of a sequence and the "no configuration within WCT after unlocking" rule are not checked.
+* Low-power modes: `clock_stop()` (SMC) holds the counter (STOP/VLPS without STOPEN, WAIT/VLPW without WAITEN, LLS).
 * Counter clock: CLKSRC=0 -> 1 kHz LPO, CLKSRC=1 -> alternate clock = bus clock (MCG/SIM derived), divided by
   PRESC.PRESCVAL+1. Timeout = TOVAL ticks. Scheduled with Scheduler.at_ns so it is independent of the core
   clock; a bus-clock change re-bases the running count.
@@ -22,12 +26,13 @@ from typing import Any
 
 from ..base import MMIOBlock
 from ..registry import register
-from ._util import build_regs, find_model
+from ._util import build_regs, find_model, irq_number
 
 LPO_HZ = 1000.0
 UNLOCK_KEYS = (0xC520, 0xD928)
 REFRESH_KEYS = (0xA602, 0xB480)
-WDOGEN, CLKSRC, ALLOWUPDATE, WINEN = 1 << 0, 1 << 1, 1 << 4, 1 << 3
+WDOGEN, CLKSRC, ALLOWUPDATE, WINEN, IRQRSTEN = 1 << 0, 1 << 1, 1 << 4, 1 << 3, 1 << 2
+INTFLG = 0x8000
 CONFIG_REGS = ("STCTRLH", "TOVALH", "TOVALL", "WINH", "WINL", "TMROUTH", "TMROUTL", "PRESC")
 
 
@@ -36,7 +41,7 @@ class WDOG(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov: dict[str, dict] = {n: {"on_write": self._cfg_write} for n in CONFIG_REGS}
-        ov["STCTRLL"] = {"w1c_mask": 0x8000}                 # INTFLG: w1c at any time (not unlock-protected)
+        ov["STCTRLL"] = {"w1c_mask": 0x8000, "on_write": self._stctrll_write}   # INTFLG: w1c, not unlock-protected
         ov["RSTCNT"] = {"w1c_mask": 0xFFFF}                  # w1c at any time; cleared only by POR
         ov["TMROUTH"]["on_read"] = self._tmrout_read
         ov["TMROUTL"]["on_read"] = self._tmrout_read
@@ -57,16 +62,27 @@ class WDOG(MMIOBlock):
         self._mcg: Any = None
         self._sim: Any = None
         self.timeouts = 0
+        self._irq: int | None = None
+        self._line = False
+        self._rst_ev: Any = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         self._mcg = find_model(chip, "kinetis.mcg", "MCG")
         self._sim = find_model(chip, "kinetis.sim", "SIM")
+        self._irq = irq_number(chip, "WDOG_EWM")
         if self._mcg is not None:
             self._mcg.listeners.append(self._clock_changed)
 
     def reset(self) -> None:
         self._cancel()
+        if self._rst_ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._rst_ev)
+        self._rst_ev = None
+        if self._line:
+            self._line = False
+            if self._irq is not None and self.chip is not None:
+                self.irq(self._irq, False)
         keep = self.get("RSTCNT") if self._powered else 0     # RSTCNT survives every reset except POR
         self._powered = True
         super().reset()
@@ -75,6 +91,7 @@ class WDOG(MMIOBlock):
         self._unlocked_until = None
         self._refresh_stage = 0
         self._update_locked = False
+        self._held_count = None
         self._warned_locked.clear()
         self._restart(log=False)
 
@@ -152,15 +169,60 @@ class WDOG(MMIOBlock):
         self._start_ns = self.chip.now_ns() - n * new_tick
         self._schedule()
 
+    def clock_stop(self, stopped: bool, mode: str) -> None:
+        """WDOG clock held in a low-power mode (STOP/VLPS without STCTRLH.STOPEN, WAIT without WAITEN, LLS):
+        the counter keeps its value."""
+        if self.chip is None:
+            return
+        if stopped:
+            self._held_count = self.counter()
+            self._cancel()
+        elif getattr(self, "_held_count", None) is not None:
+            self._start_ns = self.chip.now_ns() - self._held_count * self._tick_ns
+            self._held_count = None
+            self._schedule()
+
     def _timeout(self) -> None:
         self._ev = None
-        chip = self.chip
         self.timeouts += 1
+        self._exception(f"WDOG timeout after {self.timeout_s:.3f} s without refresh", direct=True)
+
+    def _exception(self, why: str, direct: bool = False) -> None:
+        """24.6: reset, or interrupt-then-reset WCT (256 bus clocks) later with IRQRSTEN."""
+        chip = self.chip
+        if chip is None:
+            return
+        if self.get("STCTRLH") & IRQRSTEN:
+            self.set("STCTRLL", self.get("STCTRLL") | INTFLG)
+            self._set_line(True)
+            if self._rst_ev is None:
+                bus = self._mcg.bus_hz_effective if self._mcg is not None else chip.clock.hz
+                self.emit("warn", block=self.name, msg=f"{why}: WDOG interrupt, reset in 256 bus clocks")
+                self._rst_ev = chip.sched.in_ns(256 * 1e9 / bus, self._do_reset, why, True)
+            return
+        self._do_reset(why, direct)
+
+    def _do_reset(self, why: str, direct: bool) -> None:
+        self._rst_ev = None
+        chip = self.chip
         rst = (self.get("RSTCNT") + 1) & 0xFFFF
         self.set("RSTCNT", rst)
-        self.emit("warn", block=self.name, msg=f"WDOG timeout after {self.timeout_s:.3f} s without refresh: "
-                  f"watchdog reset (RSTCNT={rst})", rstcnt=rst)
-        chip.reset("watchdog")
+        self.emit("warn", block=self.name, msg=f"{why}: watchdog reset (RSTCNT={rst})", rstcnt=rst)
+        if direct:
+            chip.reset("watchdog")
+        else:
+            chip.arch.request_reset("watchdog")
+
+    def _set_line(self, lvl: bool) -> None:
+        if lvl != self._line:
+            self._line = lvl
+            if self._irq is not None and self.chip is not None:
+                self.irq(self._irq, lvl)
+
+    def _stctrll_write(self, blk, reg, old, new):
+        if not new & INTFLG:
+            self._set_line(False)
+        return None
 
     # ------------------------------------------------------------ register hooks
     def _now_cycles(self) -> int:
@@ -176,8 +238,7 @@ class WDOG(MMIOBlock):
             if reg.name not in self._warned_locked:
                 self._warned_locked.add(reg.name)
                 why = "ALLOWUPDATE=0" if self._update_locked else "WDOG is locked (unlock with 0xC520/0xD928)"
-                self.emit("warn", block=self.name, msg=f"write 0x{new:04x} to WDOG_{reg.name} ignored: {why} "
-                          "(silicon would reset)")
+                self.emit("warn", block=self.name, msg=f"write 0x{new:04x} to WDOG_{reg.name} ignored: {why}")
             return old
         if reg.name in ("TMROUTH", "TMROUTL"):
             # writing TMROUT resets the counter (RM: only in test mode); keep it simple
@@ -208,7 +269,7 @@ class WDOG(MMIOBlock):
                 self._unlocked_until = self._now_cycles() + self.unlock_window_cycles
         else:
             self._unlock_stage = 0
-            self.emit("warn", block=self.name, msg=f"bad WDOG unlock sequence (0x{new:04x}); silicon would reset")
+            self._exception(f"bad WDOG unlock sequence (0x{new:04x})")
         return None
 
     def _refresh_write(self, blk, reg, old, new):
@@ -218,11 +279,12 @@ class WDOG(MMIOBlock):
             self._refresh_stage = 0
             if self.enabled:
                 if self.get("STCTRLH") & WINEN and self.counter() < self.win:
-                    self.emit("warn", block=self.name, msg="WDOG refreshed before the window opened "
-                              "(silicon would reset)")
+                    self._exception("WDOG refreshed before the window opened")
+                    return None
                 self._start_ns = self.chip.now_ns()
                 self._tick_ns = self.tick_ns()
                 self._schedule()
         else:
             self._refresh_stage = 0
+            self._exception(f"bad WDOG refresh sequence (0x{new:04x})")
         return None

@@ -87,7 +87,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..registry import register
-from ._util import C2000Block, build_regs, find_model, irq_line, sysctrl
+from ._util import C2000Block, build_regs, find_model, irq_line, sysctrl, listen_input, unlisten_input
 
 UP, DOWN, UPDOWN, FREEZE = 0, 1, 2, 3
 PHSEN, PRDLD, SWFSYNC, PHSDIR = 1 << 2, 1 << 3, 1 << 6, 1 << 13
@@ -123,6 +123,7 @@ def muxed_pins(board: Any, signal: str) -> list:
 
 @register("ti_c2000.epwm")
 class EPWM(C2000Block):
+    cycle_anchors = ("_cyc0", "_sync_at", "_pc_base", "_osht_end")
     eallow_regs = ("TZSEL", "TZCTL", "TZEINT", "TZCLR", "TZFRC", "HRCNFG")
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
@@ -233,7 +234,7 @@ class EPWM(C2000Block):
             if self.params.get("synci_pin", self.index == 1):
                 self._synci_pins = list(board.signal_pins("EPWMSYNCI"))
                 for p in self._synci_pins:
-                    board.input_listeners[p.id].append(self._synci_changed)
+                    listen_input(chip, p, self._synci_changed)
             seen = []
             for s in TZ_SIGNALS:
                 for p in board.signal_pins(s):
@@ -727,13 +728,11 @@ class EPWM(C2000Block):
         want = bool(self.get("TZSEL") & 0x3F3F) and bool(self._tz_pins)
         if want and self._tz_unsub is None:
             for p in self._tz_pins:
-                board.input_listeners[p.id].append(self._tz_changed)
+                listen_input(self.chip, p, self._tz_changed)
             self._tz_unsub = board.subscribe(self._tz_pin_event)
         elif not want and self._tz_unsub is not None:
             for p in self._tz_pins:
-                lst = board.input_listeners.get(p.id)
-                if lst is not None and self._tz_changed in lst:
-                    lst.remove(self._tz_changed)
+                unlisten_input(self.chip, p, self._tz_changed)
             self._tz_unsub()
             self._tz_unsub = None
             self._cbc_pin = False

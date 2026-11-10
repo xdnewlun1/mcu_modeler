@@ -77,6 +77,7 @@ class CMP(GatedBlock):
         self.dma_source = int(params.get("dma_source", DMA_SOURCE + self.index))
         self.inputs: dict[int, float] = {}
         self.cout_listeners: list = []
+        self.flag_listeners: list = []          # cb(cmp) when CFR/CFF may have changed (LLWU module wake-up input)
         self.edges = 0
         self._irqn: int | None = None
         self._line = False
@@ -295,6 +296,8 @@ class CMP(GatedBlock):
             self.irq(self._irqn, on)
         if pend and dma:
             dma_request(self.chip, self.dma_source)
+        for cb in self.flag_listeners:
+            cb(self)
 
     # ------------------------------------------------------------ register hooks
     def _scr_read(self, blk, reg):

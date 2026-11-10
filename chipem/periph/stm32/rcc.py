@@ -16,7 +16,8 @@ different from the chip YAML, or chip.clock_override set by Session for --clock)
 `core_hz`, `apb1_hz`, `apb2_hz`, `timer_hz(bus)` are the derived values; `effective_apb_hz(bus)` /
 `effective_timer_hz(bus)` scale them to the clock the core actually runs at (what USART/TIM models use).
 Other models subscribe to clock-tree changes with `rcc.listeners.append(cb)` (cb() without arguments; also called when
-only PLL48CLK = PLLQ output starts, stops or changes) and to clock
+only PLL48CLK = PLLQ output or I2SCLK (`i2s_clk_hz()`: PLLI2S = PLL input / PLLM x PLLI2SN / PLLI2SR, or the
+I2S_CKIN pin frequency `params.i2s_ckin_hz` when CFGR.I2SSRC = 1) starts, stops or changes) and to clock
 gate changes with `rcc.gate_listeners.append(cb)` (cb(enr_name, old, new) after a write that changes an xxxENR).
 
 Clock gates: AHB1ENR/AHB2ENR/AHB3ENR/APB1ENR/APB2ENR; `clock_enabled(name)` / `check_gate(name, block)` (one
@@ -70,7 +71,7 @@ class RCC(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ctl = {"on_write": self._ctl_write}
-        ov: dict[str, dict] = {"CR": ctl, "PLLCFGR": ctl, "CFGR": ctl,
+        ov: dict[str, dict] = {"CR": ctl, "PLLCFGR": ctl, "CFGR": ctl, "PLLI2SCFGR": ctl,
                                "CSR": {"on_write": self._csr_write}, "BDCR": {"on_write": self._bdcr_write}}
         for r in _RST_REG.values():
             ov[r] = {"on_write": self._rstr_write}
@@ -78,7 +79,11 @@ class RCC(MMIOBlock):
             ov[r] = {"on_write": self._enr_write}
         r = build_regs((name, "RCC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        for rn in ("AHB2ENR", "AHB2RSTR"):        # CRYP (bit 4) / HASH (bit 5): F415/F417 bits the F405 SVD omits
+            if rn in self.regs:
+                self.regs[rn].ro_mask &= ~0x30
         self.ext_hz = float(params.get("ext_hz", 8_000_000))
+        self.i2s_ckin_hz = float(params.get("i2s_ckin_hz", 0.0))    # frequency on the I2S_CKIN pin (CFGR.I2SSRC=1)
         self.frozen = bool(params.get("frozen", False))
         self.listeners: list[Callable[[], None]] = []
         self.gate_listeners: list[Callable[[str, int, int], None]] = []    # cb(enr_name, old, new)
@@ -90,6 +95,7 @@ class RCC(MMIOBlock):
         self._warned: set[str] = set()
         self._logged: tuple | None = None
         self._pll48 = 0.0                       # PLL48CLK last reported to listeners (SDIO, USB)
+        self._i2s = 0.0                         # I2SCLK last reported to listeners (SPI2/SPI3 in I2S mode)
         self._powered = False
         self.pending_reset_flags = 0            # CSR flags the next reset sets (IWDG/WWDG/software)
 
@@ -170,6 +176,21 @@ class RCC(MMIOBlock):
         m, n = self._f("PLLCFGR", 0, 6), self._f("PLLCFGR", 6, 9)
         return self.pll_in_hz() / m * n / q if m >= 2 and n >= 2 else 0.0
 
+    def plli2s_hz(self) -> float:
+        """PLLI2S output PLLI2SCLK = PLL input / PLLM x PLLI2SN / PLLI2SR (RM0090 7.3.23; 0 while PLLI2S is off or the
+        dividers are invalid: N < 2, R < 2, M < 2)."""
+        if not self.get("CR") & PLLI2SRDY:
+            return 0.0
+        m = self._f("PLLCFGR", 0, 6)
+        n, r = self._f("PLLI2SCFGR", 6, 9), self._f("PLLI2SCFGR", 28, 3)
+        if m < 2 or n < 2 or r < 2:
+            return 0.0
+        return self.pll_in_hz() / m * n / r
+
+    def i2s_clk_hz(self) -> float:
+        """I2SCLK of SPI2/SPI3 in I2S mode: PLLI2SCLK (CFGR.I2SSRC = 0) or the I2S_CKIN pin (`i2s_ckin_hz`)."""
+        return self.i2s_ckin_hz if self._f("CFGR", 23, 1) else self.plli2s_hz()
+
     def src_hz(self, sws: int) -> float:
         return (HSI_HZ, self.ext_hz, self.pll_hz(), HSI_HZ)[sws & 3]
 
@@ -236,8 +257,9 @@ class RCC(MMIOBlock):
             enr = next(e for e, r in _RST_REG.items() if r == reg.name)
             for gname, (greg, bit) in GATES.items():
                 if greg == enr and rising >> bit & 1:
-                    blk2 = self.chip.peripherals.get(gname)
-                    if blk2 is not None and blk2 is not self:
+                    blk2 = self.chip.peripherals.get(gname) or next(
+                        (b for b in self.chip.peripherals.values() if getattr(b, "gate", None) == gname), None)
+                    if blk2 is not None and blk2 is not self:     # (by gate name: Ethernet_MAC has gate "ETH")
                         blk2.reset()
                         self.emit("info", block=self.name, msg=f"{gname} reset through RCC_{reg.name}")
         return None
@@ -262,13 +284,16 @@ class RCC(MMIOBlock):
         self.apb2_hz = self.core_hz / self.ppre(2)
         key = (round(self.core_hz), round(self.apb1_hz), round(self.apb2_hz), self.source)
         pll48 = self.pll_q_hz() if self.get("CR") & PLLRDY else 0.0
+        i2s = self.i2s_clk_hz()
         if key == self._logged:
-            if pll48 != self._pll48:                # PLL48CLK changed without a bus clock change
+            if pll48 != self._pll48 or i2s != self._i2s:    # PLL48CLK / I2SCLK changed without a bus clock change
                 self._pll48 = pll48
+                self._i2s = i2s
                 for cb in list(self.listeners):
                     cb()
             return
         self._pll48 = pll48
+        self._i2s = i2s
         self._logged = key
         chip = self.chip
         if chip is not None and getattr(chip, "clock_override", None):

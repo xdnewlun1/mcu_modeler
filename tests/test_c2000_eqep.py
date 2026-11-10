@@ -516,3 +516,28 @@ def test_chip_reset_cancels_events(chip):
     chip.reset()
     assert not [e for e in chip.sched.pending() if getattr(e.cb, "__self__", None) is blk]
     assert r(chip, Q1 + QEPCTL) == 0 and cnt(chip) == 0
+
+
+# ------------------------------------------------------------------------------------------------ sync output
+def test_position_compare_sync_output_on_index_pin(chip):
+    SOEN, SPSEL, PCPOL = 1 << 13, 1 << 12, 1 << 13
+    enable(chip, dec=SOEN)
+    assert chip.pins.get(I).direction == "out" and chip.pins.get(I).level() == "L"
+    w32(chip, Q1 + QPOSCMP, 2)
+    w(chip, Q1 + QPOSCTL, PCE_EN | 9)                               # PCSPW = 9: 4 x 10 SYSCLKOUT
+    edges(chip, [(A, "H")])
+    t0 = chip.now_cycles()
+    edges(chip, [(B, "H")], gap=1)
+    assert chip.pins.get(I).level() == "H"
+    chip.run_cycles(38)
+    assert chip.pins.get(I).level() == "H"
+    chip.run_cycles(4)
+    assert chip.pins.get(I).level() == "L"
+    assert chip.now_cycles() > t0
+    assert r32(chip, Q1 + QPOSCNT) == 2                              # own pulse is not an index event
+    w(chip, Q1 + QPOSCTL, PCE_EN | PCPOL | 9)                       # active low: idles high
+    assert chip.pins.get(I).level() == "H"
+    w(chip, Q1 + QDECCTL, SOEN | SPSEL)                              # move to the strobe pin
+    assert chip.pins.get(S).direction == "out" and chip.pins.get(I).direction == "in"
+    w(chip, Q1 + QDECCTL, 0)
+    assert chip.pins.get(S).direction == "in"

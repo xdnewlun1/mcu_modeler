@@ -27,6 +27,8 @@ def part(type_name: str) -> Callable[[type], type]:
 
 def _load() -> None:
     from . import encoder, i2c_eeprom, i2c_register_device, i2s_codec, std  # noqa: F401  (standard types)
+    from . import camera  # noqa: F401  (parallel camera, DVP hook)
+    from . import serial  # noqa: F401  (serial cable chain: adapter, transceiver, connectors, cable)
 
 
 def get(type_name: str) -> type:

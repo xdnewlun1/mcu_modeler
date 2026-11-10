@@ -1,6 +1,6 @@
-"""Kinetis LPTMR (low-power timer), time-counter mode.
+"""Kinetis LPTMR (low-power timer), time-counter and pulse-counter modes.
 
-CSR: TEN bit 0, TMS bit 1 (1 = pulse counter: unsupported, logged once), TFC bit 2 (1 = free-running),
+CSR: TEN bit 0, TMS bit 1 (1 = pulse counter), TFC bit 2 (1 = free-running),
 TPP bit 3, TPS bits 4-5, TIE bit 6, TCF bit 7 (write 1 to clear).  PSR: PCS bits 0-1 (0 MCGIRCLK, modelled as
 32.768 kHz; 1 LPO 1 kHz; 2 ERCLK32K 32.768 kHz; 3 OSCERCLK, modelled as 8 MHz), PBYP bit 2, PRESCALE bits 3-6
 (divide by 2^(PRESCALE+1) unless bypassed).  CMR (16 bit), CNR (16 bit, live).
@@ -10,7 +10,12 @@ Writing TEN=0 resets the counter and clears TCF.  Ticks are scheduled in the wal
 not depend on the core clock).  Like on silicon, only the first (power-on) reset clears it; warm resets
 (SYSRESETREQ, watchdog) leave it running.
 Trigger output: each compare match (TCF set) calls `trigger_listeners` cb(lptmr): PDB TRGSEL 14 and the ADC
-alternate trigger (SIM_SOPT7 ADCnTRGSEL 14).
+alternate trigger (SIM_SOPT7 ADCnTRGSEL 14). `flag_listeners` cb(lptmr) run when TCF/TIE may have changed (LLWU M0).
+Pulse-counter mode (TMS=1, RM 40.4.2, 3.8.4.2): CNR counts active edges of input TPS (0 = CMP0 output, 1 = the pin
+muxed to LPTMR0_ALT1, 2 = LPTMR0_ALT2, 3 reserved); TPP=0 rising, 1 falling edges. With PBYP=0 the glitch filter
+passes a change only after the input stayed at its new level for 2^PRESCALE prescaler clocks (PCS clock; PRESCALE=0
+is not supported by the filter and behaves as bypassed, one `warn`); the filter's sampling phase is not modelled.
+Compare match, TFC and TCF work as in time-counter mode.
 """
 from __future__ import annotations
 
@@ -45,10 +50,26 @@ class LPTMR(MMIOBlock):
         self._warned = False
         self._powered = False
         self.trigger_listeners: list = []          # cb(lptmr) at each compare match
+        self.flag_listeners: list = []             # cb(lptmr) when TCF/TIE may have changed
+        self._pulses = 0                           # pulse-counter CNR
+        self._in_level: dict[int, int] = {}        # pulse input -> last raw level
+        self._filt_ev = None
+        self._filt_from = None
+        self._filt_warned = False
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         self._irq = irq_number(chip, self.name) or irq_number(chip, "LPTMR0")
+        pins = getattr(chip, "pins", None)
+        base = self.name if self.name.startswith("LPTMR") else "LPTMR0"
+        if pins is not None:
+            for k in (1, 2):
+                sig = f"{base}_ALT{k}"
+                for p in pins.signal_pins(sig):
+                    pins.input_listeners[p.id].append(self._pin_cb(k, sig))
+        for b in chip.peripherals.values():
+            if getattr(b, "model", None) == "kinetis.cmp" and b.name == "CMP0":
+                b.cout_listeners.append(lambda _c, lvl: self._input(0, 1 if lvl else 0))
 
     def reset(self) -> None:
         # LPTMR is reset only by POR/LVD (RM): it keeps counting (and its IRQ line) through warm resets
@@ -56,6 +77,7 @@ class LPTMR(MMIOBlock):
             return
         self._powered = True
         self._cancel()
+        self._pulses = 0
         if self._line:
             self._set_line(False)
         super().reset()
@@ -77,6 +99,61 @@ class LPTMR(MMIOBlock):
         csr = self.get("CSR")
         return bool(csr & TEN) and not csr & TMS
 
+    def _counting_pulses(self) -> bool:
+        csr = self.get("CSR")
+        return bool(csr & TEN) and bool(csr & TMS)
+
+    # ------------------------------------------------------------------ pulse counter
+    def _pin_cb(self, k: int, sig: str):
+        def cb(pin):
+            if pin.owner != sig and sig not in str(pin.owner).split("/"):
+                return
+            lvl = pin.level()
+            if lvl in ("H", "L"):
+                self._input(k, 1 if lvl == "H" else 0)
+        return cb
+
+    def _input(self, k: int, level: int) -> None:
+        old = self._in_level.get(k)
+        self._in_level[k] = level
+        if old == level or not self._counting_pulses() or (self.get("CSR") >> 4) & 3 != k:
+            return
+        psr = self.get("PSR")
+        if psr & PBYP or not (psr >> 3) & 0xF:
+            if not psr & PBYP and not self._filt_warned:
+                self._filt_warned = True
+                self.emit("warn", block=self.name, msg=f"{self.name}: glitch filter with PRESCALE=0 is not supported "
+                          "(RM 40.3.2): input taken unfiltered")
+            self._filtered(k, level)
+            return
+        if self._filt_ev is not None:
+            self.chip.sched.cancel(self._filt_ev)        # the input changed back before the filter passed it
+            self._filt_ev = None
+            if old is not None and level == self._filt_from:
+                return
+        self._filt_from = old
+        clk = float(self.source_hz.get(psr & 3, 32768.0))
+        self._filt_ev = self.chip.sched.in_ns((1 << ((psr >> 3) & 0xF)) * 1e9 / clk, self._filter_pass, k, level)
+
+    def _filter_pass(self, k: int, level: int) -> None:
+        self._filt_ev = None
+        self._filtered(k, level)
+
+    def _filtered(self, k: int, level: int) -> None:
+        active_low = bool(self.get("CSR") & 0x08)          # TPP
+        if level != (0 if active_low else 1):
+            return
+        cmr = self.get("CMR") & 0xFFFF
+        hit = self._pulses == cmr
+        self._pulses = (self._pulses + 1) & 0xFFFF
+        if hit:
+            self.set("CSR", self.get("CSR") | TCF)
+            if not self.get("CSR") & TFC:
+                self._pulses = 0
+            self._update_line()
+            for cb in self.trigger_listeners:
+                cb(self)
+
     def _set_line(self, level: bool) -> None:
         if level != self._line:
             self._line = level
@@ -86,11 +163,15 @@ class LPTMR(MMIOBlock):
     def _update_line(self) -> None:
         csr = self.get("CSR")
         self._set_line(bool(csr & TCF) and bool(csr & TIE))
+        for cb in self.flag_listeners:
+            cb(self)
 
     def _ticks(self) -> int:
         return int((now_ns(self.chip) - self._start_ns) / self._tick_ns + 1e-6)
 
     def cnr(self) -> int:
+        if self._counting_pulses():
+            return self._pulses
         if not self._running() or self._tick_ns <= 0:
             return 0
         return self._ticks() & 0xFFFF
@@ -127,9 +208,11 @@ class LPTMR(MMIOBlock):
 
     # ------------------------------------------------------------------ hooks
     def _csr_write(self, blk, reg, old, new):
-        if new & TEN and new & TMS and not self._warned:
-            self._warned = True
-            self.emit("warn", block=self.name, msg=f"{self.name}: pulse-counter mode (TMS=1) is not modelled")
+        if (old ^ new) & TEN or ((old ^ new) & TMS and new & TEN):
+            self._pulses = 0
+            if self._filt_ev is not None:
+                self.chip.sched.cancel(self._filt_ev)
+                self._filt_ev = None
         if (old ^ new) & TEN:
             if new & TEN:
                 self.set("CSR", new)

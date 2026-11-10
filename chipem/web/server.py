@@ -26,6 +26,10 @@ Data extraction:
                                    matches the row `time \t [chip \t] kind \t desc` exactly as the browser's
                                    filter does, and `.txt` is those rows.
   GET  /api/uart?uart=X&since=N&format=json|txt   output after byte offset N (txt: attachment)
+  GET  /api/hostserial             host serial bridges {realtime: {enabled, speed, lag_ms, max_lag_ms, ratio, ...},
+                                   endpoints: [{name, transport, path, connected, line, bytes_in, bytes_out,
+                                   dropped, dropped_out, ...}]} (chipem/hostserial.py; also state.host)
+  POST /api/realtime {on, speed?}  real-time pacing on/off and speed factor (Session.set_realtime)
   POST /api/adc {channel, value}   analog input: JSON int / "2048" = raw code; JSON float / "1.65V" / "1200mV" = volts
                                    (session.parse_adc_value; volts only for `adc_volts` models)
 
@@ -229,7 +233,7 @@ class Worker:
                 self.last_stop = "DONE"
                 self._publish(force=True)
                 return
-        if self.realtime:
+        if self.realtime and getattr(s, "pacer", None) is None:     # (a pacing session paces itself)
             wall = time.monotonic()
             if self._rt_anchor is None:
                 self._rt_anchor = (wall, now)
@@ -311,7 +315,12 @@ class Worker:
         st["run_target_ns"] = self.run_target_ns
         st["last_stop"] = self.last_stop
         st["error"] = self.error
-        st["realtime"] = self.realtime
+        st["realtime"] = self.realtime or getattr(s, "pacer", None) is not None
+        if hasattr(s, "host_status"):
+            try:
+                st["host"] = jsonable(s.host_status())     # host serial bridges + real-time lag (/api/hostserial)
+            except Exception:
+                pass
         try:
             st["uart_out_len"] = {u: len(s.uart_output(u)) for u in self._uarts()}
         except Exception:
@@ -841,6 +850,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({**snap.get("state", {}), "pins": snap.get("pins", []),
                                    "pins_version": snap.get("pins_version", 0),
                                    "version": snap.get("version", 0), "event_seq": snap.get("event_seq", 0)})
+            if path == "/api/hostserial":           # host serial bridges and real-time pacing (snapshot)
+                st = app.worker.snapshot.get("state", {})
+                return self._json(st.get("host") or {"realtime": {"enabled": False}, "endpoints": []})
             if path == "/api/events":
                 since = int(qs.get("since", ["0"])[0] or 0)
                 kinds = qs.get("kinds", [None])[0]
@@ -1047,6 +1059,20 @@ class _Handler(BaseHTTPRequestHandler):
                     val = parse_adc_value(str(raw))
                 w.call(lambda: s.set_adc(ch, val))
                 return self._json({"ok": True, "channel": ch, "value": val})
+            if path == "/api/realtime":             # {on: bool, speed?: float} real-time pacing (Session.set_realtime)
+                on = body.get("on", True)
+                on = on if isinstance(on, bool) else str(on).strip().lower() in ("1", "true", "yes", "on")
+                speed = body.get("speed")
+                speed = None if speed in (None, "") else float(speed)
+                if speed is not None and (not math.isfinite(speed) or speed <= 0):
+                    raise ValueError("speed must be a finite number > 0")
+
+                def fn():
+                    w.s.set_realtime(on, speed)
+                    w.realtime = on
+                    w._rt_anchor = None
+                    return w.s.host_status()["realtime"]
+                return self._json({"ok": True, "realtime": w.call(fn)})
             if path in ("/api/net", "/api/net/rename", "/api/net/remove", "/api/link", "/api/link/remove",
                         "/api/part", "/api/part/set", "/api/part/remove", "/api/part/port"):
                 return self._json({"ok": True, **w.call(lambda: self._wiring(path, body))})

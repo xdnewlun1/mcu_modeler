@@ -122,6 +122,17 @@ Documents used for `mk22fn1m0vll12.yaml` / `mk22fx512vll12.yaml` (PDFs in the ch
 - Ball numbering (UFBGA176, WLCSP90): `num` = row-major index over the existing balls (rows without I/O), `ball:` =
   the ball name. `tools/pin_table_check.py chips/stm32f407igh.yaml --expect 201` (176 + 25 balls).
 
+## STM32F415ZG / STM32F417ZG (`chips/stm32f415zg.yaml`, `chips/stm32f417zg.yaml`)
+
+The F415/F417 are the F405/F407 with the cryptographic processor (CRYP) and hash processor (HASH) bonded out (same die,
+DEV_ID 0x413; DS8597 shares the package pinouts and alternate functions of DS8626). `stm32f415zg.yaml` only includes
+`stm32f405zg.yaml` and overrides the name; `stm32f417zg.yaml` is `stm32f407zg.yaml` with the name and header changed (an
+include is one level deep, so it cannot include the F407 variant). The CRYP / HASH entries of the base file carry
+`params: {only: [STM32F415, STM32F417]}`: on other part names the `stm32.cryp` / `stm32.hash` models stay inactive
+stubs (`_util.part_present` / `make_absent`). Both files pass `tools/pin_table_check.py` with 0 errors; they are not in
+`tests/test_stm32_variants.py` (covered by `tests/test_stm32_cryp_hash.py`). The F405 SVD omits RCC AHB2ENR/AHB2RSTR
+bits 4/5 (CRYPEN/HASHEN, CRYPRST/HASHRST); `stm32.rcc` makes them writable.
+
 ## svd2chip usage
 
 ```

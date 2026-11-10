@@ -23,6 +23,8 @@ _DEFAULT_LINE = {0: "1.7", 1: "INT13", 2: "INT14"}
 
 @register("ti_c2000.cputimer")
 class CpuTimer(C2000Block):
+    cycle_anchors = ("_c0",)
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         self.index = int(params.get("index", name[-1] if name[-1].isdigit() else 0))

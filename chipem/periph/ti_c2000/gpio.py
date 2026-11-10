@@ -81,6 +81,7 @@ class GPIO(C2000Block):
         self._qev: dict[str, Any] = {}
         self._pos: dict[str, tuple[str, int]] = {}
         self.qual_listeners: dict[str, list] = {}          # pin id -> [cb(pin, qualified level)] (XINT)
+        self.periph_listeners: dict[str, list] = {}        # pin id -> [cb(pin)] peripheral inputs (_util.listen_input)
         # pin-discovery counters (kept across resets)
         self.n_reads = {p: 0 for p in PORTS}
         self.writes = {p: [0] * 32 for p in PORTS}
@@ -109,6 +110,19 @@ class GPIO(C2000Block):
                 self._rep = None
         self._xint = find_model(chip, "ti_c2000.xint")
 
+    def owns_pin(self, pin: Any) -> bool:
+        return pin is not None and pin.id in self._pos or (
+            pin is not None and str(getattr(pin, "port", "") or "").upper() in PORTS and getattr(pin, "bit", None)
+            is not None)
+
+    def _periph_notify(self, pin: Any) -> None:
+        """Deliver a (qualified) input change to the peripheral inputs on the pin; a block whose SYSCLKOUT is stopped
+        (STANDBY/HALT) does not see it."""
+        for cb in list(self.periph_listeners.get(pin.id) or ()):
+            if getattr(getattr(cb, "__self__", None), "clk_stopped", False):
+                continue
+            cb(pin)
+
     def _make_invalidator(self, port: str):
         def inv(pin: Any = None, _p=port) -> None:
             if pin is not None and pin.id in self._qlvl:
@@ -121,6 +135,8 @@ class GPIO(C2000Block):
                     lvl = pin.level()
                     for cb in list(cbs):
                         cb(pin, lvl)
+                if pin.id in self.periph_listeners:
+                    self._periph_notify(pin)
         return inv
 
     # ------------------------------------------------------------------ input qualification (SPRUI07 1.4.4)
@@ -165,6 +181,8 @@ class GPIO(C2000Block):
         self._dat[self._pos[pin.id][0]] = None
         for cb in list(self.qual_listeners.get(pin.id) or ()):
             cb(pin, lvl)
+        if pin.id in self.periph_listeners:
+            self._periph_notify(pin)
 
     def _qual_write(self, blk, reg, old, new):
         self._store(reg, new)
@@ -188,6 +206,8 @@ class GPIO(C2000Block):
                 if lvl != old:
                     for cb in list(self.qual_listeners.get(pin.id) or ()):
                         cb(pin, lvl)
+                    if pin.id in self.periph_listeners:
+                        self._periph_notify(pin)
         self._dat[port] = None
 
     def reset(self) -> None:

@@ -328,6 +328,8 @@ class SCI(UartRx, C2000Block):
         sc = self._sysctrl
         if self.gate is not None and sc is not None and not sc.clock_enabled(self.gate):
             return "clock_gated"
+        if self.clk_stopped:
+            return "clock_stopped"                  # STANDBY / HALT: LSPCLK is off
         c1 = self.get("SCICTL1")
         if not c1 & SWRESET or not self.get("SCIFFTX") & SCIRST:
             return "reset"

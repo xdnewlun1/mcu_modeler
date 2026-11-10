@@ -1,0 +1,29 @@
+# An STM32F407ZG captures frames from a parallel camera (DCMI, hardware synchronisation, 8-bit data, DMA2 Stream1).
+#   A (STM32F407ZG, 16 MHz HSI) runs dcmi_capture: a full 80x60 snapshot, a cropped 40x30 snapshot and continuous
+#     capture of every other frame; prints the byte sums and the frame count on USART1 (PA9).
+#   CAM (camera part): 80x60 8-bit grayscale `bars` test pattern, 2 MHz pixel clock, 40 clocks of horizontal and
+#     4 lines of vertical blanking (one frame every 3.84 ms); VSYNC high / HSYNC low during blanking.
+# Run:   chipem run --board boards/stm32f407_dcmi_camera.yaml --for 50ms
+#        chipem serve --board boards/stm32f407_dcmi_camera.yaml
+# Build: firmware/samples_stm32/build.sh
+name: stm32f407_dcmi_camera
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f407zg, firmware: ../firmware/samples_stm32/build/dcmi_capture.elf}
+nets:
+  - {name: PIXCLK, pins: [A.PA6]}
+  - {name: HSYNC, pins: [A.PA4]}
+  - {name: VSYNC, pins: [A.PB7]}
+  - {name: D0, pins: [A.PC6]}
+  - {name: D1, pins: [A.PC7]}
+  - {name: D2, pins: [A.PC8]}
+  - {name: D3, pins: [A.PC9]}
+  - {name: D4, pins: [A.PE4]}
+  - {name: D5, pins: [A.PB6]}
+  - {name: D6, pins: [A.PE5]}
+  - {name: D7, pins: [A.PE6]}
+parts:
+  - {id: CAM, type: camera, width: 80, height: 60, bits: 8, format: gray, pattern: bars, pixclk: 2000000, hblank: 40,
+     vblank: 4, hsync_blank: L, vsync_blank: H,
+     ports: {pixclk: PIXCLK, hsync: HSYNC, vsync: VSYNC, d0: D0, d1: D1, d2: D2, d3: D3, d4: D4, d5: D5, d6: D6,
+             d7: D7}}

@@ -147,6 +147,33 @@ def _split_adc(spec: str) -> tuple[str, int | float]:
     return ch.strip(), parse_adc_value(v)
 
 
+def _ep_port(ep):
+    """The HostPort of a host endpoint (UartBridge.port or a part's host_port), or None."""
+    p = getattr(ep, "host_port", None)
+    return p if p is not None else getattr(ep, "port", None)
+
+
+def _host_serial_entry(h: dict, base) -> tuple[str, str]:
+    """Board YAML host_serial entry -> (uart, transport spec): {uart: A.UART0, pty: /tmp/ttyK22 | true} |
+    {uart, port: /dev/ttyUSB0, baud: 115200, format: 8N1} | {uart, tcp: 5555}."""
+    uart = str(h["uart"])
+    if "pty" in h:
+        v = h["pty"]
+        return uart, "pty" if v in (None, True, "", "auto") else f"pty:{v}"
+    if "tcp" in h:
+        return uart, f"tcp:{h['tcp']}"
+    if "port" in h:
+        spec = f"serial:{h['port']}"
+        if h.get("baud") is not None:
+            spec += f":{int(float(h['baud']))}"
+            if h.get("format"):
+                spec += f":{h['format']}"
+        return uart, spec
+    if "memory" in h:
+        return uart, "memory"
+    raise ValueError(f"board: host_serial entry {h!r} needs one of pty, port, tcp")
+
+
 class ChipContext:
     """The per-chip half of a Session: the Chip, its firmware image and the user's per-chip state.
 
@@ -283,6 +310,11 @@ class Session:
         self.pin_scope: str | None = None          # restrict pin_table() to one chip (web UI)
         self.running = False
         self._run_lock = threading.Lock()
+        # host serial bridges (chipem/hostserial.py) and real-time pacing (chipem/realtime.py)
+        self.host_bridges: list = []               # UartBridge: a host port wired to a UART (--uart-pty/port/tcp)
+        self.pacer = None                          # chipem.realtime.RealTime while real-time pacing is on
+        self._wake = threading.Event()             # set by host I/O threads and stop(): wakes a waiting paced run
+        self._pace_stop = False
 
     # per-chip attributes of the view chip (backwards compatible single-chip API)
     chip = _ctx_prop("chip", "the view chip (first chip of a board)")
@@ -327,6 +359,8 @@ class Session:
             s.attach_spi_flash(spec)
         for spec in g("sd_card", None) or []:
             s.attach_sd_card(spec)
+        if g("eth_pcap", None) or g("eth_host", None):
+            s.eth_link(pcap=g("eth_pcap", None), host=g("eth_host", None))
         for spec in g("part", None) or []:
             s.add_part_spec(spec)
         for spec in g("set", None) or []:
@@ -339,6 +373,22 @@ class Session:
         for spec in g("adc", None) or []:
             ch, v = _split_adc(spec)
             s.set_adc(ch, v)
+        from .hostserial import parse_bridge_arg
+        for kind, opt in (("pty", "uart_pty"), ("serial", "uart_port"), ("tcp", "uart_tcp")):
+            for spec in g(opt, None) or []:
+                s.attach_host_serial(*parse_bridge_arg(kind, spec))
+        for spec in g("usb_host", None) or []:                 # chipem/usbbus.py: plug a USB port into a host
+            s.attach_usb_host(spec)
+        for spec in g("usb_cdc", None) or []:                  # the CDC-ACM port to a PC endpoint (PTY/TCP/serial)
+            s.attach_usb_cdc(spec)
+        for link in g("usb_cdc_pty", None) or []:
+            s.attach_usb_cdc(f"pty:{link}" if link else "pty")
+        rt = g("realtime", None)
+        speed = g("speed", None)
+        if rt is not None or speed is not None:
+            s.set_realtime(rt if rt is not None else True, speed)
+        elif s.pacer is None and s.host_endpoints(transport_only=True):
+            s.set_realtime(True)                   # interactive host bridge: lock virtual time to the wall clock
         s._vcd_parts()
         return s
 
@@ -368,6 +418,18 @@ class Session:
         for ln in bd.links:
             if ln.type == "can":
                 brd.add_can_link(ln.nodes, name=ln.name, host=ln.host)
+            elif ln.type == "eth":
+                o = ln.options
+                brd.add_eth_link([(c, p, ph) for (c, p), ph in zip(ln.nodes, o.get("phy") or [{}] * len(ln.nodes))],
+                                 name=ln.name, host=o.get("host"), pcap=o.get("pcap"), caps=o.get("caps"),
+                                 inject=o.get("inject"))
+            elif ln.type == "usb":
+                ul = brd.add_usb_link(ln.a, name=ln.name, options=ln.options)
+                for key, kind in (("cdc_pty", "pty"), ("cdc_tcp", "tcp"), ("cdc_serial", "serial")):
+                    v = ln.options.get(key)
+                    if v not in (None, False, "", "false", "no", "off"):
+                        s.attach_usb_cdc(kind if v is True or v in ("true", "yes", "on") else f"{kind}:{v}",
+                                         port=ul.name)
             else:
                 brd.add_uart_link(ln.a, ln.b, bidir=ln.bidir)
         for ps in bd.parts:
@@ -381,6 +443,13 @@ class Session:
                 s.attach_spi_flash(spi_flash_spec(d), chip=d.chip)
         for st in bd.stimulus:
             s.apply_stimulus(st)
+        for h in getattr(bd, "host_serial", None) or []:
+            s.attach_host_serial(*_host_serial_entry(h, bd.path))
+        rt = getattr(bd, "realtime", None)
+        if rt is not None and rt is not False:
+            s.set_realtime(True, None if rt is True else float(rt))
+        elif rt is None and s.host_endpoints(transport_only=True):
+            s.set_realtime(True)                   # PC software on a host port: lock to the wall clock
         s._vcd_parts()
         return s
 
@@ -480,6 +549,40 @@ class Session:
         ctx.devices.append(dev)
         return dev
 
+    def eth_link(self, *, pcap: str | None = None, host: str | dict | None = None):
+        """Ethernet segment for --eth-pcap / --eth-host (chipem.ethernet): the board's first `eth` link, or a new
+        segment joining every Ethernet MAC of the session's chips (a single chip gets a one-chip board).  `pcap` starts
+        a capture file; `host` ("ip=..,ping=..,count=..,interval=..,start=..,mac=..") adds a host node."""
+        from .ethernet import eth_blocks
+        if isinstance(host, str):
+            host = dict(kv.split("=", 1) for kv in host.split(",") if kv.strip())
+            for k in ("count", "size"):
+                if k in host:
+                    host[k] = int(host[k], 0)
+        phy = {}
+        for k, k2 in (("phy", "model"), ("phy_addr", "addr"), ("aneg", "aneg")):
+            if host and k in host:
+                phy[k2] = host.pop(k)
+        brd = self.ensure_board()
+        for ctx in self.ctxs.values():
+            for m in (eth_blocks(ctx.chip).values() if phy else ()):
+                m.phy.configure(**phy)
+        if brd.eth_links:
+            link = brd.eth_links[0]
+            if pcap:
+                link.segment.set_pcap(pcap)
+                link.pcap_path = pcap
+            if host:
+                h = dict(host)
+                link.host = link.segment.add_host(str(h.pop("name", "HOST")), **h)
+                link.host.start_pending()
+                link.host_opts = dict(host)
+            return link
+        nodes = [(cid, n, {}) for cid, ctx in self.ctxs.items() for n in eth_blocks(ctx.chip)]
+        if not nodes:
+            raise ValueError("no Ethernet MAC on this chip (STM32F407/F417 have one)")
+        return brd.add_eth_link(nodes, pcap=pcap, host=host)
+
     def attach_sram(self, spec: str, chip: str | None = None):
         """Attach a parallel SRAM to an external bus: "[CHIP.]XINTF6:size=256K,width=16,file=img.bin"
         (chipem.devices.sram; the bus is any peripheral with `attach_memory`)."""
@@ -538,9 +641,151 @@ class Session:
                 fw()
 
     def run_for(self, ns: float) -> StopReason:
+        fn = self.board.run_for if self.board is not None else self.chip.run_for
+        if self.pacer is not None or self.host_endpoints():
+            return self._run(self._run_paced, fn, float(ns))
+        return self._run(fn, float(ns))
+
+    def _run_paced(self, fn, ns: float) -> StopReason:
+        """Run in slices, pumping host serial endpoints between them; with real-time pacing on, lock virtual time
+        to the wall clock (chipem/realtime.py)."""
+        from .realtime import run_paced
+        self._pace_stop = False
+        rt = self.pacer
+        if rt is not None:
+            rt.wake = self._wake
+
+        def stopped() -> bool:
+            if self._pace_stop:
+                self._pace_stop = False
+                return True
+            return False
+        return run_paced(self, ns, rt, fn, self._pump_hosts, stopped)
+
+    # ------------------------------------------------------------------ host serial bridges / real time
+    def host_endpoints(self, transport_only: bool = False) -> list:
+        """Host serial endpoints: direct UART bridges and board parts bound to a host port (usb_serial_adapter).
+        `transport_only`: only those with an OS transport (PTY, serial, TCP), not in-memory ones."""
+        eps = list(self.host_bridges)
         if self.board is not None:
-            return self._run(self.board.run_for, float(ns))
-        return self._run(self.chip.run_for, float(ns))
+            eps += [p for p in self.board.parts.values() if hasattr(p, "pump") and hasattr(p, "host_port")]
+        if transport_only:
+            eps = [e for e in eps if getattr(_ep_port(e), "kind", "memory") != "memory"]
+        return eps
+
+    def _pump_hosts(self) -> None:
+        for ep in self.host_endpoints():
+            port = _ep_port(ep)
+            if port is not None and self._wake.set not in port.listeners:
+                port.listeners.append(self._wake.set)
+            ep.pump()
+
+    def attach_host_serial(self, uart: str, transport: str):
+        """Wire a host port straight to a UART (TTL level): `transport` "pty[:LINK]", "tcp:[HOST:]PORT",
+        "serial:DEVICE[:BAUD[:8N1]]", "memory". Returns the UartBridge (its `port` is the HostPort)."""
+        from .hostserial import UartBridge, open_port
+        ctx, name, blk = self._uart_block(uart)
+        if not hasattr(blk, "tx_listeners"):
+            raise ValueError(f"{name} is not a UART model with link hooks")
+        for b in self.host_bridges:
+            if b.blk is blk:
+                raise ValueError(f"{ctx.id}.{name} already has a host serial bridge ({b.port.describe()})")
+        port = open_port(transport)
+        if port is None:
+            raise ValueError(f"host serial {uart}: no transport given")
+        br = UartBridge(ctx.chip, blk, port, label=f"{ctx.id}.{name}" if self.board is not None else name)
+        port.listeners.append(self._wake.set)
+        self.host_bridges.append(br)
+        ctx.chip.log.event("info", ctx.chip.clock.now_ns(), block=name,
+                           msg=f"host serial: {br.label} <-> {port.kind} {port.describe()}")
+        return br
+
+    # ------------------------------------------------------------------ USB host (chipem/usbbus.py)
+    def usb_links(self) -> list:
+        return list(getattr(self.board, "usb_links", []) if self.board is not None else [])
+
+    def attach_usb_host(self, spec: str | None = None, chip: str | None = None):
+        """Plug a USB device port into an emulated PC host: "[CHIP.]PORT[:key=value,...]" (PORT e.g. OTG_FS, USB0,
+        empty = the chip's first port; keys as the board `usb` link `host:` options, e.g. debounce=10ms,
+        cdc_send=hello\\r\\n, cdc_send_at=200ms).  Returns the UsbLink (`.host` is the UsbHost)."""
+        from .usbbus import host_options
+        spec = str(spec or "")
+        port, _, opts = spec.partition(":")
+        if chip is not None:
+            ctx = self._ctx(chip)
+        elif port:
+            ctx, port = self.resolve(port)
+        else:
+            ctx = self.ctxs[self.view]
+        o: dict[str, str] = {}
+        for kv in filter(None, opts.split(",")):
+            k, eq, v = kv.partition("=")
+            if not eq:
+                raise ValueError(f"bad --usb-host option {kv!r} (expected KEY=VALUE)")
+            o[k.strip()] = v.strip()
+        name = ctx.chip.find_usb(port or None) if hasattr(ctx.chip, "find_usb") else None
+        if name is None:
+            raise ValueError(f"no USB device port {port or ''!r} on {ctx.id} "
+                             f"(ports: {', '.join(ctx.chip.usb_blocks()) or 'none'})")
+        brd = self.ensure_board()
+        return brd.add_usb_link((ctx.id, name), options=host_options(o, "--usb-host"))
+
+    def attach_usb_cdc(self, spec: str, port: str | None = None):
+        """Bind the CDC-ACM function of a USB link to a host PC endpoint: "[PORT=]TRANSPORT" with TRANSPORT "pty",
+        "pty:/tmp/link", "tcp:5555", "serial:/dev/ttyUSB1" or "memory" (chipem.hostserial).  The link is created with
+        default host options when the port has none yet.  Returns the UsbCdcBridge (its `port` is the HostPort)."""
+        from .hostserial import open_port
+        from .usbbus import UsbCdcBridge
+        spec = str(spec).strip()
+        if "=" in spec and not spec.split("=", 1)[0].lower().startswith(("pty", "tcp", "serial", "memory")):
+            port, spec = spec.split("=", 1)
+        if spec.isdigit():
+            spec = f"tcp:{spec}"
+        link = None
+        for ln in self.usb_links():
+            if port is None or port.upper() in (ln.port.upper(), f"{ln.chip_id}.{ln.port}".upper(), ln.name.upper()):
+                link = ln
+                break
+        if link is None:
+            link = self.attach_usb_host(port)
+        hp = open_port(spec or "pty")
+        if hp is None:
+            raise ValueError("usb cdc: no transport given")
+        label = f"{link.chip_id}.{link.port} CDC" if len(self.ctxs) > 1 else f"{link.port} CDC"
+        br = UsbCdcBridge(link.host, hp, label=label, blk=link.block)
+        link.endpoint = br
+        hp.listeners.append(self._wake.set)
+        self.host_bridges.append(br)
+        chip = link.block.chip
+        chip.log.event("info", chip.clock.now_ns(), block=link.port,
+                       msg=f"usb cdc: {br.label} <-> {hp.kind} {hp.describe()}")
+        return br
+
+    def set_realtime(self, on: bool = True, speed: float | None = None) -> None:
+        """Real-time pacing on/off; `speed` = virtual seconds per wall second (1.0 = real time)."""
+        if not on:
+            self.pacer = None
+            self._wake.set()
+            return
+        from .realtime import RealTime
+        if self.pacer is None:
+            self.pacer = RealTime(speed if speed is not None else 1.0)
+        elif speed is not None:
+            self.pacer.set_speed(speed)
+        self._wake.set()
+
+    def host_status(self) -> dict:
+        """{realtime: {...} | {enabled: False}, endpoints: [info, ...]} for UIs (emulation thread)."""
+        rt = self.pacer
+        return {"realtime": rt.info() if rt is not None else {"enabled": False},
+                "endpoints": [ep.info() for ep in self.host_endpoints()]}
+
+    def close_hosts(self) -> None:
+        for ep in self.host_endpoints():
+            try:
+                (ep.close_host if hasattr(ep, "close_host") else ep.close)()
+            except Exception:
+                pass
 
     def run_cycles(self, n: int) -> StopReason:
         if self.board is not None:          # cycles of the view chip, converted to board time
@@ -554,6 +799,8 @@ class Session:
     def stop(self) -> None:
         """Thread-safe: ask a running run_for/run_cycles to return early (StopReason.USER)."""
         if self.running:
+            self._pace_stop = True                 # a paced run waiting for the wall clock
+            self._wake.set()
             if self.board is not None:
                 self.board.stop()
             else:
@@ -827,6 +1074,7 @@ class Session:
             self._flush_waves(stopped_only=False)
         except Exception:
             pass
+        self.close_hosts()                          # host serial ports (PTY, serial, TCP)
         for ctx in self.ctxs.values():
             for dev in ctx.devices:
                 save = getattr(dev, "save_image", None)      # SD card write-back (chipem.devices.sdcard)

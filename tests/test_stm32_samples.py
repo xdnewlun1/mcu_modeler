@@ -492,3 +492,24 @@ def test_i2c_slave_sample_answers_a_master_on_the_same_bus():
     # the slave's ISR fills DR one byte ahead (TxE after each byte moves to the shift register): 4 sent + 1
     assert s.uart_output("USART1").decode() == "SLAVE READY\r\nSLAVE RX 04:4B32\r\nSLAVE TX 05\r\n"
     s.close()
+
+
+def test_stop_rtc_wakeup_sample_stop_standby_and_sbf():
+    """firmware/samples_stm32/stop_rtc_wakeup.c: three Stop entries woken by the RTC wakeup timer every 0.5 s (exit on
+    HSI with the PLL off), then Standby, whose RTC wake-up resets the chip with PWR_CSR.SBF/WUF set."""
+    elf = BUILD / "stop_rtc_wakeup.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    s.run_for(2.2e9)
+    out = s.uart_output("USART1").decode()
+    assert out == ("boot\r\n" + "".join(f"stop {n} woke on HSI, PLL off\r\n" for n in (1, 2, 3))
+                   + "standby\r\nstandby wake-up (SBF WUF)\r\n"), out
+    pwr = s.chip.peripherals["PWR"]
+    assert pwr.entries["stop"] >= 4 and pwr.entries["standby"] == 1
+    exits = [e.t_ns for e in s.chip.log if e.kind == "info" and "exit Stop" in e.fields.get("msg", "")]
+    assert [b - a for a, b in zip(exits, exits[1:])] == [pytest.approx(0.5e9, abs=1e3)] * 2
+    rs = [(e.get("reason"), e.t_ns) for e in s.chip.log if e.kind == "reset"]
+    assert rs[-1][0] == "standby_wakeup" and rs[-1][1] == pytest.approx(exits[-1] + 0.5e9, abs=1e3)
+    assert not [e for e in s.chip.log if e.kind in ("warn", "fault")]
+    s.close()

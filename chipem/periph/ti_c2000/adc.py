@@ -49,7 +49,7 @@ import re
 from typing import Any
 
 from ..registry import register
-from ._util import C2000Block, build_regs, find_model, irq_line
+from ._util import C2000Block, build_regs, find_model, irq_line, listen_input, unlisten_input
 
 SOC_SEQ1, RST_SEQ1, INT_ENA_SEQ1, INT_MOD_SEQ1, EPWM_SOCA_SEQ1, EXT_SOC_SEQ1 = \
     1 << 13, 1 << 14, 1 << 11, 1 << 10, 1 << 8, 1 << 7
@@ -265,14 +265,12 @@ class ADC(C2000Block):
         if want and not self._ext_pins:
             self._ext_pins = [p for p in (board.gpio("A", i) for i in range(32)) if p is not None]
             for p in self._ext_pins:
-                board.input_listeners[p.id].append(self._ext_changed)
+                listen_input(self.chip, p, self._ext_changed)
             src = self._ext_src()
             self._ext_level = src is not None and src.level() == "H"
         elif not want and self._ext_pins:
             for p in self._ext_pins:
-                lst = board.input_listeners.get(p.id)
-                if lst is not None and self._ext_changed in lst:
-                    lst.remove(self._ext_changed)
+                unlisten_input(self.chip, p, self._ext_changed)
             self._ext_pins = []
 
     def _ext_src(self) -> Any:

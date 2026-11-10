@@ -654,7 +654,7 @@ def test_pwm_pin_wave_in_state_and_events_bounded():
         kinds = [e["kind"] for e in evs]
         assert "reset" in kinds and "info" in kinds
         assert kinds.count("pin") < 4000                         # 300 ms of 2 x 20 kHz = 24,000 edges
-        waves = [e for e in evs if e.get("field") == "wave"]
+        waves = [e for e in evs if e.get("field") == "wave" and e.get("pin") != "XCLKOUT"]   # XCLKOUT: always-on clock
         assert waves and "wave" in waves[0]["desc"] and "kHz" in waves[0]["desc"]
     finally:
         a.stop()
@@ -672,3 +672,32 @@ def test_api_adc_codes_and_volts(app):
     assert code == 400 and "volts" in str(r)
     code, r = post(app, "/api/adc", {"channel": "ADC0_SE14", "value": "1.65V"})
     assert code == 400 and "raw" in str(r)
+
+
+# ---- host serial bridges + real-time pacing (chipem/hostserial.py, chipem/realtime.py) ---------------------------
+def test_hostserial_endpoint_and_realtime_toggle():
+    s = Session("mk22fn1m0vll12", BLINKY)
+    br = s.attach_host_serial("UART0", "memory")
+    a = WebApp(s, "127.0.0.1", 0).start()
+    try:
+        h = get_json(a, "/api/hostserial")
+        assert h["realtime"]["enabled"] is False
+        assert [e["name"] for e in h["endpoints"]] == ["UART0"] and h["endpoints"][0]["transport"] == "memory"
+        assert {"connected", "bytes_in", "bytes_out", "dropped", "dropped_out", "line"} <= set(h["endpoints"][0])
+        code, r = post(a, "/api/realtime", {"on": True, "speed": 2})
+        assert code == 200 and r["realtime"]["enabled"] and r["realtime"]["speed"] == 2
+        st = get_json(a, "/api/state")
+        assert st["realtime"] is True and st["host"]["realtime"]["speed"] == 2
+        br.port.host_send(b"abc")                       # blinky never enables UART0: dropped, counted
+        code, _ = post(a, "/api/run", {"ms": 20})
+        assert code == 200
+        assert wait_for(lambda: get_json(a, "/api/hostserial")["endpoints"][0]["bytes_in"] == 3)
+        code, r = post(a, "/api/realtime", {"on": False})
+        assert code == 200 and r["realtime"]["enabled"] is False
+        code, r = post(a, "/api/realtime", {"on": True, "speed": -1})
+        assert code == 400
+        html = get(a, "/")[2].decode()
+        assert 'id="hostSerWrap"' in html and 'id="rtOn"' in html
+    finally:
+        a.stop()
+        s.close()

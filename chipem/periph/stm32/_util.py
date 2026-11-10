@@ -194,6 +194,49 @@ def exti_input(chip: Any, line: int, level: bool) -> None:
     ex.line_event(line, bool(level))
 
 
+def part_present(chip: Any, params: dict | None) -> bool:
+    """Is a block that exists only on some members of the die family bonded out on this chip?  `params.only` lists
+    part-name prefixes ("STM32F407", "STM32F417"): the block is present when the chip YAML name starts with one of
+    them (no `only`: always present).  F405/F407/F415/F417 share one die and one base chip YAML
+    (chips/stm32f405zg.yaml), so Ethernet / DCMI (F407/F417) and CRYP / HASH (F415/F417) are gated this way."""
+    only = (params or {}).get("only")
+    if not only:
+        return True
+    if isinstance(only, str):
+        only = [only]
+    name = str(getattr(getattr(chip, "desc", None), "name", "") or "").upper()
+    return any(name.startswith(str(p).upper()) for p in only)
+
+
+def make_absent(block: MMIOBlock, what: str) -> None:
+    """Turn a model into the behaviour of the `stub` model (RAM-like storage, first touch of each word logged as an
+    unmodelled access) because the peripheral is not present on this part; the first access logs one `warn`.  Call
+    from attach(); the model must skip its own behaviour while `block.absent` is True."""
+    block.absent = True
+    block.regs = {}
+    block._by_off = {}
+    block.ram_like = True
+    block.mem[:] = bytes(len(block.mem))
+    name = getattr(getattr(block.chip, "desc", None), "name", "?")
+    seen = []
+
+    def first() -> None:
+        if not seen:
+            seen.append(True)
+            block.emit("warn", block=block.name, msg=f"{block.name}: {what} is not present on the {name}: the "
+                       f"access goes to an unmodelled stub (model {block.model} inactive)")
+
+    def rd(offset: int, size: int) -> int:
+        first()
+        return MMIOBlock.read(block, offset, size)
+
+    def wr(offset: int, size: int, value: int) -> None:
+        first()
+        MMIOBlock.write(block, offset, size, value)
+    block.read = rd
+    block.write = wr
+
+
 def gpio_resync(chip: Any, sig: str) -> None:
     """Ask every STM32 GPIO port to re-evaluate the pins carrying `sig` (after a peripheral's `signal_state`
     changed)."""

@@ -9,6 +9,9 @@
   COCO, IRQ if AIEN, DMA request if SC2.DMAEN). SC1B converts only on hardware triggers.
 * `on_complete`: list of callbacks cb(adc, k) run after conversion SC1[k] completes (the PDB uses it for
   back-to-back pre-triggers). `busy(k)` is True while conversion k is in progress.
+* Hardware average (SC3.AVGE, AVGS 4/8/16/32): a result takes that many conversion times; the average of identical
+  samples is the sample (input values have no noise). Compare (SC2.ACFE/ACFGT/ACREN, CV1/CV2, Table 33-112): a result
+  that fails the compare sets no COCO and leaves Rn unchanged (continuous conversions go on).
 * Reading Rn clears SC1n.COCO (and deasserts the IRQ when no COCO with AIEN remains).
 * SC2.DMAEN: a completed conversion also raises the DMAMUX request "ADC<n>" (source 40 + n); the DMA reads Rn,
   which clears COCO.  `hw_trigger(k)` starts a hardware-triggered conversion of SC1A (k=0) / SC1B (k=1) only
@@ -42,6 +45,8 @@ from .sim import subscribe_trigger_sources
 COCO, AIEN, DIFF = 0x80, 0x40, 0x20
 CAL, CALF, ADCO = 0x80, 0x40, 0x08
 ADTRG, DMAEN = 0x40, 0x04
+ACFE, ACFGT, ACREN = 0x20, 0x10, 0x08
+AVGE = 0x04
 CAL_VALUES = {"CLPD": 0x0A, "CLPS": 0x24, "CLP4": 0x220, "CLP3": 0x110, "CLP2": 0x88, "CLP1": 0x44, "CLP0": 0x22,
               "CLMD": 0x0A, "CLMS": 0x24, "CLM4": 0x220, "CLM3": 0x110, "CLM2": 0x88, "CLM1": 0x44, "CLM0": 0x22}
 _NAME = re.compile(r"^(?:ADC(\d+)_)?(SE|DP|DM|AD)?(\d+)([AB])?$", re.I)
@@ -184,10 +189,26 @@ class ADC(GatedBlock):
     def _start(self, k: int) -> None:
         if self.chip is None:
             return
+        sc3 = self.get("SC3")
+        n = (4 << (sc3 & 3)) if sc3 & AVGE else 1          # hardware average: 4/8/16/32 conversions (33.4.4)
         if self.conv_ns <= 0:
             self._complete(k)
         else:
-            self._ev[k] = self.chip.sched.in_ns(self.conv_ns, self._complete, k)
+            self._ev[k] = self.chip.sched.in_ns(self.conv_ns * n, self._complete, k)
+
+    def _compare_ok(self, v: int, diff: bool) -> bool:
+        """33.4.5 Table 33-112 (CV1/CV2 in the result format; signed for differential results)."""
+        sc2 = self.get("SC2")
+        cv1, cv2 = self.get("CV1") & 0xFFFF, self.get("CV2") & 0xFFFF
+        if diff:
+            cv1 = cv1 - 0x10000 if cv1 & 0x8000 else cv1
+            cv2 = cv2 - 0x10000 if cv2 & 0x8000 else cv2
+        gt, ren = bool(sc2 & ACFGT), bool(sc2 & ACREN)
+        if not ren:
+            return v >= cv1 if gt else v < cv1
+        if cv1 <= cv2:
+            return (cv1 <= v <= cv2) if gt else (v < cv1 or v > cv2)
+        return (v >= cv1 or v <= cv2) if gt else (cv2 < v < cv1)
 
     def _complete(self, k: int) -> None:
         self._ev[k] = None
@@ -199,6 +220,11 @@ class ADC(GatedBlock):
         diff = bool(sc1 & DIFF)
         lo, hi = self.resolution(diff)
         v = max(lo, min(hi, self.channel_value(adch, diff)))
+        if self.get("SC2") & ACFE and not self._compare_ok(v, diff):
+            # compare false: no COCO, Rn unchanged; continuous conversions go on (33.4.5)
+            if self.get("SC3") & ADCO:
+                self._start(k)
+            return
         self.set("RA" if k == 0 else "RB", v & 0xFFFF)
         self.set(sc1n, sc1 | COCO)
         self.conversions += 1

@@ -1,0 +1,12 @@
+# STM32F405ZG OTG_FS (PA11 DM / PA12 DP, VBUS sensed on PA9) plugged into an emulated PC (chipem/usbbus.py).
+# The bare-metal CDC-ACM firmware runs at 168 MHz with PLL48CLK = 48 MHz.  The host waits the 100 ms attach debounce,
+# resets the port, enumerates (GET_DESCRIPTOR, SET_ADDRESS, SET_CONFIGURATION), binds its CDC-ACM driver
+# (SET_LINE_CODING, SET_CONTROL_LINE_STATE DTR|RTS) and polls bulk IN; the firmware answers DTR with
+# "STM32 CDC ready" and echoes what the host types ("hello" at 200 ms).  Run:
+#   chipem run --board boards/stm32_usb_cdc.yaml --for 300ms
+# Open the port from PC software instead: add `cdc_pty: true` under host (or --usb-cdc pty on the command line).
+name: stm32_usb_cdc
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/usb_cdc.elf}
+links:
+  - {type: usb, name: USB1, device: A.OTG_FS, host: {debounce: 100ms, cdc_send: "hello\r\n", cdc_send_at: 200ms}}

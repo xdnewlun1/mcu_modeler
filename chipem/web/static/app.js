@@ -7,7 +7,7 @@ import { stateText, counterValue, ledColor, LED_COLORS, partCategory, portList }
 import { initBoardDialog, boardDialogOpen, closeBoardDialog } from "./boarddlg.js";
 
 const $ = (id) => document.getElementById(id);
-const KINDS = ["pin", "part", "uart", "can", "i2s", "irq", "reset", "fault", "warn", "info", "mmio"];
+const KINDS = ["pin", "part", "uart", "can", "i2s", "eth", "usb", "irq", "reset", "fault", "warn", "info", "mmio"];
 const MAX_EVENT_ROWS = 1500;
 const MAX_LINES = 5000;           // UART transcript lines kept
 const MAX_LINE_CHARS = 2000;      // a line without a line ending (binary data) is wrapped into a new one here
@@ -546,6 +546,7 @@ function applyState(st) {
   if (ui.discOn && st.last_stop !== ui._lastStop && !st.running) loadDiscovery();   // run finished: refresh
   ui._lastStop = st.last_stop;
   renderReadouts(st);
+  renderHostSerial(st);
   if (st.board && !ui.isBoard && !ui._reloading) {             // a part was added elsewhere: board layout
     ui._reloading = true;
     location.reload();
@@ -1089,6 +1090,35 @@ function buildLinkMonitor() {
       ui.monRows.push({ src, stat, key, desc: ln.describe, bytesEl: row.querySelector(".mon-bytes"), nEl: row.querySelector(".mon-n") });
     }
   }
+}
+
+// ---------------------------------------------------------------- host serial bridges + real-time pacing
+function renderHostSerial(st) {
+  const h = st.host;
+  const wrap = $("hostSerWrap");
+  if (!h) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const eps = h.endpoints || [];
+  const rt = h.realtime || {};
+  $("hostSerCount").textContent = eps.length ? `${eps.length}` : "";
+  const lag = rt.enabled ? `real time ×${rt.speed}${rt.lag_ms > 1 ? ` · lag ${Math.round(rt.lag_ms)} ms` : ""}${rt.rebases ? ` · behind ×${rt.rebases}` : ""}` : "";
+  if ($("hostRt").textContent !== lag) $("hostRt").textContent = lag;
+  $("hostRt").classList.toggle("warn", !!(rt.enabled && (rt.behind || rt.rebases)));
+  if (document.activeElement !== $("rtOn")) $("rtOn").checked = !!rt.enabled;
+  if (rt.enabled && document.activeElement !== $("rtSpeed")) $("rtSpeed").value = rt.speed;
+  const html = eps.map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(e.transport || "—")}</td><td class="mono" title="${esc(e.path || "")}">${esc(e.path || "—")}</td>`
+    + `<td class="${e.connected ? "ok" : "dim"}">${e.connected ? "yes" : "no"}</td><td>${esc(e.line || "—")}</td>`
+    + `<td>${e.bytes_in ?? 0}</td><td>${e.bytes_out ?? 0}</td><td${(e.dropped || e.dropped_out) ? ' class="warn"' : ""} title="framing ${e.dropped ?? 0} · host not connected ${e.dropped_out ?? 0}">${(e.dropped ?? 0) + (e.dropped_out ?? 0)}</td></tr>`).join("")
+    || `<tr><td colspan="8" class="dim">none: --uart-pty UART0, --uart-tcp UART0=5555, --uart-port UART0=COM5, or a usb_serial_adapter part</td></tr>`;
+  const body = $("hostSerBody");
+  if (body._html !== html) { body.innerHTML = html; body._html = html; }
+}
+
+async function setRealtime() {
+  const sp = parseFloat($("rtSpeed").value);
+  try {
+    await api("/api/realtime", { on: $("rtOn").checked, speed: Number.isFinite(sp) && sp > 0 ? sp : undefined });
+  } catch (e) { toastErr(`real time: ${e.message}`); }
 }
 
 function renderLinkMonitor() {
@@ -1901,6 +1931,10 @@ function initDataTools() {
     } else saveFile(`${ui.uartAll ? "uart_all" : ui.uart}_lines_${stamp()}.txt`, transcriptText());
   });
   $("linkMonWrap").addEventListener("toggle", () => { prefs.linkMon = $("linkMonWrap").open; savePrefs(); });
+  $("hostSerWrap").open = prefs.hostSer ?? false;
+  $("hostSerWrap").addEventListener("toggle", () => { prefs.hostSer = $("hostSerWrap").open; savePrefs(); });
+  $("rtOn").addEventListener("change", setRealtime);
+  $("rtSpeed").addEventListener("change", setRealtime);
   // events
   bindFilter($("evFilter"), () => refilterEvents());
   ui.evFollow = new Follow($("events"), $("evFollow"));

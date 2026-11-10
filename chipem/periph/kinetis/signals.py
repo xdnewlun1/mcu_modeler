@@ -28,6 +28,7 @@ TABLE = SignalTable([
     (r"JTAG_TDO|TRACE_SWO", OUT_H),
     (r"NMI_b|LPTMR\d+_ALT\d+|PDB\d+_EXTRG|EWM_IN|USB_CLKIN", IN),
     (r"EWM_OUT_b", OUT_H),
+    (r"USB_SOF_OUT", OUT_L),                  # kinetis.usbfs pulses it at every SOF
     (r"CMP\d+_OUT|CMT_IRO", OUT_L),
     (r"I2S\d+_TXD\d+", OUT_L),                # tristated (input) while no word is sent: kinetis.sai hook
     (r"I2S\d+_(RXD\d+|(TX|RX)_(BCLK|FS)|MCLK)", IN),   # outputs while generated internally: kinetis.sai hook

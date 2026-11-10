@@ -58,6 +58,8 @@ class Rule:
     params: dict | None = None      # static params; "{1}" in a string value = regex group 1, "#1" = int(group 1)
     rename: str | None = None       # chip-YAML name if it differs from the SVD name
     note: str | None = None         # comment written next to the entry
+    size: int | None = None         # block size if the model spans more than the SVD extent
+    absorb: tuple[str, ...] = ()    # SVD peripherals inside that span (no entries of their own)
 
     def match(self, name: str):
         return re.fullmatch(self.pattern, name)
@@ -102,11 +104,38 @@ FAMILIES: dict[str, dict] = {
                  _p(index="#1"), note="bxCAN (RM0090 ch. 32); CAN1 owns the filter banks (params.filters / "
                                       "filter_banks: TODO check the bank count, 14 on single-CAN parts); FDCAN differs"),
             Rule(r"SPI([1-6])", "stm32.spi", ("CR1", "CR2", "SR", "DR", "CRCPR", "I2SCFGR"),
-                 note="SPI mode (RM0090 ch. 28); I2S mode not modelled; SPI1/4/5/6 on APB2, others APB1"),
+                 note="SPI and I2S mode (RM0090 ch. 28; I2S clock from PLLI2S / I2S_CKIN); SPI1/4/5/6 on APB2, "
+                      "others APB1"),
+            Rule(r"I2S([23])ext", "stm32.i2s_ext", ("CR1", "CR2", "SR", "DR", "I2SCFGR", "I2SPR"), _p(main="SPI{1}"),
+                 note="I2S full-duplex extension of SPI2/SPI3 (RM0090 28.4.4)"),
+            Rule(r"Ethernet_MAC", "stm32.eth", ("MACCR", "MACFFR", "MACMIIAR", "MACMIIDR", "MACA0HR"), size=0x1400,
+                 absorb=("Ethernet_MMC", "Ethernet_PTP", "Ethernet_DMA"),
+                 note="Ethernet MAC + MMC + PTP + DMA in one block (RM0090 ch. 33); TODO parts without Ethernet "
+                      "sharing the die: params {only: [part prefixes]}"),
+            Rule(r"DCMI", "stm32.dcmi", ("CR", "SR", "RIS", "IER", "MIS", "ICR", "ESCR", "ESUR", "CWSTRT", "CWSIZE",
+                                         "DR"),
+                 note="camera interface (RM0090 ch. 15); DMA request \"DCMI\" (DMA2 S1/S7 ch1); TODO params.only on "
+                      "shared-die YAMLs of parts without a camera interface"),
+            Rule(r"CRYP", "stm32.cryp", ("CR", "SR", "DIN", "DOUT", "DMACR", "IMSCR", "RISR", "MISR"),
+                 note="AES ECB/CBC/CTR, DES/TDES ECB/CBC (RM0090 ch. 23, no GCM/CCM); F415/F417/F43x only: "
+                      "TODO params.only on shared-die YAMLs"),
+            Rule(r"HASH", "stm32.hash", ("CR", "DIN", "STR", "HR0", "IMR", "SR"),
+                 note="SHA-1/MD5/HMAC (RM0090 ch. 25; params.sha2: true for F43x SHA-224/256); F415/F417/F43x only: "
+                      "TODO params.only on shared-die YAMLs"),
             Rule(r"CRC", "stm32.crc", ("DR", "IDR", "CR"), note="fixed CRC-32 polynomial (F4; F0/F3/F7/L4 have POL/INIT)"),
             Rule(r"SDIO", "stm32.sdio", ("POWER", "CLKCR", "ARG", "CMD", "RESPCMD", "RESP1", "DTIMER", "DLEN", "DCTRL",
                                          "STA", "ICR", "MASK", "FIFO"),
                  note="SDIO host (RM0090 ch. 31; the F7/H7 SDMMC differs); SDIOCLK = PLL48CLK, DMA request \"SDIO\""),
+            Rule(r"OTG_FS_GLOBAL", "stm32.otg_fs", ("FS_GOTGCTL", "FS_GUSBCFG", "FS_GRSTCTL", "FS_GINTSTS",
+                                                    "FS_GINTMSK", "FS_GRXFSIZ", "FS_GCCFG"),
+                 size=0x40000, absorb=("OTG_FS_HOST", "OTG_FS_DEVICE", "OTG_FS_PWRCLK"), rename="OTG_FS",
+                 note="USB OTG FS core, device mode (RM0090 ch. 34, DWC2 2.81a); TODO params endpoints (F4: 4) / "
+                      "fifo_words (1.25 KB = 320); PHY clock = PLL48CLK"),
+            Rule(r"OTG_HS_GLOBAL", "stm32.otg_hs", ("OTG_HS_GOTGCTL", "OTG_HS_GUSBCFG", "OTG_HS_GRSTCTL",
+                                                    "OTG_HS_GINTSTS", "OTG_HS_GINTMSK", "OTG_HS_GRXFSIZ"),
+                 size=0x40000, absorb=("OTG_HS_HOST", "OTG_HS_DEVICE", "OTG_HS_PWRCLK"), rename="OTG_HS",
+                 note="USB OTG HS core on its embedded FS PHY (RM0090 ch. 35; ULPI high speed not modelled); TODO "
+                      "params endpoints (F4: 6) / fifo_words (4 KB = 1024)"),
             Rule(r"FSMC", "stm32.fsmc", ("BCR1", "BTR1", "BWTR1"),
                  note="NOR/SRAM bank 1 windows at 0x60000000 (RM0090 ch. 36; F42x/F7 FMC adds SDRAM: TODO)"),
             Rule(r"RNG", "stm32.rng", ("CR", "SR", "DR"), note="clock = PLL48CLK (main PLL Q output)"),
@@ -126,7 +155,7 @@ FAMILIES: dict[str, dict] = {
         "clock_note": "reset clock: MCG FEI = 32768 * 640; kinetis.mcg recomputes it at reset",
         "memory": [("FLASH", "flash", 0x00000000, 0x100000), ("SRAM_L", "ram", 0x1FFF0000, 0x10000),
                    ("SRAM_U", "ram", 0x20000000, 0x10000)],
-        "extra": {},
+        "extra": {"lockup_reset": True},      # RCM LOCKUP reset source (K22 RM 6.2.2.9)
         "rules": [
             Rule(r"PORT([A-E])", "kinetis.port", ("PCR0", "ISFR"), _p(port="{1}")),
             Rule(r"(?:GPIO|PT)([A-E])", "kinetis.gpio", ("PDOR", "PDDR", "PDIR"), _p(port="{1}")),
@@ -163,6 +192,12 @@ FAMILIES: dict[str, dict] = {
             Rule(r"VREF", "kinetis.vref", ("TRM", "SC")),
             Rule(r"CAN(\d+)", "kinetis.flexcan", ("MCR", "CTRL1", "ECR", "ESR1", "IMASK1", "IFLAG1", "CS0", "ID0"),
                  _p(index="#1"), note="FlexCAN; gate SIM_SCGC6 FLEXCAN<n> (TODO check mailbox count, default 16)"),
+            Rule(r"USB0", "kinetis.usbfs", ("PERID", "ISTAT", "INTEN", "STAT", "CTL", "ADDR", "BDTPAGE1", "ENDPT0",
+                                            "USBCTRL", "CONTROL", "USBTRC0"),
+                 note="USB OTG FS device (BDT in RAM); 48 MHz from SIM_SOPT2 USBSRC + CLKDIV2 USBDIV/USBFRAC, gate "
+                      "SIM_SCGC4 USBOTG"),
+            Rule(r"USBDCD", "kinetis.usbdcd", ("CONTROL", "CLOCK", "STATUS", "TIMER0", "TIMER1"),
+                 note="USB device charger detection (sequence timing from CLOCK / TIMERx)"),
             Rule(r"I2S(\d+)", "kinetis.sai", ("TCSR", "TCR2", "TCR4", "TCR5", "TDR0", "TFR0", "RCSR", "RDR0", "MCR",
                                              "MDR"),
                  note="SAI (K22 RM ch. 51); IRQs I2S0_Tx/I2S0_Rx, DMAMUX 13/12 (params.dma_tx/dma_rx), MCLK sources"),
@@ -288,6 +323,9 @@ def plan_peripherals(family: str, table: dict, memory: list[tuple], exclude: set
     g = fam["granule"]
     arm = fam["arch"] != "c28x"
     items = sorted(((n, p) for n, p in (table.get("peripherals") or {}).items()), key=lambda kv: kv[1]["base"])
+    spans = {n: r for n, _ in items for r in fam["rules"] if r.match(n) and (r.size or r.absorb)}
+    absorbed = {a for r in spans.values() for a in r.absorb}
+    items = [(n, p) for n, p in items if n not in absorbed]
     bases = [p["base"] for _, p in items]
     out: list[Periph] = []
     for i, (name, p) in enumerate(items):
@@ -302,6 +340,8 @@ def plan_peripherals(family: str, table: dict, memory: list[tuple], exclude: set
             continue                            # lives inside a memory region (e.g. flash config field)
         nxt = next((b for b in bases[i + 1:] if b > base), None)
         size = extent if not g else _round_up(base + extent, g) - base
+        if name in spans and spans[name].size and model != "stub":
+            size = spans[name].size
         if nxt is not None and base + size > nxt:
             size = max(nxt - base, 1)
             if size < extent:

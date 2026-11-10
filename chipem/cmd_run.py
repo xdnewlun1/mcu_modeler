@@ -16,8 +16,9 @@ EVENT_KINDS = tuple(KINDS)
 
 
 def add_args(p) -> None:
-    p.add_argument("--for", dest="duration", default="100ms", metavar="TIME",
-                   help="virtual time to run, e.g. 20ms, 1.5s, 500us (default 100ms; bare number = ms)")
+    p.add_argument("--for", dest="duration", default=None, metavar="TIME",
+                   help="virtual time to run, e.g. 20ms, 1.5s, 500us (default 100ms; bare number = ms; with a host "
+                        "serial port attached: until Ctrl-C; 'forever' = until Ctrl-C)")
     p.add_argument("--quiet", "-q", action="store_true", help="no live event output (summary only)")
     p.add_argument("--summary-only", action="store_true", help="same as --quiet")
     p.add_argument("--events", default=None, metavar="KINDS",
@@ -139,6 +140,8 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
         w("  (none)\n")
 
     _print_can(session, chip, cid if multi else None, w)
+    _print_eth(chip, w)
+    _print_usb(session, chip, cid, w)
 
     irqs = session.irq_summary(cid)
     w("\nexceptions taken:\n")
@@ -154,6 +157,47 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
         w("  (none)\n")
 
     _print_warnings(session.events(kinds={"warn", "fault"}, chip=cid if multi else None), w)
+
+
+def _print_usb(session: Session, chip, cid, w) -> None:
+    """USB ports plugged into an emulated host (chipem/usbbus.py): enumerated device, CDC-ACM output."""
+    links = [ln for ln in session.usb_links() if ln.block.chip is chip] if hasattr(session, "usb_links") else []
+    if not links:
+        return
+    w("\nUSB:\n")
+    for ln in links:
+        h, b = ln.host, ln.bus
+        devs = h.devices
+        w(f"  {ln.port}: host {h.state}, bus {b.state}; {b.transactions} transactions ({b.naks} NAK, {b.stalls} "
+          f"STALL, {b.timeouts} timeouts), {b.sofs} SOFs, {b.bytes_in} bytes in / {b.bytes_out} out\n")
+        for d in devs:
+            w(f"    enumerated: {d.describe()}\n")
+        for f in h.failures:
+            w(f"    failed: {f}\n")
+        if not devs and not h.failures:
+            w("    no device enumerated" + (" (no pull-up seen: is the port connected / VBUS sensed?)"
+                                           if b.state == "detached" else "") + "\n")
+        if h.cdc_rx:
+            text = escape_bytes(bytes(h.cdc_rx))
+            if len(text) > 2000:
+                text = text[:2000] + f"... ({len(h.cdc_rx)} bytes)"
+            w(f"    CDC-ACM output ({len(h.cdc_rx)} bytes): \"{text}\"\n")
+        hid = h.hid
+        if hid is not None and hid.reports:
+            w(f"    HID reports: {len(hid.reports)}, last {hid.reports[-1][1].hex()}\n")
+
+
+def _print_eth(chip, w) -> None:
+    """Ethernet MACs that did something (chipem.ethernet.eth_blocks, eth_stats())."""
+    from .ethernet import eth_blocks
+    for n, b in eth_blocks(chip).items():
+        st = b.eth_stats()
+        if not (st["tx"] or st["rx"] or st["filtered"] or st["missed"] or st["segment"]):
+            continue
+        w(f"\nEthernet {n}: {st['iface'].upper()}, PHY {st['phy']}@{st['phy_addr']} link {st['link']}, "
+          f"{st['tx']} tx, {st['rx']} rx" + "".join(f", {st[k]} {k}" for k in ("filtered", "crc", "missed", "lost")
+                                                      if st[k]) + (f", segment {st['segment']}" if st["segment"] else "")
+          + "\n")
 
 
 def _print_can(session: Session, chip, cid, w, limit: int = 20) -> None:
@@ -224,6 +268,13 @@ def print_board_summary(session: Session, out=None) -> None:
           + (f", {ln.bytes_ba} bytes {ln.b[0]}->{ln.a[0]}" if ln.bidir else "") + "\n")
     for cl in getattr(b, "can_links", []):
         w(f"  can {cl.describe()}: {cl.bus.frames} frames, {cl.bus.error_frames} error frames\n")
+    for el in getattr(b, "eth_links", []):
+        h = el.host
+        w(f"  eth {el.describe()}: {el.segment.frames} frames" + (f", host ping replies {len(h.replies)}" if h else "")
+          + "\n")
+    for ul in getattr(b, "usb_links", []):
+        d = ul.host.device
+        w(f"  usb {ul.describe()}: {ul.host.state}" + (f", {d.vid:04X}:{d.pid:04X}" if d else "") + "\n")
     if not b.links and not getattr(b, "can_links", []):
         w("  (none)\n")
     _print_warnings(session.events(kinds={"warn", "fault"}, chip="board"), w)
@@ -326,6 +377,24 @@ class TimeOrderedFeed:
         self.sink.detach()
 
 
+def print_host_summary(session: Session, out=None) -> None:
+    """Host serial endpoints and real-time pacing (only when there are any)."""
+    out = out or sys.stdout
+    st = session.host_status()
+    eps, rt = st["endpoints"], st["realtime"]
+    if not eps and not rt.get("enabled"):
+        return
+    out.write("\nhost serial:\n")
+    for e in eps:
+        out.write(f"  {e['name']:<10} {e.get('transport') or '-':<7} {e.get('path') or '-'}  line {e.get('line') or '-'}"
+                  f"  in {e.get('bytes_in', 0)}  out {e.get('bytes_out', 0)}  lost {e.get('dropped', 0)} framing / "
+                  f"{e.get('dropped_out', 0)} host closed\n")
+    if rt.get("enabled"):
+        ratio = f", achieved x{rt['ratio']:.3g}" if rt.get("ratio") else ""
+        out.write(f"  real time x{rt['speed']:g}: lag {rt['lag_ms']:.1f} ms (max {rt['max_lag_ms']:.1f} ms), "
+                  f"fell behind {rt['rebases']} time(s){ratio}, waited {rt['waited_s']:.2f} s\n")
+
+
 def print_pin_report(session: Session, out=None) -> None:
     """--pin-report: chipem.pinreport.format_pin_report(chip) per chip (module owned by another component)."""
     out = out or sys.stdout
@@ -357,8 +426,17 @@ def main(args) -> int:
 
 
 def _main(args) -> int:
-    ns = parse_time(args.duration)
+    dur = args.duration
+    forever = dur is not None and str(dur).strip().lower() in ("forever", "inf", "until-ctrl-c")
+    ns = parse_time(dur) if dur is not None and not forever else 100e6
     session = Session.from_args(args)
+    from .hostserial import print_endpoints
+    if session.host_endpoints(transport_only=True):
+        print_endpoints(session)
+        if dur is None:
+            forever = True                   # interactive host bridge: run until Ctrl-C
+    if forever:
+        ns = float("inf")
     chips = session.chips
     multi = len(chips) > 1
     for chip in chips.values():
@@ -420,6 +498,7 @@ def _main(args) -> int:
     if multi:
         print_board_summary(session)
     print_parts_summary(session)
+    print_host_summary(session)
     if getattr(args, "pin_report", False):
         print_pin_report(session)
     sys.stdout.flush()

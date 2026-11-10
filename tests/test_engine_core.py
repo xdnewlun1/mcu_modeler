@@ -116,3 +116,15 @@ def test_slice_ending_after_bw_with_wfi_like_halfword_is_not_wfi(precise):
     c2 = _core("movs r0, #1\nwfi\nmovs r0, #2\nb .", precise=precise)
     r, n = c2.run(2)
     assert r is StopReason.WFI and n == 2 and c2.read_reg("r0") == 1
+
+
+@pytest.mark.parametrize("precise", [False, True])
+def test_wfe_halts_like_wfi(precise):
+    # Unicorn 2.1 reports WFE as an invalid instruction; the core turns it into a WFI-type stop (stop_info "wfe")
+    c = _core("movs r0, #1\nmovs r1, #2\nwfe\nmovs r0, #3", precise=precise)
+    r, n = c.run(100)
+    assert r is StopReason.WFI and c.stop_info == "wfe" and c.last_fault is None
+    assert n == 3
+    assert c.pc == CODE + 6
+    r, n = c.run(1)
+    assert c.read_reg("r0") == 3
