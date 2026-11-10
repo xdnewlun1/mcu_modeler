@@ -106,7 +106,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--uart-in", action="append", default=[], metavar="[UARTn:]TEXT",
                        help="bytes a host sends to a UART receiver from t=0, paced at its baud (escapes allowed), "
                             "default UART0; bytes the receiver is not ready for are dropped, use --at for later input")
-        p.add_argument("--adc", action="append", default=[], metavar="CHANNEL=VALUE", help="ADC channel reading, e.g. ADC0_SE14=2048")
+        p.add_argument("--adc", action="append", default=[], metavar="CHANNEL=VALUE",
+                       help="analog input: an integer is a raw ADC code (ADC0_SE14=2048, ADCINA3=0x800), a decimal or a "
+                            "V/mV suffix is volts (PA0=1.65V, ADC123_IN0=1650mV on the STM32; CMP0_IN0=1.2V on a "
+                            "Kinetis comparator, which takes volts only)")
         p.add_argument("--spi-flash", action="append", default=[], metavar="SPIn:cs=PIN,jedec=ID,size=N,file=PATH",
                        help="attach a SPI NOR flash to a DSPI, e.g. SPI0:cs=PTC4 (Micron M25P16 by default)")
         p.add_argument("--log-mmio", action="store_true", help="log every peripheral register access")

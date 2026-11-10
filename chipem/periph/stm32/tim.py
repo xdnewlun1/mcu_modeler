@@ -50,25 +50,45 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   all flags.  Vectors shared between timers (TIM1_UP_TIM10, TIM1_BRK_TIM9, TIM8_UP_TIM13, ...) are the OR of the
   timers' levels.
 * Input capture (CCxS != 0, RM0090 17.3.5/18.3.5): the channel releases TIMx_CHn / TIMx_CHnN (an input).  CCxS=01
-  captures TIx, 10 the other input of the pair (CH1<->CH2, CH3<->CH4; reserved on 1-channel timers), 11 (TRC) is not
-  modelled (one `warn`: there are no internal trigger inputs).  CCxNP:CCxP select the edge (00 rising, 01 falling,
+  captures TIx, 10 the other input of the pair (CH1<->CH2, CH3<->CH4; reserved on 1-channel timers), 11 the trigger
+  input TRC (= TRGI of the slave mode controller, SMCR.TS; edges after the TS source polarity, then CCxP/CCxNP like a
+  pin).  CCxNP:CCxP select the edge (00 rising, 01 falling,
   11 both; the reserved 10 acts as rising), ICxPSC captures every 1/2/4/8 active edges (the prescaler restarts when
   CCxE, CCxS or ICxPSC change).  With CCxE=1 an active edge latches CCRx = CNT at the edge (chip.now_cycles(),
   instruction-exact, no resynchronisation delay) and sets CCxIF, or CCxOF when CCxIF is still set; CCxIE raises the
   IRQ.  Reading CCRx clears CCxIF (not CCxOF, RM0090 18.4.5); CCRx is read-only.  EGR.CCxG on an input channel
   captures CNT too.  Edges come from the pin muxed to TIMx_CHn (PinBoard input listeners, registered only while an
   input is in use): `--at`, board nets, parts or the timer's own outputs; H is 1, L and floating X are 0 (as IDR).  A
-  pin that is not muxed to the timer's signal is not seen.  ICxF (digital filter) and CR2.TI1S (XOR of CH1-3) are
-  not modelled (the filter is a no-op).  With the clock gated off (frozen) edges are ignored.
-* Slave mode (SMCR): reset mode (SMS=100) with TS = TI1F_ED (both edges of TI1), TI1FP1 or TI2FP2 (edge from CC1P/
-  CC1NP or CC2P/CC2NP): captures on that edge first, then counter + prescaler re-initialise like UG and TIF is set,
-  so the RM0090 PWM input mode (IC1 = TI1 rising, IC2 = TI1 falling, reset on TI1FP1) gives CCR1 = period and CCR2 =
-  high time.  Encoder interface (SMS=001/010/011, TIM1-5/8, RM0090 table 95): the internal clock stops driving the
+  pin that is not muxed to the timer's signal is not seen.  CR2.TI1S (3+ channel timers): TI1 = CH1 xor CH2 xor CH3
+  pins (hall sensor interface).  ICxF (digital filter) is not modelled (no-op).  With the clock gated off (frozen)
+  edges are ignored.
+* Master mode (CR2.MMS -> TRGO, RM0090 17.4.2/18.4.2): 000 reset (pulse on EGR.UG and on a slave-mode reset), 001
+  enable (level CNT_EN = CEN, and the trigger input in gated mode), 010 update (pulse at every update event, also from
+  UG), 011 compare pulse (pulse whenever CC1IF is to be set: match, capture, CC1G), 100-111 OC1REF-OC4REF (level).
+  Other blocks subscribe with `add_trigger_listener("TRGO" | "CC1".."CC4", cb)`, cb(t_cycles, level) (a pulse is
+  cb(t, True), cb(t, False); `trigger_level(sig)` gives the current level): slave timers (ITRx) and the ADC external
+  triggers (adc.py).  "CCx" is OCxREF for an output channel (the ADC triggers on its edges) and a pulse per capture
+  for an input channel.  A watched channel gets exact match events like one with an enabled output.  TRGO and the
+  slave reaction happen at the same core cycle (no resynchronisation delay; MSM has no effect).
+* Slave mode controller (SMCR.SMS, trigger input TRGI selected by SMCR.TS): ITR0-3 = another timer's TRGO per
+  RM0090 Tables 86/93/97 (`ITR` below; TIM9/12 ITR2/3 = OC1REF of TIM10/11 or TIM13/14), TI1F_ED (a pulse per TI1
+  edge), TI1FP1 / TI2FP2 (TIx inverted with CCxP; CCxNP:CCxP = 11 makes both edges active, except in gated mode),
+  ETRF (TIMx_ETR pin, including bundled "TIM2_CH1_ETR" functions: ETP inverts, ETPS divides the rising edges by
+  1/2/4/8, a divided ETRP is a pulse per Nth edge; ETF filter not modelled).  SMS=100 reset (rising TRGI: captures on
+  that edge first, then counter + prescaler re-initialise like UG, TIF), so the RM0090 PWM input mode (IC1 = TI1
+  rising, IC2 = TI1 falling, reset on TI1FP1) gives CCR1 = period and CCR2 = high time; 101 gated (the counter runs
+  while TRGI is high and CEN=1, holds its value otherwise; TIF on both edges); 110 trigger (rising TRGI sets CEN and
+  starts the counter, TIF; with OPM a retriggerable one-pulse); 111 external clock mode 1 (each rising TRGI edge is a
+  CK_PSC clock: PSC divides it, the counter counts up or down (DIR) edge-aligned with compare matches, overflow /
+  update events, TIF per edge).  SMCR.ECE external clock mode 2: rising ETRF edges clock the counter the same way,
+  combinable with reset/gated/trigger mode on another TS.  Center-aligned counting is not applied to external clocks
+  (they count edge-aligned).  EGR.TG sets TIF.  DMA requests (`_util.dma_request`, when the DMA model provides it):
+  TIMx_UP on update events (UDE), TIMx_CHn when CCxIF is set (CCxDE; on update events with CR2.CCDS), TIMx_TRIG with
+  TIF (TDE).  Encoder interface (SMS=001/010/011, TIM1-5/8, RM0090 table 95): the internal clock stops driving the
   counter; each TI1FP1 (001), TI2FP2 (010) or either (011) edge counts up or down by the level of the other input
   (TIxFPx = TIx inverted with CCxP), between 0 and ARR, DIR reflects the direction (read-only), wrapping is an
   overflow (repetition counter, update event, UIF).  PWM/forced OCxREF follow the count, compare matches set no
-  CCxIF in encoder mode.  Gated (101), trigger (110) and external clock (111, SMCR.ECE) modes, ITRx/ETRF triggers,
-  MSM: not modelled (one `warn`).  EGR.TG sets TIF.
+  CCxIF in encoder mode.
 * Dead time (TIM1/8, RM0090 17.3.11): with MOE=1 and both CCxE and CCxNE set, OCx follows OCxREF and OCxN its
   inverse, each rising edge delayed by BDTR.DTG (0xxxxxxx: DTG x tDTS, 10xxxxxx: (64 + DTG[5:0]) x 2 tDTS, 110xxxxx:
   (32 + DTG[4:0]) x 8 tDTS, 111xxxxx: (32 + DTG[4:0]) x 16 tDTS; tDTS = CK_INT x 1/2/4 by CR1.CKD), then the
@@ -81,9 +101,9 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   break input stays active MOE cannot be set and BIF cannot be cleared.  AOE=1 sets MOE again at the next update
   event (counter, UG, slave reset) once the break input is inactive.  BDTR.LOCK is stored only (no write
   protection).
-* OCxFE (fast enable) is a no-op: it only shortens the trigger-input-to-output delay, and there are no trigger inputs
-  in the model.  OCxCE (OCxREF clear on ETRF), ETR, CR2 CCPC/COM preload, MMS/TRGO (no timer chaining), one-pulse
-  trigger start and DMA requests are not modelled.
+* OCxFE (fast enable) is a no-op: trigger reactions are already immediate.  Not modelled: OCxCE (OCxREF clear on
+  ETRF), CR2 CCPC/COM preload (COMG), the ETF / ICxF digital filters, TIM2_OR / TIM5_OR / TIM11_OR input remaps, the
+  DMA burst registers DCR/DMAR (stored only).
 """
 from __future__ import annotations
 
@@ -110,11 +130,42 @@ CKD_DIV = (1, 2, 4, 4)           # CR1.CKD -> tDTS / tCK_INT (11 is reserved: tr
 # output source codes (_Chan.o / _Chan.on): None released, 0/1 fixed level, REF follows OCxREF, NREF its inverse
 REF, NREF = 2, 3
 _PARTNER = {1: 2, 2: 1, 3: 4, 4: 3}      # CCxS=10: the input of the other channel of the pair
+# SMCR.TS = 000-011: internal trigger ITR0-ITR3 -> (master timer, its trigger signal).  RM0090 Table 86 (TIM1/8),
+# Table 93 (TIM2-5), Table 97 (TIM9/12: ITR2/ITR3 are the OC1 outputs of TIM10/11 and TIM13/14).  TIM2 ITR1 is
+# TIM8_TRGO with TIM2_OR.ITR1_RMP = 00 (the OTG FS/HS SOF remaps are not modelled).
+ITR: dict[str, tuple[tuple[str, str], ...]] = {
+    "TIM1": (("TIM5", "TRGO"), ("TIM2", "TRGO"), ("TIM3", "TRGO"), ("TIM4", "TRGO")),
+    "TIM8": (("TIM1", "TRGO"), ("TIM2", "TRGO"), ("TIM4", "TRGO"), ("TIM5", "TRGO")),
+    "TIM2": (("TIM1", "TRGO"), ("TIM8", "TRGO"), ("TIM3", "TRGO"), ("TIM4", "TRGO")),
+    "TIM3": (("TIM1", "TRGO"), ("TIM2", "TRGO"), ("TIM5", "TRGO"), ("TIM4", "TRGO")),
+    "TIM4": (("TIM1", "TRGO"), ("TIM2", "TRGO"), ("TIM3", "TRGO"), ("TIM8", "TRGO")),
+    "TIM5": (("TIM2", "TRGO"), ("TIM3", "TRGO"), ("TIM4", "TRGO"), ("TIM8", "TRGO")),
+    "TIM9": (("TIM2", "TRGO"), ("TIM3", "TRGO"), ("TIM10", "CC1"), ("TIM11", "CC1")),
+    "TIM12": (("TIM4", "TRGO"), ("TIM5", "TRGO"), ("TIM13", "CC1"), ("TIM14", "CC1")),
+}
+TI1S = 1 << 7                    # CR2: TI1 = CH1 xor CH2 xor CH3
+CCDS = 1 << 3                    # CR2: CCx DMA requests on the update event
+ECE, ETP = 1 << 14, 1 << 15      # SMCR
+UDE, TDE = 1 << 8, 1 << 14       # DIER DMA request enables (CCxDE: bits 9-12)
+
+
+def _dma_request(chip: Any, name: str, level: bool = True) -> None:
+    """Assert (pulse: the DMA acknowledges it by one transfer) or deassert DMA request `name` (RM0090 Table 42/43,
+    e.g. "TIM3_UP", "TIM2_CH1", "ADC1") through `_util.dma_request` (stm32.dma); nothing without a DMA model."""
+    from . import _util
+    fn = getattr(_util, "dma_request", None)
+    if fn is None or chip is None:
+        return
+    try:
+        fn(chip, name, level)
+    except (ImportError, AttributeError):
+        pass
 
 
 class _Chan:
     __slots__ = ("n", "ccr", "ref", "ev", "out", "outn", "mode", "ccs", "pe", "o", "on", "irq", "active", "lazy_k",
-                 "dt", "dt_ref", "dt_ev", "dp", "dn", "ic_src", "ic_edges", "ic_div", "ic_cnt", "ic_key")
+                 "dt", "dt_ref", "dt_ev", "dp", "dn", "ic_src", "ic_edges", "ic_div", "ic_cnt", "ic_key", "watch",
+                 "wref")
 
     def __init__(self, n: int):
         self.n = n
@@ -144,6 +195,9 @@ class _Chan:
         self.ic_div = 1
         self.ic_cnt = 0
         self.ic_key: tuple | None = None
+        # OCxREF watched (a CCx trigger listener, TRGO = OCxREF / compare pulse): exact match events, edges reported
+        self.watch = False
+        self.wref = False
 
 
 @register("stm32.tim")
@@ -156,7 +210,7 @@ class TIM(GatedBlock):
         self.apb = int(params.get("apb", 2 if name in APB2_TIMERS else 1))
         ov: dict[str, dict] = {
             "CR1": {"on_write": self._cr1_write, "on_read": self._cr1_read},
-            "CR2": {"on_write": self._oc_cfg_write},
+            "CR2": {"on_write": self._cr2_write},
             "PSC": {"on_write": self._psc_write},
             "ARR": {"on_write": self._arr_write},
             "CNT": {"on_read": self._cnt_read, "on_write": self._cnt_write},
@@ -204,6 +258,21 @@ class TIM(GatedBlock):
         self._ti_lvl: dict[Any, bool] = {}           # last level of each watched input (1-4 = TIx, "B" = BKIN)
         self._dt_cyc = 0                             # dead time (BDTR.DTG, CR1.CKD) in core cycles
         self._warned: set[str] = set()
+        # master mode (CR2.MMS -> TRGO) and trigger outputs for other blocks (slave timers, ADC external triggers)
+        self.trgo_listeners: list = []               # cb(t_cycles, level); a pulse is cb(t, True), cb(t, False)
+        self._cc_lst: dict[int, list] = {}           # channel n -> listeners of its CCx event (OCxREF / capture)
+        self._mms = 0
+        self._trgo_lvl = False
+        self._dma_on = False                         # DIER has a DMA request enable (UDE, CCxDE, TDE)
+        # slave mode: trigger input TRGI (level), its source key, ITR subscription, ETR prescaler, external clock
+        self._trgi = False
+        self._trgi_key: Any = None
+        self._itr_sub: tuple | None = None           # (master block, signal, callback)
+        self._trc = False                            # a channel captures on TRC (CCxS=11)
+        self._etr_cnt = 0
+        self._ece = False                            # SMCR.ECE: external clock mode 2 (ETRF)
+        self._xpsc = 0                               # external clock: prescaler count
+        self._ti1x = False                           # TI1 with CR2.TI1S (CH1 xor CH2 xor CH3)
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -229,6 +298,16 @@ class TIM(GatedBlock):
         if hasattr(self, "_ti_lvl"):
             self._ti_lvl.clear()
             self._sms = self._ts = 0
+        if getattr(self, "_itr_sub", None) is not None:
+            self._itr_unsub()
+        if getattr(self, "_dma_on", False) and self.chip is not None:
+            for sfx in ("UP", "TRIG", *(f"CH{c.n}" for c in self.ch)):
+                _dma_request(self.chip, f"{self.name}_{sfx}", False)
+        if hasattr(self, "trgo_listeners"):
+            self._mms = 0
+            self._trgo_lvl = self._trgi = self._trc = self._ti1x = self._dma_on = self._ece = False
+            self._trgi_key = None
+            self._etr_cnt = self._xpsc = 0
         pins = getattr(self.chip, "pins", None)
         for c in getattr(self, "ch", ()):
             if c.dt_ev is not None and self.chip is not None:
@@ -236,7 +315,7 @@ class TIM(GatedBlock):
             c.dt_ev = None
             c.dt, c.dt_ref, c.dp, c.dn = 0, False, False, True
             c.ic_src, c.ic_cnt, c.ic_key = 0, 0, None
-            c.ref = False
+            c.ref = c.wref = False
             c.ccr = 0
             for sig in (f"{self.name}_CH{c.n}", f"{self.name}_CH{c.n}N"):
                 if pins is not None:
@@ -293,12 +372,35 @@ class TIM(GatedBlock):
 
     def _freeze(self) -> None:
         """Stop counting (clock gated off) with CEN still set: CNT/DIR hold the counter, the outputs their level."""
+        self._hold()
+        self._frozen = True
+
+    def _hold(self) -> None:
+        """Stop the running counter with CEN still set (clock gate off, gated slave mode with TRGI low, entering an
+        external clock mode): CNT/DIR hold the counter, the outputs their level."""
+        if not self.running:
+            return
         c, down = self._cnt_dir()
         self.set("CNT", c)
         if self._cms():
             self.set("CR1", (self.get("CR1") | DIR) if down else (self.get("CR1") & ~DIR))
         self._stop()
-        self._frozen = True
+
+    def _ext_mode(self) -> bool:
+        """The counter is clocked by input edges (encoder interface, external clock mode 1 or 2), not CK_INT."""
+        return (self._enc_ok and 1 <= self._sms <= 3) or self._sms == 7 or self._ece
+
+    def _gate_open(self) -> bool:
+        return self._sms != 5 or self._trgi
+
+    def _resume_or_hold(self) -> None:
+        """After a slave-mode change: run the internal counter when CEN=1, the clock is on, no external clock mode
+        drives it and the gate (SMS=101) is open; hold it otherwise."""
+        should = bool(self.get("CR1") & CEN) and not self._frozen and not self._ext_mode() and self._gate_open()
+        if self.running and not should:
+            self._hold()
+        elif not self.running and should:
+            self._start(self._restart_pos())
 
     # ------------------------------------------------------------ derived
     def kernel_hz(self) -> float:
@@ -366,7 +468,8 @@ class TIM(GatedBlock):
         anchor is a fresh counter value (update event, UG), so a compare match at the anchor tick happens; otherwise
         the counter already had this value and its match (if any) is not repeated."""
         self._stop()
-        if not self.get("CR1") & CEN or self.chip is None or self._frozen or self._encoder():
+        if not self.get("CR1") & CEN or self.chip is None or self._frozen or self._ext_mode() or \
+                (self._sms == 5 and not self._trgi):
             return
         tick = self._calc_tick()
         if tick <= 0:
@@ -429,6 +532,8 @@ class TIM(GatedBlock):
             self._stop()
             if self.ch:
                 self._oc_resync(kmin=0)        # OCxREF of PWM modes follows the stopped counter (ends the pulse)
+            if self._mms == 1:
+                self._trgo_set(False)
             return
         self._start(restart, t, period=True)
 
@@ -447,6 +552,10 @@ class TIM(GatedBlock):
         self._update_line()
         if self._advanced:
             self._aoe()
+        if self._mms == 2 and self.trgo_listeners:
+            self._trgo_pulse()
+        if self._dma_on:
+            self._dma_update()
         return True
 
     def _load_shadows(self) -> None:
@@ -515,6 +624,19 @@ class TIM(GatedBlock):
         return v
 
     def _cr1_write(self, blk, reg, old, new):
+        v = self._cr1_apply(blk, reg, old, new)
+        if (old ^ new) & CEN:
+            self._xpsc = 0
+            if self._mms == 1:                            # TRGO = CNT_EN
+                self._store(reg, new if v is None else v)
+                self._trgo_set(self._cnt_en())
+        return v
+
+    def _cnt_en(self) -> bool:
+        """CNT_EN (TRGO with MMS=001): CEN, and in gated mode the trigger input level."""
+        return bool(self.get("CR1") & CEN) and self._gate_open()
+
+    def _cr1_apply(self, blk, reg, old, new):
         if ((old >> CMS_SHIFT) & 3 and (new >> CMS_SHIFT) & 3) or self._encoder():
             new = (new & ~DIR) | (old & DIR)              # DIR is read-only while center-aligned / in encoder mode
         if self._advanced and (old ^ new) & 0x300:        # CKD: dead-time clock
@@ -537,6 +659,14 @@ class TIM(GatedBlock):
                     self._start(c)
                 if self._encoder():
                     self.emit("info", block=self.name, msg=f"{self.name} started in encoder mode (SMS={self._sms})")
+                    return new
+                if self._ext_mode():
+                    self.emit("info", block=self.name, msg=f"{self.name} enabled: external clock mode "
+                              f"{'2 (ETRF)' if self._ece else '1 (TRGI)'}, PSC={self.psc}, ARR={self.arr}")
+                    return new
+                if not self.running and self._sms == 5:
+                    self.emit("info", block=self.name, msg=f"{self.name} enabled in gated mode: counts while the "
+                              "trigger input is high")
                     return new
                 self.emit("info", block=self.name, msg=f"{self.name} started: update every "
                           f"{self.period_ns() / 1e3:.3f} us ({self.counter_hz() / 1e6:.6g} MHz counter clock, "
@@ -586,9 +716,11 @@ class TIM(GatedBlock):
                         sr |= 1 << (8 + c.n)
             self.set("SR", sr | (new & 0x1E))
             self._update_line()
+            for c in self.ch:
+                if new >> c.n & 1:
+                    self._cc_event(c)
         if new & TIF:                          # TG: trigger event -> TIF
-            self.set("SR", self.get("SR") | TIF)
-            self._update_line()
+            self._set_tif()
         if new & BIF and self._advanced:       # BG: software break
             self._break()
         return 0
@@ -609,6 +741,11 @@ class TIM(GatedBlock):
                 self._update_line()
             if self._advanced:
                 self._aoe()
+            if self._dma_on:
+                self._dma_update()
+        self._xpsc = 0
+        if self.trgo_listeners and (self._mms == 0 or (self._mms == 2 and not cr1 & UDIS)):
+            self._trgo_pulse()                         # MMS=000: UG / slave reset; MMS=010: update event
         start = self.arr if (self._down() and not self._cms()) else 0
         self.set("CNT", start)
         if self._cms():
@@ -619,6 +756,7 @@ class TIM(GatedBlock):
             self._oc_resync(kmin=0)                   # stopped counter: OCxREF from the new CNT/CCRx
 
     def _dier_write(self, blk, reg, old, new):
+        self._dma_on = bool(new & (UDE | TDE | 0x1E00))
         self._update_line()
         if (old ^ new) & 0x1E1E and self.ch:          # CCxIE / CCxDE changed: matches may need exact events now
             self._store(reg, new)
@@ -655,6 +793,7 @@ class TIM(GatedBlock):
         moe, ossr, ossi = bdtr & MOE, bdtr & OSSR, bdtr & OSSI
         dtc = self._dt_cyc = self._calc_dt(bdtr) if adv else 0
         nch = len(self.ch)
+        cc_lst, mms, tl = self._cc_lst, self._mms, bool(self.trgo_listeners)
         for c in self.ch:
             f = self._ccmr_field(c.n)
             c.ccs, c.pe, c.mode = f & 3, f >> 3 & 1, (f >> 4) & 7
@@ -668,9 +807,8 @@ class TIM(GatedBlock):
                 src = c.n
             elif c.ccs == 2 and _PARTNER[c.n] <= nch:
                 src = _PARTNER[c.n]
-            if c.ccs == 3:
-                self._warn_once("trc", f"{self.name}: CC{c.n}S=11 (IC{c.n} on TRC) is not modelled (no internal "
-                                       "trigger inputs): the channel captures nothing")
+            elif c.ccs == 3 and "SMCR" in self.regs:
+                src = "T"                                # TRC: the slave-mode trigger input (SMCR.TS)
             if not e:
                 src = 0
             key = (src, f >> 2 & 3)
@@ -703,7 +841,12 @@ class TIM(GatedBlock):
                 o = on = None
             c.o, c.on = o, on
             follows = (o is not None and o >= REF) or (on is not None and on >= REF)
-            c.active = c.ccs == 0 and (follows or c.irq or c.mode in (1, 2, 3))
+            watch = c.ccs == 0 and (bool(cc_lst.get(c.n)) or (tl and (mms == 3 + c.n or (mms == 3 and c.n == 1))))
+            if watch and not c.watch:
+                c.wref = c.ref                           # start reporting from the current level (no false edge)
+            c.watch = watch
+            c.active = c.ccs == 0 and (follows or c.irq or c.mode in (1, 2, 3) or watch)
+        self._trc = any(c.ic_src == "T" for c in self.ch)
         self._inputs_cfg()
 
     @staticmethod
@@ -886,6 +1029,8 @@ class TIM(GatedBlock):
         if self._flag_dir_ok(pos0, k):
             self.set("SR", self.get("SR") | (1 << c.n))   # CCxIF
             self._update_line()
+            if c.watch or self._dma_on:
+                self._cc_event(c)
         mode = c.mode
         if mode >= 6:
             cnt, down = self._counter_at(pos0, k)
@@ -904,6 +1049,9 @@ class TIM(GatedBlock):
         """Drive TIMx_CHn / TIMx_CHnN from OCxREF and the cached output sources.  Starting or stopping to drive a
         signal also re-syncs the GPIO pins muxed to it (a released output is an undriven pin).  Dead time: OCx
         follows OCxREF and OCxN its inverse, each with its rising edge delayed (c.dp / c.dn, polarity after)."""
+        if c.watch and c.ref != c.wref:
+            c.wref = c.ref
+            self._ref_edge(c)
         o, on = c.o, c.on
         pins = self.chip.pins
         if c.dt:
@@ -986,34 +1134,87 @@ class TIM(GatedBlock):
             self._warned.add(key)
             self.emit("warn", block=self.name, msg=msg)
 
-    # ------------------------------------------------------------ inputs: TIx pins, BKIN
+    # ------------------------------------------------------------ inputs: TIx pins, ETR, BKIN
     def _inputs_cfg(self) -> None:
         """Watch the pins of the inputs the configuration uses (capture sources, encoder TI1/TI2, slave-mode trigger
-        TI, BKIN with BKE) and re-sample their levels.  Pin listeners exist only while an input is in use, so PWM
-        outputs cost nothing extra."""
+        TI / ETR, external clock mode 2 ETR, CR2.TI1S xor inputs, BKIN with BKE), subscribe to the ITRx master and
+        re-sample the levels.  Pin listeners exist only while an input is in use, so PWM outputs cost nothing extra."""
         if self.chip is None or getattr(self.chip, "pins", None) is None:
             return
-        want: set = {c.ic_src for c in self.ch if c.ic_src}
+        want: set = {c.ic_src for c in self.ch if isinstance(c.ic_src, int) and c.ic_src}
         sms, ts = self._sms, self._ts
+        slave = sms >= 4 or self._trc                    # TRGI in use
         if self._enc_ok and 1 <= sms <= 3:
             want.update((1, 2))
-        elif sms == 4 and ts in (4, 5, 6):
+        elif slave and ts in (4, 5, 6):
             want.add(2 if ts == 6 else 1)
+        has_etr = "SMCR" in self.regs and self._enc_ok   # ETR: TIM1-5, TIM8
+        if has_etr and (self._ece or (slave and ts == 7)):
+            want.add("E")
         if self._advanced and self.get("BDTR") & BKE:
             want.add("B")
+        ti1s = bool(self.get("CR2") & TI1S) if "CR2" in self.regs and len(self.ch) >= 3 else False
+        if ti1s and 1 in want:
+            want.update((1, 2, 3))
         for k in list(self._watch):
             if k not in want:
                 self._unwatch(k)
         board = self.chip.pins
         for k in want:
             if k not in self._watch:
-                sig = f"{self.name}_BKIN" if k == "B" else f"{self.name}_CH{k}"
-                pins = board.signal_pins(sig)
+                sig = self._input_sig(k)
+                pins = self._etr_pins() if k == "E" else board.signal_pins(sig)
                 cb = (lambda pin, k=k: self._ti_changed(k, pin))
                 for p in pins:
                     board.input_listeners[p.id].append(cb)
                 self._watch[k] = (sig, cb, pins)
             self._ti_lvl[k] = self._input_level(k)
+        self._ti1x = self._ti1_now()
+        # TRGI source: ITRx (another timer's trigger output), TI1F_ED / TI1FP1 / TI2FP2, ETRF
+        key = None
+        if slave and "SMCR" in self.regs:
+            itr = ITR.get(self.name) if ts < 4 else None
+            if ts < 4:
+                key = ("ITR", ts) if itr else None
+            elif ts == 7:
+                key = ("E",) if has_etr else None
+            else:
+                key = ("TI", ts)
+        if key != self._trgi_key:
+            if self._itr_sub is not None:
+                self._itr_unsub()
+            self._trgi_key = key
+            self._etr_cnt = 0
+            if key is not None and key[0] == "ITR":
+                self._itr_subscribe(key[1])
+        self._trgi = self._trgi_now()                    # (re)sampled silently: source or polarity changed
+
+    def _input_sig(self, k: Any) -> str:
+        if k == "B":
+            return f"{self.name}_BKIN"
+        if k == "E":
+            return f"{self.name}_ETR"
+        return f"{self.name}_CH{k}"
+
+    def _etr_pins(self) -> list:
+        """Pins offering TIMx_ETR, alone or bundled with a channel ("TIM2_CH1_ETR")."""
+        return [p for p in self.chip.pins.pins if any(self._etr_owner(f) for f in p.functions.values())]
+
+    def _etr_owner(self, owner: Any) -> bool:
+        if not owner:
+            return False
+        want = f"{self.name}_ETR"
+        pre = f"{self.name}_CH"
+        for part in str(owner).split("/"):
+            part = part.strip()
+            if part == want or (part.startswith(pre) and part.endswith("_ETR")):
+                return True
+        return False
+
+    def _muxed(self, k: Any, owner: Any) -> bool:
+        if k == "E":
+            return self._etr_owner(owner)
+        return self.chip.pins.signal_matches(owner, self._input_sig(k))
 
     def _unwatch(self, k: Any) -> None:
         sig, cb, pins = self._watch.pop(k)
@@ -1027,21 +1228,29 @@ class TIM(GatedBlock):
                 lst.remove(cb)
 
     def _input_level(self, k: Any) -> bool | None:
-        """Level of input k (TIx / "B" = BKIN) from the pin muxed to it (H = 1; L and floating X read 0, as IDR);
-        None when no pin is muxed to the signal."""
+        """Level of input k (TIx / "B" = BKIN / "E" = ETR) from the pin muxed to it (H = 1; L and floating X read 0,
+        as IDR); None when no pin is muxed to the signal."""
         board = getattr(self.chip, "pins", None)
         if board is None:
             return None
-        sig = f"{self.name}_BKIN" if k == "B" else f"{self.name}_CH{k}"
-        for p in board.signal_pins(sig):
-            if board.signal_matches(p.owner, sig):
+        pins = self._watch[k][2] if k in self._watch else (
+            self._etr_pins() if k == "E" else board.signal_pins(self._input_sig(k)))
+        for p in pins:
+            if self._muxed(k, p.owner):
                 return p.level() == "H"
         return None
+
+    def _ti1_now(self) -> bool:
+        """TI1: the CH1 input, or CH1 xor CH2 xor CH3 with CR2.TI1S."""
+        lv = self._ti_lvl
+        if "CR2" in self.regs and len(self.ch) >= 3 and self.get("CR2") & TI1S:
+            return bool(lv.get(1)) ^ bool(lv.get(2)) ^ bool(lv.get(3))
+        return bool(lv.get(1))
 
     def _ti_changed(self, k: Any, pin: Any) -> None:
         """PinBoard input listener: a pin offering input k changed level."""
         w = self._watch.get(k)
-        if w is None or not self.chip.pins.signal_matches(pin.owner, w[0]):
+        if w is None or not self._muxed(k, pin.owner):
             return                                       # pin not muxed to the timer
         new = pin.level() == "H"
         old = self._ti_lvl.get(k)
@@ -1052,11 +1261,24 @@ class TIM(GatedBlock):
             if self._brk_active():
                 self._break()
             return
-        if not self._frozen:                             # clock gated off: no input sampling
-            self._ti_edge(k, new)
+        if self._frozen:                                 # clock gated off: no input sampling
+            return
+        if k == "E":
+            self._etr_edge(new)
+            return
+        if k <= 3 and len(self.ch) >= 3 and self.get("CR2") & TI1S:
+            t1 = self._ti1_now()
+            if t1 != self._ti1x:
+                self._ti1x = t1
+                self._ti_edge(1, t1)
+            if k == 1:
+                return
+        elif k == 1:
+            self._ti1x = new
+        self._ti_edge(k, new)
 
     def _ti_edge(self, k: int, rising: bool) -> None:
-        """Edge on TIk at chip.now_cycles(): captures (CNT before any slave reset), then slave mode."""
+        """Edge on TIk at chip.now_cycles(): captures (CNT before any slave reset), then encoder / slave trigger."""
         bit = 1 if rising else 2
         for c in self.ch:
             if c.ic_src == k and c.ic_edges & bit:
@@ -1065,18 +1287,43 @@ class TIM(GatedBlock):
                     c.ic_cnt = 0
                     self._capture(c)
         sms = self._sms
-        if not sms:
-            return
         if 1 <= sms <= 3:
             if self._enc_ok:
                 self._enc_edge(k, rising)
-        elif sms == 4:
+            return
+        if (sms >= 4 or self._trc) and k <= 2:
             ts = self._ts
-            if (ts == 4 and k == 1) or ((ts == 5 and k == 1) or (ts == 6 and k == 2)) and \
-                    self._edges_of(k, self.get("CCER")) & bit:
-                self._reinit()                           # reset mode: counter + prescaler re-initialised, UEV
-                self.set("SR", self.get("SR") | TIF)
-                self._update_line()
+            if ts == 4 and k == 1:
+                self._trgi_pulse()                       # TI1F_ED: every edge of TI1
+            elif (ts == 5 and k == 1) or (ts == 6 and k == 2):
+                e = self._edges_of(k, self.get("CCER"))
+                if e == 3 and sms != 5:
+                    self._trgi_pulse()                   # CCxNP:CCxP = 11: both edges are active
+                else:
+                    self._trgi_set(rising ^ (e == 2))    # TIxFPx = TIx inverted with CCxP
+
+    def _etr_edge(self, level: bool) -> None:
+        """ETR pin edge: ETRP = ETR xor ETP, divided by ETPS (1, 2, 4, 8 rising edges); ETRF (no filter) feeds TRGI
+        (TS=111) and external clock mode 2 (ECE)."""
+        smcr = self.get("SMCR")
+        lvl = level ^ bool(smcr & ETP)
+        div = 1 << (smcr >> 12 & 3)
+        if div == 1:
+            if self._trgi_key == ("E",):
+                self._trgi_set(lvl)
+            if self._ece and lvl:
+                self._ext_tick()
+            return
+        if not lvl:
+            return
+        self._etr_cnt += 1
+        if self._etr_cnt < div:
+            return
+        self._etr_cnt = 0
+        if self._trgi_key == ("E",):
+            self._trgi_pulse()
+        if self._ece:
+            self._ext_tick()
 
     def _capture(self, c: "_Chan") -> None:
         """Input capture: CCRx = CNT now, CCxIF (CCxOF when CCxIF was still set)."""
@@ -1087,30 +1334,270 @@ class TIM(GatedBlock):
         self.set(f"CCR{c.n}", v)
         self.set("SR", sr | (1 << c.n))
         self._update_line()
+        self._cc_event(c)
+
+    # ------------------------------------------------------------ slave mode controller (TRGI)
+    def _itr_subscribe(self, i: int) -> None:
+        master_name, sig = ITR[self.name][i]
+        m = self.chip.peripherals.get(master_name) if self.chip is not None else None
+        if m is None or not hasattr(m, "add_trigger_listener"):
+            self._warn_once(f"itr{i}", f"{self.name}: ITR{i} = {master_name}_{sig} is not available on this chip")
+            return
+        cb = self._itr_level
+        m.add_trigger_listener(sig, cb)
+        self._itr_sub = (m, sig, cb)
+
+    def _itr_unsub(self) -> None:
+        m, sig, cb = self._itr_sub
+        self._itr_sub = None
+        m.remove_trigger_listener(sig, cb)
+
+    def _itr_level(self, t_cyc: int, level: bool) -> None:
+        if not self._frozen:
+            self._trgi_set(bool(level))
+
+    def _trgi_now(self) -> bool:
+        """Current TRGI level of the selected source (taken silently when the source changes)."""
+        key = self._trgi_key
+        if key is None:
+            return False
+        if key[0] == "ITR":
+            return bool(self._itr_sub[0].trigger_level(self._itr_sub[1])) if self._itr_sub else False
+        if key[0] == "E":
+            smcr = self.get("SMCR")
+            lv = self._ti_lvl.get("E")
+            return bool(lv) ^ bool(smcr & ETP) if lv is not None and not smcr >> 12 & 3 else False
+        ts = key[1]
+        if ts == 4:
+            return False
+        k = 1 if ts == 5 else 2
+        e = self._edges_of(k, self.get("CCER"))
+        lv = self._ti1x if k == 1 else bool(self._ti_lvl.get(2))
+        return False if (e == 3 and self._sms != 5) else lv ^ (e == 2)
+
+    def _trgi_pulse(self) -> None:
+        self._trgi_set(True)
+        self._trgi_set(False)
+
+    def _trgi_set(self, level: bool) -> None:
+        """TRGI changed level: TRC captures, then the slave mode (RM0090 17.3.14/18.3.14): reset (100) and trigger
+        (110) act on the rising edge, gated (101) runs the counter while TRGI is high, external clock mode 1 (111)
+        counts rising edges.  TIF is set on the active edge (both edges in gated mode)."""
+        if level == self._trgi:
+            return
+        self._trgi = level
+        bit = 1 if level else 2
+        if self._trc:
+            for c in self.ch:
+                if c.ic_src == "T" and c.ic_edges & bit:
+                    c.ic_cnt += 1
+                    if c.ic_cnt >= c.ic_div:
+                        c.ic_cnt = 0
+                        self._capture(c)
+        sms = self._sms
+        if sms < 4:
+            return
+        if sms == 5:                                     # gated: counter enable follows TRGI
+            if self.get("CR1") & CEN and not self._frozen and not self._ext_mode():
+                if level:
+                    self._start(self._restart_pos())
+                else:
+                    self._hold()
+            if self._mms == 1:
+                self._trgo_set(self._cnt_en())
+            self._set_tif()
+            return
+        if not level:
+            return
+        if sms == 4:                                     # reset: counter + prescaler re-initialised, update event
+            self._reinit()
+        elif sms == 6:                                   # trigger: the counter starts (CEN set by hardware)
+            cr1 = self.get("CR1")
+            if not cr1 & CEN:
+                self.set("CR1", cr1 | CEN)
+                if not self._ext_mode():
+                    self._start(self._restart_pos())
+                if self._mms == 1:
+                    self._trgo_set(True)
+        elif sms == 7 and not self._ece:                 # external clock mode 1: count TRGI rising edges
+            self._ext_tick()
+        self._set_tif()
+
+    def _set_tif(self) -> None:
+        self.set("SR", self.get("SR") | TIF)
+        self._update_line()
+        if self._dma_on and self.get("DIER") & TDE:
+            _dma_request(self.chip, f"{self.name}_TRIG")
+
+    def _ext_tick(self) -> None:
+        """One external clock edge (external clock mode 1 on TRGI, mode 2 on ETRF): the prescaler counts it; each
+        PSC+1 edges the counter counts (up, or down with DIR; edge-aligned), compare matches and overflows as with
+        the internal clock."""
+        cr1 = self.get("CR1")
+        if not cr1 & CEN or self._frozen or (self._ece and self._sms == 5 and not self._trgi):
+            return
+        self._xpsc += 1
+        if self._xpsc <= self.psc:
+            return
+        self._xpsc = 0
+        cnt, arr = self.get("CNT") & self.cmask, self.arr
+        down = bool(cr1 & DIR)
+        ovf = False
+        if down:
+            if cnt == 0:
+                cnt, ovf = arr, True
+            else:
+                cnt -= 1
+        elif cnt == arr or cnt == self.cmask:
+            cnt, ovf = 0, True
+        else:
+            cnt += 1
+        self.set("CNT", cnt)
+        uev = self._overflow() if ovf else False
+        sr = self.get("SR")
+        for c in self.ch:
+            if c.ccs:
+                continue
+            mode = c.mode
+            if mode >= 6:
+                c.ref = self._pwm_ref(mode, cnt, down, c.ccr)
+            if cnt == c.ccr:
+                sr |= 1 << c.n
+                if mode == 1:
+                    c.ref = True
+                elif mode == 2:
+                    c.ref = False
+                elif mode == 3:
+                    c.ref = not c.ref
+            self._oc_apply(c)
+        if sr != self.get("SR"):
+            self.set("SR", sr)
+            self._update_line()
+            for c in self.ch:
+                if not c.ccs and cnt == c.ccr:
+                    self._cc_event(c)
+        if uev and cr1 & OPM:
+            self.set("CR1", self.get("CR1") & ~CEN)
+            if self._mms == 1:
+                self._trgo_set(False)
+
+    # ------------------------------------------------------------ master mode: TRGO, CCx events, DMA requests
+    def add_trigger_listener(self, sig: str, cb) -> None:
+        """Subscribe `cb(t_cycles, level)` to trigger signal `sig`: "TRGO" (CR2.MMS) or "CC1".."CC4" (the CCx event:
+        OCxREF of an output channel, a pulse at each capture of an input channel).  A pulse is reported as
+        cb(t, True) then cb(t, False).  Used by slave timers (ITRx) and the ADC external triggers."""
+        sig = sig.upper()
+        if sig == "TRGO":
+            self.trgo_listeners.append(cb)
+        else:
+            n = int(sig.lstrip("CO").rstrip("REF") or 0)
+            self._cc_lst.setdefault(n, []).append(cb)
+        if self.ch and self.chip is not None:
+            self._oc_config_changed()                    # watched channels need exact match events
+
+    def remove_trigger_listener(self, sig: str, cb) -> None:
+        sig = sig.upper()
+        lst = self.trgo_listeners if sig == "TRGO" else self._cc_lst.get(int(sig.lstrip("CO").rstrip("REF") or 0), [])
+        if cb in lst:
+            lst.remove(cb)
+            if self.ch and self.chip is not None:
+                self._oc_config_changed()
+
+    def trigger_level(self, sig: str) -> bool:
+        """Current level of trigger signal `sig` ("TRGO", "CC1".."CC4")."""
+        sig = sig.upper()
+        if sig == "TRGO":
+            return self._trgo_lvl
+        n = int(sig.lstrip("CO").rstrip("REF") or 0)
+        c = next((x for x in self.ch if x.n == n), None)
+        return bool(c is not None and not c.ccs and c.ref)
+
+    def _trgo_now(self) -> bool:
+        mms = self._mms
+        if mms == 1:
+            return self._cnt_en()
+        if mms >= 4:
+            c = next((x for x in self.ch if x.n == mms - 3), None)
+            return bool(c is not None and c.ref)
+        return False
+
+    def _trgo_set(self, level: bool) -> None:
+        if level == self._trgo_lvl:
+            return
+        self._trgo_lvl = level
+        if self.trgo_listeners:
+            t = self._now()
+            for cb in list(self.trgo_listeners):
+                cb(t, level)
+
+    def _trgo_pulse(self) -> None:
+        t = self._now()
+        for cb in list(self.trgo_listeners):
+            cb(t, True)
+            cb(t, False)
+
+    def _ref_edge(self, c: "_Chan") -> None:
+        """OCxREF of a watched channel changed: CCx listeners, TRGO = OCxREF (MMS=100-111)."""
+        lst = self._cc_lst.get(c.n)
+        if lst:
+            t = self._now()
+            for cb in list(lst):
+                cb(t, c.ref)
+        if self._mms == 3 + c.n:
+            self._trgo_set(c.ref)
+
+    def _cc_event(self, c: "_Chan") -> None:
+        """CCxIF is being set (compare match, capture, EGR.CCxG): compare pulse on TRGO (MMS=011, channel 1), a pulse
+        for the CCx listeners of an input channel, DMA request TIMx_CHn (CCxDE, CCDS=0)."""
+        if c.n == 1 and self._mms == 3 and self.trgo_listeners:
+            self._trgo_pulse()
+        if c.ccs:
+            lst = self._cc_lst.get(c.n)
+            if lst:
+                t = self._now()
+                for cb in list(lst):
+                    cb(t, True)
+                    cb(t, False)
+        if self._dma_on and self.get("DIER") >> (8 + c.n) & 1 and not self.get("CR2") & CCDS:
+            _dma_request(self.chip, f"{self.name}_CH{c.n}")
+
+    def _dma_update(self) -> None:
+        """Update event with DMA enables: TIMx_UP (UDE); with CR2.CCDS the CCx requests (CCxDE) too."""
+        dier = self.get("DIER")
+        if dier & UDE:
+            _dma_request(self.chip, f"{self.name}_UP")
+        if dier & 0x1E00 and "CR2" in self.regs and self.get("CR2") & CCDS:
+            for c in self.ch:
+                if dier >> (8 + c.n) & 1:
+                    _dma_request(self.chip, f"{self.name}_CH{c.n}")
+
+    def _cr2_write(self, blk, reg, old, new):
+        self._store(reg, new)
+        self._mms = new >> 4 & 7
+        if self.ch:
+            self._oc_config_changed()                    # watched channels (MMS=011, 1xx), TI1S inputs
+        self._trgo_set(self._trgo_now())
+        return None
 
     # ------------------------------------------------------------ slave mode / encoder interface
     def _encoder(self) -> bool:
         return self._enc_ok and 1 <= self._sms <= 3
 
     def _smcr_write(self, blk, reg, old, new):
-        enc_new = self._enc_ok and 1 <= (new & 7) <= 3
-        if enc_new and not self._encoder() and self.running:
-            c, down = self._cnt_dir()                    # entering encoder mode: the counter holds its value
-            self.set("CNT", c)
-            self._stop()
-        was = self._encoder()
         self._store(reg, new)
         self._sms, self._ts = new & 7, new >> 4 & 7
-        sms, ts = self._sms, self._ts
-        if sms in (5, 6, 7) or (sms and sms < 4 and not self._enc_ok) or (sms == 4 and ts not in (4, 5, 6)) \
-                or new & (1 << 14):
-            self._warn_once(f"sms{sms}.{ts}.{new >> 14 & 1}", f"{self.name}: SMCR=0x{new:04x}: only encoder mode "
-                            "(SMS=001-011) and reset mode (SMS=100) on TI1F_ED/TI1FP1/TI2FP2 are modelled; gated/"
-                            "trigger/external clock modes, ITRx and ETR are not")
-        if was and not self._encoder() and self.get("CR1") & CEN:
-            self._start(self._restart_pos())
+        self._ece = bool(new & ECE) and self._enc_ok
+        sms = self._sms
+        if sms and sms < 4 and not self._enc_ok:
+            self._warn_once(f"sms{sms}", f"{self.name}: SMCR.SMS={sms}: {self.name} has no encoder interface "
+                            "(TIM1-5, TIM8 only); ignored")
+        if (old ^ new) & (ECE | 7):
+            self._xpsc = 0
         if self.ch:
             self._inputs_cfg()
+        self._resume_or_hold()
+        if self._mms == 1:
+            self._trgo_set(self._cnt_en())
         return None
 
     def _enc_edge(self, k: int, rising: bool) -> None:
@@ -1124,7 +1611,7 @@ class TIM(GatedBlock):
         if k == 1:
             up = (rising ^ p1) != (bool(self._ti_lvl.get(2)) ^ p2)
         else:
-            up = (rising ^ p2) == (bool(self._ti_lvl.get(1)) ^ p1)
+            up = (rising ^ p2) == (self._ti1x ^ p1)
         cnt, arr = self.get("CNT") & self.cmask, self.arr
         ovf = False
         if up:

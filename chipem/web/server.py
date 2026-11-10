@@ -26,6 +26,8 @@ Data extraction:
                                    matches the row `time \t [chip \t] kind \t desc` exactly as the browser's
                                    filter does, and `.txt` is those rows.
   GET  /api/uart?uart=X&since=N&format=json|txt   output after byte offset N (txt: attachment)
+  POST /api/adc {channel, value}   analog input: JSON int / "2048" = raw code; JSON float / "1.65V" / "1200mV" = volts
+                                   (session.parse_adc_value; volts only for `adc_volts` models)
 
 Board wiring API (board sessions only; all executed on the worker):
   GET  /api/board                  {name, quantum_ns, wiring, chips: [{id, name, uarts}], nets, links}
@@ -1035,7 +1037,14 @@ class _Handler(BaseHTTPRequestHandler):
                 ch = str(body.get("channel") or "")
                 if not ch:
                     raise ValueError("missing 'channel'")
-                val = int(str(body.get("value")), 0)
+                raw = body.get("value")             # JSON int = raw code, JSON float = volts, string: "1.65V", "1200mV"
+                if isinstance(raw, bool) or raw is None:
+                    raise ValueError("missing or bad 'value'")
+                if isinstance(raw, (int, float)):
+                    val = raw
+                else:
+                    from ..session import parse_adc_value
+                    val = parse_adc_value(str(raw))
                 w.call(lambda: s.set_adc(ch, val))
                 return self._json({"ok": True, "channel": ch, "value": val})
             if path in ("/api/net", "/api/net/rename", "/api/net/remove", "/api/link", "/api/link/remove",

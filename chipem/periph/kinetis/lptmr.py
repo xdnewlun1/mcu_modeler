@@ -9,6 +9,8 @@ if TIE) and, with TFC=0, CNR restarts from 0 (period CMR+1 ticks); with TFC=1 it
 Writing TEN=0 resets the counter and clears TCF.  Ticks are scheduled in the wall-clock domain (these clocks do
 not depend on the core clock).  Like on silicon, only the first (power-on) reset clears it; warm resets
 (SYSRESETREQ, watchdog) leave it running.
+Trigger output: each compare match (TCF set) calls `trigger_listeners` cb(lptmr): PDB TRGSEL 14 and the ADC
+alternate trigger (SIM_SOPT7 ADCnTRGSEL 14).
 """
 from __future__ import annotations
 
@@ -42,6 +44,7 @@ class LPTMR(MMIOBlock):
         self._irq: int | None = None
         self._warned = False
         self._powered = False
+        self.trigger_listeners: list = []          # cb(lptmr) at each compare match
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -109,6 +112,8 @@ class LPTMR(MMIOBlock):
         self._ev = None
         self.set("CSR", self.get("CSR") | TCF)
         self._update_line()
+        for cb in self.trigger_listeners:
+            cb(self)
         if not self.get("CSR") & TFC:
             self._start_ns += k * self._tick_ns       # counter restarts from 0
             self._schedule(0)

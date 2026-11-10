@@ -156,6 +156,13 @@ class Chip:              # runtime assembly: description + clock + sched + pins 
     def step(self)                                   # one instruction
     clock, sched, pins, bus, core, arch, peripherals: dict[name, MMIOBlock], events (list), uart_out(name) ...
     def uart_blocks(self) -> dict[str, MMIOBlock]     # UART-like blocks: every model exposing `tx_listeners` (any family)
+    def adc_blocks(self) -> dict[str, MMIOBlock]      # analog-input blocks: every model exposing set_channel(name, value)
+    # analog-input model conventions (any family):
+    #   set_channel(name, value) -> bool | None   value as below; False = not this block's channel
+    #   set_input(name, value) -> bool            optional: resolve other names (pins "PA0", "ADC123_IN0", "CMP0_IN3");
+    #                                             False (never raise) for a name it does not know
+    #   adc_volts = True                          float values are volts (stm32.adc, kinetis.cmp); default raw codes only
+    #   adc_volts_only = True                     no raw codes (kinetis.cmp): ints are rejected
     def find_uart(self, name, *, fallback=False) -> str | None   # "USART1"/"UART1"/"SCIA"/"SCI-A" -> block name;
                                                        # fallback: unknown -> lowest-numbered UART (default "UART0")
 ```
@@ -208,7 +215,12 @@ class Session:
     def apply_stimulus(self, spec: str)           # "PTC6=1" | "50ms:B.PTC6=0" | "1.5s:PTC6=X" ; levels 1/0/H/L/X/Z(None)
     def uart_input(self, data: bytes, uart: str = "UART0")
     def uart_output(self, uart: str = "UART0") -> bytes                 # all bytes transmitted so far
-    def set_adc(self, channel: str, value: int)                         # e.g. "ADC0_SE14"
+    def set_adc(self, channel: str, value: int | float)                 # "ADC0_SE14", "PA0", "CMP0_IN0"; int = raw code,
+        # float = volts (only for `adc_volts` models; ValueError otherwise); an int for an `adc_volts_only` model is a
+        # ValueError naming the V/mV form. A name that is not "<block>_<channel>" of a block with set_channel goes to
+        # the first adc_blocks() model whose set_input(name, value) returns True.
+    # module function: parse_adc_value(text) -> int | float   "2048"/"0x800" -> int (raw code);
+    #   "1.65" / "1.65V" / "1650mV" -> float volts.  Used by --adc, shell `adc`, web POST /api/adc (string values).
     def pin_table(self, chip: str | None = None) -> list[dict]
         # [{num, name, short, kind, owner, direction, level, drive, pull, external, functions, chip}] (+ net on a board)
         # chip=None: every chip (or pin_scope); on a board, `short` of non-view chips is qualified ("B.PTC5")

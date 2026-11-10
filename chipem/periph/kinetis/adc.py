@@ -13,6 +13,17 @@
 * SC2.DMAEN: a completed conversion also raises the DMAMUX request "ADC<n>" (source 40 + n); the DMA reads Rn,
   which clears COCO.  `hw_trigger(k)` starts a hardware-triggered conversion of SC1A (k=0) / SC1B (k=1) only
   when SC2.ADTRG=1 (otherwise it is ignored).
+* Hardware trigger source (SIM_SOPT7, K22P100M120SF5V2RM 12.2.6): with ADCnALTTRGEN=0 the PDB pre-triggers reach the
+  ADC (`hw_trigger(k)`); with ADCnALTTRGEN=1 PDB triggers are ignored and the source selected by ADCnTRGSEL starts a
+  conversion of SC1A (ADCnPRETRGSEL=0) or SC1B (=1), again only with SC2.ADTRG=1. Modelled sources: 0 the
+  PDB0_EXTRG pin (rising edge on a pin muxed to PDB0_EXTRG), 1..3 the CMP0..CMP2 output (rising edge of COUT),
+  4..7 PIT channel 0..3 timeout, 8..11 the FTM0..FTM3 trigger output (channel triggers and the initialization
+  trigger enabled in FTMx_EXTTRIG), 12/13 RTC alarm / seconds, 14 LPTMR0 compare (kinetis.sim
+  `subscribe_trigger_sources`). 15 is reserved (the SIM logs one `info`).
+* Internal analog channels (3.7.1.3/3.7.1.4): ADC0_SE23 = DAC0 output (while DAC0 is enabled), ADC1_SE18 = VREF_OUT
+  (while the VREF output buffer is on). These are volts, converted with the selected reference: SC2.REFSEL=0 VREFH
+  (`params.vrefh`, 3.3 V), REFSEL=1 VALT = VREF_OUT (1.2 V; VREFH while the VREF is off). Values set with
+  set_channel() are raw counts and do not depend on REFSEL.
 * Input values: `set_channel(name_or_number, value)` (raw counts; clipped to the configured resolution), e.g.
   set_channel(14, 2048), set_channel("ADC0_SE14", 2048) (ignored -> False on ADC1), "SE4b", "DP0" (differential
   pair 0, used when SC1n.DIFF=1). Unset channels read `params.default` (0).
@@ -23,8 +34,10 @@ import re
 from typing import Any
 
 from ..registry import register
-from ._util import GatedBlock, build_regs, irq_number
+from ._util import GatedBlock, build_regs, find_model, irq_number
 from .dma import dma_request
+from .sim import subscribe_trigger_sources
+
 
 COCO, AIEN, DIFF = 0x80, 0x40, 0x20
 CAL, CALF, ADCO = 0x80, 0x40, 0x08
@@ -56,6 +69,10 @@ class ADC(GatedBlock):
         self.on_complete: list = []
         self.dma_source = -1
         self.conversions = 0
+        self.vrefh = float(params.get("vrefh", 3.3))
+        self.analog_sources: dict[str, Any] = {}     # "SE23" -> callable() -> volts or None (internal channels)
+        self._sim: Any = None
+        self._vref: Any = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -64,6 +81,17 @@ class ADC(GatedBlock):
         for b in chip.peripherals.values():
             if getattr(b, "model", None) == "kinetis.dmamux":
                 b.register_source(self.dma_source, self._dma_active)
+        self._sim = find_model(chip, "kinetis.sim", "SIM")
+        self._vref = find_model(chip, "kinetis.vref", "VREF")
+        # alternate hardware triggers (SIM_SOPT7): every source of the shared trigger encoding
+        subscribe_trigger_sources(chip, self.alt_trigger)
+        # internal analog channels (K22 chip configuration 3.7.1.3/3.7.1.4)
+        if self.index == 0:
+            dac = find_model(chip, "kinetis.dac", "DAC0")
+            if dac is not None:
+                self.analog_sources.setdefault("SE23", dac.voltage)
+        elif self.index == 1 and self._vref is not None:
+            self.analog_sources.setdefault("SE18", self._vref.voltage)
 
     def reset(self) -> None:
         for k in (0, 1):
@@ -99,6 +127,11 @@ class ADC(GatedBlock):
         return f"{kind}{int(num)}{(ab or '').lower()}"
 
     def channel_value(self, adch: int, diff: bool) -> int:
+        if not diff and self.analog_sources:
+            src = self.analog_sources.get(f"SE{adch}")
+            v = src() if src is not None else None
+            if v is not None:
+                return self._volts_to_counts(v)
         if diff:
             return self.values.get(f"DP{adch}", self.default)
         ab = "b" if self.get("CFG2") & 0x10 else "a"
@@ -106,6 +139,17 @@ class ADC(GatedBlock):
         if v is None:
             v = self.values.get(f"SE{adch}", self.default)
         return v
+
+    def reference_volts(self) -> float:
+        if self.get("SC2") & 3 == 1:                     # REFSEL=01: VALT = VREF_OUT
+            v = self._vref.voltage() if self._vref is not None else None
+            if v is not None:
+                return v
+        return self.vrefh
+
+    def _volts_to_counts(self, v: float) -> int:
+        lo, hi = self.resolution(False)
+        return max(lo, min(hi, int(round(v / self.reference_volts() * (hi + 1)))))
 
     def resolution(self, diff: bool) -> tuple[int, int]:
         mode = (self.get("CFG1") >> 2) & 3
@@ -191,9 +235,19 @@ class ADC(GatedBlock):
     def _dma_active(self) -> bool:
         return bool(self.get("SC2") & DMAEN) and any(self.get(n) & COCO for n in ("SC1A", "SC1B"))
 
-    def hw_trigger(self, k: int = 0) -> bool:
-        """Hardware trigger (PDB pre-trigger k -> SC1A/SC1B). Starts a conversion if SC2.ADTRG is set."""
+    def _sopt7(self) -> int:
+        """This ADC's SIM_SOPT7 byte: TRGSEL 3-0, PRETRGSEL 4, ALTTRGEN 7."""
+        sim = self._sim
+        if sim is None or "SOPT7" not in sim.regs:
+            return 0
+        return (sim.get("SOPT7") >> (8 * self.index)) & 0xFF if self.index < 2 else 0
+
+    def hw_trigger(self, k: int = 0, source: str = "pdb") -> bool:
+        """Hardware trigger (PDB pre-trigger k -> SC1A/SC1B). Starts a conversion if SC2.ADTRG is set. PDB
+        triggers (`source="pdb"`) are ignored while SIM_SOPT7.ADCnALTTRGEN selects the alternate trigger."""
         if not self.get("SC2") & ADTRG or self.chip is None:
+            return False
+        if source == "pdb" and self._sopt7() & 0x80:
             return False
         sc1n = "SC1A" if k == 0 else "SC1B"
         if (self.get(sc1n) & 0x1F) == 0x1F:
@@ -201,6 +255,14 @@ class ADC(GatedBlock):
         self._cancel(k)
         self._start(k)
         return True
+
+    def alt_trigger(self, sel: int) -> bool:
+        """Alternate trigger source `sel` (SIM_SOPT7 ADCnTRGSEL encoding) fired: converts SC1A/SC1B per
+        ADCnPRETRGSEL when ADCnALTTRGEN=1 and ADCnTRGSEL == sel."""
+        s = self._sopt7()
+        if not s & 0x80 or (s & 0x0F) != sel:
+            return False
+        return self.hw_trigger(1 if s & 0x10 else 0, source="alt")
 
     def _sc2_write(self, blk, reg, old, new):
         self._store(reg, new)

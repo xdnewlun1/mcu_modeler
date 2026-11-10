@@ -542,3 +542,82 @@ def test_pwm_led_board_probe_measures_frequency():
     lines = out.getvalue().splitlines()
     assert len(lines) < 60, len(lines)
     assert sum("waveform:" in l and "1.000 kHz" in l and "duty 25.0 %" in l for l in lines) >= 6
+
+
+# ------------------------------------------------------------------------------------------------ quadrature encoder
+def test_quadrature_encoder_catalog_and_params():
+    cat = {c["type"]: c for c in catalog()}
+    enc = cat["quadrature_encoder"]
+    assert enc["ports"] == {"a": "out", "b": "out", "i": "out"}
+    assert enc["params"] == {"ppr": 100, "rpm": 60.0, "hz": None, "direction": "cw", "index": True}
+    e = create("quadrature_encoder", "E", {"ppr": 50, "rpm": "1200rpm", "direction": "CCW", "index": "no"})
+    assert e.counts == 200 and e.edge_hz() == 4000 and e.params["direction"] == "ccw" and e.drive("i") is None
+    assert create("quadrature_encoder", "E", {"hz": "40kHz"}).edge_hz() == 40000
+    for bad in ({"ppr": 0}, {"rpm": -1}, {"direction": "sideways"}, {"hz": "3 parsecs"}):
+        with pytest.raises(ValueError):
+            create("quadrature_encoder", "E", bad)
+
+
+def _enc_session(**params):
+    s = _session()
+    enc = s.add_part("ENC", "quadrature_encoder", params, {"a": "A.PTC6", "b": "QB", "i": "QI"})
+    log: list = []
+    enc.listeners.append(lambda p, f: log.append((p.now(), f["port"], f["level"])) if "port" in f else None)
+    return s, enc, log
+
+
+@needs_fw
+def test_quadrature_encoder_waveform_index_and_no_edge_logging():
+    s, enc, log = _enc_session(ppr=2, hz="10kHz")              # 8 edges per revolution, one every 100 us
+    assert (enc.drive("a"), enc.drive("b"), enc.drive("i")) == ("L", "L", "L")    # half a revolution from index
+    s.run_for(1.05e6)
+    assert enc.state()["edges"] == 10 and enc.state()["position"] == 14
+    ab = [(t, p, lvl) for t, p, lvl in log if p in "ab"]
+    assert [(p, lvl) for _, p, lvl in ab[:4]] == [("a", "H"), ("b", "H"), ("a", "L"), ("b", "L")]   # A leads B
+    assert all(abs(t - 1e5 * (k + 1)) < 1 for k, (t, _, _) in enumerate(ab))
+    idx = [(round(t / 1e5), lvl) for t, p, lvl in log if p == "i"]
+    assert idx == [(4, "H"), (8, "L")]                         # one A period (4 edges) per revolution
+    assert s.chip.pins.get("PTC6").external == "H"             # position 14: (A, B) = (H, H)
+    assert not [e for e in _parts_events(s.board, "ENC") if "action" not in e.fields]
+    s.close()
+
+
+@needs_fw
+def test_quadrature_encoder_stimulus_direction_speed_stop_and_reset():
+    s, enc, log = _enc_session(ppr=100, rpm=150)               # 1000 edges/s: 1 ms per edge
+    s.apply_stimulus("5.5ms:ENC=ccw")
+    s.apply_stimulus("10.2ms:ENC=3000rpm")                     # 20 kHz: 50 us per edge
+    s.apply_stimulus("11.225ms:ENC=stop")
+    s.run_for(5.6e6)
+    assert enc.state()["position"] == 205 and enc.state()["direction"] == "ccw"
+    s.run_for(4.5e6)
+    assert enc.state()["position"] == 201                      # reversed without losing the position
+    s.run_for(1.2e6)
+    assert enc.state()["position"] == 181 and enc.state()["rpm"] == 0
+    seq = [(p, lvl) for _, p, lvl in log if p in "ab"]
+    assert seq[:5] == [("a", "H"), ("b", "H"), ("a", "L"), ("b", "L"), ("a", "H")]
+    assert seq[5:8] == [("a", "L"), ("b", "H"), ("a", "H")]    # 205 -> 202: B leads A after the reversal
+    s.run_for(3e6)
+    assert enc.state()["position"] == 181                      # stopped
+    s.set_part("ENC", rpm=60, direction="cw")
+    t0 = s.board.part_now_ns()
+    s.run_for(2.6e6)
+    assert enc.state()["position"] == 182                      # 400 edges/s: 2.5 ms
+    s.apply_stimulus("ENC=restart")
+    assert enc.state()["position"] == 200 and enc.state()["edges"] == 0
+    s.reset()                                                  # Session.reset restarts the timer
+    assert enc.state()["edges"] == 0 and t0 > 0
+    s.run_for(5.1e6)
+    assert enc.state()["edges"] == 2                           # 60 rpm kept: 2.5 ms per edge
+    s.close()
+
+
+def test_quadrature_encoder_board_yaml_round_trip():
+    d = yaml.safe_load('''
+name: enc
+chips: [{id: A, chip: mk22fn1m0vll12}]
+parts:
+  - {id: ENC, type: quadrature_encoder, ppr: 500, rpm: 600, direction: ccw, ports: {a: A.PTB0, b: A.PTB1}}
+''')
+    bd = parse_board(d, base=ROOT)
+    assert bd.parts[0].type == "quadrature_encoder" and bd.parts[0].params["ppr"] == 500

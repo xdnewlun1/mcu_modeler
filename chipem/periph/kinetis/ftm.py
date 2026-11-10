@@ -78,12 +78,13 @@ FLTCTRL.FFVAL/FFLTRnEN and QDCTRL.PHxFLTREN are ignored, i.e. as if disabled):
 Outputs to other modules:
 * trigger output (38.4.20/21, EXTTRIG): a match of channel j with CHjTRIG (j = 0..5; TRIGF) and, with INITTRIGEN,
   the counter being loaded with CNTIN (period start, CNT write, SYNC REINIT, CLKS started with CNT = CNTIN) call
-  `trigger_listeners` (PDB0 TRGSEL 8..11). Channels with CHjTRIG schedule their matches even without a pin.
+  `trigger_listeners`: PDB0 (TRGSEL 8..11) and, through SIM_SOPT7 ADCnALTTRGEN=1 / ADCnTRGSEL 8..11, the ADC0/ADC1
+  alternate hardware trigger (kinetis.adc). Channels with CHjTRIG schedule their matches even without a pin.
 * DMA (38.4.23): CnSC.DMA = CHnIE = 1: CHnF raises DMAMUX source DMA_BASE + n (FTM0 20-27, FTM1 28/29, FTM2 30/31,
   FTM3 32-39) instead of the channel interrupt; the DMA's acknowledge after the minor loop clears CHnF.
 
-Not modelled: INVCTRL, the hardware synchronization triggers (TRIG0-2, SYNC.TRIGn; SIM_SOPT4 FTMxTRGySRC), the FTM
-trigger to the ADC through SIM_SOPT7 (alternate ADC trigger), capture test mode (MODE.CAPTEST), the input filters,
+Not modelled: INVCTRL, the hardware synchronization triggers (TRIG0-2, SYNC.TRIGn; SIM_SOPT4 FTMxTRGySRC), the CMP
+outputs as fault / CH0 capture sources (SIM_SOPT4: read as no fault / no edges), capture test mode (MODE.CAPTEST), the input filters,
 global time base, the half-cycle reload, debug mode; the counter is one 16-bit counter of the FTM clock.
 """
 from __future__ import annotations

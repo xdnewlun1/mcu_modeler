@@ -659,3 +659,16 @@ def test_pwm_pin_wave_in_state_and_events_bounded():
     finally:
         a.stop()
         s.close()
+
+
+def test_api_adc_codes_and_volts(app):
+    """POST /api/adc: JSON int / "2048" = raw code, "1.2V" / "1200mV" / JSON float = volts (session.parse_adc_value);
+    a raw code for a volts-only comparator input is a 400 with the V/mV hint."""
+    assert post(app, "/api/adc", {"channel": "ADC0_SE14", "value": "0x800"}) == (200, {"ok": True, "channel": "ADC0_SE14", "value": 2048})
+    code, r = post(app, "/api/adc", {"channel": "CMP0_IN0", "value": "1200mV"})
+    assert code == 200 and r["value"] == 1.2
+    assert post(app, "/api/adc", {"channel": "CMP0_IN1", "value": 0.5})[0] == 200
+    code, r = post(app, "/api/adc", {"channel": "CMP0_IN0", "value": 1200})
+    assert code == 400 and "volts" in str(r)
+    code, r = post(app, "/api/adc", {"channel": "ADC0_SE14", "value": "1.65V"})
+    assert code == 400 and "raw" in str(r)

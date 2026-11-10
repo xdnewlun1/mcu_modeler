@@ -144,3 +144,12 @@ def test_trace_collapses_periodic_edges_like_run():
     assert any("waveform:" in l and "20.000 kHz" in l and "duty 25.0 %" in l for l in lines)
     assert any("waveform unchanged" in l for l in lines)
     assert len(feed("all")) > 1000
+
+
+def test_adc_command_accepts_codes_and_volts():
+    """shell `adc` uses session.parse_adc_value: raw codes for the Kinetis ADC, volts for comparator inputs."""
+    rc, out = run_exec("adc ADC0_SE14 2048; adc CMP0_IN0 1200mV; adc CMP0_IN1=1.5V; quit")
+    assert rc == 0, out
+    assert "ADC0_SE14 = 2048" in out and "CMP0_IN0 = 1.2 V" in out and "CMP0_IN1 = 1.5 V" in out
+    rc, out = run_exec("adc CMP0_IN0 1200; quit")
+    assert rc == 1 and "volts" in out

@@ -63,10 +63,10 @@ peripherals:
   - {name: TIM8, model: stm32.tim, base: 0x40010400, size: 0x400}
   - {name: USART1, model: stm32.usart, base: 0x40011000, size: 0x400, params: {index: 1, kind: usart}}
   - {name: USART6, model: stm32.usart, base: 0x40011400, size: 0x400, params: {index: 6, kind: usart}}
-  - {name: ADC1, model: stub, base: 0x40012000, size: 0x100}
-  - {name: ADC2, model: stub, base: 0x40012100, size: 0x100}
-  - {name: ADC3, model: stub, base: 0x40012200, size: 0x100}
-  - {name: C_ADC, model: stub, base: 0x40012300, size: 0x400}   # ADC common registers (SVD extent 0x400)
+  - {name: ADC1, model: stm32.adc, base: 0x40012000, size: 0x100}
+  - {name: ADC2, model: stm32.adc, base: 0x40012100, size: 0x100}
+  - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100}
+  - {name: C_ADC, model: stm32.adc_common, base: 0x40012300, size: 0x400}   # ADC common registers (SVD extent 0x400)
   - {name: SDIO, model: stub, base: 0x40012C00, size: 0x400}
   - {name: SPI1, model: stub, base: 0x40013000, size: 0x400}
   - {name: SYSCFG, model: stm32.syscfg, base: 0x40013800, size: 0x400}
@@ -87,8 +87,8 @@ peripherals:
   - {name: CRC, model: stub, base: 0x40023000, size: 0x400}
   - {name: RCC, model: stm32.rcc, base: 0x40023800, size: 0x400, params: {ext_hz: 8000000}}
   - {name: FLASH, model: stm32.flash, base: 0x40023C00, size: 0x400}   # flash interface registers
-  - {name: DMA1, model: stub, base: 0x40026000, size: 0x400}
-  - {name: DMA2, model: stub, base: 0x40026400, size: 0x400}
+  - {name: DMA1, model: stm32.dma, base: 0x40026000, size: 0x400, params: {controller: 1}}   # no memory-to-memory (RM0090 10.3.6)
+  - {name: DMA2, model: stm32.dma, base: 0x40026400, size: 0x400, params: {controller: 2}}
   - {name: Ethernet_MAC, model: stub, base: 0x40028000, size: 0x1400}   # ETH MAC/MMC/PTP/DMA: STM32F407 only (not on F405 silicon)
   - {name: OTG_HS_GLOBAL, model: stub, base: 0x40040000, size: 0x40000}   # USB OTG HS (whole 256 KB window)
   # AHB2

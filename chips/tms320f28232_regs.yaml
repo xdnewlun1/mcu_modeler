@@ -3,7 +3,8 @@
 # Generated once from a transcription script (register names/offsets/reset values) of:
 #   SPRS439Q TMS320F2833x/F2823x data sheet (section 8: memory map, peripheral frames, Table 8-17 GPIO,
 #   8-27..8-35), SPRUFB0 TMS320x2833x/2823x System Control and Interrupts reference guide (PLL, clocks, watchdog,
-#   CPU timers, PIE, GPIO, XINT), SPRUFZ5 SCI guide, SPRU812 ADC guide, SPRUG04 ePWM, SPRUFG4A eCAP, SPRUG79 I2C.
+#   CPU timers, PIE, GPIO, XINT), SPRUFZ5 SCI guide, SPRU812 ADC guide, SPRUG04 ePWM, SPRUFG4A eCAP, SPRUG79 I2C,
+#   SPRUI07 ch. 6 (Type-0 eQEP = the F2833x eQEP of SPRUG05A: EQEP1/EQEP2 offsets, bit fields, access types).
 # Address units are 16-bit words: offsets/sizes/widths count words; a width-2 register is 32 bits with its low
 # word at the lower address. Peripherals not on the F28232 (SCI-C, McBSP-B, eCAP5/6) are omitted.
 device: TMS320F28232
@@ -1343,66 +1344,250 @@ peripherals:
     base: 0x6B00
     size: 0x040
     derived_from: null
-    description: "eQEP1 (storage only)"
+    description: "eQEP1 (modelled by ti_c2000.eqep; SPRUI07 ch. 6 Type-0 eQEP, Table 6-1/6-4)"
     group: EQEP
     interrupts: {64: EQEP1_INT}
     registers:
       - {name: QPOSCNT, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QPOSINIT, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QPOSMAX, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSCMP, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSILAT, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSSLAT, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSLAT, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSCMP, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, description: "active compare value (shadowed when QPOSCTL.PCSHDW = 1)"}
+      - {name: QPOSILAT, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-only}
+      - {name: QPOSSLAT, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-only}
+      - {name: QPOSLAT, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-only}
       - {name: QUTMR, offset: 0x0E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QUPRD, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QWDTMR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: QWDPRD, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QDECCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QEPCTL, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCAPCTL, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QPOSCTL, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QEINT, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QFLG, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCLR, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QFRC, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QEPSTS, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QDECCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: QSP, lsb: 5, width: 1},
+          {name: QIP, lsb: 6, width: 1},
+          {name: QBP, lsb: 7, width: 1},
+          {name: QAP, lsb: 8, width: 1},
+          {name: IGATE, lsb: 9, width: 1},
+          {name: SWAP, lsb: 10, width: 1},
+          {name: XCR, lsb: 11, width: 1},
+          {name: SPSEL, lsb: 12, width: 1},
+          {name: SOEN, lsb: 13, width: 1},
+          {name: QSRC, lsb: 14, width: 2, enum: {0: "quadrature", 1: "direction-count", 2: "up-count", 3: "down-count"}},
+        ]}
+      - {name: QEPCTL, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: WDE, lsb: 0, width: 1},
+          {name: UTE, lsb: 1, width: 1},
+          {name: QCLM, lsb: 2, width: 1},
+          {name: QPEN, lsb: 3, width: 1},
+          {name: IEL, lsb: 4, width: 2},
+          {name: SEL, lsb: 6, width: 1},
+          {name: SWI, lsb: 7, width: 1},
+          {name: IEI, lsb: 8, width: 2},
+          {name: SEI, lsb: 10, width: 2},
+          {name: PCRM, lsb: 12, width: 2, enum: {0: "index", 1: "max", 2: "first-index", 3: "unit-time"}},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: QCAPCTL, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: UPPS, lsb: 0, width: 4},
+          {name: CCPS, lsb: 4, width: 3},
+          {name: CEN, lsb: 15, width: 1},
+        ]}
+      - {name: QPOSCTL, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PCSPW, lsb: 0, width: 12},
+          {name: PCE, lsb: 12, width: 1},
+          {name: PCPOL, lsb: 13, width: 1},
+          {name: PCLOAD, lsb: 14, width: 1},
+          {name: PCSHDW, lsb: 15, width: 1},
+        ]}
+      - {name: QEINT, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PCE, lsb: 1, width: 1},
+          {name: QPE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QFLG, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: PCE, lsb: 1, width: 1},
+          {name: PHE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QCLR, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, description: "write 1 to clear the QFLG bit; reads 0", fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: PCE, lsb: 1, width: 1},
+          {name: PHE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QFRC, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, description: "write 1 to force the QFLG bit; reads 0", fields: [
+          {name: PCE, lsb: 1, width: 1},
+          {name: PHE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QEPSTS, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PCEF, lsb: 0, width: 1, access: read-only},
+          {name: FIMF, lsb: 1, width: 1, write_effect: oneToClear},
+          {name: CDEF, lsb: 2, width: 1, write_effect: oneToClear},
+          {name: COEF, lsb: 3, width: 1, write_effect: oneToClear},
+          {name: QDLF, lsb: 4, width: 1, access: read-only},
+          {name: QDF, lsb: 5, width: 1, access: read-only},
+          {name: FIDF, lsb: 6, width: 1, access: read-only},
+          {name: UPEVNT, lsb: 7, width: 1, write_effect: oneToClear},
+        ]}
       - {name: QCTMR, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: QCPRD, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCTMRLAT, offset: 0x1F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCPRDLAT, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCTMRLAT, offset: 0x1F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: QCPRDLAT, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
   EQEP2:
     base: 0x6B40
     size: 0x040
     derived_from: null
-    description: "eQEP2 (storage only)"
+    description: "eQEP2 (modelled by ti_c2000.eqep; SPRUI07 ch. 6 Type-0 eQEP, Table 6-1/6-4)"
     group: EQEP
     interrupts: {65: EQEP2_INT}
     registers:
       - {name: QPOSCNT, offset: 0x00, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QPOSINIT, offset: 0x02, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QPOSMAX, offset: 0x04, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSCMP, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSILAT, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSSLAT, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: QPOSLAT, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
+      - {name: QPOSCMP, offset: 0x06, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write, description: "active compare value (shadowed when QPOSCTL.PCSHDW = 1)"}
+      - {name: QPOSILAT, offset: 0x08, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-only}
+      - {name: QPOSSLAT, offset: 0x0A, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-only}
+      - {name: QPOSLAT, offset: 0x0C, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-only}
       - {name: QUTMR, offset: 0x0E, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QUPRD, offset: 0x10, width: 2, reset: 0x00000000, reset_mask: 0xFFFFFFFF, access: read-write}
       - {name: QWDTMR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: QWDPRD, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QDECCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QEPCTL, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCAPCTL, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QPOSCTL, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QEINT, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QFLG, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCLR, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QFRC, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QEPSTS, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QDECCTL, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: QSP, lsb: 5, width: 1},
+          {name: QIP, lsb: 6, width: 1},
+          {name: QBP, lsb: 7, width: 1},
+          {name: QAP, lsb: 8, width: 1},
+          {name: IGATE, lsb: 9, width: 1},
+          {name: SWAP, lsb: 10, width: 1},
+          {name: XCR, lsb: 11, width: 1},
+          {name: SPSEL, lsb: 12, width: 1},
+          {name: SOEN, lsb: 13, width: 1},
+          {name: QSRC, lsb: 14, width: 2, enum: {0: "quadrature", 1: "direction-count", 2: "up-count", 3: "down-count"}},
+        ]}
+      - {name: QEPCTL, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: WDE, lsb: 0, width: 1},
+          {name: UTE, lsb: 1, width: 1},
+          {name: QCLM, lsb: 2, width: 1},
+          {name: QPEN, lsb: 3, width: 1},
+          {name: IEL, lsb: 4, width: 2},
+          {name: SEL, lsb: 6, width: 1},
+          {name: SWI, lsb: 7, width: 1},
+          {name: IEI, lsb: 8, width: 2},
+          {name: SEI, lsb: 10, width: 2},
+          {name: PCRM, lsb: 12, width: 2, enum: {0: "index", 1: "max", 2: "first-index", 3: "unit-time"}},
+          {name: FREE_SOFT, lsb: 14, width: 2},
+        ]}
+      - {name: QCAPCTL, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: UPPS, lsb: 0, width: 4},
+          {name: CCPS, lsb: 4, width: 3},
+          {name: CEN, lsb: 15, width: 1},
+        ]}
+      - {name: QPOSCTL, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PCSPW, lsb: 0, width: 12},
+          {name: PCE, lsb: 12, width: 1},
+          {name: PCPOL, lsb: 13, width: 1},
+          {name: PCLOAD, lsb: 14, width: 1},
+          {name: PCSHDW, lsb: 15, width: 1},
+        ]}
+      - {name: QEINT, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PCE, lsb: 1, width: 1},
+          {name: QPE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QFLG, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only, fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: PCE, lsb: 1, width: 1},
+          {name: PHE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QCLR, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, description: "write 1 to clear the QFLG bit; reads 0", fields: [
+          {name: INT, lsb: 0, width: 1},
+          {name: PCE, lsb: 1, width: 1},
+          {name: PHE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QFRC, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, description: "write 1 to force the QFLG bit; reads 0", fields: [
+          {name: PCE, lsb: 1, width: 1},
+          {name: PHE, lsb: 2, width: 1},
+          {name: QDC, lsb: 3, width: 1},
+          {name: WTO, lsb: 4, width: 1},
+          {name: PCU, lsb: 5, width: 1},
+          {name: PCO, lsb: 6, width: 1},
+          {name: PCR, lsb: 7, width: 1},
+          {name: PCM, lsb: 8, width: 1},
+          {name: SEL, lsb: 9, width: 1},
+          {name: IEL, lsb: 10, width: 1},
+          {name: UTO, lsb: 11, width: 1},
+        ]}
+      - {name: QEPSTS, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: PCEF, lsb: 0, width: 1, access: read-only},
+          {name: FIMF, lsb: 1, width: 1, write_effect: oneToClear},
+          {name: CDEF, lsb: 2, width: 1, write_effect: oneToClear},
+          {name: COEF, lsb: 3, width: 1, write_effect: oneToClear},
+          {name: QDLF, lsb: 4, width: 1, access: read-only},
+          {name: QDF, lsb: 5, width: 1, access: read-only},
+          {name: FIDF, lsb: 6, width: 1, access: read-only},
+          {name: UPEVNT, lsb: 7, width: 1, write_effect: oneToClear},
+        ]}
       - {name: QCTMR, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: QCPRD, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCTMRLAT, offset: 0x1F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: QCPRDLAT, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: QCTMRLAT, offset: 0x1F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
+      - {name: QCPRDLAT, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
   MCBSPA:
     base: 0x5000
     size: 0x040

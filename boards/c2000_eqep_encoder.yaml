@@ -1,0 +1,16 @@
+# eQEP1 of a TMS320F28232 decodes a quadrature encoder part.
+#   ENC: quadrature_encoder, 100 lines (400 edges per revolution), 1500 rpm = 10 kHz edge rate, clockwise (A leads
+#        B), index once per revolution; a -> GPIO20 (EQEP1A), b -> GPIO21 (EQEP1B), i -> GPIO23 (EQEP1I).
+#   A (F28232) runs eqep: quadrature mode, QPOSMAX = 399, counter reset at each index marker, 100 Hz unit timer
+#        latching QPOSLAT; the EQEP1_INT ISR stores eqep_pos / eqep_dir / eqep_ilat / eqep_cprd / eqep_count in M0.
+# The F28232 programs its PLL first (~6.6 ms PLL lock), so the eQEP starts counting at ~6.6 ms.
+# Change speed or direction at run time: --at 30ms:ENC=ccw, --at 30ms:ENC=3000rpm, --at 40ms:ENC=stop.
+# Run:   chipem run --board boards/c2000_eqep_encoder.yaml --for 50ms --pin-report
+# Build: firmware/samples_c2000/build.sh
+name: c2000_eqep_encoder
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/eqep.c28img}
+parts:
+  - {id: ENC, type: quadrature_encoder, ppr: 100, rpm: 1500, direction: cw, index: true,
+     ports: {a: A.GPIO20, b: A.GPIO21, i: A.GPIO23}}

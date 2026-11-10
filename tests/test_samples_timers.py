@@ -105,3 +105,24 @@ def test_ftm_capture_sample_measures_injected_edges():
     finally:
         s.close()
     assert out == "ftm_capture\r\nperiod 15000\r\nperiod 57000\r\n", out
+
+
+_QD_FW = BUILD / "ftm_qd.elf"
+
+
+@pytest.mark.skipif(not _QD_FW.exists(), reason="ftm_qd sample not built (firmware/samples/build.sh)")
+def test_ftm_qd_sample_counts_the_encoder_part_and_its_reversal():
+    """boards/k22_ftm_qd_encoder.yaml: a quadrature_encoder part (100 lines, 600 rpm = one edge every 250 us from
+    t = 0) on PTB0/PTB1 = FTM1_QD_PHA/PHB; FTM1's decoder counts every edge and ftm_qd prints CNT every 10 ms.  The
+    board stimulus reverses the encoder at 30 ms (it restarts its edge timer there: the edge due at 30 ms is not made,
+    the first reverse edge comes at 30.25 ms)."""
+    from chipem.board import load_board
+    s = Session.from_board(load_board(ROOT / "boards/k22_ftm_qd_encoder.yaml"))
+    try:
+        s.run_for(45e6)
+        out = s.uart_output("A.UART0").decode()
+        pins = {p: s.ctxs["A"].chip.pins.get(p).owner for p in ("PTB0", "PTB1")}
+    finally:
+        s.close()
+    assert out == "ftm_qd\r\nqd 40 up\r\nqd 80 up\r\nqd 119 up\r\nqd 79 down\r\n", out
+    assert pins == {"PTB0": "FTM1_QD_PHA", "PTB1": "FTM1_QD_PHB"}

@@ -8,6 +8,8 @@ The time counter runs while SR.TCE=1 and TIF=TOF=0; TSR then increments once per
 Writing TSR (only while TCE=0) clears TIF/TOF; writing TAR clears TAF.  As on silicon, TAF is set when TSR equals
 TAR and increments (i.e. on the transition TAR -> TAR+1).  IRQ "RTC" = (TIF&TIIE)|(TOF&TOIE)|(TAF&TAIE) (level);
 IRQ "RTC_Seconds" is pulsed every second while IER.TSIE=1.
+Trigger outputs: `trigger_listeners` cb(rtc, kind) with kind "alarm" when TAF gets set and "seconds" at every
+TSR increment (independent of IER.TSIE): PDB TRGSEL 12/13 and the ADC alternate trigger (SOPT7 ADCnTRGSEL 12/13).
 Like the real VBAT domain, the RTC keeps its state across chip (system) resets: only the first reset (power-on)
 and CR.SWR clear it.
 """
@@ -47,6 +49,7 @@ class RTC(MMIOBlock):
             self.add_reg(r)
         self._ev = None
         self._sec_start_ns = 0.0     # time at which TPR was 0 (start of the current second)
+        self.trigger_listeners: list = []      # cb(rtc, "alarm" | "seconds")
         self._line = False
         self._irq: int | None = None
         self._irq_sec: int | None = None
@@ -115,6 +118,7 @@ class RTC(MMIOBlock):
         self._ev = None
         tsr = self.get("TSR")
         sr = self.get("SR")
+        alarm = tsr == self.get("TAR") and not sr & SR_TAF
         if tsr == self.get("TAR"):
             sr |= SR_TAF
         tsr = (tsr + 1) & 0xFFFFFFFF
@@ -128,6 +132,10 @@ class RTC(MMIOBlock):
         if self.get("IER") & IER_TSIE and self._irq_sec is not None:
             self.seconds_irqs += 1
             self.pulse_irq(self._irq_sec)
+        for cb in self.trigger_listeners:
+            if alarm:
+                cb(self, "alarm")
+            cb(self, "seconds")
         if self.counting():
             self._ev = self.chip.sched.at_ns(self._sec_start_ns + SEC_NS, self._second)
 

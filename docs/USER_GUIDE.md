@@ -158,7 +158,8 @@ clocks, LEDs, probes, counters, gates, flip-flops.
 - **Unmodelled peripherals are RAM-like stubs.** A loop that waits for a hardware status bit on a stub spins forever.
 - **UART and SPI pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel only
   through links. Timer outputs are different: STM32 TIM, Kinetis FTM, C2000 ePWM / eCAP APWM drive their pins edge by
-  edge, and timer inputs (input capture, eCAP, faults, trip zones) see the edges on their pins (section 4.4).
+  edge, and timer inputs (input capture, eCAP, eQEP and FTM quadrature decoders, faults, trip zones) see the edges on
+  their pins (section 4.4).
 
 ---
 
@@ -437,7 +438,7 @@ exceptions taken:
 | `--at TIME:PIN=LEVEL` | `--at 1ms:PTC6=0` | drive an input at an absolute time |
 | `--at TIME:UART=TEXT` | `--at '7ms:SCIA=hi\n'` | start typing TEXT into a receiver at that time, paced at its baud |
 | `--uart-in [UART:]TEXT` | `--uart-in 'SCIA:hi\n'` | the same from t=0 (default UART0) |
-| `--adc CH=VALUE` | `--adc ADC0_SE18=40000` | raw conversion result for an ADC channel |
+| `--adc CH=VALUE` | `--adc ADC0_SE18=40000`, `--adc PA0=1.65V`, `--adc CMP0_IN0=1.2V` | analog input: an integer is a raw conversion code, a decimal or V/mV suffix is volts (STM32 ADC, Kinetis CMP inputs: volts only); STM32 also takes pin names (see below) |
 | `--spi-flash SPIn:cs=PIN[,jedec=,size=,file=]` | `--spi-flash SPI0:cs=PTC4` | attach SPI NOR flash to a Kinetis DSPI |
 | `--part ID:TYPE[:K=V,...]` | `--part LED1:led:in=PTC5` | add a board part (section 6) |
 | `--vcd FILE` | `--vcd out.vcd` | write pin waveforms |
@@ -452,6 +453,19 @@ exceptions taken:
 
 Pin names accept the GPIO name (`PTC6`), any part of the datasheet name (`LLWU_P10`) or the pin number (`78`).
 UART escapes: `\n \r \t \xNN \\`. Quote anything with `\` or spaces for the shell.
+
+ADC values per family. One rule everywhere (`--adc`, shell `adc`, web `POST /api/adc`): an integer (`2048`,
+`0x800`) is a raw conversion code, a number with a decimal point or a `V` / `mV` suffix (`1.65`, `1.65V`, `1650mV`) is
+volts. Kinetis ADCs (`ADC0_SE14=2048`) and the C2000 ADC (`ADCINA3=2048`) take raw codes only (volts are rejected).
+Inputs that have no raw code, the Kinetis comparator inputs, take volts only: `--adc CMP0_IN0=1.2V` (or `1200mV`,
+`1.2`); a bare integer there is rejected with a message pointing at the V / mV form. The
+STM32 ADC takes volts (VREF+ = 3.3 V) when the value has a decimal point or a unit (`1.65`, `1.65V`, `1650mV`) and a
+raw 12-bit code otherwise (`2048`). Its channels can be named by pin (`PA0`), by ADC and channel (`ADC1_IN0`, `IN0`)
+or by the pin table name (`ADC123_IN0`). The value belongs to the pin, so `PA0=1.65V` feeds channel 0 of ADC1, ADC2
+and ADC3 alike. A channel without a value converts its pin's digital level (H = 3.3 V, L = 0 V). The internal
+channels take `ADC1_TEMP=<degC>` (default 25) and `VBAT=<volts>` (default 3.3). Example: `chipem run
+firmware/samples_stm32/build/adc_tim_trigger.elf --chip stm32f405zg --for 5ms --adc PA0=1.65V` prints `adc 2048`
+every millisecond (TIM3 TRGO triggers ADC1).
 
 Exit status: 0 when the run reaches the end of the window, 3 when it stops on a fault (`--stop-on-fault`) or a
 lockup, 1 on a usage or load error. A fault that enters the firmware's HardFault handler still exits 0.
@@ -551,7 +565,7 @@ interaction (handy in scripts). All `run` options (`--clock`, `--set`, `--part`,
 | `bt [WORDS]` | best-effort backtrace from LR and stack scan |
 | `periph [NAME]` | list blocks, or dump one block's registers without read side effects |
 | `uart [NAME] TEXT`, `uartout [NAME]` | send to a UART receiver; show what a UART sent |
-| `adc CHANNEL VALUE` | set an ADC reading |
+| `adc CHANNEL VALUE` | set an analog input (same rule as `--adc`: integer = raw code, `1.65V` / `1200mV` = volts) |
 | `events [N] [kinds]`, `trace on\|off\|all` | recent events; print events live during `run` (same format and PWM summaries as `chipem run`; `trace all` prints every edge) |
 | `parts`, `part ID [KEY=VALUE]`, `part add ID:TYPE:...` | list, set or add board parts |
 | `vcd PATH` | start writing a VCD |
@@ -910,6 +924,8 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `pwm_led.yaml` | STM32F405 + K22 | timer PWM (TIM3 CH1 on PA6, FTM0 CH0 on PTC1, 1 kHz 25 %) driving an LED and a probe each; the probes read 1000 Hz | no links |
 | `k22_ftm_capture.yaml` | K22 | FTM0 PWM (PTC1, 10 kHz) wired to the FTM1 input capture (PTA12) on the same chip | UART0 prints `period 6000` five times |
 | `c2000_ecap_loopback.yaml` | F28232 | ePWM1A (GPIO0, 20 kHz 30 %) wired to eCAP1 (GPIO24) | `ecap_period` 5000, `ecap_high` 1500 cycles |
+| `c2000_eqep_encoder.yaml` | F28232 | a `quadrature_encoder` part (100 lines, 1500 rpm, index) on eQEP1 (GPIO20/21/23) | `eqep_pos` = position since the index at each 10 ms unit time out, `eqep_dir` 1, `eqep_cprd` 312 |
+| `k22_ftm_qd_encoder.yaml` | K22 | the encoder part (600 rpm) on FTM1_QD_PHA/PHB (PTB0/PTB1), reversed at 30 ms | `qd 40 up`, `qd 80 up`, `qd 119 up`, `qd 79 down`, ... |
 | `pwm_capture_3way.yaml` | STM32F405 + K22 + F28232 | one STM32 PWM (PA6, 1 kHz 25 %) measured by a probe, a K22 FTM capture and a C2000 eCAP (`--for 12ms`) | probe 1000 Hz, K22 `period 60000`, eCAP 100000 / 25000 cycles |
 
 ### 5.4 Pin report on a board
@@ -956,6 +972,7 @@ input port reads the net (H/L/X). Gates are zero-delay. The catalog (from `GET /
 | `vcc`, `gnd` | out | | H, L |
 | `pulse` | out | `period` (1ms), `duty` (0.5), `start` (L), `phase` (0ns) | free-running clock |
 | `pattern` | out | `steps` ([[TIME, LEVEL], ...]), `repeat` (false), `period` | level sequence; Z before the first step |
+| `quadrature_encoder` | a, b, i | `ppr` (100), `rpm` (60), `hz` (none: quadrature edge rate, overrides rpm), `direction` (cw), `index` (true) | incremental encoder: A and B 90 degrees apart (cw: A leads B), 4 x `ppr` edges per revolution, `i` high for one A period once per revolution (Z with `index: false`); starts half a revolution from the index |
 | `led` | in | `active` (H), `color` (red) | lit while the net is at `active`; counts changes |
 | `probe` | in | | level, rises, falls, last change, frequency |
 | `counter` | in | `edge` (rise): rise/fall/both | edge count |
@@ -1015,6 +1032,7 @@ parts (2):
 | a gate between two chips | board YAML: `{id: G1, type: and, ports: {in0: A.PTC5, in1: CLK, out: B.PTC7}}` |
 | measure a frequency | `{id: P1, type: probe, ports: {in: B_LED}}`; the summary prints `level L, 6 rises / 6 falls, 1 kHz` |
 | count pulses | `{id: CNT1, type: counter, ports: {in: B_LED}}` |
+| a motor shaft encoder for eQEP / FTM / TIM quadrature decoding | `{id: ENC, type: quadrature_encoder, ppr: 100, rpm: 1500, ports: {a: A.GPIO20, b: A.GPIO21, i: A.GPIO23}}`, then `--at 30ms:ENC=ccw`, `--at 40ms:ENC=3000rpm`, `--at 50ms:ENC=stop` |
 
 The `logic_demo` board summary shows each kind:
 
@@ -1030,6 +1048,25 @@ parts (10):
   P1       probe    in=GATED                           level L, 6 rises / 6 falls, 1 kHz, last change 8 ms
   FF1      dff      d=LED_A clk=CLK rst=- q=LATCHED qn=- q=H clocks=8
 ...
+```
+
+**Quadrature encoder.** `quadrature_encoder` makes one edge every `1 / (4 * ppr * rpm / 60)` s (or `1 / hz`),
+on absolute board times (no drift), alternating A and B: clockwise A rises, B rises, A falls, B falls. Its stimulus
+takes `cw` / `ccw`, `stop`, `<n>rpm` (or a bare number), `<n>hz` / `<n>khz` (edge rate) and `restart` (back to the
+start position), several at once (`--at 20ms:ENC=ccw,300rpm`); `ENC.rpm=...` and the web part dialog set single
+values. A change keeps the position and restarts the edge timer at that instant (the next edge one period later).
+Its edges are not logged as `part` events (they would flood the log); the pins' own events, the VCD and the
+`position` / `revolutions` / `edges` state show them. `Session.reset` restarts it at its start position.
+Boards: `boards/c2000_eqep_encoder.yaml` (F28232 eQEP1 with index) and `boards/k22_ftm_qd_encoder.yaml` (K22 FTM1
+quadrature decoder):
+
+```
+$ .venv/bin/chipem run --board boards/c2000_eqep_encoder.yaml --for 50ms --pin-report
+...
+parts (1):
+  ENC      quadrature_encoder a=ENC_a b=ENC_b i=ENC_i            position=700 revolutions=1.75 direction=cw rpm=1500 edge_hz=10000 edges=500 a=L b=L i=L
+...
+GPIO20   64  EQEP1A (pull-up)                     6.554 ms  pll+0x8                     0      0      0     0  confirmed     periodic 2.5 kHz, duty 50.0 %
 ```
 
 Parts are digital only: no analog values, no propagation delay, no UART bytes.
@@ -1233,7 +1270,7 @@ The prebuilt outputs are in each `build/` directory, and the tests use them. Reb
 | directory | build | output | tools |
 |---|---|---|---|
 | `firmware/samples/` (K22) | `firmware/samples/build.sh` | `build/*.elf`, `.bin`, `.map` (11 samples, incl. `ftm_pwm`, `ftm_capture`) | clang + ld.lld |
-| `firmware/samples_stm32/` | `firmware/samples_stm32/build.sh` | 9 samples (incl. `tim_pwm`, `tim_capture`), linked at 0x08000000 | clang + ld.lld |
+| `firmware/samples_stm32/` | `firmware/samples_stm32/build.sh` | 11 samples (incl. `tim_pwm`, `tim_capture`, `uart_dma`, `adc_tim_trigger`), linked at 0x08000000 | clang + ld.lld |
 | `firmware/samples_stm32_hal/` | `firmware/samples_stm32_hal/build.sh` | `build/uart_chat_hal.elf` | clang + ld.lld + STM32CubeF4 in `firmware/vendor/` |
 | `firmware/samples_c2000/` | `firmware/samples_c2000/build.sh` | `build/*.c28img` | `tools/c28x_asm.py` |
 | `firmware/samples_c2000_c/` | `firmware/samples_c2000_c/build.sh` | `build/*.out` (EABI) and `*_coff.out` | TI cl2000 in `toolchains/` |
@@ -1393,7 +1430,7 @@ Options shared by `run`, `shell` and `serve`:
 | `--set PIN=LEVEL\|PART=VALUE` | drive a pin / set a part from t=0 (repeatable) |
 | `--at TIME:PIN=LEVEL\|TIME:PART=VALUE\|TIME:UART=TEXT` | timed stimulus (repeatable) |
 | `--uart-in [UART:]TEXT` | host input from t=0 (default UART0) |
-| `--adc CHANNEL=VALUE` | ADC reading (`ADC0_SE14=2048`; bare `SE14` = ADC0) |
+| `--adc CHANNEL=VALUE` | analog input: integer = raw code (`ADC0_SE14=2048`; bare `SE14` = ADC0; C2000 `ADCINA3=2048`), decimal or V/mV = volts (STM32 `PA0=1.65V`; Kinetis comparator `CMP0_IN0=1.2V`, volts only) |
 | `--spi-flash SPIn:cs=PIN[,jedec=ID,size=N,file=PATH]` | SPI NOR flash on a Kinetis DSPI |
 | `--part ID:TYPE[:KEY=VAL,...]` | add a part (repeatable) |
 | `--log-mmio` | log every peripheral access |

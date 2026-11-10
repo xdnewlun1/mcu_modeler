@@ -16,7 +16,7 @@ K22 = ROOT / "chips" / "mk22fn1m0vll12.yaml"
 FX512 = ROOT / "chips" / "mk22fx512vll12.yaml"
 MY_MODELS = {"kinetis.sim", "kinetis.port", "kinetis.gpio", "kinetis.wdog", "kinetis.mcg", "kinetis.osc",
              "kinetis.smc", "kinetis.pmc", "kinetis.rcm", "kinetis.llwu", "kinetis.vbat", "kinetis.ftfe",
-             "kinetis.adc"}
+             "kinetis.adc", "kinetis.crc", "kinetis.dac", "kinetis.cmp", "kinetis.ewm", "kinetis.vref"}
 
 
 @pytest.fixture(scope="module")
@@ -113,6 +113,40 @@ def test_fpu_test(desc):
     assert chip.pins.get("PTC5").level() == "H"
     assert chip.pins.get("PTC4").level() == "H"
     assert not [e for e in chip.log if e.kind == "fault"]
+
+
+def test_crc_dac_cmp_sample(desc):
+    """crc_dac.c: CRC-32 and CRC-16 from the CRC module, VREF start-up, the DAC0 buffer stepped by software
+    triggers, and CMP0 (CMP0_IN0 vs. the 6-bit DAC at 1.65 V) reported on UART0 and on PTC5 (CMP0_OUT)."""
+    chip, _ = boot(desc, "crc_dac")
+    cmp0 = chip.peripherals["CMP0"]
+    assert cmp0.set_channel("CMP0_IN0", 1.0)                   # volts (the --adc path: CMP0_IN0=1.0V)
+    chip.run_for(40e6)
+    out = chip.uart_out("UART0")
+    assert out == (b"CRC32=CBF43926\r\nCRC16=29B1\r\nVREF ok\r\n"
+                   b"DAC rp=1\r\nDAC rp=2\r\nDAC rp=3\r\nDAC rp=0\r\nDAC rp=1\r\nDAC sr=7\r\nCOUT=0\r\n")
+    dac = chip.peripherals["DAC0"]
+    assert dac.code() == 0x800 and dac.voltage() == pytest.approx(3.3 * 0x801 / 4096)
+    assert chip.pins.get("PTC5").owner == "CMP0_OUT" and chip.pins.get("PTC5").level() == "L"
+    cmp0.set_channel("CMP0_IN0", 2.0)                         # above 1.65 V
+    chip.run_for(5e6)
+    assert chip.pins.get("PTC5").level() == "H"
+    cmp0.set_channel("CMP0_IN0", 1.5)
+    chip.run_for(5e6)
+    assert chip.uart_out("UART0").endswith(b"COUT=0\r\nCOUT=1\r\nCOUT=0\r\n")
+    assert chip.pins.get("PTC5").level() == "L"
+    assert not [e for e in chip.log if e.kind in ("warn", "fault")]
+
+
+def test_crc_dac_cli_with_adc_option(capsys):
+    """`chipem run ... --adc CMP0_IN0=2V` reaches the comparator through Session.set_adc (volts only)."""
+    elf = BUILD / "crc_dac.elf"
+    if not elf.exists():
+        pytest.skip(f"{elf} not built")
+    from chipem.cli import main
+    assert main(["run", str(elf), "--for", "40ms", "--adc", "CMP0_IN0=2V", "--summary-only"]) == 0
+    out = capsys.readouterr().out
+    assert "CRC32=CBF43926" in out and "COUT=1" in out and "COUT=0" not in out
 
 
 def test_samples_run_with_clock_override(desc):

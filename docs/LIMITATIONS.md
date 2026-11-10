@@ -77,11 +77,18 @@ clocks/GPIO/timers/UART are stubs.
 
 ## Peripherals
 
-**Stubs.** I2C0–2, USB0, USBDCD, CAN0, I2S0, CRC, CMP, DAC0, VREF, EWM, CMT, SDHC,
-FlexBus, AXBS, AIPS, MPU, FMC and MCM have no behaviour. They read back what was written and start at 0,
-not at the SVD reset value. Firmware that waits for a status bit set by hardware (I2C byte complete,
-CRC result) loops forever. The chip YAML's `model:` fields are the authoritative list. FTM0–3 are modelled
-(`kinetis.ftm`, below).
+**Stubs.** I2C0–2, USB0, USBDCD, CAN0, I2S0, CMT, SDHC, FlexBus, AXBS, AIPS, MPU, FMC and MCM have no
+behaviour. They read back what was written and start at 0, not at the SVD reset value. Firmware that waits for a
+status bit set by hardware (I2C byte complete) loops forever. The chip YAML's `model:` fields are the authoritative
+list. FTM0–3 (`kinetis.ftm`), CRC, DAC0, CMP0–2, VREF and EWM are modelled (below).
+
+**Analog values.** There is no analog level on the pin board: dedicated analog pins only change owner (the DAC0_OUT
+and VREF_OUT pins show owner `DAC0_OUT` / `VREF_OUT`, direction analog, while those outputs are on). Analog sources
+are wired model to model: DAC0 → CMP1 IN3 and ADC0_SE23; VREF_OUT → DAC0 DACREF_1, the CMP 6-bit DAC Vin1,
+CMP0/CMP1 IN5 and ADC1_SE18 (and the ADC VALT reference). External comparator inputs are set with
+`--adc CMPx_INn=<millivolts>` (Session values are integers) or `CMP.set_input(n, volts)`, and are independent of
+the ADC channel values set on the same pins (`ADC0_SE4b` and `CMP1_IN0` are the same pin: set both). ADC
+`--adc` values are raw counts.
 
 **FTM (`kinetis.ftm`)** models the counter, output compare, EPWM/CPWM, combine with dead time and the output path
 onto FTMx_CHn pins; input capture and dual edge capture (one-shot and continuous, with the C(n)V/C(n+1)V read
@@ -92,24 +99,24 @@ triggers into PDB0 (TRGSEL 8–11) and channel DMA requests (DMAMUX sources 20�
 edges take effect 3 system clocks after the pin edge (the synchronizer). Approximations and gaps: the input filters
 (FILTER, FLTCTRL.FFVAL, QDCTRL.PHxFLTREN) are ignored as if disabled; the external clock and quadrature inputs are
 not synchronized and the "at most system clock / 4" input rate is not checked; CMP / USB SOF sources selected in
-SIM_SOPT4 (fault inputs, FTM1/FTM2 channel 0) give no edges. Not modelled: INVCTRL, the hardware sync triggers
-(TRIG0–2) and most SYNCONF options (software sync and LDOK work), capture test mode, the FTM trigger to the ADC through
-SIM_SOPT7, the global time base and debug mode.
+SIM_SOPT4 (fault inputs, FTM1/FTM2 channel 0) give no edges. The trigger output also reaches ADC0/ADC1 through
+SIM_SOPT7 (ADCnALTTRGEN=1, ADCnTRGSEL 8–11). Not modelled: INVCTRL, the hardware sync triggers (TRIG0–2) and most
+SYNCONF options (software sync and LDOK work), capture test mode, the global time base and debug mode.
 
 Notes on the modelled peripherals:
 
 | model | what is missing or approximate |
 |---|---|
-| SIM | Clock-gate violations log one `warn` per peripheral; silicon bus-faults. Only PORT, ADC and FTFE check their gate. |
+| SIM | Clock-gate violations log one `warn` per peripheral; silicon bus-faults. Only the gated models check (PORT, ADC, FTFE, FTM, PDB, CRC, DAC0, CMP, VREF, EWM and others built on `GatedBlock`). |
 | MCG/OSC | No lock/settle delays; no loss-of-clock or loss-of-lock monitors; IRC trim registers stored only. |
 | PORT | Digital filter, slew rate, drive strength and open-drain (ODE) do not affect pin levels: an ODE output driving H shows H. IRQC DMA-request modes only set ISF. |
 | GPIO | No electrical contention: an output always wins over external stimulus. Floating inputs read 0 (one `warn`). |
 | WDOG | The unlock window lasts at least 4096 core cycles (silicon: 256 bus clocks). Window violations and writes outside the unlock window log a `warn` instead of resetting. Test mode is not modelled. |
-| PIT | Lifetime timer (LTMR64) not modelled. |
+| PIT | Lifetime timer (LTMR64) not modelled. Each channel timeout is a trigger for PDB0 (TRGSEL 4–7) and the ADC alternate trigger; DMAMUX periodic triggering is not modelled. |
 | LPTMR | Pulse-counter mode (TMS=1) is not supported (logged once). MCGIRCLK is fixed at 32.768 kHz and OSCERCLK at 8 MHz. |
 | UART | The TX pin does not toggle: it shows its idle level (output, H) and RX is an input (level from the pull or the net, else `X`). RX behaves like silicon: no input queue; a byte arriving with C2.RE clear, the SIM gate off or no pin muxed to UARTn_RX is dropped, and one arriving while RDRF/OR is set is lost with S1.OR (OR & C3.ORIE drives UARTn_ERR). No parity, framing or noise errors, no break, LIN, IrDA or ISO-7816. TX/RX buffers follow RM ch. 49: UART0/1 have 8-entry FIFOs (`fifo_depth: 8` in the chip YAML; PFIFO reports the size), UART2–4 one entry; the effective depth is 1 until PFIFO.TXFE/RXFE is set. TDRE/RDRF follow the TWFIFO/RWFIFO watermarks, a byte arriving with the buffer full is lost with OR and SFIFO.RXOF, a write to a full transmit buffer sets TXOF, reading D from an empty buffer sets RXUF (silicon's resulting FIFO-pointer misalignment is not modelled), CFIFO flushes and the RXUFE/TXOFE/RXOFE error interrupts work. The transmitter is double buffered (buffer + shift register) and setting C2.TE shifts out a one-character idle preamble first. DMA requests (C5.RDMAS/TDMAS) are supported. Baud pacing is modelled, so TDRE/TC/RDRF timing follows the configured baud rate; UART0/1 run from the core clock, UART2–5 from the bus clock. |
-| ADC | Hardware triggers (SC2.ADTRG) come only from the PDB model; with ADTRG=1 an SC1n write just selects the channel. Calibration completes instantly. Conversion time is fixed (`params.conv_ns`, default 4 µs). Values come from `--adc`/`set_channel`, not from pin levels; unset channels read 0. |
-| PDB | Only the software trigger (TRGSEL=15) starts the counter; other trigger sources are logged once and never fire. Pre-triggers drive ADC0/ADC1 SC1A/SC1B (pre-triggers 2–7 ignored); back-to-back chaining follows ADC completion (ch0 pre-trigger 0 chains from ADC1 SC1B). LDMOD=1/2/3 load buffered values at the next wrap or trigger (no distinction). Sequence errors flag when the target COCO is still set, but the conversion still starts. DAC interval triggers and pulse-out (POEN/POnDLY) are storage only. One-shot mode leaves CNT at 0. |
+| ADC | Hardware triggers (SC2.ADTRG) come from the PDB pre-triggers (SIM_SOPT7 ADCnALTTRGEN=0) or from the alternate source in ADCnTRGSEL (ALTTRGEN=1; ADCnPRETRGSEL picks SC1A/SC1B): PDB0_EXTRG pin rising edge, CMP0–2 output rising edge, FTM0–3 trigger, PIT channel 0–3 timeout, RTC alarm / seconds, LPTMR0 compare (all sources of Table 3-51; the SIM logs one `info` only for reserved TRGSEL 15 or a source missing from the chip). A trigger during a conversion restarts it. With ADTRG=1 an SC1n write just selects the channel. Calibration completes instantly. Conversion time is fixed (`params.conv_ns`, default 4 µs). Values come from `--adc`/`set_channel`, not from pin levels; unset channels read 0. ADC0_SE23 (DAC0 output) and ADC1_SE18 (VREF_OUT) convert the source's voltage with VREFH = 3.3 V (`params.vrefh`) or, with SC2.REFSEL=01, VALT = VREF_OUT. The temperature sensor, bandgap (AD27) and VREFH/VREFL channels are not wired. |
+| PDB | The counter starts on the software trigger (TRGSEL=15) or any Table 3-51 input: PDB0_EXTRG pin, CMP0–2 output, PIT channel 0–3, FTM0–3 trigger, RTC alarm / seconds, LPTMR0 (a source missing from the chip is logged once and never fires). Pre-triggers drive ADC0/ADC1 SC1A/SC1B (pre-triggers 2–7 ignored); back-to-back chaining follows ADC completion (ch0 pre-trigger 0 chains from ADC1 SC1B). LDMOD=1/2/3 load buffered values at the next wrap or trigger (no distinction). Sequence errors flag when the target COCO is still set, but the conversion still starts. DAC interval trigger 0 drives DAC0's hardware trigger (TOE: every DACINT0+1 PDB clocks from each counter start, up to MOD; EXT: on ADC0 SC1A completion); interval trigger 1 (DAC1, absent) and pulse-out (POEN/POnDLY, the CMP sample/window signal) are storage only. One-shot mode leaves CNT at 0. |
 | DMA/DMAMUX | Transfers complete instantly (zero bus time); no channel arbitration, priorities or bandwidth control. DMAMUX periodic triggering (PIT TRIG) is not modelled (logged once; the channel behaves as untriggered). Only peripherals that call `dma_request` (e.g. UART, ADC, DSPI) can request DMA. |
 | DSPI (SPI0–2) | Master mode only. Frames transfer instantly, with no baud rate or CS-to-SCK delays and no continuous SCK. MISO reads all ones unless a responder is attached: `--spi-flash` (SPI NOR flash device) or a `responder(tx, pcs, bits)` callback in Python. The SPI pins do not toggle: SCK/SOUT show output L (CPOL is not looked at), PCS output H, SIN an input. |
 | RTC | Driven by virtual time. Keeps state across chip resets (VBAT domain) but not across a new Session. TCR compensation stored only. |
@@ -117,6 +124,11 @@ Notes on the modelled peripherals:
 | SMC/PMC/LLWU | Power modes are not modelled: `SMC_PMCTRL` STOPM is logged and stored, PMSTAT stays RUN, WFI is plain sleep. LLS/VLLS entry, VLLS wake-up through reset, and LLWU wake-up flags (always 0) are missing. |
 | RCM | Reports the last reset cause from the `reset` event reason (POR, watchdog, lockup, SYSRESETREQ). |
 | VBAT | Plain RAM that survives chip reset. |
+| CRC | Results are immediate (silicon: 2 clocks per byte). Data writes are transposed per TOT within the bytes the access covers and fed MSB first; seed writes (WAS=1) are not transposed (32.3.2.1 puts a 16-bit seed in DATA[LU:LL] whatever TOT is). GPOLY[31:16] ignores writes while TCRC=0, as 32.2.2 says: drivers that write GPOLY before setting TCRC=1 get a 16-bit polynomial. In 16-bit mode DATA[31:16] keeps its reset/32-bit-mode value (RM: indeterminate). |
+| DAC0 | Output level is `voltage()` plus one `info` event per change (no analog pin level); settling time, LPEN and the output drive are not modelled. The hardware trigger (DACTRGSEL=0) comes from the PDB0 DAC interval trigger 0. RP written above DACBFUP is clamped to DACBFUP. 16/32-bit accesses to SR/C0–C2 (forbidden by the RM) act bytewise. Also mapped at 0x4003F000 (`DAC0_ALIAS`). |
+| CMP0–2 | No propagation delay; PMODE stored only. Hysteresis 5/10/20/30 mV (HYSTCTR 0–3, data sheet typical). Filtered mode with the bus clock delays a change by FILTER_CNT × FILT_PER bus clocks (worst-case latency, no sample phase). Sampled (SE=1) and windowed (WE=1) modes need the PDB pulse-out, which is not generated: COUT holds (one `warn`). CMP outputs do not reach the FTM fault / capture inputs (SIM_SOPT4) or the UART RX inputs (SIM_SOPT5). Bandgap input IN6 is a fixed 1.0 V. MUXCR.PSTM is stored only. |
+| VREF | VREFST after a fixed 35 µs (`params.startup_ns`); the buffer start-up after a MODE_LV change, the chop oscillator, REGEN and ICOMPEN are not modelled. Output 1.2 V + 0.5 mV per TRIM step from the reset trim. |
+| EWM | Write-once violations (CTRL EWMEN/ASSIN/INEN, CMPL, CMPH) are ignored with one `warn` (silicon: bus transfer error). The LPO is an exact 1 kHz. Stop/Wait counter freeze is not modelled. A service exactly at counter == CMPL is legal. |
 
 **K22 checks against the reference manual** (K22P100M120SF5V2RM Rev. 5, which covers the "A" mask parts
 MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet K22P100M120SF5 Rev 4):
@@ -140,26 +152,57 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
   memory/SRAM boot) bus-faults.
 - **USART** is single-buffered like silicon: a byte arriving while RXNE is set sets ORE and is lost; bytes arriving
   with UE/RE clear, the RCC enable off, the RCC reset bit set or no pin in AF mode for USARTn_RX are dropped; no
-  parity/framing/noise errors, no LIN, smartcard, IrDA or hardware flow control; DMA requests are not generated.
+  parity/framing/noise errors, no LIN, smartcard, IrDA or hardware flow control. CR3.DMAT/DMAR DMA requests are
+  generated (TXE/RXNE).
+- **DMA1/DMA2** (`stm32.dma`, RM0090 ch. 10): 8 streams with the Table 42/43 request mapping (CHSEL), P2M/M2P/M2M
+  (M2M on DMA2 only; DMA1 M2M is a transfer error), PINC/MINC/PINCOS, PSIZE/MSIZE, direct and FIFO mode (packing and
+  unpacking with the same data as silicon; memory written at the FTH threshold, at the end and on disable), circular,
+  double buffer (CT/M1AR), PL arbitration, NDTR, EN protection and abort, TCIF/HTIF/TEIF/FEIF with LIFCR/HIFCR and the
+  per-stream IRQs, TEIF on bus errors and CCM RAM accesses. Transfers take zero bus time (run right after the access
+  that triggered them), so DMEIF and FIFO overrun/underrun FEIF never occur; burst beats, bus-matrix contention and
+  AHB/APB latencies are not modelled; PFCTRL (peripheral flow control) is not modelled (one `warn`, NDTR is used).
+  The USART, TIM (UP/CHx/TRIG) and ADC models raise DMA requests (`_util.dma_request`); SPI/I2C/DAC/SDIO are stubs
+  whose requests stay silent. On silicon DMA1's peripheral port reaches APB1 only (it is not on the bus
+  matrix); here every DMA1 port can address anything, and the AHB1ENR gate only warns on register access.
 - **Timers** (TIM1–14, one `stm32.tim` model; TIM9–14 get 1–2 channels, up-counting and 16 bits from their SVD
   registers) model the time base, the update interrupt, output compare and PWM1/PWM2 driving TIMx_CHn / TIMx_CHnN
   pins (TIM1/8 complementary outputs, MOE/OSSI/OSSR idle states), input capture from pin edges (CCxS 01/10, edge
-  polarity, ICxPSC, CCxOF, CCRx read clears CCxIF), slave reset mode on TI1F_ED/TI1FP1/TI2FP2 (so PWM input mode
-  works), the encoder interface (SMS 001–011), TIM1/8 dead time (BDTR.DTG with CR1.CKD) and break (BKIN pin with
-  BKE/BKP, EGR.BG, BIF/BIE, AOE). Shared vectors (TIM1_UP_TIM10, ...) are ORed. Captures latch CNT at the
-  instruction-exact edge time with no input resynchronisation delay; a TI or BKIN input with no pin muxed to it sees
-  nothing (an unmuxed BKIN is inactive). Not modelled: the ICxF input filter (no-op), CR2.TI1S XOR input, CCxS=11
-  (TRC, one `warn`), gated/trigger/external-clock slave modes, ITRx/ETR and timer chaining (TRGO), OCxCE/ETR clear,
-  OCxFE (no-op: no trigger inputs), compare flags while in encoder mode, dead time on the break transition, the
-  CCPC/COM preload, BDTR.LOCK write protection (stored only) and DMA requests.
+  polarity, ICxPSC, CCxOF, CCRx read clears CCxIF, CCxS=11 TRC), CR2.TI1S (CH1 xor CH2 xor CH3), the encoder
+  interface (SMS 001–011), TIM1/8 dead time (BDTR.DTG with CR1.CKD) and break (BKIN pin with BKE/BKP, EGR.BG,
+  BIF/BIE, AOE). Master/slave synchronisation: CR2.MMS drives TRGO (reset/UG, enable, update, compare pulse,
+  OC1REF–OC4REF); the slave mode controller takes TRGI from ITR0–3 (RM0090 Tables 86/93/97, e.g. TIM2 ITR0–3 =
+  TIM1/TIM8/TIM3/TIM4; TIM9/12 ITR2/3 = OC1REF of TIM10/11, TIM13/14), TI1F_ED, TI1FP1, TI2FP2 or ETRF and runs
+  reset, gated, trigger or external clock mode 1 (with TIF/TIE); SMCR.ECE external clock mode 2 counts the TIMx_ETR pin
+  (ETP, ETPS). DMA requests TIMx_UP / TIMx_CHn (CCDS) / TIMx_TRIG go to `stm32.dma`. Shared vectors (TIM1_UP_TIM10,
+  ...) are ORed. Captures latch CNT at the instruction-exact edge time with no input resynchronisation delay; TRGO
+  reaches its slaves (and the ADC) in the same core cycle (MSM has no effect); a TI, ETR or BKIN input with no pin
+  muxed to it sees nothing (an unmuxed BKIN is inactive). Not modelled: the ICxF and ETF input filters (no-op),
+  center-aligned counting with an external clock (counts edge-aligned), OCxCE/ETR clear, OCxFE (no-op), compare
+  flags while in encoder mode, dead time on the break transition, the CCPC/COM preload, BDTR.LOCK write protection
+  (stored only), the TIMx_OR input remaps (TIM2 ITR1 is always TIM8_TRGO) and the DMA burst registers DCR/DMAR.
+- **ADC1–3** (`stm32.adc`, RM0090 ch. 13) model the regular group: ADON, SWSTART, SQR1.L/SQ1–16 with SCAN, CONT,
+  DISCEN/DISCNUM, SMPx sample times, RES 12/10/8/6, ALIGN, EOC with EOCS (DR read clears it), OVR (only with DMA=1
+  or EOCS=1, RM0090 13.8.1: stops conversions until cleared), the analog watchdog (AWDEN, AWDSGL/AWDCH, HTR/LTR),
+  EOCIE/AWDIE/OVRIE on the shared `ADC` vector, the DMA request "ADCn" per conversion (DDS stored only: after the
+  DMA's last transfer nobody reads DR and the next conversion overruns, as with DDS=0 on silicon) and the external
+  triggers of Table 51 (EXTEN edges; TIMx_CCy = OCyREF, so the channel must be in a PWM/toggle mode, or a capture).
+  Timing: ADCCLK = PCLK2 / ADCPRE; a conversion takes (SMPx + RES) ADCCLK, the first one after a trigger 2 ADCCLK
+  more (DS8626 tlatr max) plus 1 PCLK2 cycle for an external trigger; ADCCLK phase, tSTAB and clock changes during
+  a conversion are not modelled. Values: `--adc PA0=1.65V` / `ADC1_IN0=1.65` (volts; a plain integer is a raw 12-bit
+  code), stored per pin (PA0 feeds IN0 of ADC1, 2 and 3); a channel with no value reads its pin's digital level
+  (H = 3.3 V, L/X = 0 V); IN16 temperature (25 °C, `ADC1_TEMP=<degC>`), IN17 VREFINT 1.21 V, IN18 VBAT/2 (`VBAT=3.3`)
+  with CCR.TSVREFE/VBATE. Not modelled: injected channels (JSQR/JOFRx/JDRx/JSWSTART/JEXTEN, one `warn`), multi-ADC
+  modes (CCR.MULTI, one `warn`; CDR reads 0), the EXTI11 trigger (one `warn`), CCR.DELAY, source impedance and
+  sampling-capacitor effects.
 - **WWDG** is storage only (a `warn` when enabled); IWDG is modelled.
 - RCC clock switches and PLL lock complete instantly; clock gates only `warn` on access to a gated-off block.
-- ADC, DAC, SPI, I2C, CAN, DMA, SDIO, USB, FSMC, RTC, RNG and CRC are RAM-like stubs.
+- DAC, SPI, I2C, CAN, SDIO, USB, FSMC, RTC, RNG and CRC are RAM-like stubs.
 - **What ST's HAL meets** (`firmware/samples_stm32_hal`, STM32CubeF4 HAL 1.8.5): HSE/PLL ready flags follow their
   enable bits at once, so `HSE_STARTUP_TIMEOUT`/PLL timeouts never fire and a missing crystal cannot be simulated;
   the clock security system and `RCC_CIR` ready interrupts are not modelled. FLASH `ACR` latency, prefetch and
-  caches are stored but cost nothing (1 cycle per instruction). `PWR_CSR.VOSRDY` is always 1. DMA is a stub, so
-  `HAL_UART_Transmit_DMA`/`Receive_DMA` (and any `*_DMA` HAL call) never complete; use polling or `_IT` calls.
+  caches are stored but cost nothing (1 cycle per instruction). `PWR_CSR.VOSRDY` is always 1. `HAL_UART_Transmit_DMA`/`HAL_UART_Receive_DMA` complete
+  (`firmware/samples_stm32_hal/uart_dma_hal.c`); `*_DMA` calls of peripherals that are still stubs (SPI, I2C,
+  DAC, SDIO) never complete.
   The checkout has no libc/compiler-rt for Cortex-M, so HAL builds must bring `memset`/`memcpy`, `__aeabi_memclr*`
   and `__aeabi_uldivmod` themselves (`firmware/samples_stm32_hal/aeabi_rt.c`, `startup.c`).
 
@@ -203,7 +246,7 @@ die, same peripheral list and models). In addition:
   `.ebss`/`.bss` are not zeroed by the loader (RAM resets to 0 anyway).
 - **EALLOW protection is enforced**: a write to a protected register without EALLOW is ignored (one `warn` per
   block), like silicon. Missing `EALLOW` in firmware shows up as configuration that does nothing.
-- **Storage only**: HRPWM, eQEP, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
+- **Storage only**: HRPWM, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
   no behaviour; SPI MISO reads 0xFFFF.
 - **ADC** (`ti_c2000.adc`) models the dual / cascaded sequencers with start/stop and continuous run (SEQ_OVRD),
   SEQ1-before-SEQ2 arbitration of the one converter, pending / lost triggers, software, ePWM SOCA/SOCB and external
@@ -228,6 +271,20 @@ die, same peripheral list and models). In addition:
   synchronization delay (an edge is captured on the cycle it reaches the pin), CTR=PRD sync-out / comparators in
   capture mode; the prescaler state is cleared on a PRESCALE change and on REARM (our choice: the guide does not
   say), and a TSCTR load (write or sync) produces no CTR=0 / compare event at the load instant.
+- **eQEP** (`ti_c2000.eqep`, eQEP1/2, Type-0 eQEP of SPRUI07 ch. 6 = SPRUG05A) decodes the EQEPxA/B/I/S pins
+  (QSRC quadrature x4 / direction-count / up / down, XCR 2x/1x, SWAP, QAP/QBP/QIP/QSP, IGATE; an A and a B edge in
+  the same cycle is a phase error, PHE, not counted), the position counter with QPOSMAX rollover (PCO/PCU), PCRM
+  index / max / first index / unit time reset with the index marker logic (FIMF, FIDF, QDLF, PCEF/PCE, QPOSILAT),
+  IEI/IEL and SEI/SEL index and strobe init / latch, SWI, QDF/QDC, position compare with shadow load (PCM, PCR), the
+  unit timer (QUTMR/QUPRD, UTO, QPOSLAT / QCTMRLAT / QCPRDLAT latch with QCLM), the watchdog (SYSCLKOUT/64, WTO),
+  the capture unit (CCPS, UPPS, QCTMR/QCPRD, UPEVNT, COEF, CDEF, latch on a QPOSCNT read with QCLM = 0) and the
+  QFLG / QEINT / QCLR / QFRC interrupt logic (EQEPx_INT, PIE 5.x). No register is EALLOW-protected. Not modelled:
+  the position-compare sync output on EQEPxI/S (SOEN, SPSEL, PCSPW, PCPOL stored; the pins stay inputs), emulation
+  FREE_SOFT, GPIO input qualification and synchronization delay, the "index within one SYSCLKOUT of a QCLK" boundary
+  case. Our choices where the guide is silent: QPEN = 0 clears QEPSTS, the latch registers and the index-marker
+  state but keeps QPOSCNT and QFLG; the capture timer wraps past 0xFFFF (COEF) instead of saturating; QFRC reads 0;
+  a polarity / gating change or a mux change does not produce an edge; QDF is 0 after reset, so the first forward
+  edge sets QDC.
 - **Clock gates only warn** (PCLKCR); silicon ignores accesses to an unclocked peripheral.
 - SCI: overrun is modelled (OE/RXERROR without FIFO: the unread character is overwritten; RXFFOVF with the FIFO:
   the 17th character is not stored, our reading of the guide's ambiguous wording); bytes arriving in SW RESET, with
@@ -240,7 +297,8 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
 
 ## Pins
 
-- Levels are digital (H/L/X). There are no voltages, so analog pins do not feed the ADC.
+- Levels are digital (H/L/X). There are no pin voltages: ADC inputs come from `--adc` / `set_channel` (on the STM32
+  a channel without a value converts its pin's digital level, H = VREF+, L/X = 0 V).
 - Serial peripherals (UART, SPI, I2C) do not toggle pin levels with their traffic. Timer/PWM channels (STM32 TIM,
   Kinetis FTM, C2000 ePWM, eCAP in APWM mode) do: they drive their signal edge by edge through
   `PinBoard.drive_signal`, and the pin shows the live level. Timer inputs (input capture, eCAP, FTM faults and

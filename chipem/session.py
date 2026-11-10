@@ -125,11 +125,26 @@ def parse_uart_stimulus(spec: str) -> tuple[float | None, str, bytes] | None:
     return (parse_time(t) if t else None), m.group(2).upper(), decode_escapes(m.group(3))
 
 
-def _split_adc(spec: str) -> tuple[str, int]:
+def parse_adc_value(text: str) -> int | float:
+    """ADC stimulus value: an integer ("2048", "0x800") is a raw conversion code; a number with a decimal point or a
+    unit ("1.65", "1.65V", "1650mV", "3V") is a voltage in volts (float), for models that take volts (`adc_volts`)."""
+    t = str(text).strip()
+    low = t.lower()
+    if low.endswith("mv"):
+        return float(t[:-2]) / 1000.0
+    if low.endswith("v"):
+        return float(t[:-1])
+    try:
+        return int(t, 0)
+    except ValueError:
+        return float(t)
+
+
+def _split_adc(spec: str) -> tuple[str, int | float]:
     if "=" not in spec:
-        raise ValueError(f"bad --adc {spec!r} (expected CHANNEL=VALUE, e.g. ADC0_SE14=2048)")
+        raise ValueError(f"bad --adc {spec!r} (expected CHANNEL=VALUE, e.g. ADC0_SE14=2048 or PA0=1.65V)")
     ch, v = spec.split("=", 1)
-    return ch.strip(), int(v.strip(), 0)
+    return ch.strip(), parse_adc_value(v)
 
 
 class ChipContext:
@@ -155,7 +170,7 @@ class ChipContext:
         chip_ = self.chip
         self.vtor = vtor
         self.clock_override = clock_hz
-        self.adc_values: dict[str, int] = {}
+        self.adc_values: dict[str, int | float] = {}
         self.pending_uart: dict[str, bytearray] = {}
         self.irq_counts: dict[int, int] = {}
         self.devices: list = []                    # board devices (SPI flash, ...)
@@ -627,10 +642,24 @@ class Session:
             raise ValueError(f"no UART named {uart} (UARTs: {', '.join(ctx.chip.uart_blocks()) or 'none'})")
         return ctx.chip.uart_out(name)
 
-    def set_adc(self, channel: str, value: int) -> None:
-        """channel e.g. 'ADC0_SE14' or 'B.ADC0_SE14' (block name prefix; bare 'SE14' means ADC0)."""
+    def set_adc(self, channel: str, value: int | float) -> None:
+        """channel e.g. 'ADC0_SE14' or 'B.ADC0_SE14' (block name prefix; bare 'SE14' means ADC0).  A name that is not
+        "<ADC block>_<channel>" (a pin "PA0", a shared pin-table name "ADC123_IN0") goes to the first ADC model with
+        the `set_input(name, value)` capability that accepts it.  `value`: int = raw code; float = volts, only for
+        models that declare `adc_volts` (Chip.adc_blocks()); a model with `adc_volts_only` (no raw codes: Kinetis CMP inputs)
+        rejects an int with a ValueError that suggests the V / mV form."""
         ctx, ch = self.resolve(channel)
         ch = ch.strip().upper()
+        head = ch.split("_", 1)[0]
+        if not hasattr(ctx.chip.peripherals.get(head), "set_channel"):
+            for bname, b in ctx.chip.adc_blocks().items():
+                fn = getattr(b, "set_input", None)
+                if fn is None or (isinstance(value, float) and not getattr(b, "adc_volts", False)) \
+                        or (not isinstance(value, float) and getattr(b, "adc_volts_only", False)):
+                    continue
+                if fn(ch, value):
+                    ctx.adc_values[ch] = value
+                    return
         if "_" in ch:
             blk_name, sub = ch.split("_", 1)
         elif "ADC0" not in ctx.chip.peripherals and "ADC" in ctx.chip.peripherals:
@@ -639,16 +668,21 @@ class Session:
         else:
             blk_name, sub = "ADC0", ch
             ch = f"ADC0_{ch}"
-        ctx.adc_values[ch] = int(value)
         blk = ctx.chip.peripherals.get(blk_name)
+        if isinstance(value, float) and not getattr(blk, "adc_volts", False):
+            raise ValueError(f"{blk_name} takes raw ADC codes, not volts ({ch}={value})")
+        if not isinstance(value, float) and getattr(blk, "adc_volts_only", False):
+            raise ValueError(f"{blk_name} takes volts, not raw codes: write {ch}={value}mV or e.g. {ch}=1.2V "
+                             f"(a bare integer is a raw ADC code)")
+        ctx.adc_values[ch] = value
         fn = getattr(blk, "set_channel", None)
         if fn is None:
             ctx.warn(f"{blk_name} model has no set_channel(); ADC value {ch}={value} stored only")
             return
         try:
-            ok = fn(ch, int(value))
+            ok = fn(ch, value)
         except (KeyError, ValueError, TypeError):
-            ok = fn(sub, int(value))
+            ok = fn(sub, value)
         if ok is False:
             ctx.warn(f"{blk_name} rejected ADC channel {ch}")
 

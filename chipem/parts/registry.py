@@ -26,7 +26,7 @@ def part(type_name: str) -> Callable[[type], type]:
 
 
 def _load() -> None:
-    from . import std  # noqa: F401  (registers the standard types)
+    from . import encoder, std  # noqa: F401  (registers the standard types)
 
 
 def get(type_name: str) -> type:

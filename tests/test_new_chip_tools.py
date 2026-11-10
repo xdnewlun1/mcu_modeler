@@ -72,7 +72,10 @@ def test_scaffold_yaml_loads_and_maps_models(scaffold):
     assert models["RCC"].model == "stm32.rcc" and models["IWDG"].model == "stm32.iwdg"
     assert models["TIM2"].model == "stm32.tim" and models["TIM9"].model == "stm32.tim"
     assert models["EXTI"].model == "stm32.exti" and models["SPI1"].model == "stub"
+    assert models["DMA1"].model == "stm32.dma" and models["DMA1"].params == {"controller": 1}
+    assert models["DMA2"].model == "stm32.dma" and models["DMA2"].params == {"controller": 2}
     assert models["ADC1"].size == 0x100                              # clamped to the next block (ADC2)
+    assert models["ADC1"].model == models["ADC3"].model == "stm32.adc" and models["C_ADC"].model == "stm32.adc_common"
     assert not any(0xE000E000 <= p.base < 0xE000F000 for p in desc.peripherals)   # SCS is arch-owned
     assert desc.irqs[37] == "USART1" and desc.irqs[6] == "EXTI0"
     assert [p.num for p in desc.pins] == list(range(1, 9))
@@ -133,6 +136,14 @@ def test_model_rule_requires_matching_registers():
                                                                                                 {"port": "C"})
     assert new_chip.map_model("kinetis", "UART3", ["BDH", "BDL", "C2", "S1", "D"])[:2] == ("kinetis.uart", {"index": 3})
     assert new_chip.map_model("kinetis", "RFVBAT", [])[0:3:2] == ("kinetis.vbat", "VBAT")
+    assert new_chip.map_model("kinetis", "CRC", ["DATA", "GPOLY", "CTRL"])[0] == "kinetis.crc"
+    assert new_chip.map_model("kinetis", "DAC0", ["DAT0L", "DAT0H", "SR", "C0", "C1", "C2"])[:2] == ("kinetis.dac",
+                                                                                                  {"index": 0})
+    cmp_regs = ["CR0", "CR1", "FPR", "SCR", "DACCR", "MUXCR"]
+    assert new_chip.map_model("kinetis", "CMP2", cmp_regs)[:2] == ("kinetis.cmp", {"index": 2})
+    assert new_chip.map_model("kinetis", "CMP0", ["CR0", "CR1"])[0] == "stub"           # a different layout
+    assert new_chip.map_model("kinetis", "EWM", ["CTRL", "SERV", "CMPL", "CMPH"])[0] == "kinetis.ewm"
+    assert new_chip.map_model("kinetis", "VREF", ["TRM", "SC"])[0] == "kinetis.vref"
     assert new_chip.map_model("ti_c2000", "SCIB", ["SCICCR", "SCICTL1", "SCITXBUF", "SCIRXBUF"])[0] == "ti_c2000.sci"
     epwm_regs = ["TBCTL", "TBPRD", "CMPA", "AQCTLA", "DBCTL", "ETSEL"]
     assert new_chip.map_model("ti_c2000", "EPWM3", epwm_regs)[:2] == ("ti_c2000.epwm",
@@ -142,13 +153,27 @@ def test_model_rule_requires_matching_registers():
     assert new_chip.map_model("ti_c2000", "ECAP2", ecap_regs)[:2] == ("ti_c2000.ecap",
                                                                       {"gate": "ECAP2ENCLK", "index": 2})
     assert new_chip.map_model("ti_c2000", "ECAP2", [])[0] == "stub"         # a different register layout
-    assert new_chip.map_model("ti_c2000", "EQEP1", [])[:2] == ("ti_c2000.storage", {"gate": "EQEP1ENCLK"})
+    eqep_regs = ["QPOSCNT", "QPOSINIT", "QPOSMAX", "QPOSCMP", "QUTMR", "QUPRD", "QDECCTL", "QEPCTL", "QCAPCTL",
+                 "QPOSCTL", "QEINT", "QFLG", "QCLR", "QFRC", "QEPSTS"]
+    assert new_chip.map_model("ti_c2000", "EQEP2", eqep_regs)[:2] == ("ti_c2000.eqep",
+                                                                      {"gate": "EQEP2ENCLK", "index": 2})
+    assert new_chip.map_model("ti_c2000", "EQEP1", [])[0] == "stub"         # a different register layout
+    assert new_chip.map_model("ti_c2000", "ECANA", [])[:2] == ("ti_c2000.storage", {"gate": "ECANAENCLK"})
     assert new_chip.map_model("ti_c2000", "FLASH", ["FOPT"])[:3] == ("ti_c2000.flash", {"regs": "FLASH"}, "FLASHREGS")
     # TIM9-14 (1-2 channels, up-counting only) use stm32.tim too; their features follow from the SVD registers
     for t in ("TIM9", "TIM12", "TIM14"):
         model, _params, _name, _note = new_chip.map_model("stm32", t, ["CR1", "PSC", "ARR", "SR", "DIER"])
         assert model == "stm32.tim", t
     assert new_chip.map_model("stm32", "TIM8", ["CR1", "PSC", "ARR", "SR", "DIER"])[0] == "stm32.tim"
+    adc_regs = ["SR", "CR1", "CR2", "SMPR1", "SMPR2", "HTR", "LTR", "SQR1", "SQR2", "SQR3", "JSQR", "DR"]
+    assert new_chip.map_model("stm32", "ADC2", adc_regs)[:2] == ("stm32.adc", {})
+    assert new_chip.map_model("stm32", "ADC1", ["ISR", "IER", "CR", "CFGR", "DR"])[0] == "stub"     # L4/G0 layout
+    for n in ("C_ADC", "ADC_Common", "ADC123_Common"):
+        assert new_chip.map_model("stm32", n, ["CSR", "CCR", "CDR"])[0] == "stm32.adc_common", n
+    dma_regs = ["LISR", "HISR", "LIFCR", "HIFCR", "S0CR", "S0NDTR", "S0PAR", "S0M0AR", "S0M1AR", "S0FCR"]
+    assert new_chip.map_model("stm32", "DMA2", dma_regs)[:2] == ("stm32.dma", {"controller": 2})
+    # an F0/L4-style DMA (ISR/IFCR, CCR1/CNDTR1 channels, no streams) must not map to the F4 stream model
+    assert new_chip.map_model("stm32", "DMA1", ["ISR", "IFCR", "CCR1", "CNDTR1", "CPAR1", "CMAR1"])[0] == "stub"
 
 
 @pytest.mark.skipif(not K22_SVD, reason="MK22F12.svd not downloaded")
@@ -167,6 +192,11 @@ def test_scaffold_kinetis_and_c2000_match_the_real_chips(tmp_path):
     assert (alias.model, alias.base, alias.size, alias.params) == ("kinetis.ftm_alias", 0x4003A000, 0x1000,
                                                                    {"target": "FTM2"})
     assert k22["FTM2"].model == "kinetis.ftm" and k22["FTM2"].base == 0x400B8000
+    dalias = k22["DAC0_ALIAS"]
+    assert (dalias.model, dalias.base, dalias.params) == ("kinetis.ftm_alias", 0x4003F000, {"target": "DAC0"})
+    for n, m in (("CRC", "kinetis.crc"), ("DAC0", "kinetis.dac"), ("CMP0", "kinetis.cmp"), ("CMP1", "kinetis.cmp"),
+                 ("CMP2", "kinetis.cmp"), ("EWM", "kinetis.ewm"), ("VREF", "kinetis.vref")):
+        assert k22[n].model == m, n
     out = io.StringIO()
     assert svd2chip.check(K22_SVD[0], tmp_path / "chips" / "k22test.yaml", out=out) == 0, out.getvalue()
     c2k = load_chip(tmp_path / "chips" / "c2ktest.yaml")

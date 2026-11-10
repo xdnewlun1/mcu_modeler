@@ -1,7 +1,7 @@
 """Kinetis Programmable Delay Block (PDB0, K22 RM ch. 37).
 
 Registers (from the SVD table): SC, MOD, CNT (live, read-only), IDLY, per channel n (0..1) CHnC1, CHnS, CHnDLY0,
-CHnDLY1, DAC interval triggers DACINTCn/DACINTn and pulse-out POEN/POnDLY (storage only).
+CHnDLY1, DAC interval triggers DACINTCn/DACINTn and pulse-out POEN/POnDLY (storage only, see below).
 
 SC fields: LDOK 0, CONT 1, MULT 2-3, PDBIE 5, PDBIF 6 (write 0 to clear), PDBEN 7, TRGSEL 8-11 (15 = software),
 PRESCALER 12-14, DMAEN 15, SWTRIG 16 (write 1 = trigger, reads 0), PDBEIE 17, LDMOD 18-19.
@@ -24,20 +24,28 @@ Behaviour:
 * MOD, IDLY and CHnDLYm are buffered: written values take effect when loaded. LDMOD=0 loads when LDOK is written
   (PDBEN must be 1); LDMOD=1/2/3 load at the next counter wrap or trigger (best-effort). LDOK reads 1 until loaded.
 * PDBEN=0 stops the counter, clears CNT and LDOK.
-* TRGSEL 8..11 (K22P100M120SF5V2RM Table 3-51): the FTM0..FTM3 trigger output (initialization trigger and channel
-  triggers as enabled in FTMx_EXTTRIG, kinetis.ftm `trigger_listeners`) restarts the counter like a software trigger
-  while PDBEN=1. Other TRGSEL values (external pin PDB0_EXTRG, CMP, PIT, RTC, LPTMR) are logged once and never
-  trigger.
+* TRGSEL 0..14 (K22P100M120SF5V2RM Table 3-51, wired by kinetis.sim `subscribe_trigger_sources`): 0 rising edge on
+  a pin muxed to PDB0_EXTRG, 1..3 rising edge of CMP0..CMP2 COUT, 4..7 PIT channel 0..3 timeout, 8..11 the FTM0..FTM3
+  trigger output (initialization and channel triggers as enabled in FTMx_EXTTRIG), 12 RTC alarm, 13 RTC seconds,
+  14 LPTMR0 compare. The selected input restarts the counter like a software trigger while PDBEN=1. Selecting an
+  input whose source model is not on the chip logs one `info` (the counter never starts).
+* DAC interval trigger 0 (37.4.3, chip configuration 3.8.1.4/3.8.1.5) -> DAC0 `hw_trigger()` (DAC0 advances its
+  buffer when C0.DACTRGSEL=0). DACINTC0.TOE=1, EXT=0: the interval counter restarts with the PDB counter (trigger
+  and continuous-mode wrap) and fires at counts DACINT, 2*DACINT+1, ... (every DACINT+1 PDB clocks, the counter
+  running 0..DACINT) while the count is <= MOD. DACINT0 is buffered like MOD (loaded with LDOK). EXT=1: the
+  interval counter is bypassed and each completion of ADC0 SC1A (DAC external trigger input 0, ADC0SC1A_COCO)
+  triggers DAC0 (PDBEN and TOE required). Interval trigger 1 belongs to DAC1, which this part does not have: it is
+  stored only. Pulse-out (POEN/POnDLY, the CMP sample/window signal) is storage only.
 """
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 from ..registry import register
 from ._util import GatedBlock, build_regs, find_model, irq_number
 from .clockutil import bus_hz, now_ns
 from .dma import dma_request
+from .sim import subscribe_trigger_sources
 
 LDOK, CONT, PDBIE, PDBIF, PDBEN = 1, 2, 1 << 5, 1 << 6, 1 << 7
 DMAEN, SWTRIG, PDBEIE = 1 << 15, 1 << 16, 1 << 17
@@ -60,6 +68,7 @@ class PDB(GatedBlock):
         for n in range(NCH):
             ov[f"CH{n}S"] = {"on_write": self._chs_write}
             ov[f"CH{n}C1"] = {"on_write": self._c1_write}
+        ov["DACINTC0"] = {"on_write": self._dacintc_write}
         r = build_regs((name, "PDB0"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.nch = sum(1 for n in range(NCH) if f"CH{n}C1" in self.regs)
@@ -69,6 +78,10 @@ class PDB(GatedBlock):
         self._adcs: list[Any] = [None] * self.nch
         self._warned_trg = False
         self.triggers = 0             # statistics: counter (re)starts, including continuous wraps
+        self.dac_triggers = 0         # statistics: DAC interval trigger pulses sent
+        self._dac_ev: Any = None
+        self._dac: Any = None
+        self._wired: set[int] = {TRG_SOFTWARE}
         self._init_state()
 
     def _init_state(self) -> None:
@@ -79,6 +92,7 @@ class PDB(GatedBlock):
         self.mod = self.regs["MOD"].reset
         self.idly = self.regs["IDLY"].reset
         self.dly = [[0, 0] for _ in range(self.nch)]
+        self.dacint = self.regs["DACINT0"].reset & 0xFFFF if "DACINT0" in self.regs else 0
         self._pts: list[int] = []
         self._pi = 0
 
@@ -88,11 +102,8 @@ class PDB(GatedBlock):
         for b in chip.peripherals.values():
             if getattr(b, "model", None) == "kinetis.dmamux":
                 b.register_source(int(self.params.get("dma_source", DMA_SOURCE)), self._dma_active)
-        for nm, sel in TRG_FTM.items():
-            ftm = chip.peripherals.get(nm)
-            lst = getattr(ftm, "trigger_listeners", None)
-            if lst is not None:
-                lst.append(partial(self._input_trigger, sel))
+        self._wired = subscribe_trigger_sources(chip, self._input_trigger) | {TRG_SOFTWARE}
+        self._dac = find_model(chip, "kinetis.dac", "DAC0")
         for n in range(self.nch):
             adc = find_model(chip, "kinetis.adc", f"ADC{n}")
             if adc is not None and getattr(adc, "index", n) != n:
@@ -114,6 +125,12 @@ class PDB(GatedBlock):
         if self._ev is not None and self.chip is not None:
             self.chip.sched.cancel(self._ev)
         self._ev = None
+        self._cancel_dac()
+
+    def _cancel_dac(self) -> None:
+        if self._dac_ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._dac_ev)
+        self._dac_ev = None
 
     def cnt(self) -> int:
         if not self.running or self.chip is None:
@@ -134,6 +151,8 @@ class PDB(GatedBlock):
         self.idly = self.get("IDLY") & 0xFFFF
         for n in range(self.nch):
             self.dly[n] = [self.get(f"CH{n}DLY0") & 0xFFFF, self.get(f"CH{n}DLY1") & 0xFFFF]
+        if "DACINT0" in self.regs:
+            self.dacint = self.get("DACINT0") & 0xFFFF
         self.set("SC", self.get("SC") & ~LDOK)
 
     def _points(self) -> list[int]:
@@ -171,6 +190,35 @@ class PDB(GatedBlock):
         self._pts = self._points()
         self._pi = 0
         self._schedule()
+        self._schedule_dac(-1)
+
+    # ------------------------------------------------------------------ DAC interval trigger
+    def _dac_interval_on(self) -> bool:
+        return "DACINTC0" in self.regs and (self.get("DACINTC0") & 3) == 1          # TOE=1, EXT=0
+
+    def _schedule_dac(self, after: int) -> None:
+        """Schedule the next DAC interval pulse at the first count DACINT + k*(DACINT+1) > `after` (<= MOD)."""
+        self._cancel_dac()
+        if not self.running or not self._dac_interval_on():
+            return
+        step = self.dacint + 1
+        c = self.dacint
+        if c <= after:
+            c += ((after - c) // step + 1) * step
+        if c > self.mod:
+            return
+        self._dac_ev = self.chip.sched.at_ns(self.t0_ns + c * self.tick_ns, self._dac_pulse, c)
+
+    def _dac_pulse(self, c: int) -> None:
+        self._dac_ev = None
+        self._fire_dac()
+        self._schedule_dac(c)
+
+    def _fire_dac(self) -> None:
+        self.dac_triggers += 1
+        dac = self._dac
+        if dac is not None:
+            dac.hw_trigger()
 
     def _schedule(self) -> None:
         """Schedule the next compare point (or the end of the cycle) after the current index."""
@@ -197,6 +245,7 @@ class PDB(GatedBlock):
         self._pts = [v for v in self._points() if v > c]
         self._pi = 0
         self._schedule()
+        self._schedule_dac(c)
 
     def _compare(self, v: int) -> None:
         self._ev = None
@@ -219,6 +268,7 @@ class PDB(GatedBlock):
 
     def _wrap(self) -> None:
         self._ev = None
+        self._cancel_dac()
         t = self.t0_ns + (self.mod + 1) * self.tick_ns
         if self.get("SC") & CONT:
             self._start_cycle(t)
@@ -253,8 +303,13 @@ class PDB(GatedBlock):
         adc.hw_trigger(m)
 
     def _adc_complete(self, adc: Any, k: int) -> None:
-        """ADC conversion SC1[k] finished: fire back-to-back pre-triggers chained to it."""
-        if not self.running or not self.get("SC") & PDBEN:
+        """ADC conversion SC1[k] finished: fire back-to-back pre-triggers chained to it; ADC0 SC1A completion is
+        also the DAC external trigger input 0 (DACINTC0.EXT=1)."""
+        sc = self.get("SC")
+        if (k == 0 and sc & PDBEN and self._adcs and adc is self._adcs[0] and "DACINTC0" in self.regs
+                and (self.get("DACINTC0") & 3) == 3):
+            self._fire_dac()
+        if not self.running or not sc & PDBEN:
             return
         try:
             n = self._adcs.index(adc)
@@ -302,11 +357,10 @@ class PDB(GatedBlock):
             return new
         self._store(reg, new)
         trgsel = (new >> 8) & 0xF
-        if trgsel != TRG_SOFTWARE and trgsel not in TRG_FTM.values() and new & LDOK and not self._warned_trg:
+        if trgsel not in self._wired and new & LDOK and not self._warned_trg:
             self._warned_trg = True
-            self.emit("info", block=self.name, msg=f"{self.name}: trigger source TRGSEL={trgsel} is not modelled "
-                      "(only the software trigger, TRGSEL=15, and the FTM triggers, 8-11); the counter will not "
-                      "start")
+            self.emit("info", block=self.name, msg=f"{self.name}: trigger source TRGSEL={trgsel} is not modelled; "
+                      "the counter will not start")
         if new & LDOK and not (new >> 18) & 3:
             self._load()
             self._resync()
@@ -322,6 +376,12 @@ class PDB(GatedBlock):
         self._store(reg, v)
         self._update_irq()
         return v
+
+    def _dacintc_write(self, blk, reg, old, new):
+        if (old ^ new) & 3 and self.running:
+            self._store(reg, new)
+            self._schedule_dac(self.cnt())
+        return None
 
     def _c1_write(self, blk, reg, old, new):
         if (old ^ new) & 0xFFFFFF:

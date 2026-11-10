@@ -7,6 +7,9 @@ so the period is LDVAL+1 bus clocks.  One scheduler event per expiry (wall-clock
 the bus clock at (re)load time).  A new LDVAL written while running takes effect at the next reload.
 Chained channels (CHN=1, n>0) count expirations of channel n-1 instead of clocks.
 IRQ line of channel n (IRQ "PIT<n>") is level = TIF & TIE; clearing TIF/TIE deasserts it.
+Trigger output: every timeout of channel n (each time TIF is set, chained channels included, whatever TIE) calls
+`trigger_listeners` cb(pit, n): the PIT trigger n of the PDB (TRGSEL 4-7) and of the ADC alternate trigger
+(SIM_SOPT7 ADCnTRGSEL 4-7). DMAMUX periodic triggering is not modelled.
 """
 from __future__ import annotations
 
@@ -61,6 +64,7 @@ class PIT(MMIOBlock):
             if r.name in ov or r.name == "MCR":
                 self.add_reg(r)
         self.ch = [_Chan(n) for n in range(NCH)]
+        self.trigger_listeners: list = []          # cb(pit, n) at each timeout of channel n
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -125,6 +129,8 @@ class PIT(MMIOBlock):
         """Channel c reached zero: set TIF, notify a chained successor."""
         self.set(f"TFLG{c.n}", self.get(f"TFLG{c.n}") | TIF)
         self._update_line(c)
+        for cb in self.trigger_listeners:
+            cb(self, c.n)
         if c.n + 1 < NCH:
             nxt = self.ch[c.n + 1]
             if nxt.running and self._chained(nxt):

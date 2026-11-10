@@ -465,6 +465,13 @@ class Chip:
         kinetis.uart, stm32.usart, ti_c2000.sci, ...), in chip YAML order."""
         return {n: b for n, b in self.peripherals.items() if hasattr(b, "tx_listeners")}
 
+    def adc_blocks(self) -> dict[str, Any]:
+        """Peripherals that take ADC input values (any model exposing `set_channel(name, value)`: kinetis.adc,
+        ti_c2000.adc, stm32.adc, ...), in chip YAML order.  Optional capabilities: `set_input(name, value) -> bool`
+        resolves names that are not "<block>_<channel>" (pin names: Session.set_adc falls back to it), and
+        `adc_volts = True` marks a model whose float values are volts (otherwise values are raw codes)."""
+        return {n: b for n, b in self.peripherals.items() if hasattr(b, "set_channel")}
+
     def find_uart(self, name: str, *, fallback: bool = False) -> str | None:
         """Resolve a user-typed UART name to a peripheral name, uniformly across families: exact match first
         (case-insensitive), then ignoring separators ("SCI-A" -> SCIA), then by instance suffix so UARTn/USARTn

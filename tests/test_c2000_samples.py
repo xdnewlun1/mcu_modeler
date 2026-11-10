@@ -224,3 +224,49 @@ def test_ecap_loopback_board_measures_epwm(tmp_path):
     gpio24 = s.ctxs["A"].chip.pins.get("GPIO24")
     assert gpio24.owner == "ECAP1" and gpio24.direction == "in"
     assert not [e for e in s.events(kinds={"warn"})]
+
+
+def test_eqep_encoder_board_tracks_position_and_direction(tmp_path):
+    """eqep.asm on boards/c2000_eqep_encoder.yaml: a 100-line quadrature_encoder part at 1500 rpm (10 kHz edge rate,
+    one edge every 100 us from t = 0, starting at position 200 of 400, index at positions 0..3) drives eQEP1.  The
+    counter is reset at every index marker, so QPOSCNT = (encoder position - 401) mod 400 after the first marker
+    (edge 201, the first QCLK after the index edge); the 100 Hz unit timer latches it into QPOSLAT for the ISR."""
+    import json
+    from chipem.board import load_board
+    from chipem.session import Session
+    img = build("eqep", tmp_path)
+    sym = json.loads(img.read_text())["symbols"]
+    bd = load_board(ROOT / "boards" / "c2000_eqep_encoder.yaml")
+    bd.chips[0].firmware = img
+    s = Session.from_board(bd, quiet=True)
+    chip = s.ctxs["A"].chip
+    bus = chip.bus
+    enc = s.board.parts["ENC"]
+
+    def last_uto_ns():                                          # QUTMR reads QUPRD at a time out, 0 one cycle later
+        return chip.now_ns() - (bus.read(0x6B0E, 2) + 1) * 10.0
+
+    def expect(pos):
+        return (pos - 401) % 400
+
+    s.run_for(70e6)
+    assert chip.clock.hz == 100e6
+    k = int(last_uto_ns() // 1e5)                               # encoder edges up to the last unit time out
+    assert bus.read(sym["eqep_pos"], 2) == expect(200 + k)
+    assert bus.read(sym["eqep_dir"], 1) == 1
+    assert bus.read(sym["eqep_ilat"], 2) == 0                   # second marker (edge 601, 60.1 ms): aligned
+    assert bus.read(sym["eqep_cprd"], 1) in (312, 313)          # 4 edges x 10000 cycles / 128
+    assert bus.read(sym["eqep_count"], 1) == 6                  # 16.6 ... 66.6 ms
+    assert bus.read(0x6B00, 2) == expect(enc.state()["position"])
+    gpio20 = chip.pins.get("GPIO20")
+    assert gpio20.owner == "EQEP1A" and gpio20.direction == "in"
+
+    t_rev = s.board.part_now_ns()
+    s.apply_stimulus("ENC=ccw")                                 # reverse: back through the index at position 800
+    s.run_for(20e6)
+    k2 = int((last_uto_ns() - t_rev) // 1e5)
+    assert bus.read(sym["eqep_pos"], 2) == expect(900 - k2)
+    assert bus.read(sym["eqep_dir"], 1) == 0
+    assert bus.read(sym["eqep_ilat"], 2) == 399                 # reverse marker: latched at QPOSMAX, no error
+    assert bus.read(sym["eqep_count"], 1) == 8
+    assert not [e for e in s.events(kinds={"warn"})]

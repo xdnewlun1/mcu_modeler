@@ -167,3 +167,35 @@ def test_board_chat_with_c2000():
     assert c2k.pins.get("GPIO35").level() == "H"
     out = s.uart_output("A.SCIA")
     assert b"HELLO C2000" in out and b"PONG 1\r\n" in out
+
+
+DMA_ELF = ROOT / "firmware" / "samples_stm32_hal" / "build" / "uart_dma_hal.elf"
+
+
+def test_hal_uart_transmit_and_receive_dma():
+    """uart_dma_hal: HAL_UART_Transmit_DMA (DMA2 Stream7 ch4) and HAL_UART_Receive_DMA (DMA2 Stream2 ch4) complete:
+    HAL_DMA_IRQHandler sees HTIF/TCIF, UART_DMATransmitCplt enables TCIE, the USART TC interrupt calls
+    HAL_UART_TxCpltCallback; UART_DMAReceiveCplt calls HAL_UART_RxCpltCallback."""
+    if not DMA_ELF.exists():
+        pytest.skip(f"{DMA_ELF} not built (firmware/samples_stm32_hal/build.sh)")
+    from elftools.elf.elffile import ELFFile
+
+    with open(DMA_ELF, "rb") as f:
+        st = ELFFile(f).get_section_by_name(".symtab")
+        addr = {n: st.get_symbol_by_name(n)[0]["st_value"] for n in ("rx_done", "tx_done", "uart_errors", "rx_buf")}
+    s = Session(YAML, DMA_ELF)
+    s.schedule_uart(0, "USART1", b"abcdefgh")
+    s.schedule_uart(2e6, "USART1", b"12345678")
+    s.run_for(4e6)
+    chip = s.chip
+    assert s.uart_output("USART1") == b"HAL DMA\r\nabcdefgh\r\n12345678\r\n"
+    rd = lambda n: chip.bus.read(addr[n], 4)        # noqa: E731
+    assert (rd("rx_done"), rd("tx_done"), rd("uart_errors")) == (2, 3, 0)
+    assert chip.bus.read_bytes(addr["rx_buf"], 8) == b"12345678"
+    assert chip.clock.hz == 168e6
+    dma2 = chip.peripherals["DMA2"]
+    assert dma2.stream_request(7) == ("USART1_TX",) and dma2.stream_request(2) == ("USART1_RX",)
+    assert dma2.items == 9 + 8 + 10 + 8 + 10
+    assert chip.peripherals["USART1"].rx_dropped == 0
+    assert not [w for w in warns(chip) if "DMA" in w]
+    s.close()

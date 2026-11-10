@@ -21,6 +21,11 @@ the last character received. PE/FE/NF/ORE/IDLE clear with the SR-read-then-DR-re
 are rc_w0 (writing 0 clears them); reading DR clears RXNE.
 IRQ "<name>" (USART1, UART4 ...) line = (TXE & TXEIE) | (TC & TCIE) | (RXNE & RXNEIE) | (ORE & RXNEIE) | (IDLE &
 IDLEIE), level-sensitive.
+DMA (RM0090 sec. 30.3.13): CR3.DMAT asserts the DMA request "<name>_TX" (RM0090 Tables 42/43, e.g. USART1_TX on DMA2
+stream 7 channel 4) while TXE = 1, so the DMA's DR write (which clears TXE) deasserts it and the next TXE re-asserts it;
+CR3.DMAR asserts "<name>_RX" while RXNE = 1 (the DMA's DR read clears RXNE).  Requests go through
+`_util.dma_request` to both controllers (chipem/periph/stm32/dma.py).  The TC flag/interrupt path is unchanged (HAL
+waits for TC after the DMA transfer-complete interrupt).
 """
 from __future__ import annotations
 
@@ -29,13 +34,14 @@ from typing import Any
 from ..base import MMIOBlock
 from ..registry import register
 from ..uartwire import UartRx
-from ._util import GatedBlock, apb_hz, build_regs, irq_number
+from ._util import GatedBlock, apb_hz, build_regs, dma_request, irq_number
 
 SR_PE, SR_FE, SR_NF, SR_ORE, SR_IDLE, SR_RXNE, SR_TC, SR_TXE, SR_LBD, SR_CTS = (1 << b for b in range(10))
 SR_RC_W0 = SR_RXNE | SR_TC | SR_LBD | SR_CTS
 SR_ERR = SR_PE | SR_FE | SR_NF | SR_ORE | SR_IDLE
 CR1_RE, CR1_TE, CR1_IDLEIE, CR1_RXNEIE, CR1_TCIE, CR1_TXEIE = 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7
 CR1_PS, CR1_PCE, CR1_M, CR1_UE, CR1_OVER8 = 1 << 9, 1 << 10, 1 << 12, 1 << 13, 1 << 15
+CR3_DMAR, CR3_DMAT = 1 << 6, 1 << 7
 STOP_BITS = (1.0, 0.5, 2.0, 1.5)
 APB2_UARTS = ("USART1", "USART6")
 
@@ -57,7 +63,8 @@ class USART(UartRx, GatedBlock):
               "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
               "BRR": {"on_write": self._ctl_write},
               "CR1": {"on_write": self._cr1_write},
-              "CR2": {"on_write": self._ctl_write}}
+              "CR2": {"on_write": self._ctl_write},
+              "CR3": {"on_write": self._cr3_write}}
         tbl = name if name[:-1] in ("USART", "UART") else f"{'UART' if self.kind == 'uart' else 'USART'}{self.index}"
         r = build_regs((name, tbl, "USART1"), size, ov, params.get("regs_file"))
         self._rx_init()
@@ -73,6 +80,10 @@ class USART(UartRx, GatedBlock):
         self._warned_tx = False
         self._sr_seen = False
         self.tx_listeners: list = []           # board links (chipem.board.UartLink): cb(uart, byte)
+        self._dma_bits = 0                     # CR3 & (DMAR | DMAT), cached for the flag paths
+        self._dma_tx = False                   # request levels last sent to the DMA
+        self._dma_rx = False
+        self._dma_names = (f"{name}_TX", f"{name}_RX")
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -96,6 +107,8 @@ class USART(UartRx, GatedBlock):
             self._set_line(False)
         self._sr_seen = False
         super().reset()
+        self._dma_bits = 0
+        self._dma_update()
         self._wire_reset()
         # the output log survives a reset (the user's view of the wire); the host keeps sending what it has left
 
@@ -161,6 +174,27 @@ class USART(UartRx, GatedBlock):
     def _sr_mod(self, set_bits: int = 0, clr_bits: int = 0) -> None:
         self.set("SR", (self.get("SR") | set_bits) & ~clr_bits)
         self._update_line()
+        if self._dma_bits or self._dma_tx or self._dma_rx:
+            self._dma_update()
+
+    # ------------------------------------------------------------------ DMA requests
+    def _dma_update(self) -> None:
+        if self.chip is None:
+            return
+        sr, d = self.get("SR"), self._dma_bits
+        tx = bool(d & CR3_DMAT and sr & SR_TXE)
+        rx = bool(d & CR3_DMAR and sr & SR_RXNE)
+        if tx != self._dma_tx:
+            self._dma_tx = tx
+            dma_request(self.chip, self._dma_names[0], tx)
+        if rx != self._dma_rx:
+            self._dma_rx = rx
+            dma_request(self.chip, self._dma_names[1], rx)
+
+    def _cr3_write(self, blk, reg, old, new):
+        self._dma_bits = new & (CR3_DMAR | CR3_DMAT)
+        self._dma_update()
+        return None
 
     def _cancel(self, attr: str) -> None:
         ev = getattr(self, attr)
@@ -180,6 +214,8 @@ class USART(UartRx, GatedBlock):
                 self._warned_tx = True
                 self.emit("warn", block=self.name, msg=f"{self.name}: write to DR with the transmitter disabled "
                           f"(CR1.UE={int(bool(cr1 & CR1_UE))}, TE={int(bool(cr1 & CR1_TE))})")
+            if self._dma_tx:                    # TXE stays 1: the request stays (the DMA acknowledged it)
+                dma_request(self.chip, self._dma_names[0], True)
             return old
         b = new & (0x1FF if cr1 & CR1_M and not cr1 & CR1_PCE else 0xFF)
         self.output.append(b & 0xFF)
@@ -193,6 +229,8 @@ class USART(UartRx, GatedBlock):
             self._tx_ev = self.chip.sched.in_ns(t, self._tx_done)
         else:
             self._sr_mod(SR_TXE | SR_TC)
+            if self._dma_tx:                    # no baud generator: TXE never dropped, the request stays
+                dma_request(self.chip, self._dma_names[0], True)
         return old
 
     # ------------------------------------------------------------------ RX
@@ -256,6 +294,8 @@ class USART(UartRx, GatedBlock):
         v = (old & ~SR_RC_W0) | (old & new & SR_RC_W0)        # rc_w0: writing 0 clears, 1 keeps
         self._store(reg, v)
         self._update_line()
+        if self._dma_rx:
+            self._dma_update()
         return v
 
     # ------------------------------------------------------------------ control

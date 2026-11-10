@@ -255,3 +255,79 @@ def test_tim_capture_sample_measures_injected_period():
     pa7 = s.chip.pins.get("PA7")
     assert (pa7.owner, pa7.direction, pa7.pull) == ("TIM3_CH2", "in", "down")
     s.close()
+
+
+def test_uart_dma_sample_tx_and_rx_by_dma(desc):
+    """uart_dma: DMA2 Stream7 ch4 (USART1_TX) sends the banner and the echo, DMA2 Stream5 ch4 (USART1_RX) receives
+    8-byte blocks into RAM (RM0090 Table 43)."""
+    elf = BUILD / "uart_dma.elf"
+    if not elf.exists():
+        pytest.skip("not built")
+    s = Session(YAML, elf)
+    s.schedule_uart(0, "USART1", b"abcdefgh")      # paced at the baud rate from t=0, RX DMA is armed before the banner
+    s.schedule_uart(2e6, "USART1", b"12345678")
+    s.run_for(5e6)
+    assert s.uart_output("USART1") == b"DMA ready\r\nabcdefgh\r\n12345678\r\n"
+    chip = s.chip
+    assert chip.bus.read_bytes(data_symbol(elf, "rx_buf"), 8) == b"12345678"
+    assert chip.bus.read(data_symbol(elf, "rx_blocks"), 4) == 2
+    assert chip.bus.read(data_symbol(elf, "tx_done"), 4) == 3          # DMA2_Stream7 TC interrupts
+    assert chip.peripherals["USART1"].rx_dropped == 0
+    dma2 = chip.peripherals["DMA2"]
+    assert dma2.items == 11 + 8 + 10 + 8 + 10
+    assert dma2.stream_request(7) == ("USART1_TX",) and dma2.stream_request(5) == ("USART1_RX",)
+    # TX bytes leave back to back at the character time (the DMA refills DR on every TXE)
+    tx = [e.t_ns for e in s.events(kinds={"uart"}) if e.fields.get("dir") == "tx"]
+    char_ns = 10 * 139 / 16e6 * 1e9
+    assert all(b - a == pytest.approx(char_ns, abs=150) for a, b in zip(tx[:10], tx[1:11]))
+    assert not [w for w in warns(chip) if "DMA" in w]
+    s.close()
+
+
+def test_uart_dma_cli_uart_in():
+    elf = BUILD / "uart_dma.elf"
+    if not elf.exists():
+        pytest.skip("not built")
+    r = subprocess.run([sys.executable, "-m", "chipem.cli", "run", "--chip", "stm32f405zg", str(elf), "--for", "3ms",
+                        "--uart-in", "USART1:qwertyui"], capture_output=True, text=True, cwd=ROOT, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert '"DMA ready\\r\\nqwertyui\\r\\n"' in r.stdout and "IRQ70 DMA2_Stream7" in r.stdout
+
+
+def test_adc_tim_trigger_sample():
+    """adc_tim_trigger: TIM3 TRGO (update, 1 kHz) triggers ADC1 IN0 (PA0); the EOC interrupt stores DR and the main
+    loop prints it.  Each conversion ends 1 PCLK2 + 2 ADCCLK (latency) + (84 + 12) ADCCLK = 197 core cycles after the
+    TIM3 update (16 MHz, ADCCLK = 8 MHz).  The input comes from Session.set_adc (`--adc PA0=1.65V`), then a raw code
+    on the ADC1_IN0 name."""
+    elf = BUILD / "adc_tim_trigger.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    s.set_adc("PA0", 1.65)
+    adc, tim = s.chip.peripherals["ADC1"], s.chip.peripherals["TIM3"]
+    ends: list[int] = []
+    done = adc._done
+    adc._done = lambda: (ends.append(s.chip.now_cycles()), done())
+    s.run_for(3.5e6)
+    started = [e.t_ns for e in s.events(kinds={"info"}) if "TIM3 started" in str(e.fields.get("msg"))]
+    t0 = round(started[0] * 16e6 / 1e9)
+    assert ends == [t0 + 16000 * k + 197 for k in (1, 2, 3)]
+    s.set_adc("ADC1_IN0", 1000)
+    s.run_for(2.4e6)
+    out = s.uart_output("USART1").decode()
+    assert out == "adc ready\r\n" + "adc 2048\r\n" * 3 + "adc 1000\r\n" * 2, out
+    assert s.chip.bus.read(data_symbol(elf, "overruns"), 4) == 0 and tim.updates == 5
+    pa0 = s.chip.pins.get("PA0")
+    assert (pa0.owner, pa0.direction) == ("ADC123_IN0", "analog")
+    assert not warns(s.chip)
+    s.close()
+
+
+def test_adc_tim_trigger_cli():
+    elf = BUILD / "adc_tim_trigger.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    r = subprocess.run([sys.executable, "-m", "chipem.cli", "run", "--chip", "stm32f405zg", str(elf), "--for", "3ms",
+                        "--adc", "ADC1_IN0=0.825V"], capture_output=True, text=True, cwd=ROOT, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert '"adc ready\\r\\nadc 1024\\r\\nadc 1024\\r\\n"' in r.stdout, r.stdout

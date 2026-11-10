@@ -29,7 +29,7 @@ peripherals:
   - {name: SPI0, model: kinetis.dspi, base: 0x4002C000, size: 0x1000, params: {index: 0}}
   - {name: SPI1, model: kinetis.dspi, base: 0x4002D000, size: 0x1000, params: {index: 1}}
   - {name: I2S0, model: stub, base: 0x4002F000, size: 0x1000}
-  - {name: CRC, model: stub, base: 0x40032000, size: 0x1000}
+  - {name: CRC, model: kinetis.crc, base: 0x40032000, size: 0x1000}
   - {name: USBDCD, model: stub, base: 0x40035000, size: 0x1000}
   - {name: PDB0, model: kinetis.pdb, base: 0x40036000, size: 0x1000}
   - {name: PIT, model: kinetis.pit, base: 0x40037000, size: 0x1000}
@@ -39,6 +39,7 @@ peripherals:
   - {name: ADC0, model: kinetis.adc, base: 0x4003B000, size: 0x1000, params: {index: 0}}
   - {name: RTC, model: kinetis.rtc, base: 0x4003D000, size: 0x1000}
   - {name: VBAT, model: kinetis.vbat, base: 0x4003E000, size: 0x1000}
+  - {name: DAC0_ALIAS, model: kinetis.ftm_alias, base: 0x4003F000, size: 0x1000, params: {target: DAC0}}   # RM 3.7.3.4: DAC0 also on AIPS0
   - {name: LPTMR0, model: kinetis.lptmr, base: 0x40040000, size: 0x1000}
   - {name: RFSYS, model: ram, base: 0x40041000, size: 0x1000}
   - {name: SIM, model: kinetis.sim, base: 0x40047000, size: 0x2000}
@@ -48,7 +49,7 @@ peripherals:
   - {name: PORTD, model: kinetis.port, base: 0x4004C000, size: 0x1000, params: {port: D}}
   - {name: PORTE, model: kinetis.port, base: 0x4004D000, size: 0x1000, params: {port: E}}
   - {name: WDOG, model: kinetis.wdog, base: 0x40052000, size: 0x1000}
-  - {name: EWM, model: stub, base: 0x40061000, size: 0x1000}
+  - {name: EWM, model: kinetis.ewm, base: 0x40061000, size: 0x1000}
   - {name: CMT, model: stub, base: 0x40062000, size: 0x1000}
   - {name: MCG, model: kinetis.mcg, base: 0x40064000, size: 0x1000}
   - {name: OSC, model: kinetis.osc, base: 0x40065000, size: 0x1000}
@@ -59,8 +60,10 @@ peripherals:
   - {name: UART2, model: kinetis.uart, base: 0x4006C000, size: 0x1000, params: {index: 2}}
   - {name: UART3, model: kinetis.uart, base: 0x4006D000, size: 0x1000, params: {index: 3}}
   - {name: USB0, model: stub, base: 0x40072000, size: 0x1000}
-  - {name: CMP, model: stub, base: 0x40073000, size: 0x1000}
-  - {name: VREF, model: stub, base: 0x40074000, size: 0x1000}
+  - {name: CMP0, model: kinetis.cmp, base: 0x40073000, size: 0x0008, params: {index: 0}}
+  - {name: CMP1, model: kinetis.cmp, base: 0x40073008, size: 0x0008, params: {index: 1}}
+  - {name: CMP2, model: kinetis.cmp, base: 0x40073010, size: 0x0FF0, params: {index: 2}}
+  - {name: VREF, model: kinetis.vref, base: 0x40074000, size: 0x1000}
   - {name: LLWU, model: kinetis.llwu, base: 0x4007C000, size: 0x1000}
   - {name: PMC, model: kinetis.pmc, base: 0x4007D000, size: 0x1000}
   - {name: SMC, model: kinetis.smc, base: 0x4007E000, size: 0x1000}
@@ -71,7 +74,7 @@ peripherals:
   - {name: FTM2, model: kinetis.ftm, base: 0x400B8000, size: 0x1000}
   - {name: FTM3, model: kinetis.ftm, base: 0x400B9000, size: 0x1000}
   - {name: ADC1, model: kinetis.adc, base: 0x400BB000, size: 0x1000, params: {index: 1}}
-  - {name: DAC0, model: stub, base: 0x400CC000, size: 0x1000}
+  - {name: DAC0, model: kinetis.dac, base: 0x400CC000, size: 0x1000, params: {index: 0}}
   - {name: I2C2, model: stub, base: 0x400E6000, size: 0x1000}
   - {name: UART4, model: kinetis.uart, base: 0x400EA000, size: 0x1000, params: {index: 4}}
   - {name: GPIOA, model: kinetis.gpio, base: 0x400FF000, size: 0x40, params: {port: A}}

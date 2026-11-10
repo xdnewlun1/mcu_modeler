@@ -776,14 +776,17 @@ class Shell(cmd.Cmd):
             self.p("(no UART output)")
 
     def do_adc(self, arg: str) -> None:
-        """adc CHANNEL VALUE   set the raw conversion result of an ADC channel (e.g. adc ADC0_SE14 2048)."""
+        """adc CHANNEL VALUE   set an analog input: integer = raw ADC code (adc ADC0_SE14 2048), decimal or V/mV
+        suffix = volts (adc PA0 1.65V, adc CMP0_IN0 1200mV; comparator inputs take volts only)."""
+        from .session import parse_adc_value
         a = self._args(arg)
         if len(a) == 1 and "=" in a[0]:
             a = a[0].split("=", 1)
         if len(a) != 2:
             raise ValueError("usage: adc CHANNEL VALUE")
-        self.s.set_adc(a[0], self._int(a[1]))
-        self.p(f"{a[0]} = {self._int(a[1])}")
+        v = parse_adc_value(a[1])
+        self.s.set_adc(a[0], v)
+        self.p(f"{a[0]} = {v if isinstance(v, int) else f'{v:g} V'}")
 
     # ---- events / state --------------------------------------------------------------------------------------
     def do_events(self, arg: str) -> None:

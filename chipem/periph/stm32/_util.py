@@ -75,6 +75,21 @@ def irq_number(chip: Any, *names: str) -> int | None:
     return None
 
 
+def dma_request(chip: Any, name: str, level: bool = True) -> bool:
+    """Assert (level=True) or deassert a DMA request on every stm32.dma controller of the chip (DMA1 and DMA2).
+    `name` is the RM0090 Table 42/43 request name ("USART1_TX", "TIM3_UP", "ADC1", ...). Returns True if a controller
+    maps the request to some stream/channel (whether or not a stream is enabled), False if none does (ignored).
+    See chipem/periph/stm32/dma.py for the request/acknowledge semantics."""
+    ctls = getattr(chip, "_stm32_dmas", None)
+    if ctls is None:
+        from .dma import controllers
+        ctls = controllers(chip)
+    routed = False
+    for c in ctls:
+        routed |= c.request(name, level)
+    return routed
+
+
 def rcc(chip: Any) -> Any:
     """The chip's RCC model (cached on the chip), or None."""
     r = getattr(chip, "_stm32_rcc", None)
