@@ -362,9 +362,12 @@ class Session:
         s.board_desc = bd
         brd.desc = bd                              # chip specs/devices/stimulus for Board.to_yaml()
         for n in bd.nets:
-            brd.add_net(n.name, n.pins, pull=n.pull, drive=n.drive)
+            brd.add_net(n.name, n.pins, pull=n.pull, drive=n.drive, open_drain=getattr(n, "open_drain", False))
         for ln in bd.links:
-            brd.add_uart_link(ln.a, ln.b, bidir=ln.bidir)
+            if ln.type == "can":
+                brd.add_can_link(ln.nodes, name=ln.name, host=ln.host)
+            else:
+                brd.add_uart_link(ln.a, ln.b, bidir=ln.bidir)
         for ps in bd.parts:
             brd.add_part(ps.id, ps.type, ps.params, ps.ports)
         for d in bd.devices:

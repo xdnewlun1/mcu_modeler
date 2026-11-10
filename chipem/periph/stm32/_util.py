@@ -150,3 +150,65 @@ class GatedBlock(MMIOBlock):
             return True
         self._rcc.check_gate(self.gate, self.name)
         return False
+
+
+def shared_irq(chip: Any, n: int | None, who: str, on: bool) -> None:
+    """Drive NVIC line n as the OR of several blocks (TIM6_DAC, HASH_RNG, ...): `who` asserts/deasserts its share.
+    Uses the same per-chip table as stm32.tim (`chip._stm32_tim_lines`), so a timer and another block sharing a
+    vector combine correctly."""
+    if n is None or chip is None:
+        return
+    shared = getattr(chip, "_stm32_tim_lines", None)
+    if shared is None:
+        shared = {}
+        try:
+            chip._stm32_tim_lines = shared
+        except AttributeError:
+            pass
+    s = shared.setdefault(n, set())
+    if on:
+        s.add(who)
+    else:
+        s.discard(who)
+    chip.arch.set_irq(n, bool(s))
+
+
+def exti_input(chip: Any, line: int, level: bool) -> None:
+    """Internal EXTI line input (16 PVD, 17 RTC alarm, 21 tamper/timestamp, 22 RTC wakeup): an edge selected by
+    EXTI_RTSR/FTSR sets EXTI_PR (when IMR enables the line) and raises the line's NVIC vector through the EXTI
+    model.  Levels are remembered per chip so only edges count."""
+    lv = getattr(chip, "_stm32_exti_inputs", None)
+    if lv is None:
+        lv = {}
+        try:
+            chip._stm32_exti_inputs = lv
+        except AttributeError:
+            pass
+    prev = lv.get(line, False)
+    lv[line] = bool(level)
+    if prev == bool(level):
+        return
+    ex = find_model(chip, "stm32.exti", "EXTI")
+    if ex is None:
+        return
+    ex.line_event(line, bool(level))
+
+
+def gpio_resync(chip: Any, sig: str) -> None:
+    """Ask every STM32 GPIO port to re-evaluate the pins carrying `sig` (after a peripheral's `signal_state`
+    changed)."""
+    for b in (getattr(chip, "peripherals", None) or {}).values():
+        if getattr(b, "model", None) == "stm32.gpio" and hasattr(b, "resync_signal"):
+            b.resync_signal(sig)
+
+
+def signal_pin_level(chip: Any, sig: str) -> str | None:
+    """Level ("H"/"L"/"X") of the first pin currently owned by peripheral signal `sig` (a pin muxed to it), or None
+    when no pin carries it."""
+    board = getattr(chip, "pins", None)
+    if board is None:
+        return None
+    for p in board.signal_pins(sig):
+        if board.signal_matches(p.owner, sig):
+            return p.level()
+    return None

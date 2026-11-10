@@ -472,6 +472,32 @@ class Chip:
         `adc_volts = True` marks a model whose float values are volts (otherwise values are raw codes)."""
         return {n: b for n, b in self.peripherals.items() if hasattr(b, "set_channel")}
 
+    def can_blocks(self) -> dict[str, Any]:
+        """CAN controllers (any model exposing the CAN node hook `can_attach(bus)`, chipem/canbus.py: kinetis.flexcan,
+        ti_c2000.ecan, ...), in chip YAML order."""
+        return {n: b for n, b in self.peripherals.items() if hasattr(b, "can_attach")}
+
+    def find_can(self, name: str) -> str | None:
+        """Resolve a user-typed CAN controller name: exact (case-insensitive), then ignoring separators and an "E"
+        prefix ("eCAN-A" -> ECANA), then by instance suffix ("CANA" -> ECANA, "CAN1" -> CAN1, "FLEXCAN0" -> CAN0)."""
+        import re
+        cans = self.can_blocks()
+        key = str(name).strip().upper()
+        if key in cans:
+            return key
+        norm = re.sub(r"[^A-Z0-9]", "", key)
+        for n in cans:
+            if re.sub(r"[^A-Z0-9]", "", n.upper()) == norm:
+                return n
+        pat = re.compile(r"(?:FLEX|E|BX)?CAN([A-Z0-9]+)")
+        m = pat.fullmatch(norm)
+        if m:
+            for n in cans:
+                mm = pat.fullmatch(re.sub(r"[^A-Z0-9]", "", n.upper()))
+                if mm and mm.group(1) == m.group(1):
+                    return n
+        return None
+
     def find_uart(self, name: str, *, fallback: bool = False) -> str | None:
         """Resolve a user-typed UART name to a peripheral name, uniformly across families: exact match first
         (case-insensitive), then ignoring separators ("SCI-A" -> SCIA), then by instance suffix so UARTn/USARTn

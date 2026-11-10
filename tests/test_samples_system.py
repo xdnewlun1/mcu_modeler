@@ -186,3 +186,58 @@ def test_withings_console_answers_help():
     assert b"UART IS CONNECTED" in out and b"boot_trace" in out and out.rstrip().endswith(b"shell>")
     assert not [e for e in s.chip.log if e.kind in ("warn", "fault")]
     assert not [e for e in s.chip.log if e.kind == "uart" and e.get("dir") == "drop"]
+
+
+def test_i2c_eeprom_board_writes_and_reads_back():
+    """boards/k22_i2c_eeprom.yaml: K22 I2C0 master + i2c_eeprom part on open-drain nets. The firmware probes an absent
+    address (NACK), page-writes a string with acknowledge polling of the 5 ms write cycle and reads it back."""
+    from chipem.board import load_board
+    from chipem.session import Session
+    if not (BUILD / "i2c_eeprom.elf").exists():
+        pytest.skip("i2c_eeprom not built")
+    s = Session.from_board(load_board(ROOT / "boards" / "k22_i2c_eeprom.yaml"))
+    s.run_for(30e6)
+    out = bytes(s.chip.peripherals["UART0"].output).decode()
+    assert "0x51: NACK" in out and 'wrote "Hello over I2C!", read "Hello over I2C!"' in out and "PASS" in out
+    ee = s.board.parts["EE1"]
+    assert ee.dump(0x10, 15) == b"Hello over I2C!" and ee.state()["writes"] == 2      # pages 0x10-0x17, 0x18-0x1E
+    assert ee.state()["naks"] > 0 and not ee.busy                                     # acknowledge polling happened
+    i2c = s.chip.peripherals["I2C0"]
+    assert i2c.baud() == pytest.approx(60e6 / 640)                                    # bus 60 MHz, ICR 0x2D
+    # SCL edges on PTB2 are real: one SCL period apart inside a byte
+    rises = [e.t_ns for e in s.log if e.kind == "pin" and e.fields.get("pin") == "PTB2"
+             and e.fields.get("field") == "level" and e.fields.get("new") == "H"]
+    gaps = [b - a for a, b in zip(rises, rises[1:])]
+    assert min(gaps) == pytest.approx(1e9 / (60e6 / 640), rel=1e-3)
+    s.close()
+
+
+def test_can_echo_sample_with_host_node():
+    """firmware/samples/can_echo.c alone on its FlexCAN0 bus with an acknowledging host node: a frame every 10 ms
+    (100#<n>4B32, 500 kbit/s; SysTick starts after the ~1.1 ms banner), frames 0x200-0x27F printed on UART0; other
+    IDs are filtered out."""
+    from chipem.canbus import CanFrame
+    from chipem.session import Session
+    elf = BUILD / "can_echo.elf"
+    if not elf.exists():
+        pytest.skip(f"{elf} not built")
+    s = Session("mk22fn1m0vll12", elf, clock_hz=120e6, quiet=True)
+    try:
+        blk = s.chip.peripherals["CAN0"]
+        host = blk.can_bus.add_host()
+        host.send(CanFrame(0x211, b"\x01\x02"), 3e6)
+        host.send(CanFrame(0x311, b"\x03"), 4e6)            # outside the RXMGMASK range
+        s.run_for(32e6)
+        sent = [(t, f) for t, f in host.received]
+        assert [str(f) for _t, f in sent] == ["100#00004B32", "100#00014B32", "100#00024B32"]
+        assert blk.bitrate() == pytest.approx(500e3)
+        evs = [e for e in s.events(kinds={"can"}) if e.fields["node"] == "CAN0"]
+        for e, (t, f) in zip(evs, sent):
+            assert e.t_ns == pytest.approx(t) and e.t_ns - e.fields["sof_ns"] == pytest.approx(f.bits * 2000.0)
+        assert 11e6 < sent[0][0] < 11.5e6 and sent[1][0] - sent[0][0] == pytest.approx(10e6, rel=0.02)
+        out = s.chip.uart_out("UART0").decode()
+        assert out.startswith("CAN ECHO K22\r\n") and "RX 211 [2] 01 02\r\n" in out and "RX 311" not in out
+        assert "TX 1\r\nTX 2\r\n" in out.replace("RX 211 [2] 01 02\r\n", "")
+        assert blk.errors.tec == 0 and blk.rx_frames == 2 and blk.rx_lost == 1
+    finally:
+        s.close()

@@ -1,12 +1,10 @@
-"""STM32F4 system blocks: IWDG, WWDG (stub), FLASH interface, PWR, DBGMCU.
+"""STM32F4 system blocks: IWDG, FLASH interface, PWR, DBGMCU (the window watchdog is in wwdg.py).
 
 IWDG (RM0090 ch. 21): KR keys 0xCCCC start (cannot be stopped again), 0xAAAA reload, 0x5555 unlock PR/RLR (any
 other key or a reload locks them again; locked writes are ignored with one `warn`).  Counter clock = LSI
 (params `lsi_hz`, default 32 kHz) / (4 << PR) (PR >= 6: /256); timeout = (RLR + 1) ticks from start/reload.
 SR.PVU/RVU read 0 (updates are immediate).  Timeout: `warn`, RCC_CSR.IWDGRSTF on the next reset, then
 chip.reset("watchdog").  Scheduled with Scheduler.at_ns (LSI does not depend on the core clock).
-
-WWDG: SVD storage only (CR/CFR reset 0x7F); enabling it (CR.WDGA) logs one `warn` (no reset is ever generated).
 
 FLASH (RM0090 ch. 3): ACR is storage (LATENCY, PRFTEN, ICEN, DCEN read back; wait states have no timing effect).
 KEYR 0x45670123 then 0xCDEF89AB clears CR.LOCK (a wrong key locks until reset); writing CR.LOCK=1 locks.  SR.BSY
@@ -121,26 +119,6 @@ class IWDG(MMIOBlock):
                 self.emit("warn", block=self.name, msg=f"IWDG_{reg.name} write without the 0x5555 unlock key: ignored")
             return old
         return None
-
-
-@register("stm32.wwdg")
-class WWDG(MMIOBlock):
-    def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        params = dict(params or {})
-        r = build_regs((name, "WWDG"), size, {"CR": {"on_write": self._cr_write}}, params.get("regs_file"))
-        super().__init__(name, base, size, r, log=log, params=params)
-        self._warned = False
-
-    def _cr_write(self, blk, reg, old, new):
-        if new & 0x80 and not old & 0x80:
-            new |= 0x80
-            if not self._warned:
-                self._warned = True
-                self.emit("warn", block=self.name, msg="WWDG enabled: the window watchdog is not modelled "
-                          "(it never resets the chip)")
-        elif old & 0x80:
-            new |= 0x80                       # WDGA can only be cleared by reset
-        return new
 
 
 @register("stm32.flash")

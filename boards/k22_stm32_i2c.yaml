@@ -1,0 +1,19 @@
+# Two vendors on one I2C bus: K22 I2C0 master <-> STM32F405 I2C1 slave.
+#   A (MK22FN1M0VLL12, 120 MHz core / 60 MHz bus) runs i2c_reg_master: I2C0 on PTB2 (SCL) / PTB3 (SDA), PCR.ODE,
+#     93.75 kHz. It probes 0x43 (nobody: NACK), writes "Hello over I2C!" with register pointer 0x10 to the slave at
+#     0x42, reads it back with a repeated START and prints the result and PASS on UART0.
+#   B (STM32F405ZG, HSI 16 MHz) runs i2c_slave: I2C1 slave at 0x42 on PB6 (SCL) / PB7 (SDA), AF4 open drain, a
+#     16-register map (pointer = first written byte, 4 bits, auto-increment); it stretches SCL while its interrupt
+#     handler clears ADDR / services DR, and prints SLAVE READY / SLAVE RX <ptr>:<hex> / SLAVE TX <n> on USART1.
+#   The SCL/SDA nets are open drain (wired-AND, pulled up); quantum 1 us keeps the cross-chip ACK inside the SCL low
+#   time.
+# Run:   chipem run --board boards/k22_stm32_i2c.yaml --for 30ms --vcd k22_stm32_i2c.vcd
+# Build: firmware/samples/build.sh; firmware/samples_stm32/build.sh
+name: k22_stm32_i2c
+quantum: 1us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/i2c_reg_master.elf, clock_hz: 120000000}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/i2c_slave.elf}
+nets:
+  - {name: SCL, pins: [A.PTB2, B.PB6], open_drain: true}
+  - {name: SDA, pins: [A.PTB3, B.PB7], open_drain: true}

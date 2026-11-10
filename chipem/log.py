@@ -1,4 +1,4 @@
-"""EventLog: the single stream of runtime observations (pin, mmio, irq, uart, reset, fault, info, warn).
+"""EventLog: the single stream of runtime observations (pin, mmio, irq, uart, can, reset, fault, info, warn, part).
 
 `log.event(kind, t_ns, **fields)` appends and notifies subscribers; CLI/VCD/web subscribe. See docs/CONTRACTS.md.
 
@@ -19,7 +19,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator
 
-KINDS = ("pin", "mmio", "irq", "uart", "reset", "fault", "info", "warn", "part")
+KINDS = ("pin", "mmio", "irq", "uart", "can", "reset", "fault", "info", "warn", "part")
 
 
 @dataclass
@@ -213,6 +213,18 @@ def format_time(t_ns: float) -> str:
     return f"[{t_ns / 1e6:10.3f} ms]"
 
 
+def format_can(f: dict) -> str:
+    """'CAN0 tx 123#DEADBEEF' (candump style id#data, R = remote frame) from the fields of a `can` event."""
+    ident = int(f.get("id", 0))
+    ident_s = f"{ident:08X}" if f.get("ext") else f"{ident:03X}"
+    body = f"R{f.get('dlc') or ''}" if f.get("rtr") else str(f.get("data", ""))
+    who = f"{f.get('node', '')}" if f.get("node") else str(f.get("link", ""))
+    s = f"{who} {f.get('dir', 'tx')} {ident_s}#{body}"
+    if f.get("err"):
+        s += f" ERROR {f['err']}"
+    return s
+
+
 def format_event(ev: LogEvent) -> str:
     f = dict(ev.fields)
     head = f"{format_time(ev.t_ns)} {ev.kind}"
@@ -234,6 +246,10 @@ def format_event(ev: LogEvent) -> str:
         if isinstance(data, (bytes, bytearray)):
             data = data.decode("latin-1")
         s = " ".join(x for x in (head, str(name), str(f.pop("dir", "tx")), repr(data)) if x)
+    elif ev.kind == "can" and "id" in f:
+        s = f"{head} {format_can(f)}"
+        for k in ("link", "node", "dir", "id", "ext", "rtr", "dlc", "data", "msg"):
+            f.pop(k, None)
     elif "msg" in f:
         s = f"{head} {f.pop('msg')}"
     else:

@@ -1,5 +1,5 @@
-"""Board parts: switches, buttons, clocks, quadrature encoders, LEDs, probes, counters and logic gates attached to
-board nets.
+"""Board parts: switches, buttons, clocks, quadrature encoders, LEDs, probes, counters, logic gates and I2C devices
+(EEPROM, register map) attached to board nets.
 
 Generic glue (no vendor knowledge). `registry.create(type, id, params)` / `registry.catalog()`;
 `chipem.board.Board.add_part()` wires a part's ports to nets. See docs/CONTRACTS.md "Board parts".

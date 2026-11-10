@@ -152,3 +152,105 @@ def test_pwm_capture_3way_cli_pin_report(capsys):
     assert "C|   GPIO24  68  ECAP1          in" in out
     assert "A|   PA6     42  TIM3_CH1       out" in out
     assert "=== pin report chip C ===" in out and "GPIO24" in out.split("=== pin report chip C ===")[1]
+
+
+SPI_PAIR = ROOT / "boards" / "stm32_spi_pair.yaml"
+
+
+@pytest.mark.skipif(not ((STM / "spi_master.elf").exists() and (STM / "spi_slave.elf").exists()),
+                    reason="SPI pair samples not built (firmware/samples_stm32/build.sh)")
+def test_stm32_spi_pair_board_bit_level_over_nets():
+    """boards/stm32_spi_pair.yaml: STM32 SPI1 master <-> STM32 SPI1 slave over four nets (SCK/MOSI/MISO/NSS). The
+    master's SCK/MOSI/NSS and the slave's MISO toggle bit by bit; both sides print what they received."""
+    from chipem.session import Session
+    s = Session.from_board(SPI_PAIR, quiet=True)
+    edges = []
+    a = s.ctxs["A"].chip
+    a.pins.subscribe(lambda e: edges.append(e.t_ns) if e.pin == "PA5" and e.field == "level" else None)
+    try:
+        s.run_for(9e6)
+        out_a, out_b = s.uart_output("A.USART1").decode(), s.uart_output("B.USART1").decode()
+        warns = [e.fields["msg"] for e in s.events(kinds={"warn"})]
+        nss = s.ctxs["B"].chip.pins.get("PA4")
+        miso_b = s.ctxs["B"].chip.pins.get("PA6")
+    finally:
+        s.close()
+    assert out_a.startswith("M 1 WORLD\r\nM 2 WORLD\r\nM 3 WORLD\r\n"), out_a
+    assert out_b.startswith("S 1 hello\r\nS 2 hello\r\nS 3 hello\r\n"), out_b
+    assert edges[1] - edges[0] == pytest.approx(4000, abs=1)                # 125 kHz SCK: 4 us half period
+    assert (nss.owner, nss.direction, nss.level()) == ("SPI1_NSS", "in", "H")   # NSS released between transfers
+    assert (miso_b.owner, miso_b.direction) == ("SPI1_MISO", "in")              # slave MISO released when idle
+    assert not warns, warns
+
+
+def test_k22_master_stm32_slave_i2c_board():
+    """boards/k22_stm32_i2c.yaml: a K22 I2C0 master and an STM32 I2C1 slave on open-drain nets (quantum 1 us). The
+    slave model decodes the K22's pin edges, stretches SCL while its ISR services ADDR/DR, and answers reads."""
+    from pathlib import Path
+    import pytest
+    from chipem.board import load_board
+    from chipem.session import Session
+    root = Path(__file__).resolve().parent.parent
+    fws = [root / "firmware/samples/build/i2c_reg_master.elf", root / "firmware/samples_stm32/build/i2c_slave.elf"]
+    if not all(f.exists() for f in fws):
+        pytest.skip("I2C samples not built")
+    s = Session.from_board(load_board(root / "boards/k22_stm32_i2c.yaml"))
+    s.run_for(30e6)
+    a, b = s.board.chips["A"], s.board.chips["B"]
+    out_a = bytes(a.peripherals["UART0"].output).decode()
+    out_b = bytes(b.peripherals["USART1"].output).decode()
+    assert "0x43: NACK" in out_a and 'read "Hello over I2C!"' in out_a and "PASS" in out_a
+    assert "SLAVE RX 00:" + b"Hello over I2C!".hex().upper() in out_b and "SLAVE TX 10" in out_b
+    assert not [e for e in s.log.filter("warn") if "conflict" in str(e.fields.get("msg"))]
+    s.close()
+
+
+CAN_BOARD = ROOT / "boards" / "k22_c2000_can.yaml"
+
+
+@pytest.mark.skipif(not (ROOT / "firmware/samples_c2000_c/build/can_echo.out").exists()
+                    or not (ROOT / "firmware/samples/build/can_echo.elf").exists(),
+                    reason="can_echo samples not built (TI cl2000 / clang)")
+def test_k22_c2000_can_board_exchanges_frames():
+    """boards/k22_c2000_can.yaml: K22 FlexCAN0 sends 100#<n>4B32 every 10 ms, the F28232 eCAN-A echoes it as 201#...;
+    both print what they receive.  Frames last exactly their stuffed length at 500 kbit/s (2 us/bit), and the echo
+    follows the K22 frame by the C2000's mailbox-polling reaction time."""
+    from chipem.canbus import CanFrame
+    from chipem.session import Session
+    s = Session.from_board(CAN_BOARD, quiet=True)
+    try:
+        s.run_for(45e6)
+        evs = s.events(kinds={"can"})
+        k22 = [e for e in evs if e.fields["chip"] == "A"]
+        c2k = [e for e in evs if e.fields["chip"] == "B"]
+        assert [e.fields["data"] for e in k22] == [f"{n:04X}4B32" for n in range(4)]
+        assert [(e.fields["id"], e.fields["data"]) for e in c2k] == [(0x201, f"{n:04X}4B32") for n in range(4)]
+        for e in k22 + c2k:
+            f = CanFrame(e.fields["id"], bytes.fromhex(e.fields["data"]))
+            assert e.t_ns - e.fields["sof_ns"] == pytest.approx(f.bits * 2000.0)
+            assert e.fields["link"] == "CANBUS" and not e.fields.get("err")
+        for a, b in zip(k22, c2k):
+            assert a.t_ns + 3 * 2000.0 <= b.fields["sof_ns"] < a.t_ns + 30e3      # intermission + reaction
+        gaps = [b.fields["sof_ns"] - a.fields["sof_ns"] for a, b in zip(k22, k22[1:])]
+        assert all(g == pytest.approx(10e6, abs=5e3) for g in gaps)
+        a_out = s.chips["A"].uart_out("UART0").decode()
+        b_out = s.chips["B"].uart_out("SCIA").decode()
+        assert "RX 201 [4] 00 02 4B 32\r\nTX 3\r\n" in a_out
+        assert b_out.startswith("CAN ECHO C2000\r\nRX 100 [4] 00 00 4B 32\r\nTX 201\r\nRX 100 [4] 00 01 4B 32\r\n")
+        cl = s.board.can_links[0]
+        assert cl.bus.frames == 8 and cl.bus.error_frames == 0
+        for chip, name in ((s.chips["A"], "CAN0"), (s.chips["B"], "ECANA")):
+            st = chip.peripherals[name].can_stats()
+            assert st["tec"] == 0 and st["rec"] == 0 and st["state"] == "active" and st["bus"] == "CANBUS"
+    finally:
+        s.close()
+
+
+@pytest.mark.skipif(not (ROOT / "firmware/samples_c2000_c/build/can_echo.out").exists(),
+                    reason="can_echo samples not built")
+def test_k22_c2000_can_board_cli_summary(capsys):
+    from chipem.cli import main
+    assert main(["run", "--board", str(CAN_BOARD), "--for", "25ms", "--summary-only"]) == 0
+    out = capsys.readouterr().out
+    assert "A| CAN frames: 2 sent" in out and "B| CAN frames: 2 sent" in out
+    assert "A|   CAN0: 500 kbit/s, 2 tx, 2 rx" in out and "can CANBUS: A.CAN0, B.ECANA: 4 frames" in out

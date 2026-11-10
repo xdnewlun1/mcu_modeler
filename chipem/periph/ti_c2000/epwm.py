@@ -57,7 +57,8 @@ Trip zone (TZ): TZ1-TZ6 inputs (active low; GPIO12-15 MUX1, GPIO16/17 MUX3) are 
   TZEINT, TZCLR, TZFRC, HRCNFG).
 Event trigger (ET): ETSEL INTSEL/SOCASEL/SOCBSEL (ZRO, PRD, CAU, CAD, CBU, CBD), ETPS prescaling (1st/2nd/3rd event,
   INTCNT/SOCxCNT live; INTCNT stops at INTPRD while ETFLG.INT is set), ETFLG / ETCLR / ETFRC; INT -> EPWMx_INT (PIE
-  3.x); SOCA/SOCB start the ADC sequencers and pulse the ADCSOCAO/BO pins (ti_c2000.adc.epwm_soc).
+  3.x); SOCA/SOCB start the ADC sequencers and pulse the ADCSOCAO/BO pins (ti_c2000.adc.epwm_soc), and call
+  `soc_listeners` cb(index, "A" | "B") (the DMA's ePWMxSOCA/B triggers).
 Pins: EPWMxA / EPWMxB follow the outputs (PinBoard.drive_signal); a GPIO muxed to EPWMxA/B later shows the current
   level.  TBPRD = 0 with actions or events enabled schedules an event every TBCLK (correct but slow: one `warn`).
 Not modelled: HRPWM (TBPHSHR/CMPAHR/HRCNFG stored); TBCTL.FREE_SOFT (stored; CHIP_EM has no emulation-suspend
@@ -131,6 +132,7 @@ class EPWM(C2000Block):
         super().__init__(name, base, size, regs_, params=params, log=log)
         self.gate = params.get("gate", f"EPWM{self.index}ENCLK")
         self.sync_listeners: list = []             # cb(t_cycles) on every EPWMxSYNCO pulse (eCAP1 on EPWM1)
+        self.soc_listeners: list = []              # cb(index, "A" | "B") on every SOCA/SOCB pulse (DMA triggers)
         self.running = False
         self._cyc0 = 0              # anchor cycle (a TBCLK edge) ...
         self._t0 = 0                # ... and the absolute tick count there (position = tick % period)
@@ -576,8 +578,12 @@ class EPWM(C2000Block):
         self.set("ETFLG", self.get("ETFLG") | flag)
         if flag == ET_INT:
             self._int_set(True)
-        elif self._adc is not None and hasattr(self._adc, "epwm_soc"):
-            self._adc.epwm_soc("A" if flag == ET_SOCA else "B")
+        else:
+            which = "A" if flag == ET_SOCA else "B"
+            if self._adc is not None and hasattr(self._adc, "epwm_soc"):
+                self._adc.epwm_soc(which)
+            for cb in list(self.soc_listeners):
+                cb(self.index, which)
 
     def _int_set(self, lvl: bool) -> None:
         if lvl != self._int_lvl:

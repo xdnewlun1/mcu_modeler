@@ -1,7 +1,8 @@
 """STM32F4 peripheral signal roles for pins in alternate-function mode (see chipem/periph/signals.py).
 
 Analog mode (MODER=11) stays the GPIO model's business. SPI clocks idle low: CPOL is an SPI_CR1 bit the GPIO
-model does not see. Open-drain I2C pins follow PUPDR (or an external pull on a net).
+model does not see. These are static fallbacks: stm32.spi (`signal_state`) overrides the SPI roles live (master/slave,
+SPE, CPOL) and toggles the pins; stm32.dac claims DAC_OUTx on its analog-mode pin while the channel is enabled. Open-drain I2C pins follow PUPDR (or an external pull on a net).
 """
 from ..signals import ANALOG, IN, OD, OUT_H, OUT_L, SignalTable
 

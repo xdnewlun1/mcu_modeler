@@ -10,7 +10,8 @@ Per pin (MODER field):
 * 10 alternate function: owner = the AFn function of the pin table (`functions["AF7"]` = "USART1_TX"), or
   "disabled" with one `warn` when the pin has no such function; direction and idle drive from the STM32 signal
   table (`signals.py`: USART TX -> output idling H, RX -> input, I2C -> open-drain, unknown -> "none"); pull from
-  PUPDR. Traffic does not toggle the pin.
+  PUPDR. A peripheral may override the static role with `signal_state(sig)` (stm32.spi: SCK/MOSI/MISO/NSS
+  directions follow master/slave mode) and toggle the pin with PinBoard.drive_signal (timer channels, SPI).
 * 11 analog: owner = the pin's "ADC" (or "analog") function, else "analog"; direction "analog"; no pull.
 Reset values come from the SVD (GPIOA: PA13/PA14/PA15 AF0 = JTMS-SWDIO/JTCK-SWCLK/JTDI with pulls; GPIOB: PB3/PB4 AF0
 = JTDO/TRACESWO and NJTRST), so the debug pins start owned by SWD/JTAG.
@@ -166,13 +167,19 @@ class GPIO(GatedBlock):
         pud = self.pupd(i)
         pull = {1: "up", 2: "down"}.get(pud)
         if mode == 3:
-            fn = (pin.functions.get("ADC") or pin.functions.get("analog")) if pin is not None else None
+            an = pin.functions.get("analog") if pin is not None else None
+            if an and self._signal_state(an) is not None:
+                return an, "analog", None, None         # an analog output that is on (DAC_OUTx with DAC ENx=1)
+            fn = (pin.functions.get("ADC") or an) if pin is not None else None
             return (fn or "analog"), "analog", None, None
         if mode == 2:
             owner = self._owner_af(pin, i, self.af(i)) if pin is not None else "?"
             d, drv = SIGNALS.pin_state(owner if owner not in ("disabled", "?") else None)
             if d == "out" and owner.startswith("TIM") and self._tim_released(owner):
                 d, drv = "in", None                     # timer channel not driving (disabled / input capture)
+            live = self._signal_state(owner)
+            if live is not None:
+                d, drv = live
             return owner, d, drv, pull
         if mode == 1:
             high = bool(self.odr >> i & 1)
@@ -195,13 +202,31 @@ class GPIO(GatedBlock):
                     return not driven
         return False
 
+    def _signal_state(self, owner: str) -> tuple[str, str | None] | None:
+        """Live (direction, idle drive) of an AF signal whose direction depends on the peripheral's mode (SPI
+        master/slave): the block named by the signal prefix ("SPI1" for "SPI1_MISO") may define
+        `signal_state(sig) -> (direction, drive) | None`; None keeps the static signal-table role."""
+        periphs = getattr(self.chip, "peripherals", None) or {}
+        for part in owner.split("/"):
+            part = part.strip()
+            f = getattr(periphs.get(part.split("_", 1)[0]), "signal_state", None)
+            if f is not None:
+                r = f(part)
+                if r is not None:
+                    return r
+        return None
+
     def resync_signal(self, sig: str) -> None:
         """A peripheral started or stopped driving `sig`: re-evaluate the alternate-function pins carrying it."""
         board = getattr(self.chip, "pins", None)
         if board is None:
             return
         for i, pin in enumerate(self.pins):
-            if pin is not None and self.mode(i) == 2 and board.signal_matches(pin.owner, sig):
+            if pin is None:
+                continue
+            m = self.mode(i)
+            if (m == 2 and board.signal_matches(pin.owner, sig)) or \
+                    (m == 3 and board.signal_matches(pin.functions.get("analog"), sig)):
                 self._sync_pin(i, quiet=True)
 
     def _sync_pin(self, i: int, *, quiet: bool = False, why: str = "") -> None:

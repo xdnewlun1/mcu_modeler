@@ -1,0 +1,179 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      188     4 .isr_vector
+ 8000000  8000000      188     4         /tmp/startup-9a7ffa.o:(.isr_vector)
+ 8000000  8000000      188     1                 __vector_table
+ 8000188  8000188      488     4 .text
+ 8000188  8000188        2     4         /tmp/startup-9a7ffa.o:(.text.Default_Handler)
+ 8000188  8000188        0     1                 $t
+ 8000189  8000189        2     1                 Default_Handler
+ 8000189  8000189        2     1                 NMI_Handler
+ 8000189  8000189        2     1                 HardFault_Handler
+ 8000189  8000189        2     1                 MemManage_Handler
+ 8000189  8000189        2     1                 BusFault_Handler
+ 8000189  8000189        2     1                 UsageFault_Handler
+ 8000189  8000189        2     1                 SVC_Handler
+ 8000189  8000189        2     1                 DebugMon_Handler
+ 8000189  8000189        2     1                 PendSV_Handler
+ 8000189  8000189        2     1                 SysTick_Handler
+ 8000189  8000189        2     1                 WWDG_IRQHandler
+ 8000189  8000189        2     1                 PVD_IRQHandler
+ 8000189  8000189        2     1                 TAMP_STAMP_IRQHandler
+ 8000189  8000189        2     1                 RTC_WKUP_IRQHandler
+ 8000189  8000189        2     1                 FLASH_IRQHandler
+ 8000189  8000189        2     1                 RCC_IRQHandler
+ 8000189  8000189        2     1                 EXTI0_IRQHandler
+ 8000189  8000189        2     1                 EXTI1_IRQHandler
+ 8000189  8000189        2     1                 EXTI2_IRQHandler
+ 8000189  8000189        2     1                 EXTI3_IRQHandler
+ 8000189  8000189        2     1                 EXTI4_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream0_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream1_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream2_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream3_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream4_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream5_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream6_IRQHandler
+ 8000189  8000189        2     1                 ADC_IRQHandler
+ 8000189  8000189        2     1                 CAN1_TX_IRQHandler
+ 8000189  8000189        2     1                 CAN1_RX0_IRQHandler
+ 8000189  8000189        2     1                 CAN1_RX1_IRQHandler
+ 8000189  8000189        2     1                 CAN1_SCE_IRQHandler
+ 8000189  8000189        2     1                 EXTI9_5_IRQHandler
+ 8000189  8000189        2     1                 TIM1_BRK_TIM9_IRQHandler
+ 8000189  8000189        2     1                 TIM1_UP_TIM10_IRQHandler
+ 8000189  8000189        2     1                 TIM1_TRG_COM_TIM11_IRQHandler
+ 8000189  8000189        2     1                 TIM1_CC_IRQHandler
+ 8000189  8000189        2     1                 TIM2_IRQHandler
+ 8000189  8000189        2     1                 TIM3_IRQHandler
+ 8000189  8000189        2     1                 TIM4_IRQHandler
+ 8000189  8000189        2     1                 I2C2_EV_IRQHandler
+ 8000189  8000189        2     1                 I2C2_ER_IRQHandler
+ 8000189  8000189        2     1                 SPI1_IRQHandler
+ 8000189  8000189        2     1                 SPI2_IRQHandler
+ 8000189  8000189        2     1                 USART1_IRQHandler
+ 8000189  8000189        2     1                 USART2_IRQHandler
+ 8000189  8000189        2     1                 USART3_IRQHandler
+ 8000189  8000189        2     1                 EXTI15_10_IRQHandler
+ 8000189  8000189        2     1                 RTC_Alarm_IRQHandler
+ 8000189  8000189        2     1                 OTG_FS_WKUP_IRQHandler
+ 8000189  8000189        2     1                 TIM8_BRK_TIM12_IRQHandler
+ 8000189  8000189        2     1                 TIM8_UP_TIM13_IRQHandler
+ 8000189  8000189        2     1                 TIM8_TRG_COM_TIM14_IRQHandler
+ 8000189  8000189        2     1                 TIM8_CC_IRQHandler
+ 8000189  8000189        2     1                 DMA1_Stream7_IRQHandler
+ 8000189  8000189        2     1                 FSMC_IRQHandler
+ 8000189  8000189        2     1                 SDIO_IRQHandler
+ 8000189  8000189        2     1                 TIM5_IRQHandler
+ 8000189  8000189        2     1                 SPI3_IRQHandler
+ 8000189  8000189        2     1                 UART4_IRQHandler
+ 8000189  8000189        2     1                 UART5_IRQHandler
+ 8000189  8000189        2     1                 TIM6_DAC_IRQHandler
+ 8000189  8000189        2     1                 TIM7_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream0_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream1_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream2_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream3_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream4_IRQHandler
+ 8000189  8000189        2     1                 ETH_IRQHandler
+ 8000189  8000189        2     1                 ETH_WKUP_IRQHandler
+ 8000189  8000189        2     1                 CAN2_TX_IRQHandler
+ 8000189  8000189        2     1                 CAN2_RX0_IRQHandler
+ 8000189  8000189        2     1                 CAN2_RX1_IRQHandler
+ 8000189  8000189        2     1                 CAN2_SCE_IRQHandler
+ 8000189  8000189        2     1                 OTG_FS_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream5_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream6_IRQHandler
+ 8000189  8000189        2     1                 DMA2_Stream7_IRQHandler
+ 8000189  8000189        2     1                 USART6_IRQHandler
+ 8000189  8000189        2     1                 I2C3_EV_IRQHandler
+ 8000189  8000189        2     1                 I2C3_ER_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_EP1_OUT_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_EP1_IN_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_WKUP_IRQHandler
+ 8000189  8000189        2     1                 OTG_HS_IRQHandler
+ 8000189  8000189        2     1                 DCMI_IRQHandler
+ 8000189  8000189        2     1                 CRYP_IRQHandler
+ 8000189  8000189        2     1                 HASH_RNG_IRQHandler
+ 8000189  8000189        2     1                 FPU_IRQHandler
+ 800018c  800018c       72     4         /tmp/startup-9a7ffa.o:(.text.Reset_Handler)
+ 800018c  800018c        0     1                 $t
+ 800018d  800018d       72     1                 Reset_Handler
+ 8000200  8000200      112     4         /tmp/i2c_slave-79d5b6.o:(.text.I2C1_EV_IRQHandler)
+ 8000200  8000200        0     1                 $t
+ 8000201  8000201      112     1                 I2C1_EV_IRQHandler
+ 8000314  8000314       24     4         /tmp/i2c_slave-79d5b6.o:(.text.I2C1_ER_IRQHandler)
+ 8000314  8000314        0     1                 $t
+ 8000315  8000315       24     1                 I2C1_ER_IRQHandler
+ 8000338  8000338      2a2     4         /tmp/i2c_slave-79d5b6.o:(.text.main)
+ 8000338  8000338        0     1                 $t
+ 8000339  8000339      2a2     1                 main
+ 80005da  80005da       36     1         <internal>:(.rodata.str1.1)
+ 8000610  8000610        0     1         . = ALIGN(4)
+ 8000610  8000610       10     4 .ARM.exidx
+ 8000610  8000610       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000       28     1 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        1     1         /tmp/i2c_slave-79d5b6.o:(.bss.txn)
+20000000 20000000        1     1                 txn
+20000001 20000001        1     1         /tmp/i2c_slave-79d5b6.o:(.bss.first)
+20000001 20000001        1     1                 first
+20000002 20000002        1     1         /tmp/i2c_slave-79d5b6.o:(.bss.rxn)
+20000002 20000002        1     1                 rxn
+20000003 20000003        1     1         /tmp/i2c_slave-79d5b6.o:(.bss.ptr)
+20000003 20000003        1     1                 ptr
+20000004 20000004        1     1         /tmp/i2c_slave-79d5b6.o:(.bss.start_ptr)
+20000004 20000004        1     1                 start_ptr
+20000005 20000005       10     1         /tmp/i2c_slave-79d5b6.o:(.bss.regs)
+20000005 20000005       10     1                 regs
+20000015 20000015       10     1         /tmp/i2c_slave-79d5b6.o:(.bss.rxbuf)
+20000015 20000015       10     1                 rxbuf
+20000025 20000025        1     1         /tmp/i2c_slave-79d5b6.o:(.bss.report)
+20000025 20000025        1     1                 report
+20000026 20000026        2     1         . = ALIGN(4)
+20000028 20000028        0     1         _ebss = .
+       0        0      162     1 .debug_loclists
+       0        0       39     1         /tmp/startup-9a7ffa.o:(.debug_loclists)
+      39       39      129     1         /tmp/i2c_slave-79d5b6.o:(.debug_loclists)
+       0        0      28b     1 .debug_abbrev
+       0        0       d7     1         /tmp/startup-9a7ffa.o:(.debug_abbrev)
+      d7       d7      1b4     1         /tmp/i2c_slave-79d5b6.o:(.debug_abbrev)
+       0        0      758     1 .debug_info
+       0        0       b0     1         /tmp/startup-9a7ffa.o:(.debug_info)
+      b0       b0      6a8     1         /tmp/i2c_slave-79d5b6.o:(.debug_info)
+       0        0       c8     1 .debug_rnglists
+       0        0       24     1         /tmp/startup-9a7ffa.o:(.debug_rnglists)
+      24       24       a4     1         /tmp/i2c_slave-79d5b6.o:(.debug_rnglists)
+       0        0      168     1 .debug_str_offsets
+       0        0       38     1         /tmp/startup-9a7ffa.o:(.debug_str_offsets)
+      38       38      130     1         /tmp/i2c_slave-79d5b6.o:(.debug_str_offsets)
+       0        0      2a6     1 .debug_str
+       0        0      2a6     1         <internal>:(.debug_str)
+       0        0       dc     1 .debug_addr
+       0        0       18     1         /tmp/startup-9a7ffa.o:(.debug_addr)
+      18       18       c4     1         /tmp/i2c_slave-79d5b6.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       49     1 .ARM.attributes
+       0        0       49     1         /tmp/startup-9a7ffa.o:(.ARM.attributes)
+       0        0       84     4 .debug_frame
+       0        0       34     4         /tmp/startup-9a7ffa.o:(.debug_frame)
+      34       34       50     4         /tmp/i2c_slave-79d5b6.o:(.debug_frame)
+       0        0      524     1 .debug_line
+       0        0       c8     1         /tmp/startup-9a7ffa.o:(.debug_line)
+      c8       c8      45c     1         /tmp/i2c_slave-79d5b6.o:(.debug_line)
+       0        0       9c     1 .debug_line_str
+       0        0       9c     1         <internal>:(.debug_line_str)
+       0        0      760     4 .symtab
+       0        0      760     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      7b3     1 .strtab
+       0        0      7b3     1         <internal>:(.strtab)

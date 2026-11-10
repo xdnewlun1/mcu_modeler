@@ -331,3 +331,164 @@ def test_adc_tim_trigger_cli():
                         "--adc", "ADC1_IN0=0.825V"], capture_output=True, text=True, cwd=ROOT, timeout=120)
     assert r.returncode == 0, r.stderr
     assert '"adc ready\\r\\nadc 1024\\r\\nadc 1024\\r\\n"' in r.stdout, r.stdout
+
+
+# ------------------------------------------------------------------------------------------------ SPI flash / RTC
+SPI_FLASH_OUT = ("JEDEC 202015\r\nSR 00\r\nREAD 43 48 49 50 5F 45 4D" + " FF" * 9 + "\r\nTEXT CHIP_EM\r\ndone\r\n")
+
+
+def test_spi_flash_sample_with_spi_flash_device():
+    elf = BUILD / "spi_flash.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    dev = s.attach_spi_flash("SPI1:cs=PA4")
+    sck = []
+    s.chip.pins.subscribe(lambda e: sck.append(e.t_ns) if e.pin == "PA5" and e.field == "level" else None)
+    s.run_for(20e6)
+    assert s.uart_output("USART1").decode() == SPI_FLASH_OUT
+    assert dev.ops == [("program", 0x100)] and dev.mem[0x100:0x107] == b"CHIP_EM"
+    spi = s.chip.peripherals["SPI1"]
+    assert spi.baud() == pytest.approx(2e6)                       # PCLK2 16 MHz / 8
+    nframes = len(spi.frames)
+    # X -> L when SPE turns the SCK output on, then 2 edges per bit; a half period is 250 ns
+    assert len(sck) == 1 + 16 * nframes
+    assert sck[2] - sck[1] == pytest.approx(250, abs=1)
+    assert not [w for w in warns(s.chip) if "SPI1" in w]
+    s.close()
+
+
+def test_spi_flash_sample_without_device_reads_zeros():
+    elf = BUILD / "spi_flash.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    s.run_for(20e6)
+    assert s.uart_output("USART1").decode().startswith("JEDEC 000000\r\n")      # MISO floats: reads 0 like IDR
+    s.close()
+
+
+def test_spi_flash_sample_cli():
+    elf = BUILD / "spi_flash.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    r = subprocess.run([sys.executable, "-m", "chipem.cli", "run", "--chip", "stm32f405zg", str(elf), "--for", "20ms",
+                        "--spi-flash", "SPI1:cs=PA4,jedec=0xEF4016", "--summary-only"], capture_output=True, text=True,
+                       cwd=ROOT, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert "JEDEC EF4016" in r.stdout and "TEXT CHIP_EM" in r.stdout, r.stdout
+
+
+def test_rtc_alarm_sample_every_second_and_warm_boot():
+    elf = BUILD / "rtc_alarm.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    pb0 = []
+    s.chip.pins.subscribe(lambda e: pb0.append(e.t_ns) if e.pin == "PB0" and e.field == "level" else None)
+    s.run_for(3.5e9)
+    out = s.uart_output("USART1").decode()
+    assert out == ("cold boot\r\nRTC 2024-02-28 23:59:59\r\nRTC 2024-02-29 00:00:00\r\nRTC 2024-02-29 00:00:01\r\n"), out
+    toggles = pb0[1:]                                             # first: L when PB0 becomes an output
+    assert len(toggles) == 3
+    assert [b - a for a, b in zip(toggles, toggles[1:])] == [pytest.approx(1e9, abs=2e3)] * 2
+    s.chip.reset("software")                                      # system reset: the backup domain survives
+    s.run_for(1.2e9)
+    out2 = s.uart_output("USART1").decode()[len(out):]
+    assert out2.startswith("warm boot\r\nRTC 2024-02-29 00:00:0"), out2
+    s.close()
+
+
+# ------------------------------------------------------------------ I2C (chipem/periph/stm32/i2c.py)
+I2C_BOARD = ROOT / "boards" / "stm32_i2c_eeprom.yaml"
+
+
+def test_i2c_eeprom_board_prints_read_back_string():
+    if not (BUILD / "i2c_eeprom.elf").exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session.from_board(I2C_BOARD)
+    scl = []
+    s.chips["A"].pins.subscribe(lambda e: scl.append(e.t_ns) if e.pin == "PB6" and e.field == "level" else None)
+    s.run_for(20e6)
+    out = s.uart_output("A.USART1").decode()
+    assert out.startswith("EEPROM: Hello I2C!\r\npolls: "), out
+    polls = int(out.split("polls: ")[1][:2], 16)
+    assert 10 < polls < 200                                        # two 5 ms write cycles, acknowledge polled
+    ee = s.board.part("EE1")
+    assert ee.dump(0x10, 10) == b"Hello I2C!" and ee.writes == 2
+    # 100 kHz SM: SCL edges 5 us apart inside a byte
+    gaps = [round(b - a, 1) for a, b in zip(scl, scl[1:])]
+    assert gaps.count(5000.0) > 100
+    assert not [e for e in s.events(kinds={"warn"})]
+    s.close()
+
+
+def test_i2c_slave_sample_answers_a_master_on_the_same_bus():
+    """i2c_slave runs I2C1 as slave 0x42 (PB6/PB7); the test drives I2C2 (PB10/PB11, wired to the same nets) as
+    master from Python: write pointer 4 + two bytes, then read three registers back."""
+    elf = BUILD / "i2c_slave.elf"
+    if not elf.exists():
+        pytest.skip("not built (firmware/samples_stm32/build.sh)")
+    s = Session(YAML, elf)
+    chip, brd = s.chip, s.ensure_board()
+    bus = chip.bus
+    m = 0x40005800                                                 # I2C2
+    s.run_for(2e6)                                                 # firmware configures I2C1, prints SLAVE READY
+    bus.write(0x40023840, 4, bus.read(0x40023840, 4) | (1 << 22))  # RCC_APB1ENR.I2C2EN
+    for p in (10, 11):
+        bus.write(0x40020404, 4, bus.read(0x40020404, 4) | (1 << p))
+        bus.write(0x40020400, 4, (bus.read(0x40020400, 4) & ~(3 << 2 * p)) | (2 << 2 * p))
+        bus.write(0x40020424, 4, (bus.read(0x40020424, 4) & ~(0xF << 4 * (p - 8))) | (4 << 4 * (p - 8)))
+    brd.add_net("SCL", [("A", "PB6"), ("A", "PB10")], open_drain=True)
+    brd.add_net("SDA", [("A", "PB7"), ("A", "PB11")], open_drain=True)
+    for off, v in ((0, 1 << 15), (0, 0), (4, 16), (0x1C, 80), (0x20, 17), (0, 1 | (1 << 10))):
+        bus.write(m + off, 4, v)
+
+    def wait(bits):
+        for _ in range(5000):
+            v = bus.read(m + 0x14, 4)
+            if v & bits:
+                return v
+            brd.run_for(1000)
+        raise AssertionError(f"timeout, SR1={bus.read(m + 0x14, 4):#x}")
+
+    def start(a):
+        bus.write(m, 4, bus.read(m, 4) | (1 << 8))
+        wait(1)
+        bus.write(m + 0x10, 4, a)
+        assert wait(2 | (1 << 10)) & 2
+        bus.read(m + 0x14, 4)
+        bus.read(m + 0x18, 4)
+
+    start(0x42 << 1)
+    for b in (0x04, 0x4B, 0x32):
+        wait(0x80)
+        bus.write(m + 0x10, 4, b)
+    wait(4)
+    bus.write(m, 4, bus.read(m, 4) | (1 << 9))
+    s.run_for(2e6)
+    start(0x42 << 1)
+    wait(0x80)
+    bus.write(m + 0x10, 4, 0x04)
+    wait(0x80)
+    bus.write(m, 4, bus.read(m, 4) | (1 << 8))                     # repeated START (after the pointer byte)
+    wait(1)
+    bus.write(m + 0x10, 4, (0x42 << 1) | 1)
+    wait(2)
+    bus.read(m + 0x14, 4)
+    bus.read(m + 0x18, 4)
+    out = []
+    wait(0x40)
+    out.append(bus.read(m + 0x10, 4))
+    wait(4)
+    bus.write(m, 4, bus.read(m, 4) & ~(1 << 10))                   # NACK the next byte
+    out.append(bus.read(m + 0x10, 4))
+    wait(4)
+    bus.write(m, 4, bus.read(m, 4) | (1 << 9))
+    out += [bus.read(m + 0x10, 4), bus.read(m + 0x10, 4)]
+    s.run_for(3e6)
+    # bytes 1 and 2 arrive back to back (RxNE then BTF on byte 3), byte 4 is NACKed: registers 04..07
+    assert bytes(out) == b"\x4b\x32\xa6\xa7"
+    # the slave's ISR fills DR one byte ahead (TxE after each byte moves to the shift register): 4 sent + 1
+    assert s.uart_output("USART1").decode() == "SLAVE READY\r\nSLAVE RX 04:4B32\r\nSLAVE TX 05\r\n"
+    s.close()

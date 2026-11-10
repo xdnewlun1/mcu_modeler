@@ -7,8 +7,9 @@ EXTI (RM0090 ch. 12), lines 0-22:
 * Lines 0-15 watch the pin selected by SYSCFG_EXTICRx (PinBoard input listeners on every GPIO pin; X counts as 0).
   A rising (RTSR) / falling (FTSR) edge, or a 0 -> 1 SWIER write, sets PR when the line is unmasked (IMR); the
   event path (EMR) has no visible effect here. PR is write-1-to-clear; clearing PR also clears SWIER.
-* Lines 16-22 (PVD, RTC alarm, OTG FS wakeup, Ethernet wakeup, OTG HS wakeup, tamper/timestamp, RTC wakeup) only
-  respond to SWIER (their sources are not modelled).
+* Lines 16-22 (PVD, RTC alarm, OTG FS wakeup, Ethernet wakeup, OTG HS wakeup, tamper/timestamp, RTC wakeup) respond
+  to SWIER and to `line_event(line, rising)` from internal sources (stm32.rtc: alarm line 17, wakeup line 22, through
+  `_util.exti_input`); the other sources are not modelled.
 * NVIC lines (level, asserted while PR & IMR has a bit of the group): EXTI0..EXTI4 (lines 0-4), EXTI9_5 (5-9),
   EXTI15_10 (10-15), PVD (16), RTC_Alarm (17), OTG_FS_WKUP (18), ETH_WKUP (19), OTG_HS_WKUP (20),
   TAMP_STAMP (21), RTC_WKUP (22); numbers are looked up by name in the chip YAML.
@@ -118,6 +119,16 @@ class EXTI(MMIOBlock):
         pin = self.pin_of(line)
         if pin is not None:
             self._last[(self.port_of(line), line)] = 1 if pin.level() == "H" else 0
+
+    def line_event(self, line: int, rising: bool) -> bool:
+        """Edge on an internal EXTI input (16 PVD, 17 RTC alarm, 21 tamper/timestamp, 22 RTC wakeup, ...): sets PR
+        when the edge is selected (RTSR for rising, FTSR for falling) and IMR enables the line. Returns True if PR was
+        set."""
+        sel = self.get("RTSR") if rising else self.get("FTSR")
+        if not (sel >> line & 1 and self.get("IMR") >> line & 1):
+            return False
+        self._set_pending(line)
+        return True
 
     def _set_pending(self, line: int) -> None:
         if not self.get("IMR") >> line & 1:

@@ -37,8 +37,11 @@ state pointer wraps at the end of the sequencer.
 * An ePWM or external trigger does not convert while PCLKCR0.ADCENCLK = 0 or the ADC core is powered down
   (ADCTRL3.ADCPWDN = 0; one `warn`); a software SOC_SEQx only warns about the gate (as for any access).
 Channel values come from `set_channel("ADCINA3" | "A3", value)` (default `params.default`, 0).
-Not modelled: SUSMOD (no emulation suspend), the ADC-to-DMA sync of SEQ_OVRD + CONT_RUN, the "few SYSCLKOUT" from the
-last result to the interrupt flag, ADCCLK phase (a trigger starts at once), ADCREFSEL / ADCOFFTRIM effects.
+* DMA (ti_c2000.dma): every SEQxINT pulse calls `dma_listeners` cb(seq, sync); `sync` is the ADCSYNC signal (SEQ1
+  with CONT_RUN and SEQ_OVRD, for a sequence that started at RESULT0, SPRUI07 7.3.5).  A DMA channel that takes the
+  trigger clears INT_SEQx (the DMA's "clear signal to the interrupt source", SPRUI07 8.2.2).
+Not modelled: SUSMOD (no emulation suspend), the "few SYSCLKOUT" from the last result to the interrupt flag, ADCCLK
+phase (a trigger starts at once), ADCREFSEL / ADCOFFTRIM effects.
 """
 from __future__ import annotations
 
@@ -112,6 +115,7 @@ class ADC(C2000Block):
         self.conversions = 0
         self.soc_lost = 0
         self._soc_warned = False
+        self.dma_listeners: list = []       # cb(seq, sync) on every SEQ1INT/SEQ2INT pulse (DMA triggers, ADCSYNC)
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -421,6 +425,9 @@ class ADC(C2000Block):
         if newly and c2 & INT_ENA[seq]:
             self.pulse_irq(self._lines[seq])
             self.pulse_irq(self._lines[0])
+            sync = seq == 1 and c1 & CONT_RUN and c1 & SEQ_OVRD and s.k0 == lo     # ADCSYNC: sequence from RESULT0
+            for cb in list(self.dma_listeners):
+                cb(seq, bool(sync))
         self._next_session(self.chip.now_cycles(), prev_last=s.t_last(), prev_seq=seq)
 
     def _next_session(self, t: int, prev_last: int | None = None, prev_seq: int | None = None) -> None:

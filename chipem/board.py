@@ -9,8 +9,10 @@ Board description (`boards/<name>.yaml`, paths relative to the board file)::
       - {id: B, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/uart_link_echo.elf}
     nets:                              # electrical connections, any number of pins per net
       - {name: BTN, pins: [A.PTC6, B.PTC6], pull: up}      # optional net pull (up|down) / fixed driver (drive: H|L)
+      - {name: SDA, pins: [A.PTB3, B.PB7], open_drain: true} # wired-AND bus (I2C): H drivers count as released, pull-up
     links:                             # byte-level peripheral links (fast path)
       - {type: uart, from: A.UART0, to: B.UART0}           # bidirectional unless dir: tx
+      - {type: can, name: CANBUS, nodes: [A.CAN0, B.CAN0]}   # CAN bus (any number of nodes; short: {can: [..]})
     devices:
       - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}     # same options as --spi-flash
     parts:                             # board parts (chipem/parts): port -> net name, or CHIP.PIN (anonymous net)
@@ -26,7 +28,12 @@ Runtime (`Board`):
 * **Nets** join pins of several chips. Whenever a member pin's direction, drive or pull changes (PinBoard
   events) the net level is recomputed: driven outputs / the net's fixed driver / user stimulus (strong) win over
   the net pull, which wins over the member pins' own pulls; else X. Two strong drivers at different levels are a
-  conflict: the net resolves to X and the board logs one `warn` per conflict episode. The resolved level is
+  conflict: the net resolves to X and the board logs one `warn` per conflict episode. A pin pulled low by an
+  open-drain peripheral output (`Pin.od_low`, I2C SDA/SCL) is a strong L driver; a released open-drain pin drives
+  nothing, so I2C buses are wired-AND on any net. An `open_drain: true` net is wired-AND for every driver (an H
+  drive counts as released: any L wins, else the pull) and is pulled up unless it says `pull: down`. A part port
+  may carry a pull resistor (`Part.pull(port)`, e.g. the pull-ups of an I2C EEPROM breakout): weaker than the net's
+  own `pull`, stronger than the member pins' pulls. The resolved level is
   written into every member pin's `external` (an output pin keeps showing its own drive). A chip that is behind
   the source chip in time gets the change scheduled at the source's timestamp; one that is ahead sees it at once.
 * **UART links** hook the UART model's `tx_listeners`: a byte written to the sender's D is delivered to the
@@ -35,6 +42,11 @@ Runtime (`Board`):
   holding register/FIFO, or loses it (not listening, RX pin not muxed, overrun) exactly like silicon
   (chipem/periph/uartwire.py). A receiver whose chip has no pin offering its RX function gets nothing (no_pin).
   A baud mismatch between the two ends (> 3 %) is reported once per link as a `warn`; bytes are still delivered.
+* **CAN links** put the listed CAN controllers (`Chip.can_blocks()`: models with the `can_attach` hook) on one
+  `chipem.canbus.CanBus` (`CanLink`): frames take their real bus time at the transmitter's bit rate, the lowest ID
+  wins arbitration, a frame nobody acknowledges is an ACK error and is retried (see chipem/canbus.py). `host: true`
+  adds an external node that acknowledges every frame (a PC CAN adapter); `CanLink.bus.inject(frame, t)` sends from
+  it. Each completed frame is one `can` event in the transmitter's chip log.
 * **Auto UART links from nets.** Peripheral functions do not drive pin levels in this emulator, so a net cannot
   carry UART bits. Instead, whenever a net joins a pin owned by a UART TX signal (`UART0_TX`, `USART1_TX`,
   `LPUART0_TX`, `SCITXDA`, ...) and a pin owned by a UART RX signal (`UART0_RX`, `USART1_RX`, `SCIRXDA`, ...),
@@ -67,7 +79,7 @@ from .core import StopReason
 from .log import EventLog
 
 __all__ = ["BoardDesc", "BoardChipSpec", "NetSpec", "LinkSpec", "DeviceSpec", "PartSpec", "load_board", "Board",
-           "Net", "UartLink", "split_qualified", "uart_signal", "parse_part_spec", "DEFAULT_QUANTUM_NS",
+           "Net", "UartLink", "CanLink", "split_qualified", "uart_signal", "parse_part_spec", "DEFAULT_QUANTUM_NS",
            "MAX_PROPAGATION"]
 
 DEFAULT_QUANTUM_NS = 10_000.0           # 10 us
@@ -93,14 +105,18 @@ class NetSpec:
     pins: list[tuple[str, str]]         # [(chip id, pin name)]
     pull: str | None = None             # "up" | "down" | None
     drive: str | None = None            # fixed driver "H" | "L" | None
+    open_drain: bool = False            # wired-AND: H drivers count as released; pulled up unless pull: down
 
 
 @dataclass
 class LinkSpec:
-    type: str                           # "uart"
-    a: tuple[str, str]                  # (chip id, peripheral) of `from`
-    b: tuple[str, str]                  # (chip id, peripheral) of `to`
+    type: str                           # "uart" | "can"
+    a: tuple[str, str]                  # (chip id, peripheral) of `from` (can: the first node)
+    b: tuple[str, str]                  # (chip id, peripheral) of `to` (can: the second node, or the first again)
     bidir: bool = True
+    nodes: list[tuple[str, str]] = field(default_factory=list)   # can: every node on the bus
+    name: str | None = None             # can: bus name
+    host: bool = False                  # can: add an acknowledging host node
 
 
 @dataclass
@@ -264,15 +280,29 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
                 raise ValueError(f"board: net {name}: pull must be up|down")
         drive = n.get("drive")
         drive = parse_level(drive) if drive is not None else None
-        nets.append(NetSpec(name=name, pins=pins, pull=pull, drive=drive))
+        od = n.get("open_drain", False)
+        if not isinstance(od, bool):
+            od = str(od).strip().lower() in ("1", "true", "yes", "on")
+        nets.append(NetSpec(name=name, pins=pins, pull=pull, drive=drive, open_drain=od))
 
     links: list[LinkSpec] = []
     for i, ln in enumerate(data.get("links") or []):
         if not isinstance(ln, dict):
             raise ValueError(f"board: link {i} must be a mapping")
-        typ = str(ln.get("type", "uart")).lower()
+        typ = str(ln.get("type", "can" if "can" in ln else "uart")).lower()
+        if typ == "can":
+            eps = ln.get("nodes", ln.get("can"))
+            if eps is None and ln.get("from") is not None:
+                eps = [ln.get("from"), ln.get("to")]
+            if not isinstance(eps, list) or not eps or any(e is None for e in eps):
+                raise ValueError(f"board: link {i}: a can link needs `nodes: [CHIP.CANx, ...]`")
+            nodes = [_qual(e, ids, "can node") for e in eps]
+            nodes = [(c, p.upper()) for c, p in nodes]
+            links.append(LinkSpec(type="can", a=nodes[0], b=nodes[-1], nodes=nodes,
+                                  name=str(ln["name"]) if ln.get("name") else None, host=bool(ln.get("host", False))))
+            continue
         if typ != "uart":
-            raise ValueError(f"board: link {i}: unsupported type {typ!r} (supported: uart)")
+            raise ValueError(f"board: link {i}: unsupported type {typ!r} (supported: uart, can)")
         a = _qual(ln.get("from"), ids, "link endpoint")
         b = _qual(ln.get("to"), ids, "link endpoint")
         d = str(ln.get("dir", "both")).lower()
@@ -375,12 +405,13 @@ class Net:
     """Pins of several chips joined by a wire. See the module docstring for the resolution rules."""
 
     def __init__(self, board: "Board", name: str, members: list[tuple[str, Any, Any]], *, pull: str | None = None,
-                 drive: str | None = None):
+                 drive: str | None = None, open_drain: bool = False):
         self.board = board
         self.name = name
         self.members = members              # [(chip id, Chip, Pin)]
         self.pull = pull
         self.drive = drive                  # fixed driver on the net
+        self.open_drain = bool(open_drain)  # wired-AND net (I2C): H drivers count as released
         self.stimulus: str | None = None    # user stimulus applied to any member pin (strong)
         self.ports: list[tuple[Any, str]] = []   # part endpoints [(Part, port name)]
         self.anon = False                   # created implicitly for a part port wired to a chip pin
@@ -404,6 +435,8 @@ class Net:
         for i, (_cid, _chip, p) in enumerate(self.members):
             if p.fixed is not None:
                 out.append((self.label(i), p.fixed))
+            elif p.od_low:                  # pulled low by an open-drain peripheral output (I2C)
+                out.append((self.label(i), "L"))
             elif p.direction == "out" and p.drive is not None:
                 # an output without a modelled drive (a peripheral function such as SCITXDA) does not drive
                 out.append((self.label(i), p.drive))
@@ -421,12 +454,24 @@ class Net:
     def resolve(self) -> tuple[str, bool]:
         """(level, conflict)."""
         vals = {lvl for _who, lvl in self.drivers()}
+        if self.open_drain and vals:
+            if "L" in vals:
+                return "L", False           # wired-AND: any low driver wins
+            if "X" in vals:
+                return "X", False
+            vals = set()                    # H drivers are released outputs: the pull decides
         if vals:
             if len(vals) == 1:
                 return next(iter(vals)), False
             return "X", ("H" in vals and "L" in vals)
         if self.pull is not None:
             return ("H" if self.pull == "up" else "L"), False
+        if self.ports:                      # pull resistors on part ports (I2C device breakout pull-ups)
+            pp = {pl for pl in (part.pull(port) for part, port in self.ports) if pl}
+            if len(pp) == 1:
+                return ("H" if pp.pop() == "up" else "L"), False
+        if self.open_drain:
+            return "H", False               # an open-drain bus is pulled up unless the net says pull: down
         pulls = {p.pull for _c, _ch, p in self.members if p.pull}
         if len(pulls) == 1:
             return ("H" if pulls.pop() == "up" else "L"), False
@@ -589,6 +634,42 @@ class UartLink:
                             t_ns=src_chip.now_ns(), link=self.describe())
 
 
+
+class CanLink:
+    """A CAN bus (chipem.canbus.CanBus) joining CAN controllers of the board's chips (`Chip.can_blocks()`)."""
+
+    def __init__(self, board: "Board", name: str, nodes: list[tuple[str, str]], *, host: bool = False):
+        from .canbus import CanBus
+        self.board = board
+        self.name = name
+        self.nodes = list(nodes)
+        self.bus = CanBus(name)
+        self.blocks = []
+        for cid, pname in self.nodes:
+            blk = board.peripheral(cid, pname)
+            if not hasattr(blk, "can_attach"):
+                raise ValueError(f"board: {cid}.{pname} is not a CAN controller model (model "
+                                 f"{getattr(blk, 'model', '?')})")
+            self.blocks.append(blk)
+        for blk in self.blocks:
+            blk.can_attach(self.bus)
+        self.host = self.bus.add_host(chip=board.clock_chip) if host else None
+
+    def describe(self) -> str:
+        return f"{self.name}: " + ", ".join(f"{c}.{p}" for c, p in self.nodes) + (" + host" if self.host else "")
+
+    def to_dict(self) -> dict:
+        d: dict[str, Any] = {"type": "can", "name": self.name, "nodes": [f"{c}.{p}" for c, p in self.nodes]}
+        if self.host is not None:
+            d["host"] = True
+        return d
+
+    def close(self) -> None:
+        for blk in self.blocks:
+            blk.can_detach()
+        self.blocks = []
+
+
 # ------------------------------------------------------------------------------------------------ runtime
 class Board:
     """N chips in lockstep plus nets and links. `chips` maps chip id -> Chip (order = board order)."""
@@ -603,6 +684,7 @@ class Board:
         self.log = log if log is not None else EventLog()
         self.nets: list[Net] = []
         self.links: list[UartLink] = []
+        self.can_links: list[CanLink] = []      # CAN buses (chipem.canbus)
         self._net_of: dict[tuple[str, str], Net] = {}
         self._auto: dict[str, dict[tuple[tuple[str, str], tuple[str, str]], UartLink]] = {}   # net -> links
         self.wiring = 0                     # bumped on every net/link change (UIs redraw the wiring)
@@ -707,7 +789,7 @@ class Board:
         return members
 
     def add_net(self, name: str | None, pins: list[tuple[str, str]], *, pull: str | None = None,
-                drive: str | None = None, extend: bool = False) -> Net:
+                drive: str | None = None, extend: bool = False, open_drain: bool | None = None) -> Net:
         """Join pins with a wire (same rules for YAML nets and nets created at runtime). `name=None` picks a free
         NETn name. An existing name is an error unless `extend` (then the pins are added to that net)."""
         if pull is not None and pull not in ("up", "down"):
@@ -726,6 +808,8 @@ class Board:
                 net.pull = pull
             if drive is not None:
                 net.drive = drive
+            if open_drain is not None:
+                net.open_drain = bool(open_drain)
             self._changed()
             net.update()
             self._refresh_auto(net)
@@ -734,7 +818,7 @@ class Board:
         if not str(name).strip():
             raise ValueError("board: empty net name")
         members = self._members(name, pins)
-        net = Net(self, name, members, pull=pull, drive=drive)
+        net = Net(self, name, members, pull=pull, drive=drive, open_drain=bool(open_drain))
         for cid, _chip, pin in members:
             self._net_of[(cid, pin.id)] = net
         self.nets.append(net)
@@ -760,6 +844,7 @@ class Board:
                 keep.pull = other.pull
             if keep.drive is None and other.drive is not None:
                 keep.drive = other.drive
+            keep.open_drain = keep.open_drain or other.open_drain
             if keep.stimulus is None and other.stimulus is not None:
                 keep.stimulus = other.stimulus
             for part, port in other.ports:          # part endpoints move to the merged net
@@ -829,6 +914,34 @@ class Board:
         return link
 
     add_link = add_uart_link
+
+    def _can_ep(self, ep: tuple[str, str]) -> tuple[str, str]:
+        cid = self.chip_id(ep[0])
+        find = getattr(self.chips[cid], "find_can", None)
+        name = find(ep[1]) if find is not None else None
+        return cid, name or ep[1]
+
+    def add_can_link(self, nodes: list[tuple[str, str]], *, name: str | None = None, host: bool = False) -> CanLink:
+        """Put CAN controllers [(chip id, CAN0 / ECANA / ...), ...] on one CAN bus."""
+        nodes = [self._can_ep(n) for n in nodes]
+        if len(set(nodes)) != len(nodes):
+            raise ValueError("board: a can link lists the same controller twice")
+        for ln in self.can_links:
+            both = set(nodes) & set(ln.nodes)
+            if both:
+                raise ValueError(f"board: {', '.join(f'{c}.{p}' for c, p in both)} already on CAN bus {ln.name}")
+        name = name or ("CANBUS" if not self.can_links else f"CANBUS{len(self.can_links)}")
+        link = CanLink(self, name, nodes, host=host)
+        self.can_links.append(link)
+        self._changed()
+        return link
+
+    def can_bus(self, name: str | None = None):
+        """The CanBus named `name` (default: the first one)."""
+        for ln in self.can_links:
+            if name is None or ln.name.upper() == str(name).upper():
+                return ln.bus
+        raise ValueError(f"board: no CAN bus {name!r}")
 
     def find_link(self, a: tuple[str, str], b: tuple[str, str]) -> UartLink:
         """The explicit link between endpoints a and b (either orientation)."""
@@ -969,13 +1082,15 @@ class Board:
             chips.append(d)
         nets = []
         for n in self.nets:
-            if not n.members and not n.pull and not n.drive:
+            if not n.members and not n.pull and not n.drive and not n.open_drain:
                 continue                    # part-only net: implied by the parts' ports
             d = {"name": n.name, "pins": [n.label(i) for i in range(len(n.members))]}
             if n.pull:
                 d["pull"] = n.pull
             if n.drive:
                 d["drive"] = n.drive
+            if n.open_drain:
+                d["open_drain"] = True
             nets.append(d)
         links = []
         for ln in self.links:
@@ -985,6 +1100,7 @@ class Board:
             if not ln.bidir:
                 d["dir"] = "tx"
             links.append(d)
+        links.extend(ln.to_dict() for ln in self.can_links)
         out: dict[str, Any] = {"name": self.name, "quantum": f"{self.quantum_ns / 1e3:g}us", "chips": chips}
         if nets:
             out["nets"] = nets
@@ -1364,3 +1480,5 @@ class Board:
         for link in self.links:
             link.close()
         self._auto.clear()
+        for cl in self.can_links:
+            cl.close()

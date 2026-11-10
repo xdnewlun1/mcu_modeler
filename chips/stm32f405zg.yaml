@@ -40,24 +40,24 @@ peripherals:
   - {name: TIM12, model: stm32.tim, base: 0x40001800, size: 0x400}
   - {name: TIM13, model: stm32.tim, base: 0x40001C00, size: 0x400}
   - {name: TIM14, model: stm32.tim, base: 0x40002000, size: 0x400}
-  - {name: RTC, model: stub, base: 0x40002800, size: 0x400}   # RTC and backup registers
+  - {name: RTC, model: stm32.rtc, base: 0x40002800, size: 0x400}   # RTC and backup registers (backup domain)
   - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400}
   - {name: IWDG, model: stm32.iwdg, base: 0x40003000, size: 0x400}
   - {name: I2S2ext, model: stub, base: 0x40003400, size: 0x400}
-  - {name: SPI2, model: stub, base: 0x40003800, size: 0x400}   # SPI2/I2S2
-  - {name: SPI3, model: stub, base: 0x40003C00, size: 0x400}   # SPI3/I2S3
+  - {name: SPI2, model: stm32.spi, base: 0x40003800, size: 0x400}   # SPI2/I2S2 (I2S mode not modelled)
+  - {name: SPI3, model: stm32.spi, base: 0x40003C00, size: 0x400}   # SPI3/I2S3 (I2S mode not modelled)
   - {name: I2S3ext, model: stub, base: 0x40004000, size: 0x400}
   - {name: USART2, model: stm32.usart, base: 0x40004400, size: 0x400, params: {index: 2, kind: usart}}
   - {name: USART3, model: stm32.usart, base: 0x40004800, size: 0x400, params: {index: 3, kind: usart}}
   - {name: UART4, model: stm32.usart, base: 0x40004C00, size: 0x400, params: {index: 4, kind: uart}}
   - {name: UART5, model: stm32.usart, base: 0x40005000, size: 0x400, params: {index: 5, kind: uart}}
-  - {name: I2C1, model: stub, base: 0x40005400, size: 0x400}
-  - {name: I2C2, model: stub, base: 0x40005800, size: 0x400}
-  - {name: I2C3, model: stub, base: 0x40005C00, size: 0x400}
+  - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400}
+  - {name: I2C2, model: stm32.i2c, base: 0x40005800, size: 0x400}
+  - {name: I2C3, model: stm32.i2c, base: 0x40005C00, size: 0x400}
   - {name: CAN1, model: stub, base: 0x40006400, size: 0x400}
   - {name: CAN2, model: stub, base: 0x40006800, size: 0x400}
   - {name: PWR, model: stm32.pwr, base: 0x40007000, size: 0x400}
-  - {name: DAC, model: stub, base: 0x40007400, size: 0x400}
+  - {name: DAC, model: stm32.dac, base: 0x40007400, size: 0x400}
   # APB2
   - {name: TIM1, model: stm32.tim, base: 0x40010000, size: 0x400}
   - {name: TIM8, model: stm32.tim, base: 0x40010400, size: 0x400}
@@ -68,7 +68,7 @@ peripherals:
   - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100}
   - {name: C_ADC, model: stm32.adc_common, base: 0x40012300, size: 0x400}   # ADC common registers (SVD extent 0x400)
   - {name: SDIO, model: stub, base: 0x40012C00, size: 0x400}
-  - {name: SPI1, model: stub, base: 0x40013000, size: 0x400}
+  - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400}
   - {name: SYSCFG, model: stm32.syscfg, base: 0x40013800, size: 0x400}
   - {name: EXTI, model: stm32.exti, base: 0x40013C00, size: 0x400}
   - {name: TIM9, model: stm32.tim, base: 0x40014000, size: 0x400}
@@ -84,7 +84,7 @@ peripherals:
   - {name: GPIOG, model: stm32.gpio, base: 0x40021800, size: 0x400, params: {port: G}}
   - {name: GPIOH, model: stm32.gpio, base: 0x40021C00, size: 0x400, params: {port: H}}
   - {name: GPIOI, model: stm32.gpio, base: 0x40022000, size: 0x400, params: {port: I}}
-  - {name: CRC, model: stub, base: 0x40023000, size: 0x400}
+  - {name: CRC, model: stm32.crc, base: 0x40023000, size: 0x400}
   - {name: RCC, model: stm32.rcc, base: 0x40023800, size: 0x400, params: {ext_hz: 8000000}}
   - {name: FLASH, model: stm32.flash, base: 0x40023C00, size: 0x400}   # flash interface registers
   - {name: DMA1, model: stm32.dma, base: 0x40026000, size: 0x400, params: {controller: 1}}   # no memory-to-memory (RM0090 10.3.6)
@@ -96,7 +96,7 @@ peripherals:
   - {name: DCMI, model: stub, base: 0x50050000, size: 0x400}   # STM32F407 only
   - {name: CRYP, model: stub, base: 0x50060000, size: 0x400}   # STM32F415/417 only
   - {name: HASH, model: stub, base: 0x50060400, size: 0x400}   # STM32F415/417 only
-  - {name: RNG, model: stub, base: 0x50060800, size: 0x400}
+  - {name: RNG, model: stm32.rng, base: 0x50060800, size: 0x400}
   # AHB3
   - {name: FSMC, model: stub, base: 0xA0000000, size: 0x1000}   # FSMC control registers
   # Cortex-M4 debug MCU

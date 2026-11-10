@@ -25,7 +25,7 @@ peripherals:
   - {name: FMC, model: stub, base: 0x4001F000, size: 0x1000}
   - {name: FTFE, model: kinetis.ftfe, base: 0x40020000, size: 0x1000}
   - {name: DMAMUX, model: kinetis.dmamux, base: 0x40021000, size: 0x1000}
-  - {name: CAN0, model: stub, base: 0x40024000, size: 0x1000}
+  - {name: CAN0, model: kinetis.flexcan, base: 0x40024000, size: 0x1000}   # RM ch. 46; 16 MBs, gate SIM_SCGC6[FLEXCAN0]
   - {name: SPI0, model: kinetis.dspi, base: 0x4002C000, size: 0x1000, params: {index: 0}}
   - {name: SPI1, model: kinetis.dspi, base: 0x4002D000, size: 0x1000, params: {index: 1}}
   - {name: I2S0, model: stub, base: 0x4002F000, size: 0x1000}
@@ -53,8 +53,8 @@ peripherals:
   - {name: CMT, model: stub, base: 0x40062000, size: 0x1000}
   - {name: MCG, model: kinetis.mcg, base: 0x40064000, size: 0x1000}
   - {name: OSC, model: kinetis.osc, base: 0x40065000, size: 0x1000}
-  - {name: I2C0, model: stub, base: 0x40066000, size: 0x1000}
-  - {name: I2C1, model: stub, base: 0x40067000, size: 0x1000}
+  - {name: I2C0, model: kinetis.i2c, base: 0x40066000, size: 0x1000}
+  - {name: I2C1, model: kinetis.i2c, base: 0x40067000, size: 0x1000}
   - {name: UART0, model: kinetis.uart, base: 0x4006A000, size: 0x1000, params: {index: 0, fifo_depth: 8}}   # RM §3.9.5.1: 8-entry TX/RX FIFOs
   - {name: UART1, model: kinetis.uart, base: 0x4006B000, size: 0x1000, params: {index: 1, fifo_depth: 8}}
   - {name: UART2, model: kinetis.uart, base: 0x4006C000, size: 0x1000, params: {index: 2}}
@@ -75,7 +75,7 @@ peripherals:
   - {name: FTM3, model: kinetis.ftm, base: 0x400B9000, size: 0x1000}
   - {name: ADC1, model: kinetis.adc, base: 0x400BB000, size: 0x1000, params: {index: 1}}
   - {name: DAC0, model: kinetis.dac, base: 0x400CC000, size: 0x1000, params: {index: 0}}
-  - {name: I2C2, model: stub, base: 0x400E6000, size: 0x1000}
+  - {name: I2C2, model: kinetis.i2c, base: 0x400E6000, size: 0x1000}
   - {name: UART4, model: kinetis.uart, base: 0x400EA000, size: 0x1000, params: {index: 4}}
   - {name: GPIOA, model: kinetis.gpio, base: 0x400FF000, size: 0x40, params: {port: A}}
   - {name: GPIOB, model: kinetis.gpio, base: 0x400FF040, size: 0x40, params: {port: B}}

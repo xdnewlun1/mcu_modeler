@@ -1,0 +1,169 @@
+     VMA      LMA     Size Align Out     In      Symbol
+       0        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+       0        0      188     4 .isr_vector
+       0        0      188     4         /tmp/startup-def2f6.o:(.isr_vector)
+       0        0      188     1                 __vector_table
+     400      400       10     4 .flash_config
+     400      400       10     4         /tmp/startup-def2f6.o:(.flash_config)
+     400      400       10     1                 __flash_config
+     410      410      490     4 .text
+     410      410        2     4         /tmp/startup-def2f6.o:(.text.Default_Handler)
+     410      410        0     1                 $t
+     411      411        2     1                 Default_Handler
+     411      411        2     1                 NMI_Handler
+     411      411        2     1                 HardFault_Handler
+     411      411        2     1                 MemManage_Handler
+     411      411        2     1                 BusFault_Handler
+     411      411        2     1                 UsageFault_Handler
+     411      411        2     1                 SVC_Handler
+     411      411        2     1                 DebugMon_Handler
+     411      411        2     1                 PendSV_Handler
+     411      411        2     1                 SysTick_Handler
+     411      411        2     1                 DMA0_IRQHandler
+     411      411        2     1                 DMA1_IRQHandler
+     411      411        2     1                 DMA2_IRQHandler
+     411      411        2     1                 DMA3_IRQHandler
+     411      411        2     1                 DMA4_IRQHandler
+     411      411        2     1                 DMA5_IRQHandler
+     411      411        2     1                 DMA6_IRQHandler
+     411      411        2     1                 DMA7_IRQHandler
+     411      411        2     1                 DMA8_IRQHandler
+     411      411        2     1                 DMA9_IRQHandler
+     411      411        2     1                 DMA10_IRQHandler
+     411      411        2     1                 DMA11_IRQHandler
+     411      411        2     1                 DMA12_IRQHandler
+     411      411        2     1                 DMA13_IRQHandler
+     411      411        2     1                 DMA14_IRQHandler
+     411      411        2     1                 DMA15_IRQHandler
+     411      411        2     1                 DMA_Error_IRQHandler
+     411      411        2     1                 MCM_IRQHandler
+     411      411        2     1                 FTFE_IRQHandler
+     411      411        2     1                 Read_Collision_IRQHandler
+     411      411        2     1                 LVD_LVW_IRQHandler
+     411      411        2     1                 LLWU_IRQHandler
+     411      411        2     1                 WDOG_EWM_IRQHandler
+     411      411        2     1                 RNG_IRQHandler
+     411      411        2     1                 I2C0_IRQHandler
+     411      411        2     1                 I2C1_IRQHandler
+     411      411        2     1                 SPI0_IRQHandler
+     411      411        2     1                 SPI1_IRQHandler
+     411      411        2     1                 I2S0_Tx_IRQHandler
+     411      411        2     1                 I2S0_Rx_IRQHandler
+     411      411        2     1                 UART0_LON_IRQHandler
+     411      411        2     1                 UART0_RX_TX_IRQHandler
+     411      411        2     1                 UART0_ERR_IRQHandler
+     411      411        2     1                 UART1_RX_TX_IRQHandler
+     411      411        2     1                 UART1_ERR_IRQHandler
+     411      411        2     1                 UART2_RX_TX_IRQHandler
+     411      411        2     1                 UART2_ERR_IRQHandler
+     411      411        2     1                 UART3_RX_TX_IRQHandler
+     411      411        2     1                 UART3_ERR_IRQHandler
+     411      411        2     1                 ADC0_IRQHandler
+     411      411        2     1                 CMP0_IRQHandler
+     411      411        2     1                 CMP1_IRQHandler
+     411      411        2     1                 FTM0_IRQHandler
+     411      411        2     1                 FTM1_IRQHandler
+     411      411        2     1                 FTM2_IRQHandler
+     411      411        2     1                 CMT_IRQHandler
+     411      411        2     1                 RTC_IRQHandler
+     411      411        2     1                 RTC_Seconds_IRQHandler
+     411      411        2     1                 PIT0_IRQHandler
+     411      411        2     1                 PIT1_IRQHandler
+     411      411        2     1                 PIT2_IRQHandler
+     411      411        2     1                 PIT3_IRQHandler
+     411      411        2     1                 PDB0_IRQHandler
+     411      411        2     1                 USB0_IRQHandler
+     411      411        2     1                 USBDCD_IRQHandler
+     411      411        2     1                 Reserved71_IRQHandler
+     411      411        2     1                 DAC0_IRQHandler
+     411      411        2     1                 MCG_IRQHandler
+     411      411        2     1                 LPTMR0_IRQHandler
+     411      411        2     1                 PORTA_IRQHandler
+     411      411        2     1                 PORTB_IRQHandler
+     411      411        2     1                 PORTC_IRQHandler
+     411      411        2     1                 PORTD_IRQHandler
+     411      411        2     1                 PORTE_IRQHandler
+     411      411        2     1                 SWI_IRQHandler
+     411      411        2     1                 SPI2_IRQHandler
+     411      411        2     1                 UART4_RX_TX_IRQHandler
+     411      411        2     1                 UART4_ERR_IRQHandler
+     411      411        2     1                 UART5_RX_TX_IRQHandler
+     411      411        2     1                 UART5_ERR_IRQHandler
+     411      411        2     1                 CMP2_IRQHandler
+     411      411        2     1                 FTM3_IRQHandler
+     411      411        2     1                 DAC1_IRQHandler
+     411      411        2     1                 ADC1_IRQHandler
+     411      411        2     1                 I2C2_IRQHandler
+     411      411        2     1                 CAN0_ORed_Message_buffer_IRQHandler
+     411      411        2     1                 CAN0_Bus_Off_IRQHandler
+     411      411        2     1                 CAN0_Error_IRQHandler
+     411      411        2     1                 CAN0_Tx_Warning_IRQHandler
+     411      411        2     1                 CAN0_Rx_Warning_IRQHandler
+     411      411        2     1                 CAN0_Wake_Up_IRQHandler
+     411      411        2     1                 SDHC_IRQHandler
+     414      414       72     4         /tmp/startup-def2f6.o:(.text.Reset_Handler)
+     414      414        0     1                 $t
+     415      415       72     1                 Reset_Handler
+     488      488       22     4         /tmp/startup-def2f6.o:(.text.WDOG_Disable)
+     488      488        0     1                 $t
+     489      489       22     1                 WDOG_Disable
+     4ac      4ac      3c6     4         /tmp/can_echo-916bc5.o:(.text.main)
+     4ac      4ac        0     1                 $t
+     4ad      4ad      3c6     1                 main
+     872      872       2e     1         <internal>:(.rodata.str1.1)
+     8a0      8a0        0     1         . = ALIGN(4)
+     8a0      8a0       10     4 .ARM.exidx
+     8a0      8a0       10     4         <internal>:(.ARM.exidx)
+1fff0000 1fff0000        0     1 .data
+1fff0000 1fff0000        0     1         . = ALIGN(4)
+1fff0000 1fff0000        0     1         _sdata = .
+1fff0000 1fff0000        0     1         . = ALIGN(4)
+1fff0000 1fff0000        0     1         _edata = .
+1fff0000 1fff0000        0     1 _sidata = LOADADDR(.data)
+1fff0000 1fff0000        8     4 .bss
+1fff0000 1fff0000        0     1         . = ALIGN(4)
+1fff0000 1fff0000        0     1         _sbss = .
+1fff0000 1fff0000        4     4         /tmp/can_echo-916bc5.o:(.bss.sent)
+1fff0000 1fff0000        4     1                 sent
+1fff0004 1fff0004        4     4         /tmp/can_echo-916bc5.o:(.bss.received)
+1fff0004 1fff0004        4     1                 received
+1fff0008 1fff0008        0     1         . = ALIGN(4)
+1fff0008 1fff0008        0     1         _ebss = .
+       0        0      1e3     1 .debug_loclists
+       0        0       39     1         /tmp/startup-def2f6.o:(.debug_loclists)
+      39       39      1aa     1         /tmp/can_echo-916bc5.o:(.debug_loclists)
+       0        0      262     1 .debug_abbrev
+       0        0       d7     1         /tmp/startup-def2f6.o:(.debug_abbrev)
+      d7       d7      18b     1         /tmp/can_echo-916bc5.o:(.debug_abbrev)
+       0        0      503     1 .debug_info
+       0        0       ed     1         /tmp/startup-def2f6.o:(.debug_info)
+      ed       ed      416     1         /tmp/can_echo-916bc5.o:(.debug_info)
+       0        0       e2     1 .debug_rnglists
+       0        0       27     1         /tmp/startup-def2f6.o:(.debug_rnglists)
+      27       27       bb     1         /tmp/can_echo-916bc5.o:(.debug_rnglists)
+       0        0       fc     1 .debug_str_offsets
+       0        0       48     1         /tmp/startup-def2f6.o:(.debug_str_offsets)
+      48       48       b4     1         /tmp/can_echo-916bc5.o:(.debug_str_offsets)
+       0        0      203     1 .debug_str
+       0        0      203     1         <internal>:(.debug_str)
+       0        0       8c     1 .debug_addr
+       0        0       20     1         /tmp/startup-def2f6.o:(.debug_addr)
+      20       20       6c     1         /tmp/can_echo-916bc5.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       49     1 .ARM.attributes
+       0        0       49     1         /tmp/startup-def2f6.o:(.ARM.attributes)
+       0        0       6c     4 .debug_frame
+       0        0       44     4         /tmp/startup-def2f6.o:(.debug_frame)
+      44       44       28     4         /tmp/can_echo-916bc5.o:(.debug_frame)
+       0        0      49e     1 .debug_line
+       0        0       e9     1         /tmp/startup-def2f6.o:(.debug_line)
+      e9       e9      3b5     1         /tmp/can_echo-916bc5.o:(.debug_line)
+       0        0       84     1 .debug_line_str
+       0        0       84     1         <internal>:(.debug_line_str)
+       0        0      700     4 .symtab
+       0        0      700     4         <internal>:(.symtab)
+       0        0       f7     1 .shstrtab
+       0        0       f7     1         <internal>:(.shstrtab)
+       0        0      717     1 .strtab
+       0        0      717     1         <internal>:(.strtab)

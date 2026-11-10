@@ -4,7 +4,8 @@ XINTnCR: bit 0 ENABLE, bits 3:2 POLARITY (00/10 falling, 01 rising, 11 both).  T
 block (GPIOXINT1SEL/2SEL/XNMISEL: GPIO0-31, GPIOXINT3..7SEL: GPIO32-63).  A qualifying edge of the source pin's level
 (X counts as low) pulses XINT1 → PIE 1.4, XINT2 → 1.5, XINT3..7 → 12.1..12.5 and resets the 16-bit counter, which
 then counts SYSCLKOUT cycles (XINT1CTR/XINT2CTR/XNMICTR, read-only).  XNMI (XNMICR: ENABLE, SELECT, POLARITY) pulses
-the NMI, and INT13 when SELECT = 1.
+the NMI, and INT13 when SELECT = 1 (XINT13).  `int_listeners` cb(n) are called with every XINTn / XINT13 (n = 13)
+pulse (DMA triggers).
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ class XInt(C2000Block):
         self._edge_cycle: dict[int, int] = {}
         self._lines: dict[int, Any] = {}
         self._listeners: list[tuple[str, Any]] = []
+        self.int_listeners: list = []            # cb(n) on every XINTn pulse, n = 13 for XINT13 (DMA triggers)
         self.edges = {n: 0 for n in range(8)}
 
     def attach(self, chip: Any) -> None:
@@ -93,8 +95,12 @@ class XInt(C2000Block):
                 self.pulse_irq("NMI")
                 if cr & 2:
                     self.pulse_irq("INT13")
+                    for cb in list(self.int_listeners):
+                        cb(13)
             else:
                 self.pulse_irq(self._lines[n])
+                for cb in list(self.int_listeners):
+                    cb(n)
 
     def _cr_write(self, blk, reg, old, new):
         if (old ^ new) & 1:

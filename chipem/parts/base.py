@@ -140,6 +140,12 @@ class Part:
     def drive(self, port: str) -> str | None:
         return self._out.get(port)
 
+    def pull(self, port: str) -> str | None:
+        """Pull resistor on `port` ("up" | "down" | None): a weak level for the port's net when nothing drives it
+        (weaker than the net's own `pull`, stronger than chip pin pulls). E.g. the SDA/SCL pull-ups of an I2C
+        device breakout (`pullup: true`)."""
+        return None
+
     def state(self) -> dict:
         return {}
 

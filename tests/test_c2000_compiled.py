@@ -7,6 +7,7 @@ Runs the real compiler output (RTS `_c_int00`, `.cinit` copy tables, compiler id
   - boards/c2000_stm32_chat_c.yaml: the chat with the STM32 HAL firmware, same conversation as the asm version
   - selftest: integer/long long arithmetic via the RTS helpers, soft-float, library functions, checked on the host
   - epwm: 20 kHz / 25 % on GPIO0 (EPWM1A), the ePWM event-trigger ISR (ETCLR, PIEACK 3) and the SOCA -> ADC ISR
+  - adc_dma: ePWM1 SOCA -> ADC SEQ1 -> DMA CH1 ping-pong buffer in L4 (DINTCH1 swaps buffers), printed over SCI-A
 Skipped when the images are not built (the compiler is not part of the repository).  Timings within 5 %."""
 from __future__ import annotations
 
@@ -328,3 +329,102 @@ def test_epwm_pwm_isr_and_adc(name):
     assert len(rises) >= 39
     assert all(abs((b - a) - 0.050) < 1e-6 for a, b in zip(rises, rises[1:]))
     assert all(abs((f - r) - 0.0125) < 1e-6 for r, f in zip(rises, falls))
+
+
+# ------------------------------------------------------------------------------------------------ adc_dma
+@pytest.mark.parametrize("name", ["adc_dma.out", "adc_dma_coff.out"])
+def test_adc_dma_ping_pong(name):
+    """firmware/samples_c2000_c/adc_dma.c: ePWM1 SOCA every 100 us -> ADC SEQ1 (ADCINA0-A3) -> SEQ1INT -> DMA CH1
+    copies the 4 results from 0x0B00 / 0x0B04 (source wrap) into a ping-pong buffer in L4; a transfer is 8 bursts
+    (800 us) and DINTCH1 at each transfer start swaps the destination shadow; main prints completed buffers."""
+    from chipem.session import Session
+    vals = (0x400, 0x123, 0xABC, 0xFFF)
+    s = Session("tms320f28232", _img(name), quiet=True)
+    try:
+        for i, v in enumerate(vals):
+            s.chips["A"].peripherals["ADC"].set_channel(f"ADCINA{i}", v)
+        s.run_for(12e6)
+        chip = s.chips["A"]
+        syms = s.ctxs["A"].image.symbols
+        pre = "_" if name.endswith("_coff.out") else ""
+        n0 = _word(chip, syms[pre + "dma_isr_count"], 2)
+        s.run_for(4e6)                                    # 4 ms = 5 transfers of 800 us
+        n1 = _word(chip, syms[pre + "dma_isr_count"], 2)
+        buf = [_word(chip, syms[pre + "adc_buf"] + i) for i in range(64)]
+        dma = chip.peripherals["DMA"]
+        evs = s.events(kinds={"uart", "warn", "fault"})
+    finally:
+        s.close()
+    assert n0 > 0 and abs((n1 - n0) - 5) <= 1
+    assert 0xC000 <= syms[pre + "adc_buf"] < 0xE000                       # L4/L5: on the DMA bus
+    assert buf == list(vals) * 16                                         # both halves complete and aligned
+    assert dma.lost == 0 and not [e for e in evs if e.kind in ("warn", "fault")]
+    lines = [t for _, t in _lines(evs)]
+    assert lines[0] == "ADC DMA" and len(lines) >= 3
+    total = 8 * sum(vals)
+    for ln in lines[1:]:
+        f = ln.split()
+        assert f[0] == "DMA" and f[2] in ("BUF0", "BUF1") and int(f[2][3]) == (int(f[1]) - 1) & 1
+        assert [int(x, 16) for x in f[3:7]] == list(vals) and f[7] == "SUM" and int(f[8], 16) == total
+
+
+# ------------------------------------------------------------------------------------------------ i2c_eeprom
+@pytest.mark.parametrize("name", ["i2c_eeprom.out", "i2c_eeprom_coff.out"])
+def test_i2c_eeprom_write_poll_read(name):
+    """firmware/samples_c2000_c/i2c_eeprom.c: I2C-A at 100 kHz (10 MHz module clock, ICCL = ICCH = 45) writes a string
+    into a 24C32 EEPROM part on GPIO32/33, acknowledge-polls the 5 ms write cycle and reads it back over SCI-A."""
+    from chipem.session import Session
+    s = Session("tms320f28232", _img(name), quiet=True)
+    try:
+        s.add_part("EE1", "i2c_eeprom", {"size": 4096}, {"sda": "A.GPIO32", "scl": "A.GPIO33"})
+        s.run_for(20e6)
+        ee = s.find_part("EE1")
+        evs = s.events(kinds={"uart", "pin", "warn", "fault"})
+        syms = s.ctxs["A"].image.symbols
+        pre = "_" if name.endswith("_coff.out") else ""
+        polls = _word(s.chips["A"], syms[pre + "poll_count"])
+    finally:
+        s.close()
+    assert [t for _, t in _lines(evs)] == ["I2C EEPROM", "EEPROM: Hello over I2C"]
+    assert ee.dump(0x40, 14) == b"Hello over I2C" and ee.writes == 1 and ee.naks == polls > 10
+    rises = [t for t, v in _edges(evs, "GPIO33") if v == "H"]
+    assert abs((rises[1] - rises[0]) - 0.010) < 1e-6                # SCL period 10 us (100 kHz)
+    assert not [e for e in evs if e.kind in ("warn", "fault")]
+
+
+def test_i2c_eeprom_board_yaml():
+    _img("i2c_eeprom.out")
+    from chipem.session import Session
+    s = Session.from_board(ROOT / "boards" / "c2000_i2c_eeprom.yaml", quiet=True)
+    try:
+        s.run_for(20e6)
+        lines = [t for _, t in _lines(s.events(kinds={"uart"}))]
+    finally:
+        s.close()
+    assert lines == ["I2C EEPROM", "EEPROM: Hello over I2C"]
+
+
+# ------------------------------------------------------------------------------------------------ eCAN
+@pytest.mark.parametrize("name", ["can_echo.out", "can_echo_coff.out"])
+def test_can_echo_alone_with_host_node(name):
+    """can_echo: eCAN-A at 500 kbit/s after the PLL relock; mailbox 16 takes ID 0x100, the data is echoed as ID 0x201
+    from mailbox 0 and both are printed on SCI-A."""
+    from chipem.canbus import CanFrame
+    from chipem.session import Session
+    s = Session("tms320f28232", _img(name), quiet=True)
+    try:
+        e = s.chip.peripherals["ECANA"]
+        host = e.can_bus.add_host()
+        host.send(CanFrame(0x100, b"\x00\x07\x4B\x32"), 10e6)
+        host.send(CanFrame(0x101, b"\x99"), 12e6)          # no mailbox for it
+        s.run_for(14e6)
+        assert e.bitrate() == pytest.approx(500e3, rel=1e-6)
+        (t, f), = host.received
+        assert str(f) == "201#00074B32"
+        bits = CanFrame(0x100, b"\x00\x07\x4B\x32").bits
+        assert 0 < t - (10e6 + bits * 2000.0) - f.bits * 2000.0 < 50e3      # echo starts right after the frame
+        out = s.chip.uart_out("SCIA").decode()
+        assert out == "CAN ECHO C2000\r\nRX 100 [4] 00 07 4B 32\r\nTX 201\r\n"
+        assert e.rx_frames == 2 and e.rx_lost == 1 and e.errors.tec == 0
+    finally:
+        s.close()

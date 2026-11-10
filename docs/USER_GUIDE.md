@@ -156,8 +156,9 @@ clocks, LEDs, probes, counters, gates, flip-flops.
   programs needs `--clock`.
 - **Clock gates only warn.** Accessing a gated-off peripheral logs one `warn` and proceeds; silicon would fault.
 - **Unmodelled peripherals are RAM-like stubs.** A loop that waits for a hardware status bit on a stub spins forever.
-- **UART and SPI pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel only
-  through links. Timer outputs are different: STM32 TIM, Kinetis FTM, C2000 ePWM / eCAP APWM drive their pins edge by
+- **UART and Kinetis SPI pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel
+  only through links. The STM32 SPI (`stm32.spi`) is the exception: it drives SCK/MOSI/NSS (master) or MISO (slave)
+  bit by bit, so two STM32s can talk SPI over board nets (`boards/stm32_spi_pair.yaml`). Timer outputs are different: STM32 TIM, Kinetis FTM, C2000 ePWM / eCAP APWM drive their pins edge by
   edge, and timer inputs (input capture, eCAP, eQEP and FTM quadrature decoders, faults, trip zones) see the edges on
   their pins (section 4.4).
 
@@ -395,6 +396,18 @@ No fault, the battery reads 5640 mV, and the firmware's shell answers `help`. Se
 
 Giving the address explicitly gives the same result: `--load-addr 0x4000 --vtor 0x4000`.
 
+The same device works on an STM32 SPI (SPI1–3, master mode): it answers the frames the firmware clocks out, and
+chip select is the GPIO pin named by `cs=`. The `spi_flash` sample reads the JEDEC ID, programs a page and reads it
+back:
+
+```sh
+.venv/bin/chipem run firmware/samples_stm32/build/spi_flash.elf --chip stm32f405zg --for 20ms --spi-flash SPI1:cs=PA4
+#  USART1 (95 bytes): "JEDEC 202015\r\nSR 00\r\nREAD 43 48 49 50 5F 45 4D FF ...\r\nTEXT CHIP_EM\r\ndone\r\n"
+```
+
+The STM32 SPI also toggles SCK/MOSI on the pins (visible with `--vcd` or in the web UI), and without the device
+MISO floats and reads 0 (`JEDEC 000000`).
+
 ### 3.5 The STM32 HAL ELF
 
 `firmware/samples_stm32_hal/build/uart_chat_hal.elf` is built from ST's STM32CubeF4 HAL. It switches to 168 MHz
@@ -439,7 +452,7 @@ exceptions taken:
 | `--at TIME:UART=TEXT` | `--at '7ms:SCIA=hi\n'` | start typing TEXT into a receiver at that time, paced at its baud |
 | `--uart-in [UART:]TEXT` | `--uart-in 'SCIA:hi\n'` | the same from t=0 (default UART0) |
 | `--adc CH=VALUE` | `--adc ADC0_SE18=40000`, `--adc PA0=1.65V`, `--adc CMP0_IN0=1.2V` | analog input: an integer is a raw conversion code, a decimal or V/mV suffix is volts (STM32 ADC, Kinetis CMP inputs: volts only); STM32 also takes pin names (see below) |
-| `--spi-flash SPIn:cs=PIN[,jedec=,size=,file=]` | `--spi-flash SPI0:cs=PTC4` | attach SPI NOR flash to a Kinetis DSPI |
+| `--spi-flash SPIn:cs=PIN[,jedec=,size=,file=]` | `--spi-flash SPI0:cs=PTC4`, `--spi-flash SPI1:cs=PA4` | attach SPI NOR flash to a Kinetis DSPI or an STM32 SPI (master) |
 | `--part ID:TYPE[:K=V,...]` | `--part LED1:led:in=PTC5` | add a board part (section 6) |
 | `--vcd FILE` | `--vcd out.vcd` | write pin waveforms |
 | `--pin-report` | | after the run, print what the firmware did with every pin |
@@ -846,7 +859,7 @@ links:                            # byte-level UART links; both directions unles
 nets:                             # wires carrying GPIO levels; a pin can be in one net
   - {name: LED_A, pins: [A.PTC5, B.PA0]}
   - {name: BTN, pins: [A.PTC6, B.PB1], pull: up}     # pull: up|down, or drive: H|L for a fixed level
-devices:                          # SPI NOR flash on a Kinetis DSPI (same options as --spi-flash)
+devices:                          # SPI NOR flash on a Kinetis DSPI / STM32 SPI (same options as --spi-flash)
   - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}
 parts:                            # section 6
   - {id: LED1, type: led, ports: {in: LED_A}}
@@ -868,6 +881,33 @@ Rules that matter:
 - **Baud check.** A link warns once if the two ends differ by more than 3 % in baud or differ in frame. Bytes are
   still delivered. Make both firmwares agree at the clocks they actually run.
 - Lockstep: cross-chip effects arrive up to one quantum late. Smaller is more precise and slower.
+
+### 5.1a CAN links
+
+CAN controllers (`chip.can_blocks()`: Kinetis `CAN0`, F28232 `ECANA`/`ECANB`) join a bus with a `can` link; any
+number of nodes:
+
+```yaml
+links:
+  - {type: can, name: CANBUS, nodes: [A.CAN0, B.ECANA]}   # or {can: [A.CAN0, B.ECANA]}; host: true adds an ACKing PC node
+```
+
+- Frames take their real time: the exact stuffed frame length (SOF..EOF) at the transmitter's bit rate, then 3
+  intermission bits. Every node must run the same bit rate (within 1.5 %); a mismatched receiver counts a form
+  error and does not acknowledge.
+- Arbitration: the lowest identifier wins, the others retry after it. A frame no other node acknowledges is an ACK
+  error: an error frame, TEC + 8, an automatic retry (error passive at TEC 128, then the retries continue). A single
+  chip without a link is in exactly that situation.
+- The controller must be on the bus: clock gate on, out of freeze / initialization mode, RX (and TX) pins muxed to
+  the CAN function. The pins themselves do not carry bits; nets are not needed.
+- Output: each frame is a `can` event (`A: CAN CAN0 tx 100#00014B32` in the live log), the summary of each chip lists
+  `CAN frames: N sent`, its controllers (`CAN0: 500 kbit/s, 9 tx, 9 rx, TEC 0 REC 0, active, bus CANBUS`) and the
+  first frames; the board summary shows `can CANBUS: A.CAN0, B.ECANA: 18 frames, 0 error frames`.
+- From Python: `session.board.can_bus("CANBUS").inject("123#DEADBEEF", t_ns)` sends from a host node; on a single
+  chip `chip.peripherals["CAN0"].can_bus.add_host()` gives an acknowledging node (`.send(frame, t)`, `.received`).
+
+`chipem run --board boards/k22_c2000_can.yaml --for 100ms`: the K22 sends `100#<n>4B32` every 10 ms, the F28232
+echoes `201#<n>4B32` 6 µs after each frame ends plus its polling time; both print the frames on their UARTs.
 
 ### 5.2 Running and watching two chips talk
 
@@ -915,6 +955,7 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `two_k22_uart_pins.yaml` | K22 + K22 | the same with nets only: automatic links | 72 / 72 |
 | `k22_stm32_uart.yaml` | K22 + STM32F405 | two vendors over a link | 72 / 72 |
 | `c2000_k22_uart.yaml` | K22 + F28232 | bytes lost before the C28x enables SCI-A | 72 / 50 |
+| `k22_c2000_can.yaml` | K22 + F28232 | CAN bus at 500 kbit/s: FlexCAN0 sends every 10 ms, eCAN-A (TI C) echoes | 9 / 9 frames in 100 ms |
 | `c2000_stm32_uart.yaml` | F28232 + STM32F405 | C28x sender, STM32 echo | 48 / 48 |
 | `c2000_stm32_chat.yaml` | F28232 + STM32F405 | two-way "chat" protocol (HELLO/PING/PONG), bare-metal STM32, nets only | 122 / 130 |
 | `c2000_stm32_chat_hal.yaml` | F28232 + STM32F405 | the same with ST's HAL on the STM32 at 168 MHz | 130 / 130 |
@@ -924,8 +965,12 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `pwm_led.yaml` | STM32F405 + K22 | timer PWM (TIM3 CH1 on PA6, FTM0 CH0 on PTC1, 1 kHz 25 %) driving an LED and a probe each; the probes read 1000 Hz | no links |
 | `k22_ftm_capture.yaml` | K22 | FTM0 PWM (PTC1, 10 kHz) wired to the FTM1 input capture (PTA12) on the same chip | UART0 prints `period 6000` five times |
 | `c2000_ecap_loopback.yaml` | F28232 | ePWM1A (GPIO0, 20 kHz 30 %) wired to eCAP1 (GPIO24) | `ecap_period` 5000, `ecap_high` 1500 cycles |
+| `c2000_i2c_eeprom.yaml` | F28232 | TI-compiled C: I2C-A page write + ack polling + read of an `i2c_eeprom` part (24C32) | SCI-A `EEPROM: Hello over I2C` |
 | `c2000_eqep_encoder.yaml` | F28232 | a `quadrature_encoder` part (100 lines, 1500 rpm, index) on eQEP1 (GPIO20/21/23) | `eqep_pos` = position since the index at each 10 ms unit time out, `eqep_dir` 1, `eqep_cprd` 312 |
 | `k22_ftm_qd_encoder.yaml` | K22 | the encoder part (600 rpm) on FTM1_QD_PHA/PHB (PTB0/PTB1), reversed at 30 ms | `qd 40 up`, `qd 80 up`, `qd 119 up`, `qd 79 down`, ... |
+| `stm32_i2c_eeprom.yaml` | STM32F405 | I2C1 master + `i2c_eeprom` part | USART1 `EEPROM: Hello I2C!` |
+| `k22_stm32_i2c.yaml` | K22 + STM32F405 | K22 I2C0 master, STM32 I2C1 slave (0x42) on open-drain nets, quantum 1 us | K22 `PASS`, STM32 `SLAVE RX 00:48656C…`, `SLAVE TX 10` |
+| `k22_i2c_eeprom.yaml` | K22 | I2C0 master and an `i2c_eeprom` part (page writes, ack polling, random read) | UART0 `wrote "Hello over I2C!", read "Hello over I2C!"`, `PASS` |
 | `pwm_capture_3way.yaml` | STM32F405 + K22 + F28232 | one STM32 PWM (PA6, 1 kHz 25 %) measured by a probe, a K22 FTM capture and a C2000 eCAP (`--for 12ms`) | probe 1000 Hz, K22 `period 60000`, eCAP 100000 / 25000 cycles |
 
 ### 5.4 Pin report on a board
@@ -981,6 +1026,8 @@ input port reads the net (H/L/X). Gates are zero-delay. The catalog (from `GET /
 | `mux2` | a, b, sel, out | | out = a while sel is L, b while H |
 | `dff` | d, clk, rst, q, qn | `edge` (rise), `init` (L), `rst_active` (H) | D flip-flop, async reset |
 | `latch` | d, en, q | `init` (L) | transparent while en is H |
+| `i2c_eeprom` | sda, scl (open drain) | `address` (0x50), `size` (256), `page` (auto), `twr` (5ms), `fill` (0xFF), `init` (""), `pullup` (true) | 24Cxx serial EEPROM on the I2C bus |
+| `i2c_register_device` | sda, scl (open drain) | `address` (0x48), `regs` ({}), `readonly` ([]), `default` (0), `pullup` (true) | generic register-map target (sensor, expander) |
 
 A port is wired to a net name (created if absent) or to `CHIP.PIN` (an anonymous net `<id>_<port>` is created).
 
@@ -1067,6 +1114,50 @@ parts (1):
   ENC      quadrature_encoder a=ENC_a b=ENC_b i=ENC_i            position=700 revolutions=1.75 direction=cw rpm=1500 edge_hz=10000 edges=500 a=L b=L i=L
 ...
 GPIO20   64  EQEP1A (pull-up)                     6.554 ms  pll+0x8                     0      0      0     0  confirmed     periodic 2.5 kHz, duty 50.0 %
+```
+
+### 6.1 I2C devices and open-drain nets
+
+I2C buses are real wires: each I2C controller (K22 `kinetis.i2c`, STM32 `stm32.i2c`, C2000 `ti_c2000.i2c`) pulls its
+SDA/SCL pins low or releases them at the configured bit rate, and the I2C parts decode the net edges and answer by
+pulling SDA low. A VCD of the two nets shows the whole transaction (START, address, ACK, data, STOP).
+
+- **Pull-ups.** A released line must be pulled up. Either declare the nets `open_drain: true` (wired-AND, pulled up;
+  an H driver on it counts as released) or `pull: up`, or let the device breakout do it: the I2C parts have
+  `pullup: true` by default (a pull resistor on their ports). Without any, the line floats (X), which the
+  controllers read as 1, so every transfer is NACKed.
+- **Pins in open-drain mode.** K22: set `PORTx_PCRn.ODE` on the SDA/SCL pins (without it the enabled module drives
+  the released line H and a slave's ACK becomes a drive conflict, with one `warn`). STM32: alternate function with
+  `OTYPER = 1` (`GPIO_MODE_AF_OD` in the HAL). C2000: GPIO32/33 muxed to SDAA/SCLA.
+- **Quantum.** A bus between two chips needs `quantum: 1us` (below the SCL low time) so the slave's ACK is seen in
+  time; one chip plus parts works with any quantum.
+
+`i2c_eeprom` behaves like an AT24Cxx: a write transfer sends the word address (1 byte up to 2 KiB, where the upper
+address bits are the low device-address bits, so a 24C16 answers 0x50-0x57; 2 bytes above), then data into the page
+buffer (rolling over within the page); the STOP starts the `twr` write cycle, during which the device does not
+acknowledge its address (poll it until it does). A write of the word address only, followed by a repeated START and
+a read, reads from that address; reads are sequential and roll over at the end. `init: "text"` or `init:
+"hex:48656C6C6F"` presets the contents. `i2c_register_device` uses the common register-pointer convention: the first
+written byte selects the register, the next bytes write from there, reads return registers from the pointer, both
+auto-incrementing; `readonly` registers acknowledge writes but keep their value; `--at 5ms:DEV1.reg=...` is not
+supported, use the shell / web `set(reg=0x10, value=0x5A)`.
+
+```yaml
+nets:
+  - {name: SCL, pins: [A.PTB2], open_drain: true}
+  - {name: SDA, pins: [A.PTB3], open_drain: true}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 256, twr: 5ms, ports: {sda: SDA, scl: SCL}}
+  - {id: TMP, type: i2c_register_device, address: 0x48, regs: {0x00: 0x19, 0x01: 0x80}, readonly: [0x00],
+     ports: {sda: SDA, scl: SCL}}
+```
+
+```
+$ .venv/bin/chipem run --board boards/k22_i2c_eeprom.yaml --for 30ms -q
+...
+  UART0 (108 bytes): "K22 I2C0 -> EEPROM @0x50\r\n0x51: NACK\r\nwrote \"Hello over I2C!\", read \"Hello over I2C!\" (84 ack polls)\r\nPASS\r\n"
+...
+  EE1      i2c_eeprom sda=SDA scl=SCL                    address=0x50 size=256 pointer=31 busy=False writes=2 reads=15 transfers=90 naks=84
 ```
 
 Parts are digital only: no analog values, no propagation delay, no UART bytes.
@@ -1431,7 +1522,7 @@ Options shared by `run`, `shell` and `serve`:
 | `--at TIME:PIN=LEVEL\|TIME:PART=VALUE\|TIME:UART=TEXT` | timed stimulus (repeatable) |
 | `--uart-in [UART:]TEXT` | host input from t=0 (default UART0) |
 | `--adc CHANNEL=VALUE` | analog input: integer = raw code (`ADC0_SE14=2048`; bare `SE14` = ADC0; C2000 `ADCINA3=2048`), decimal or V/mV = volts (STM32 `PA0=1.65V`; Kinetis comparator `CMP0_IN0=1.2V`, volts only) |
-| `--spi-flash SPIn:cs=PIN[,jedec=ID,size=N,file=PATH]` | SPI NOR flash on a Kinetis DSPI |
+| `--spi-flash SPIn:cs=PIN[,jedec=ID,size=N,file=PATH]` | SPI NOR flash on a Kinetis DSPI or STM32 SPI |
 | `--part ID:TYPE[:KEY=VAL,...]` | add a part (repeatable) |
 | `--log-mmio` | log every peripheral access |
 | `--pin-report` | print the pin discovery report after `run` |
@@ -1449,6 +1540,7 @@ Times: `<number><ns|us|ms|s>`, bare number = ms. Levels: `1/H/high`, `0/L/low`, 
 |---|---|---|
 | `pin` | owner, direction, pull or level change | `PTC5  L -> H` |
 | `uart` | byte sent, received or dropped | `USART1 TX: "PONG 1\r\n"`, `SCIA DROP: "hi\n"` |
+| `can` | CAN frame completed (or not acknowledged) | `A: CAN CAN0 tx 100#00014B32`, `CAN CAN0 tx 100#00004B32 ERROR ack (...)` |
 | `mmio` | register access (only with `--log-mmio`) | `MMIO W GPIOC.PDDR = 0x20` |
 | `irq` | interrupt events (current models report counts in the summary instead) | |
 | `reset` | chip reset with reason | `RESET SYSRESETREQ` |

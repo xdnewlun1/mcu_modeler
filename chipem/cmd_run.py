@@ -138,6 +138,8 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
     if not any_uart:
         w("  (none)\n")
 
+    _print_can(session, chip, cid if multi else None, w)
+
     irqs = session.irq_summary(cid)
     w("\nexceptions taken:\n")
     if irqs:
@@ -152,6 +154,30 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
         w("  (none)\n")
 
     _print_warnings(session.events(kinds={"warn", "fault"}, chip=cid if multi else None), w)
+
+
+def _print_can(session: Session, chip, cid, w, limit: int = 20) -> None:
+    """CAN controllers that did something (chip.can_blocks(), can_stats()) and the frames this chip sent."""
+    blocks = chip.can_blocks() if hasattr(chip, "can_blocks") else {}
+    active = {n: b.can_stats() for n, b in blocks.items() if hasattr(b, "can_stats")}
+    active = {n: st for n, st in active.items() if st["tx"] or st["rx"] or st["tec"] or st["rec"]
+              or st["state"] not in ("disabled", "init", "freeze", "active")}
+    evs = [ev for ev in session.events(kinds={"can"}, chip=cid)]
+    if not active and not evs:
+        return
+    from .log import format_can
+    ok = [ev for ev in evs if not ev.fields.get("err")]
+    w(f"\nCAN frames: {len(ok)} sent" + (f", {len(evs) - len(ok)} failed attempt(s) logged" if len(ok) != len(evs)
+                                          else "") + "\n")
+    for n, st in active.items():
+        rate = f"{st['bitrate'] / 1e3:g} kbit/s" if st["bitrate"] else "no bit clock"
+        w(f"  {n}: {rate}, {st['tx']} tx, {st['rx']} rx" + (f", {st['lost']} not stored" if st["lost"] else "")
+          + f", TEC {st['tec']} REC {st['rec']}, {st['state']}" + (f", bus {st['bus']}" if st.get("bus") else "")
+          + "\n")
+    for ev in evs[:limit]:
+        w(f"  {ev.t_ns / 1e6:10.3f} ms  {format_can(ev.fields)}\n")
+    if len(evs) > limit:
+        w(f"  ... {len(evs) - limit} more\n")
 
 
 def _print_warnings(events, w) -> None:
@@ -192,11 +218,13 @@ def print_board_summary(session: Session, out=None) -> None:
         w(f"  {n.name:<12} {n.level}  [{pins}]{extra}\n")
     if not b.nets:
         w("  (none)\n")
-    w(f"links ({len(b.links)}):\n")
+    w(f"links ({len(b.links) + len(getattr(b, 'can_links', []))}):\n")
     for ln in b.links:
         w(f"  uart {ln.describe()}: {ln.bytes_ab} bytes {ln.a[0]}->{ln.b[0]}"
           + (f", {ln.bytes_ba} bytes {ln.b[0]}->{ln.a[0]}" if ln.bidir else "") + "\n")
-    if not b.links:
+    for cl in getattr(b, "can_links", []):
+        w(f"  can {cl.describe()}: {cl.bus.frames} frames, {cl.bus.error_frames} error frames\n")
+    if not b.links and not getattr(b, "can_links", []):
         w("  (none)\n")
     _print_warnings(session.events(kinds={"warn", "fault"}, chip="board"), w)
 

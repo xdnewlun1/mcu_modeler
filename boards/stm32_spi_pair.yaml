@@ -1,0 +1,25 @@
+# Two STM32F405ZG talking SPI over board nets, bit by bit (the stm32.spi model toggles SCK/MOSI/MISO/NSS).
+#   A runs spi_master: SPI1 master, mode 0, 125 kHz (PCLK2 16 MHz / 128), hardware NSS output (SSOE) on PA4;
+#                      every 2 ms sends "hello" and prints "M <n> WORLD" (what the slave shifted back) on USART1.
+#   B runs spi_slave:  SPI1 slave, NSS from PA4; answers "WORLD" and prints "S <n> hello" on USART1.
+# Nets: SCK (pulled down: the master releases SCK while SPE = 0), MOSI, MISO (driven by the slave only while
+# selected), NSS (pulled up). The 1 us lockstep quantum is well below the 4 us SCK half period, so the slave's MISO
+# bit reaches the master before its sampling edge.
+# Run:   chipem run --board boards/stm32_spi_pair.yaml --for 8ms
+#        chipem serve --board boards/stm32_spi_pair.yaml
+# Build: firmware/samples_stm32/build.sh
+name: stm32_spi_pair
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/spi_master.elf}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/spi_slave.elf}
+nets:
+  - {name: SCK, pins: [A.PA5, B.PA5], pull: down}
+  - {name: MOSI, pins: [A.PA7, B.PA7]}
+  - {name: MISO, pins: [A.PA6, B.PA6]}
+  - {name: NSS, pins: [A.PA4, B.PA4], pull: up}
+  - {name: A_LED, pins: [A.PB0]}
+  - {name: B_LED, pins: [B.PB0]}
+parts:
+  - {id: LED_M, type: led, color: green, ports: {in: A_LED}}
+  - {id: LED_S, type: led, color: yellow, ports: {in: B_LED}}

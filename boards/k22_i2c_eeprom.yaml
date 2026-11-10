@@ -1,0 +1,17 @@
+# K22 I2C0 master + a 24C02 serial EEPROM part on an open-drain bus.
+#   A (MK22FN1M0VLL12, 120 MHz core / 60 MHz bus) runs i2c_eeprom: I2C0 on PTB2 (SCL) / PTB3 (SDA), PCR.ODE, 93.75 kHz.
+#     It probes 0x51 (nobody: NACK), writes "Hello over I2C!" at word address 0x10 in 8-byte pages (each page ends with
+#     a STOP and the EEPROM's 5 ms write cycle, polled by address-only transfers until it acknowledges), reads it back
+#     (dummy write + repeated START) and prints the result and PASS on UART0.
+#   EE1: 256-byte i2c_eeprom at 0x50 with pull-ups on SDA/SCL (`pullup: true`, on the nets as `open_drain`).
+# Run:   chipem run --board boards/k22_i2c_eeprom.yaml --for 30ms --vcd i2c.vcd     (SDA/SCL edges in the VCD)
+# Build: firmware/samples/build.sh
+name: k22_i2c_eeprom
+quantum: 1us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/i2c_eeprom.elf, clock_hz: 120000000}
+nets:
+  - {name: SCL, pins: [A.PTB2], open_drain: true}
+  - {name: SDA, pins: [A.PTB3], open_drain: true}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 256, twr: 5ms, ports: {sda: SDA, scl: SCL}}

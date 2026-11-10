@@ -1,0 +1,13 @@
+# TMS320F28232 I2C-A master (firmware/samples_c2000_c/i2c_eeprom.c, TI cl2000) with a 24C32-style EEPROM on
+# GPIO32 (SDAA) / GPIO33 (SCLA).  The firmware writes "Hello over I2C" at word 0x0040, acknowledge-polls the 5 ms write
+# cycle, reads it back and prints "EEPROM: Hello over I2C" on SCI-A.
+#   chipem run --board boards/c2000_i2c_eeprom.yaml --for 20ms
+name: c2000_i2c_eeprom
+quantum: 1us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000_c/build/i2c_eeprom.out}
+nets:
+  - {name: SDA, pins: [A.GPIO32], open_drain: true}
+  - {name: SCL, pins: [A.GPIO33], open_drain: true}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 4096, twr: 5ms, ports: {sda: SDA, scl: SCL}}

@@ -1,7 +1,9 @@
 """Kinetis PORT (pin control and interrupts): PCR0-31, GPCLR/GPCHR, ISFR, PORTD digital filter regs.
 
 PCR fields: PS (0) pull select, PE (1) pull enable, SRE (2), PFE (4), ODE (5), DSE (6), MUX (8-10), LK (15,
-locks bits 0-15 until reset), IRQC (16-19), ISF (24, w1c).
+locks bits 0-15 until reset), IRQC (16-19), ISF (24, w1c).  ODE matters for open-drain functions (I2C SDA/SCL): with
+ODE = 0 an enabled I2C module drives its released line high (push-pull, K22 RM §3.9.4 note), so a slave's ACK fights
+it on a net; GPIO outputs ignore ODE.
 
 Pin board interaction (the PinBoard is generic; this model is the only place that knows Kinetis muxing):
 * MUX=1 -> owner "GPIO"; direction/drive come from the matching GPIO model (PDDR/PDOR).
@@ -31,7 +33,7 @@ from ..registry import register
 from ._util import GatedBlock, build_regs, find_model, irq_number
 from .signals import TABLE as SIGNALS
 
-PS, PE, MUX_SHIFT, MUX_MASK, LK = 1 << 0, 1 << 1, 8, 0x700, 1 << 15
+PS, PE, ODE, MUX_SHIFT, MUX_MASK, LK = 1 << 0, 1 << 1, 1 << 5, 8, 0x700, 1 << 15
 IRQC_SHIFT, ISF = 16, 1 << 24
 IRQC_NAMES = {0: "disabled", 1: "DMA rising", 2: "DMA falling", 3: "DMA either", 8: "logic 0", 9: "rising edge",
               10: "falling edge", 11: "either edge", 12: "logic 1"}
@@ -155,6 +157,8 @@ class PORT(GatedBlock):
                 kw["drive"] = None
             else:
                 kw["direction"], kw["drive"] = SIGNALS.pin_state(owner if owner != "disabled" else None)
+                if not v & ODE and SIGNALS.role(owner).name == "od" and self._od_push_pull(owner):
+                    kw["direction"], kw["drive"] = "out", "H"     # I2C pin without PCR.ODE: push-pull (§3.9.4)
                 for hook in self.signal_dir_hooks:
                     st = hook(owner)
                     if st is not None:
@@ -171,6 +175,17 @@ class PORT(GatedBlock):
             if pull:
                 extra += f" (pull-{pull})"
             self.emit("info", block=self.name, pin=pin.id, msg=f"{pin.id} → {owner}{extra}")
+
+    def _od_push_pull(self, owner: str) -> bool:
+        """An open-drain function (I2Cn_SDA/SCL) on a pin with PCR.ODE = 0: the module drives the released line high
+        (push-pull) while it is enabled (`lines_active()` of the block named by the signal prefix); the K22 RM §3.9.4
+        requires ODE for I2C. A disabled module does not drive the pin."""
+        periphs = getattr(self.chip, "peripherals", None) or {}
+        for part in owner.split("/"):
+            f = getattr(periphs.get(part.strip().split("_", 1)[0]), "lines_active", None)
+            if f is not None and f():
+                return True
+        return False
 
     def refresh_function(self, pred) -> None:
         """Re-derive owner/direction/drive of the pins muxed to a peripheral function (ALT2..7) for which
@@ -260,6 +275,8 @@ class PORT(GatedBlock):
                 self._gpio._on_mux_change()
         if mux_changed or (old ^ new) & (PE | PS):
             self._sync_pin(i, mux_changed=mux_changed)
+        if not mux_changed and (old ^ new) & ODE and (new & MUX_MASK) >> MUX_SHIFT >= 2:
+            self._sync_pin(i, mux_changed=True, quiet=True)      # open-drain enable of a peripheral pin
         irqc_old, irqc_new = (old >> IRQC_SHIFT) & 0xF, (new >> IRQC_SHIFT) & 0xF
         pin = self.pins[i]
         if irqc_old != irqc_new:

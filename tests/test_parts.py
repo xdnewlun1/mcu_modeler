@@ -621,3 +621,151 @@ parts:
 ''')
     bd = parse_board(d, base=ROOT)
     assert bd.parts[0].type == "quadrature_encoder" and bd.parts[0].params["ppr"] == 500
+
+
+# ------------------------------------------------------------------------------------------------ I2C devices
+class _BitBang:
+    """Open-drain I2C master made of two switches (L or Z) on part-only nets SDA/SCL: zero-delay bit banging."""
+
+    def __init__(self, b, pull=True):
+        self.b = b
+        b.add_part("MSDA", "switch", {"level": "Z"}, {"out": "SDA"})
+        b.add_part("MSCL", "switch", {"level": "Z"}, {"out": "SCL"})
+
+    def sda(self, v):
+        self.b.set_part("MSDA", level="Z" if v else "L")
+
+    def scl(self, v):
+        self.b.set_part("MSCL", level="Z" if v else "L")
+
+    def rd(self):
+        return 1 if self.b.net("SDA").level != "L" else 0
+
+    def start(self):
+        self.sda(1), self.scl(1), self.sda(0), self.scl(0)
+
+    def stop(self):
+        self.sda(0), self.scl(1), self.sda(1)
+
+    def write(self, byte):
+        for i in range(7, -1, -1):
+            self.sda(byte >> i & 1), self.scl(1), self.scl(0)
+        self.sda(1), self.scl(1)
+        ack = self.rd() == 0
+        self.scl(0)
+        return ack
+
+    def read(self, ack):
+        self.sda(1)
+        v = 0
+        for _ in range(8):
+            self.scl(1)
+            v = v << 1 | self.rd()
+            self.scl(0)
+        self.sda(0 if ack else 1), self.scl(1), self.scl(0), self.sda(1)
+        return v
+
+    def xfer(self, addr, wr=(), nread=0, stop=True):
+        self.start()
+        acks = [self.write(addr << 1)] + [self.write(x) for x in wr]
+        out = []
+        if nread:
+            self.start()                                   # repeated START
+            acks.append(self.write(addr << 1 | 1))
+            out = [self.read(k < nread - 1) for k in range(nread)]
+        if stop:
+            self.stop()
+        return acks, bytes(out)
+
+
+def test_i2c_parts_catalog_and_params():
+    cat = {c["type"]: c for c in catalog()}
+    assert cat["i2c_eeprom"]["ports"] == {"sda": "inout", "scl": "inout"}
+    assert cat["i2c_eeprom"]["params"]["address"] == 0x50 and cat["i2c_eeprom"]["params"]["twr"] == "5ms"
+    assert cat["i2c_register_device"]["ports"] == {"sda": "inout", "scl": "inout"}
+    ee = create("i2c_eeprom", "E", {"size": 2048, "address": "0x50"})
+    assert ee.addr_bytes == 1 and ee.blocks == 8 and ee.page == 16 and ee.params["address"] == "0x50"
+    assert create("i2c_eeprom", "E", {"size": 32768}).addr_bytes == 2
+    with pytest.raises(ValueError, match="power of two"):
+        create("i2c_eeprom", "E", {"size": 1000})
+    with pytest.raises(ValueError, match="multiple of 8"):
+        create("i2c_eeprom", "E", {"size": 2048, "address": 0x51})
+    with pytest.raises(ValueError, match="7-bit address"):
+        create("i2c_eeprom", "E", {"address": 0x90})
+    assert create("i2c_eeprom", "E").pull("sda") == "up" and create("i2c_eeprom", "E", {"pullup": False}).pull("sda") is None
+
+
+def test_open_drain_net_and_part_pullups():
+    b = _bare()
+    b.add_part("S1", "switch", {"level": "H"}, {"out": "BUS"})
+    b.add_part("S2", "switch", {"level": "L"}, {"out": "BUS"})
+    assert b.net("BUS").level == "X" and b.net("BUS").conflict          # push-pull H vs L
+    b.net("BUS").open_drain = True
+    b.net("BUS").update()
+    assert b.net("BUS").level == "L" and not b.net("BUS").conflict      # wired-AND
+    b.set_part("S2", level="Z")
+    assert b.net("BUS").level == "H"                                    # H drivers are released: pulled up
+    b2 = _bare()
+    b2.add_part("EE", "i2c_eeprom", {}, {"sda": "SDA", "scl": "SCL"})
+    assert b2.net("SDA").level == "H" and b2.net("SCL").level == "H"    # the breakout's pull-ups
+    b3 = _bare()
+    b3.add_part("EE", "i2c_eeprom", {"pullup": False}, {"sda": "SDA", "scl": "SCL"})
+    assert b3.net("SDA").level == "X"
+    # chip pins in an open-drain YAML net, exported back
+    bd = parse_board({"chips": [{"id": "A"}], "nets": [{"name": "SDA", "pins": ["A.PTB3"], "open_drain": True}]})
+    assert bd.nets[0].open_drain
+    s = Session.from_board(bd)
+    assert s.board.net("SDA").open_drain and s.chip.pins.get("PTB3").level() == "H"
+    assert yaml.safe_load(s.board.to_yaml())["nets"][0] == {"name": "SDA", "pins": ["A.PTB3"], "open_drain": True}
+    s.close()
+
+
+@needs_fw
+def test_i2c_eeprom_protocol_write_cycle_and_polling():
+    s = _session()
+    b = s.ensure_board()
+    ee = b.add_part("EE", "i2c_eeprom", {"init": "0123456789", "twr": "5ms"}, {"sda": "SDA", "scl": "SCL"})
+    m = _BitBang(b)
+    acks, data = m.xfer(0x50, [0x02], 4)                              # random read: dummy write + repeated START
+    assert all(acks) and data == b"2345"
+    acks, data = m.xfer(0x50, [], 2)                                  # current address read continues
+    assert data == b"67"
+    assert m.xfer(0x51, [])[0] == [False]                             # another address: NACK
+    acks, _ = m.xfer(0x50, [0x06, 0x41, 0x42, 0x43])                  # page write crossing 0x07 -> wraps in page
+    assert all(acks) and ee.busy and ee.dump(0, 10) == b"0123456789"
+    assert m.xfer(0x50, [])[0] == [False]                             # write cycle: no ACK (ack polling)
+    s.run_for(4.9e6)
+    assert ee.busy
+    s.run_for(0.2e6)
+    assert not ee.busy and ee.dump(0, 10) == b"C12345AB89"            # 0x06 A, 0x07 B, then 0x00 C (page roll)
+    assert m.xfer(0x50, [])[0] == [True]
+    acks, data = m.xfer(0x50, [0xFF], 2)                              # sequential read rolls over the array
+    assert data == b"\xffC"
+    acks, _ = m.xfer(0x50, [0x30])                                    # address only: no write cycle
+    assert not ee.busy and ee.state()["writes"] == 1
+    big = b.add_part("EE2", "i2c_eeprom", {"address": 0x54, "size": 8192}, {"sda": "SDA", "scl": "SCL"})
+    acks, _ = m.xfer(0x54, [0x12, 0x34, 0x5A])                        # two word-address bytes
+    assert all(acks) and big.busy
+    s.run_for(5.1e6)
+    assert big.dump(0x1234, 1) == b"\x5a"
+    s.close()
+
+
+@needs_fw
+def test_i2c_register_device_pointer_readonly_and_set():
+    s = _session()
+    b = s.ensure_board()
+    dev = b.add_part("D1", "i2c_register_device", {"address": 0x48, "regs": {0: 0x12, "0x01": 0x34, 0x0F: 0xEE},
+                                                    "readonly": [0]}, {"sda": "SDA", "scl": "SCL"})
+    m = _BitBang(b)
+    assert m.xfer(0x48, [0x00], 3)[1] == b"\x12\x34\x00"
+    acks, _ = m.xfer(0x48, [0x00, 0x99, 0x56, 0x78])                  # reg 0 is read-only
+    assert all(acks) and dev.regs[0:3] == [0x12, 0x56, 0x78] and dev.pointer == 3
+    assert m.xfer(0x48, [], 1)[1] == b"\x00"                          # read continues at the pointer
+    b.set_part("D1", reg=0x0F, value=0x5A)
+    assert m.xfer(0x48, [0x0F], 1)[1] == b"\x5a"
+    assert m.xfer(0x49, [])[0] == [False]
+    assert dev.state()["writes"] == 2
+    exported = {p["id"]: p for p in yaml.safe_load(b.to_yaml())["parts"]}
+    assert exported["D1"]["regs"] == {"0x00": 0x12, "0x01": 0x34, "0x0F": 0xEE} and exported["D1"]["readonly"] == [0]
+    s.close()

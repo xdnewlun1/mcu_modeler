@@ -77,10 +77,10 @@ clocks/GPIO/timers/UART are stubs.
 
 ## Peripherals
 
-**Stubs.** I2C0–2, USB0, USBDCD, CAN0, I2S0, CMT, SDHC, FlexBus, AXBS, AIPS, MPU, FMC and MCM have no
+**Stubs.** USB0, USBDCD, I2S0, CMT, SDHC, FlexBus, AXBS, AIPS, MPU, FMC and MCM have no
 behaviour. They read back what was written and start at 0, not at the SVD reset value. Firmware that waits for a
-status bit set by hardware (I2C byte complete) loops forever. The chip YAML's `model:` fields are the authoritative
-list. FTM0–3 (`kinetis.ftm`), CRC, DAC0, CMP0–2, VREF and EWM are modelled (below).
+status bit set by hardware loops forever. The chip YAML's `model:` fields are the authoritative
+list. FTM0–3 (`kinetis.ftm`), I2C0–2 (`kinetis.i2c`), CAN0 (`kinetis.flexcan`), CRC, DAC0, CMP0–2, VREF and EWM are modelled (below).
 
 **Analog values.** There is no analog level on the pin board: dedicated analog pins only change owner (the DAC0_OUT
 and VREF_OUT pins show owner `DAC0_OUT` / `VREF_OUT`, direction analog, while those outputs are on). Analog sources
@@ -109,7 +109,8 @@ Notes on the modelled peripherals:
 |---|---|
 | SIM | Clock-gate violations log one `warn` per peripheral; silicon bus-faults. Only the gated models check (PORT, ADC, FTFE, FTM, PDB, CRC, DAC0, CMP, VREF, EWM and others built on `GatedBlock`). |
 | MCG/OSC | No lock/settle delays; no loss-of-clock or loss-of-lock monitors; IRC trim registers stored only. |
-| PORT | Digital filter, slew rate, drive strength and open-drain (ODE) do not affect pin levels: an ODE output driving H shows H. IRQC DMA-request modes only set ISF. |
+| PORT | Digital filter, slew rate and drive strength do not affect pin levels. ODE matters only for I2C pins (without it an enabled I2C module drives the released line H, push-pull); a GPIO output with ODE driving H still shows H. IRQC DMA-request modes only set ISF. |
+| I2C0–2 | Pin-level bus (SDA/SCL toggle at the F register's rate, Table 48-54, 50 % duty; START/STOP/ACK, clock stretching and arbitration on board nets). Not modelled: 10-bit slave addresses (C2.ADEXT; a 10-bit master just sends the bytes), SMBus (SMB timeouts SLTF/SHTF, FACK = 1 behaves as FACK = 0, ALERTEN, PEC), A2 matching only with SIICAEN, the glitch filter (FLT.FLT stored), high drive (HDRS), SBRC, wake-up (WUEN) and stop holdoff (SHEN). Edges are instantaneous (no rise time); a slave answers at the SCL edge. |
 | GPIO | No electrical contention: an output always wins over external stimulus. Floating inputs read 0 (one `warn`). |
 | WDOG | The unlock window lasts at least 4096 core cycles (silicon: 256 bus clocks). Window violations and writes outside the unlock window log a `warn` instead of resetting. Test mode is not modelled. |
 | PIT | Lifetime timer (LTMR64) not modelled. Each channel timeout is a trigger for PDB0 (TRGSEL 4–7) and the ADC alternate trigger; DMAMUX periodic triggering is not modelled. |
@@ -161,9 +162,10 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
   per-stream IRQs, TEIF on bus errors and CCM RAM accesses. Transfers take zero bus time (run right after the access
   that triggered them), so DMEIF and FIFO overrun/underrun FEIF never occur; burst beats, bus-matrix contention and
   AHB/APB latencies are not modelled; PFCTRL (peripheral flow control) is not modelled (one `warn`, NDTR is used).
-  The USART, TIM (UP/CHx/TRIG) and ADC models raise DMA requests (`_util.dma_request`); SPI/I2C/DAC/SDIO are stubs
-  whose requests stay silent. On silicon DMA1's peripheral port reaches APB1 only (it is not on the bus
-  matrix); here every DMA1 port can address anything, and the AHB1ENR gate only warns on register access.
+  The USART, TIM (UP/CHx/TRIG), ADC, SPI (SPIx_TX/RX) and DAC (DAC1/DAC2) models raise DMA requests
+  (`_util.dma_request`); so does I2C (I2Cx_TX/RX, LAST), SDIO is a stub whose requests stay silent. On silicon
+  DMA1's peripheral port reaches APB1 only (it is not on the bus matrix); here every DMA1 port can address
+  anything, and the AHB1ENR gate only warns on register access.
 - **Timers** (TIM1–14, one `stm32.tim` model; TIM9–14 get 1–2 channels, up-counting and 16 bits from their SVD
   registers) model the time base, the update interrupt, output compare and PWM1/PWM2 driving TIMx_CHn / TIMx_CHnN
   pins (TIM1/8 complementary outputs, MOE/OSSI/OSSR idle states), input capture from pin edges (CCxS 01/10, edge
@@ -194,15 +196,55 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
   with CCR.TSVREFE/VBATE. Not modelled: injected channels (JSQR/JOFRx/JDRx/JSWSTART/JEXTEN, one `warn`), multi-ADC
   modes (CCR.MULTI, one `warn`; CDR reads 0), the EXTI11 trigger (one `warn`), CCR.DELAY, source impedance and
   sampling-capacitor effects.
-- **WWDG** is storage only (a `warn` when enabled); IWDG is modelled.
+- **SPI1–3** (`stm32.spi`, RM0090 ch. 28, SPI mode) are bit-level on the pins: a master toggles SCK (CPOL idle,
+  2^(BR+1) PCLK per bit, SPI1 on APB2, SPI2/3 on APB1), MOSI (CPHA edges, MSB/LSB first, 8/16 bits) and, with
+  SSOE=1 and SSM=0, NSS (low while SPE=1), samples MISO from its pin (H = 1, L/X = 0) or from a responder
+  (`--spi-flash SPI1:cs=PA4`, `responder(tx, pcs, bits)`); a slave (MSTR=0) shifts on the SCK pin edges while NSS
+  (pin, or SSI with SSM=1) is low and drives MISO only while selected, so two STM32s talk over board nets
+  (`boards/stm32_spi_pair.yaml`; keep the board quantum well below half an SCK period). Double buffering, TXE/RXNE/
+  BSY, OVR (DR then SR read clears), MODF (NSS low in master, SSM=1/SSI=0), CRCEN/CRCNEXT/CRCERR, RXONLY and
+  BIDIMODE master continuous clocking, IRQ and DMA requests are modelled. The TX buffer moves to the shift register
+  at once (no PCLK synchronisation delay) and back-to-back frames have no gap. A master frame with SCK/MOSI not
+  muxed still runs (flags/timing) but no device sees it (one `warn`). SCK/MOSI/NSS are released (float) while SPE=0.
+  A slave with an empty TX buffer resends its previous frame. Not modelled: I2S mode (one `warn`, idle), TI frame
+  format (one `warn`, Motorola timing), slave BIDIMODE, slave CRC, pin speed. The Kinetis DSPI stays frame-level.
+- **CRC** (`stm32.crc`): 32-bit words fed MSB first with polynomial 0x04C11DB7 (CRC-32/MPEG-2 over the word
+  stream; 0x12345678 → 0xDF8A8A2B), CR.RESET, IDR. Instantaneous. 8/16-bit DR writes are fed zero-extended with one
+  `warn` (the F4 unit has no byte enables).
+- **RNG** (`stm32.rng`): a new value 40 PLL48CLK periods after RNGEN and after each DR read (PLL48CLK = the main PLL's
+  Q output, 0 while PLLON=0); clock error (CECS/CEIS) when it is stopped or below HCLK/16. Values are deterministic
+  (seeded PRNG, `params.seed`) and never repeat consecutively; seed errors only through `inject_seed_error()`. The
+  HASH_RNG vector is shared with the (stub) HASH.
+- **DAC** (`stm32.dac`): two channels, DHR→DOR after 1 APB1 cycle (TEN=0) or 3 after a TIM6/8/7/5/2/4 TRGO trigger
+  (1 after SWTRIG), DHR8/12 R/L and dual registers, noise/triangle waves (LFSR taps after the RM figure, not checked
+  against silicon sequences), DMA requests with underrun (DMAUDR, the shared TIM6_DAC vector). The output is
+  `voltage()` + an `info` per change; PA4/PA5 show owner DAC_OUT1/2 in analog mode and the voltage is the pin's
+  analog value, so ADC channel 4/5 on that pin converts it (no internal DAC→ADC path exists on the F4). Not
+  modelled: the EXTI9 trigger (one `warn`), the output buffer (BOFF stored), settling time.
+- **WWDG** (`stm32.wwdg`): 7-bit counter at PCLK1/4096/2^WDGTB (prescaler phase starts at the last CR write),
+  reset at 0x40→0x3F, on a refresh above W and on a CR write with T6=0 (RCC_CSR.WWDGRSTF), EWIF at 0x40 with the
+  WWDG IRQ (EWI). Counts while the APB1 clock is on, also before WDGA (wrapping). DBGMCU freeze is not modelled.
+- **RTC** (`stm32.rtc`): BCD calendar (TR/DR/SSR, leap years, weekday, 12 h format, ADD1H/SUB1H) from LSE/LSI/
+  HSE÷RTCPRE with PRER prescalers, shadow registers (TR/SSR read locks DR; RSF set 2 RTCCLK after it is cleared;
+  BYPSHAD), WPR key protection, PWR_CR.DBP enforcement, INIT mode (INITF at once, not after 2 RTCCLK), alarms A/B
+  with MSK1–4 and WDSEL on EXTI line 17, the wakeup timer (WUCKSEL, WUTR) on EXTI line 22; the backup domain
+  (calendar, registers, BKP0R–19R) survives system resets and is cleared by RCC_BDCR.BDRST. RCC_BDCR changes are
+  seen at the next RTC access or event. Not modelled: sub-second alarm compare (MASKSS≠0: one `warn`), SHIFTR,
+  calibration (CALIBR/CALR stored), timestamp, tamper, RTC_AF1 outputs, REFCKON. RCC_BDCR itself ignores DBP.
 - RCC clock switches and PLL lock complete instantly; clock gates only `warn` on access to a gated-off block.
-- DAC, SPI, I2C, CAN, SDIO, USB, FSMC, RTC, RNG and CRC are RAM-like stubs.
+- CAN, SDIO, USB and FSMC are RAM-like stubs.
+- **I2C1–3** (`stm32.i2c`) is a pin-level bus. Not modelled: 10-bit slave addressing (OAR1.ADDMODE = 1 never
+  matches), SMBus (SMBUS/PEC/ALERT/ARP/TIMEOUT), BERR, analog/digital filters, rise time (TRISE stored only; edges are
+  instantaneous). OTYPER is not checked: I2C pins are always open drain. CR2.FREQ is only checked (one `warn` if it
+  differs from PCLK1); the timing comes from the real PCLK1. A START requested while another master holds the bus
+  waits for its STOP (no ARLO); arbitration during a transfer is detected bit by bit (ARLO). DMA LAST uses the RX
+  stream's NDTR when the ACK bit is driven.
 - **What ST's HAL meets** (`firmware/samples_stm32_hal`, STM32CubeF4 HAL 1.8.5): HSE/PLL ready flags follow their
   enable bits at once, so `HSE_STARTUP_TIMEOUT`/PLL timeouts never fire and a missing crystal cannot be simulated;
   the clock security system and `RCC_CIR` ready interrupts are not modelled. FLASH `ACR` latency, prefetch and
   caches are stored but cost nothing (1 cycle per instruction). `PWR_CSR.VOSRDY` is always 1. `HAL_UART_Transmit_DMA`/`HAL_UART_Receive_DMA` complete
-  (`firmware/samples_stm32_hal/uart_dma_hal.c`); `*_DMA` calls of peripherals that are still stubs (SPI, I2C,
-  DAC, SDIO) never complete.
+  (`firmware/samples_stm32_hal/uart_dma_hal.c`); `*_DMA` calls of peripherals that are still stubs (SDIO) never
+  complete.
   The checkout has no libc/compiler-rt for Cortex-M, so HAL builds must bring `memset`/`memcpy`, `__aeabi_memclr*`
   and `__aeabi_uldivmod` themselves (`firmware/samples_stm32_hal/aeabi_rt.c`, `startup.c`).
 
@@ -246,15 +288,33 @@ die, same peripheral list and models). In addition:
   `.ebss`/`.bss` are not zeroed by the loader (RAM resets to 0 anyway).
 - **EALLOW protection is enforced**: a write to a protected register without EALLOW is ignored (one `warn` per
   block), like silicon. Missing `EALLOW` in firmware shows up as configuration that does nothing.
-- **Storage only**: HRPWM, eCAN, I2C, McBSP, XINTF timing and DMA keep register values but have
+- **Storage only**: HRPWM, McBSP and XINTF timing keep register values but have
   no behaviour; SPI MISO reads 0xFFFF.
+- **I2C-A** (`ti_c2000.i2c`) is a pin-level bus on GPIO32/33 (SDAA/SCLA): module clock SYSCLKOUT/(IPSC+1) latched
+  at IRS = 1 (one `warn` outside 7-12 MHz), SCL low/high = Tmod x (ICCL/ICCH + d). Not modelled: START byte mode
+  (STB) and FREE (stored only); free data format and 10-bit addresses as a slave; I2CEMDR.BC stored only (slave-transmit
+  XRDY timing unchanged); noise filters and rise time; a slave byte arriving with I2CDRR full is ACKed and SCL is
+  then stretched (RSFULL) rather than NACKed; the SDA hold time is fixed at SCL low / 4 (SPRUG03 gives no value).
 - **ADC** (`ti_c2000.adc`) models the dual / cascaded sequencers with start/stop and continuous run (SEQ_OVRD),
   SEQ1-before-SEQ2 arbitration of the one converter, pending / lost triggers, software, ePWM SOCA/SOCB and external
   (XINT2 pin rising edge) starts, INT_MOD (every other end of sequence), simultaneous sampling, and conversion timing
   from HSPCLK / ADCCLKPS / CPS / ACQ_PS (SPRS439 latencies). Channel values come from `--adc` / `set_channel`, not
-  pin voltages. Not modelled: SUSMOD, the DMA sync of SEQ_OVRD + CONT_RUN, the few SYSCLKOUT between the last result
+  pin voltages. The SEQ1INT/SEQ2INT pulses (and the ADCSYNC of SEQ_OVRD + CONT_RUN) trigger the DMA, which clears
+  INT_SEQx. Not modelled: SUSMOD, the few SYSCLKOUT between the last result
   and the interrupt flag, the ADCCLK phase. Every ePWM SOCA / SOCB also pulses a pin muxed to ADCSOCAO / ADCSOCBO
   low for 32 HSPCLK cycles.
+- **DMA** (`ti_c2000.dma`, SPRUI07 ch. 8) models the six channels with every PERINTSEL trigger except McBSP (SEQ1INT /
+  SEQ2INT, XINT1-7 / XINT13, TINT0-2, ePWM1-6 SOCA/SOCB, PERINTFRC), PERINTFLG latching and overflow (OVRFLG,
+  OVRINTE), burst / transfer / wrap address generation with signed steps and active / shadow pointers, 16/32-bit
+  items, ONESHOT, CONTINUOUS (ping-pong from the shadows), DINTCHn at the beginning or end of a transfer, the ADCSYNC
+  re-synchronisation (SYNCE / SYNCSEL / SYNCERR, triggers ignored until the first sync after RUN), round-robin and
+  CH1 high-priority arbitration (preemption after the word in progress, PRIORITYSTAT), HALT / SOFTRESET / HARDRESET /
+  PRIORITYRESET and the DMAENCLK gate. Timing is SPRUI07 8.3: a burst of n items takes 1 + 4n SYSCLKOUT (5n for a
+  McBSP source) from the trigger; its data is written at the burst's last cycle (one event per burst), and CPU/DMA
+  access conflicts or XINTF stalls cost nothing. The DMA reaches only its bus (L4-L7, XINTF zones 0/6/7, the ADC
+  results at 0x0B00, McBSP data registers, ePWM registers remapped to PF3 with MAPCNF.MAPEPWM, where the CPU view is
+  not remapped); any other address is skipped with one `warn` per channel (no defined silicon behaviour). McBSP
+  events never trigger (McBSP is storage), DEBUGCTRL.FREE (emulation suspend) has no effect.
 - **ePWM** (`ti_c2000.epwm`) models time base (including TBCTR above TBPRD counting to 0xFFFF with TBSTS.CTRMAX),
   compare, action qualifier, dead band, PWM chopper (every carrier edge is an event: slow, one `warn`), trip zone
   (software and TZ1–TZ6 pins, one-shot and cycle-by-cycle), event trigger (INT, SOCA/SOCB), the F2833x sync scheme
@@ -299,7 +359,9 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
 
 - Levels are digital (H/L/X). There are no pin voltages: ADC inputs come from `--adc` / `set_channel` (on the STM32
   a channel without a value converts its pin's digital level, H = VREF+, L/X = 0 V).
-- Serial peripherals (UART, SPI, I2C) do not toggle pin levels with their traffic. Timer/PWM channels (STM32 TIM,
+- Serial peripherals (UART, Kinetis DSPI) do not toggle pin levels with their traffic; I2C does (pin-level bus,
+  `chipem/periph/i2cwire.py`) and the STM32 SPI does (bit by
+  bit, `stm32.spi`). Timer/PWM channels (STM32 TIM,
   Kinetis FTM, C2000 ePWM, eCAP in APWM mode) do: they drive their signal edge by edge through
   `PinBoard.drive_signal`, and the pin shows the live level. Timer inputs (input capture, eCAP, FTM faults and
   quadrature, TIM break, ePWM trip zones) are pin inputs and see every edge of their pin (`--at`, nets, parts). Otherwise a peripheral-owned pin shows the **idle** state of its signal from the family signal table (`chipem/periph/<family>/signals.py`, rule
@@ -311,17 +373,42 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   a TX→RX net creates).
 - Board lockstep: cross-chip effects (net edges, UART link bytes) can arrive up to one quantum (default 10 µs)
   late when the receiving chip is ahead in time.
+
+### CAN (chipem/canbus.py, `kinetis.flexcan`, `ti_c2000.ecan`)
+
+- **Bus.** Frames take their exact stuffed length (SOF..EOF, from the real bit stream and CRC-15) at the
+  transmitter's bit time plus 3 intermission bits; arbitration by the arbitration field (lowest wins, losers retry
+  after the winner); no ACK from any other active node = ACK error, 14-bit error frame, automatic retry; error-passive
+  senders wait 8 more bits. Arbitration and the ACK decision are instantaneous at fixed points (end of the previous
+  frame / ACK slot), so the controllers' internal arbitration windows (FlexCAN TASD, eCAN's 80-cycle copy) and the
+  move-in/move-out timing are not modelled; a decision taken on one chip is revised only while the winner's SOF bit
+  has not passed (lockstep quantum must stay below the shortest frame, ~47 bit times).
+- **Errors.** Frames on the emulated bus are never corrupted: no CRC, stuff, form or bit errors from noise, no
+  overload frames. A bit-rate mismatch (> 1.5 %) only makes that receiver count a form error and not acknowledge (on
+  a real bus its error flags would destroy the frame for everyone). A transmitter without its TX/RX pins muxed gets a
+  bit error per attempt (bus off after 32). Two nodes sending the same arbitration field at once are not detected
+  (the bus picks one). Bus-off recovery waits 128 x 11 bit times regardless of bus traffic.
+- **Pins.** CAN pins are not driven bit by bit: a `can` link joins the controllers; the TX pin shows its recessive
+  idle level. A chip description without a pin offering CANx_RX/CANRXx skips the pin check.
+- **FlexCAN:** no supervisor-mode access checks (SUPV), low-power stop / doze / self wake-up (WAKINT), BUSY code
+  bit, SMP/RJW effects, TASD, WRMFRZ; freeze and disable are acknowledged at once.
+- **eCAN:** no emulation suspend (SUSP/SMA), TCOF (TSC MSB overflow), SA1 after leaving init only cleared by the
+  first bus contact, no corruption on 16-bit accesses to the 32-bit-only registers.
+- **STM32 bxCAN** (CAN1/CAN2) is still a stub; a future `stm32.can` model joins the same bus by implementing the
+  node protocol (docs/CONTRACTS.md "CAN bus").
 - UART input (links, `--uart-in`, `--at TIME:UARTn=TEXT`, shell, web) is never queued for the firmware: each byte
   arrives at its stop-bit time and is taken or dropped as on silicon (`uart` events with `dir=drop` and a
   `reason`; the run summary counts them). Host input is paced at the receiving UART's current baud (115200 8N1
   while it has none). `--uart-in` starts at t=0, so bytes sent before the firmware has enabled its receiver are
   lost; use `--at` to type later. A chip with no pin offering a UART's RX function receives host input without a
   pin check but nothing over board links.
-- A net is a perfect wire: there is no propagation delay, drive strength or open-drain modelling. A peripheral
-  output contributes its idle (or, for a PWM channel, its live) level as a strong driver; a peripheral input or open-drain pin contributes only its
-  pull resistor.
+- A net is a perfect wire: there is no propagation delay or drive strength. A peripheral
+  output contributes its idle (or, for a PWM channel, its live) level as a strong driver; a peripheral input or a
+  released open-drain pin contributes only its pull resistor; an open-drain pin pulled low (I2C) is a strong L.
+  `open_drain: true` nets are wired-AND (H drivers count as released) with an implicit pull-up. There is no
+  resistor value, so no RC rise time and no "too weak pull-up" failure.
 - Pin identifiers come from the chip YAML's `gpio_name_format` (`PTC5`, `PA9`, `GPIO34`).
-- The idle level of a serial signal is fixed: a CPOL=1 SPI clock still shows L. PWM channels show their live level
+- The idle level of a serial signal is fixed: a CPOL=1 Kinetis DSPI clock still shows L (the STM32 SPI follows CPOL). PWM channels show their live level
   (100 % duty, FTM ELSnA / TIM CCxP / ePWM inversion included) while the timer drives them; a released channel
   (output disabled, module off) goes back to the drive the mux model set, the table's idle level. The idle state is
   applied whenever the owner changes and at reset (JTAG/SWD pins on Kinetis and STM32).
@@ -336,8 +423,12 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   flip-flop samples `d` as it is at the clock edge (an edge that changes `d` in the same event may see the old or
   new value depending on wiring order). Combinational loops are detected (16 re-resolutions of a net in one event),
   warned once and left at their last level, so ring oscillators do not oscillate.
-- No bus-level parts (I2C/SPI/UART devices are `devices:`/`links:`, not parts), and parts cannot carry UART bytes
-  (serial peripheral pins do not toggle with traffic).
+- I2C parts (`i2c_eeprom`, `i2c_register_device`) decode the bus from net edges; they never stretch SCL, answer at
+  the SCL edge (no output delay), support 7-bit addresses only, and the EEPROM has no write-protect pin, no
+  hardware address pins (the address is a parameter) and no endurance model. No SPI/UART parts (SPI flash is a
+  `devices:` entry, UART bytes travel over `links:`).
+- Cross-chip I2C needs a board quantum below the SCL low time (`quantum: 1us`; the I2C boards set it): with the
+  default 10 µs a slave on another chip may answer after the master sampled SDA.
 - Timed parts (pulse, pattern) run on the first chip's scheduler; other chips see their edges with the usual board
   lockstep latency (up to one quantum). A pulse faster than the board quantum still works but costs a slice cut per
   edge.
@@ -407,8 +498,8 @@ What it does not do yet:
   reads 0 mV. The software-triggered temperature-sensor read (ADCH 26) also reads 0.
 - **PTA13 floats.** It is an input with IRQC "logic 0", and with nothing connected it reads 0, so PORTA's
   ISF stays set. Drive it (e.g. `--set PTA13=1`) to mimic the board's idle level.
-- It references DWT, ITM, FPB, TPIU, I2C0/1, USB0 and CRC, all stubs. Code paths that depend on them (sensor
-  I2C, USB) will not behave. FTM0–2 are modelled (`kinetis.ftm`); its output with and without the FTM models was
+- It references DWT, ITM, FPB, TPIU, USB0 and CRC (stubs) and I2C0/1 (modelled, but its sensors are not on any
+  board: add `i2c_register_device` parts to answer them). USB code paths will not behave. FTM0–2 are modelled (`kinetis.ftm`); its output with and without the FTM models was
   identical in the PWM review run.
 - The 0x0–0x3FFF bootloader is not in the file. That region is erased flash (0xFF), so anything that calls
   into the bootloader would fault.

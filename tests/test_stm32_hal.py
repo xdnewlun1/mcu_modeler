@@ -199,3 +199,27 @@ def test_hal_uart_transmit_and_receive_dma():
     assert chip.peripherals["USART1"].rx_dropped == 0
     assert not [w for w in warns(chip) if "DMA" in w]
     s.close()
+
+
+# ------------------------------------------------------------------ I2C (HAL_I2C_* against the i2c_eeprom part)
+I2C_ELF = ROOT / "firmware" / "samples_stm32_hal" / "build" / "i2c_eeprom_hal.elf"
+
+
+def test_hal_i2c_mem_and_master_api_against_eeprom_part():
+    if not I2C_ELF.exists():
+        pytest.skip(f"{I2C_ELF} not built (firmware/samples_stm32_hal/build.sh)")
+    s = Session(YAML, I2C_ELF)
+    brd = s.ensure_board()
+    brd.quantum_ns = 1000.0
+    brd.add_net("SCL", [("A", "PB6")], open_drain=True)
+    brd.add_net("SDA", [("A", "PB7")], open_drain=True)
+    ee = brd.add_part("EE1", "i2c_eeprom", {}, {"sda": "SDA", "scl": "SCL"})
+    s.run_for(30e6)
+    out = s.uart_output("USART1").decode()
+    assert out == "I2C HAL\r\nMEM: HAL I2C!\r\nRX: I2C!\r\n0x77: none\r\n", out
+    assert ee.dump(0x20, 8) == b"HAL I2C!" and ee.writes == 1 and ee.naks > 0      # ack polling saw the NACKs
+    i2c = s.chip.peripherals["I2C1"]
+    assert i2c.get("CR2") & 0x3F == 42 and i2c.get("CCR") & 0xFFF == 210           # HAL_I2C_Init from PCLK1
+    assert i2c.baud() == pytest.approx(100e3)
+    assert not [e for e in s.events(kinds={"warn"})]
+    s.close()

@@ -6,7 +6,8 @@ timer interrupt (TINT0 → PIE 1.7, TINT1 → CPU INT13, TINT2 → CPU INT14; `p
 therefore (PRD + 1) × (TDDR + 1) cycles.  TCR: TSS (bit 4) stops/starts, TRB (bit 5, reads 0) reloads TIM from PRD
 and PSC from TDDR, TIF (bit 15) is cleared by writing 1, TIE (bit 14) enables the interrupt.  Timers run after reset
 (TIM = PRD = 0xFFFFFFFF).  The state is kept as an anchor (cycle, TIM, PSC) plus one scheduler event at the next
-reload, so polling TIM costs no events.
+reload, so polling TIM costs no events.  `tint_listeners` cb(index) are called with every interrupt pulse (DMA TINTn
+triggers).
 """
 from __future__ import annotations
 
@@ -41,6 +42,7 @@ class CpuTimer(C2000Block):
         self._tim0 = 0xFFFFFFFF    # TIM at the anchor
         self._psc0 = 0             # prescale counter at the anchor
         self.expiries = 0
+        self.tint_listeners: list = []   # cb(index) on every TINTn pulse (DMA triggers)
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -106,6 +108,8 @@ class CpuTimer(C2000Block):
         self.set("TCR", tcr)
         if tcr & TIE:
             self.pulse_irq(self.line)
+            for cb in list(self.tint_listeners):
+                cb(self.index)
         self._schedule()
 
     def period_cycles(self) -> int:

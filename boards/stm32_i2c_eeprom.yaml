@@ -1,0 +1,12 @@
+# STM32F405ZG I2C1 master (PB6 SCL / PB7 SDA, 100 kHz) + 24C02 EEPROM part at 0x50 on open-drain nets.
+# The firmware writes "Hello I2C!", acknowledge-polls the 5 ms write cycle and prints the read-back string on
+# USART1: "EEPROM: Hello I2C!".  quantum 1us: shorter than the SCL low time (boards with I2C).
+name: stm32_i2c_eeprom
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/i2c_eeprom.elf}
+nets:
+  - {name: SCL, pins: [A.PB6], open_drain: true}
+  - {name: SDA, pins: [A.PB7], open_drain: true}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 256, ports: {sda: SDA, scl: SCL}}

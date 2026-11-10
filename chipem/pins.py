@@ -59,6 +59,7 @@ class Pin:
     external: Level | None = None               # user stimulus; None = nothing connected
     fixed: Level | None = None                  # power pins: constant level (VDD -> H, VSS -> L)
     gpio_name_format: str = DEFAULT_GPIO_NAME_FORMAT   # from the chip description (chipdesc.PinDesc.gpio_name_format)
+    od_low: bool = False                        # an open-drain peripheral signal (I2C SDA/SCL) pulls the pin low
 
     @property
     def gpio_name(self) -> str | None:
@@ -80,6 +81,8 @@ class Pin:
     def level(self) -> Level:
         if self.fixed is not None:
             return self.fixed
+        if self.od_low:
+            return "L"
         if self.direction == "out":
             return self.drive if self.drive is not None else "X"
         if self.external is not None:
@@ -94,6 +97,8 @@ class Pin:
         bits = [f"{self.num:3d} {self.id:<10} {self.level()}", f"owner={self.owner}", f"dir={self.direction}"]
         if self.direction == "out":
             bits.append(f"drive={self.drive}")
+        if self.od_low:
+            bits.append("od=L")
         if self.pull:
             bits.append(f"pull={self.pull}")
         if self.external is not None:
@@ -168,6 +173,8 @@ class PinBoard:
         self.signal_levels: dict[str, Level] = {}
         self._signal_pins: dict[str, list[Pin]] = {}
         self._mux_drive: dict[int, Level | None] = {}       # pin num -> drive the mux model last asked for
+        # open-drain peripheral outputs (I2C SDA/SCL) currently pulling their pins low (drive_open_drain)
+        self.od_low: set[str] = set()
 
     # --- construction --------------------------------------------------
     @classmethod
@@ -278,7 +285,61 @@ class PinBoard:
             o, pin.pull = pin.pull, pull
             self._emit(pin, "pull", o, pull, t)
         self._level_changed(pin, old_level, t)
+        if self.od_low or pin.od_low:
+            self._od_sync(pin, t)
         return pin
+
+    # --- open-drain peripheral outputs (generic: names only) -----------------------------------------------------
+    def _od_want(self, pin: Pin) -> bool:
+        return pin.direction != "analog" and any(self.signal_matches(pin.owner, s) for s in self.od_low)
+
+    def _od_sync(self, pin: Pin, t: float) -> None:
+        want = self._od_want(pin)
+        if want != pin.od_low:
+            old = pin.level()
+            pin.od_low = want
+            self._level_changed(pin, old, t)
+            self._emit(pin, "od", not want, want, t)     # after the level: a board net re-resolves on this event
+
+    def drive_open_drain(self, name: str, low: bool) -> None:
+        """Open-drain peripheral output `name` (I2C "I2C0_SDA", "SCLA", ...): `low=True` pulls every pin currently
+        owned by it low (`Pin.od_low`: the pin reads L and is a strong L driver on a board net, whatever direction
+        its mux model reported); `low=False` releases it, and the pin shows what its mux model says again (an
+        open-drain role is an input: the level comes from the net, a pull or stimulus, else X). A pin muxed to the
+        signal later follows at once (mcu_update). Emits a PinEvent field "od" (old, new: bool) and the level
+        change, at instruction-precise time."""
+        low = bool(low)
+        if (name in self.od_low) == low:
+            return
+        if low:
+            self.od_low.add(name)
+        else:
+            self.od_low.discard(name)
+        t = None
+        for p in self.signal_pins(name):
+            if not self.signal_matches(p.owner, name):
+                continue
+            want = self._od_want(p)
+            if want != p.od_low:
+                if t is None:
+                    t = self._now()
+                old = p.level()
+                p.od_low = want
+                self._level_changed(p, old, t)
+                self._emit(p, "od", not want, want, t)  # after the level: a board net re-resolves on this event
+
+    def signal_level(self, name: str) -> Level | None:
+        """Wired-AND level of the pins currently owned by peripheral signal `name` (any L -> L, else H if one is H,
+        else X), or None when no pin carries the signal (not muxed)."""
+        out = None
+        for p in self.signal_pins(name):
+            if self.signal_matches(p.owner, name):
+                lvl = p.level()
+                if lvl == "L":
+                    return "L"
+                if out is None or lvl == "H":
+                    out = lvl
+        return out
 
     # --- peripheral output signals (generic: names only, no vendor knowledge) --------------------------------------
     @staticmethod
@@ -366,6 +427,7 @@ class PinBoard:
     def reset(self):
         """MCU reset: restore power-on owner/direction/drive/pull (external stimulus is kept). Emits events."""
         self.signal_levels.clear()
+        self.od_low.clear()
         for p in self.pins:
             owner, direction, drive, pull = self._initial[p.num]
             self.mcu_update(p, owner=owner, direction=direction, drive=drive, pull=pull)

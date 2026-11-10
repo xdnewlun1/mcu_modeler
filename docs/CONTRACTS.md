@@ -47,6 +47,14 @@ class PinBoard:
     def release_signal(self, name, idle=None)          # no longer driven: pins go to `idle`, else to the drive the mux
                                                        #   model last passed to mcu_update (the table's idle level)
     def signal_pins(self, name) -> list[Pin]           # pins offering `name` in any function (static, cached)
+    # open-drain peripheral outputs (I2C SDA/SCL; added with I2C, 2026-11-09)
+    od_low: set[str]                                   # open-drain signals currently pulling their pins low
+    def drive_open_drain(self, name, low: bool)        # low=True: every pin owned by `name` gets Pin.od_low (reads L,
+                                                       #   strong L driver on a net, whatever its direction); False:
+                                                       #   released, the pin shows its mux state again (an OD role is an
+                                                       #   input: net / pull / X). PinEvent field "od" (old, new bools)
+                                                       #   after the "level" event; mcu_update re-applies it on re-mux
+    def signal_level(self, name) -> Level | None       # wired-AND level of the pins owned by `name` (None: not muxed)
     @staticmethod
     def signal_matches(owner, name) -> bool            # owner carries name: equal, a '/'-part equal, or a '/'-part
                                                        #   "<name>_<LETTERS>[_<LETTERS>]" ("TIM2_CH1_ETR" carries "TIM2_CH1";
@@ -70,7 +78,7 @@ any `/`-part of the name; `TABLE.pin_state(fn) -> (direction, drive)`). It does 
 | SPI `SCK`/`MOSI`/`SOUT`/`SIMO`/`SPICLK` | out | L (CPOL not seen by the mux model) |
 | SPI `MISO`/`SIN`/`SOMI` | in | pull, else X |
 | SPI `PCS*`/`NSS`/`SPISTE*` | out | H |
-| I2C `SDA`/`SCL` (open-drain) | in | H when pulled up, else X |
+| I2C `SDA`/`SCL` (open-drain) | in | H when pulled up, else X; L while the controller pulls it (`drive_open_drain`) |
 | CAN TX / RX | out / in | H / pull |
 | PWM/timer channels (`FTMx_CHn`, `TIMx_CHn[N]`, `EPWMxA/B`) | out | L idle; the live level while the timer drives the signal (`drive_signal`) |
 | clock outputs (`CLKOUT`, `RTC_CLKOUT`, `XCLKOUT`, `MCOx`), trace clock/data | out | L |
@@ -82,6 +90,13 @@ The level does not follow serial traffic (UART bytes, SPI frames): it is the sig
 models are the exception: they call `PinBoard.drive_signal` at every output edge, and a pin owned by that signal
 shows the live level (see the drive override above) until `release_signal`. Nets treat a peripheral output like any
 driven output.
+
+STM32 GPIO hooks (`stm32.gpio`, AF/analog pins; the block is found by the signal's prefix, "SPI1" for "SPI1_MISO"):
+a peripheral may define `signal_driven(n, neg=False) -> bool | None` (stm32.tim: is TIMx_CHn[N] driven now; False
+shows the pin as an input) and `signal_state(sig) -> (direction, drive) | None` (live role overriding the table:
+stm32.spi master/slave directions, stm32.dac DAC_OUTx owning its analog-mode pin; None keeps the table role). When
+that answer changes the peripheral calls `GPIO.resync_signal(sig)` on every port (`_util.gpio_resync(chip, sig)`),
+which re-evaluates the AF (and analog) pins carrying `sig`, then `drive_signal`/`release_signal` for the live level.
 
 ## chipem/periph/base.py — MMIO blocks
 ```python
@@ -157,6 +172,8 @@ class Chip:              # runtime assembly: description + clock + sched + pins 
     clock, sched, pins, bus, core, arch, peripherals: dict[name, MMIOBlock], events (list), uart_out(name) ...
     def uart_blocks(self) -> dict[str, MMIOBlock]     # UART-like blocks: every model exposing `tx_listeners` (any family)
     def adc_blocks(self) -> dict[str, MMIOBlock]      # analog-input blocks: every model exposing set_channel(name, value)
+    def can_blocks(self) -> dict[str, MMIOBlock]      # CAN controllers: every model exposing can_attach(bus) (any family)
+    def find_can(self, name) -> str | None            # "CAN0"/"FlexCAN0"/"ECANA"/"eCAN-A"/"CANA" -> block name
     # analog-input model conventions (any family):
     #   set_channel(name, value) -> bool | None   value as below; False = not this block's channel
     #   set_input(name, value) -> bool            optional: resolve other names (pins "PA0", "ADC123_IN0", "CMP0_IN3");
@@ -173,7 +190,9 @@ Chip YAML keys: `name, core{arch, backend, cpu, fpu, clock_hz, addr_unit_bits}, 
 
 ## Events / logging
 All runtime observations go through `chip.log` (a `chipem.log.EventLog`): `log.event(kind, t_ns, **fields)` with kinds
-`pin`, `mmio`, `irq`, `uart`, `reset`, `fault`, `info`, `warn`. The CLI/VCD/web subscribe to it.
+`pin`, `mmio`, `irq`, `uart`, `can`, `reset`, `fault`, `info`, `warn`, `part`. The CLI/VCD/web subscribe to it.
+`can` (chipem/canbus.py, one per completed frame, on the transmitter's log): `{link, node, dir: "tx", id, ext, rtr,
+dlc, data: hex str, bits, sof_ns}`, `t_ns` = end of EOF; a failed attempt adds `err` ("ack" | "bit0") and `msg`.
 Subscribers receive every event. The stored history (`iter(log)`, `filter`, `Session.events`) bounds fast periodic
 pins: `EventLog(maxlen=1_000_000, *, pin_burst=1000, pin_dense_edges=20, pin_dense_ns=10e6, pin_wave_ns=100e6)`; a
 `pin` level event of a pin (keyed by `chip`, `pin`) with `pin_dense_edges` edges within `pin_dense_ns` is dense; after
@@ -252,13 +271,16 @@ class Board:
                                                # quantum); COUNT, USER (stop) or the first other stop reason (last_stop_chip)
     def stop(self)                             # thread-safe
     def now_ns(self) -> float                  # earliest chip time; skew_ns(): latest - earliest
-    def add_net(self, name, pins: [(cid, pin)], *, pull=None, drive=None) -> Net
+    def add_net(self, name, pins: [(cid, pin)], *, pull=None, drive=None, extend=False, open_drain=None) -> Net
     def add_uart_link(self, a: (cid, periph), b: (cid, periph), *, bidir=True) -> UartLink
     def set_pin(self, cid, pin, level)         # stimulus: net pin -> net.stimulus (strong), else pins.set_external
     def net_of(self, cid, pin) -> Net | None
     def warn(self, msg, *, t_ns=None, **fields)
-class Net:  level; conflict; conflicts; members [(cid, chip, pin)]; pull; drive; stimulus
-    # strong (outputs' drive, fixed pins, net drive, stimulus) > net pull > member pin pulls > X; H vs L -> X + one warn
+class Net:  level; conflict; conflicts; members [(cid, chip, pin)]; pull; drive; stimulus; open_drain
+    # strong (outputs' drive, pins with od_low = L, fixed pins, net drive, stimulus) > net pull > part port pulls
+    # (Part.pull) > open_drain implicit pull-up > member pin pulls > X; H vs L -> X + one warn
+    # open_drain=True (YAML `open_drain: true`, add_net(open_drain=)): wired-AND, any L driver wins, H drivers count as
+    # released, no conflict
     # per episode; level written to every member's `external` (scheduled at the source time on chips behind it)
 class UartLink: bytes_ab; bytes_ba; warned    # sender tx_listeners -> peer.receive() one sender character time later
                                               # (peer's scheduler); >3 % baud or frame mismatch -> one warn per link
@@ -364,7 +386,8 @@ live in `chipem/parts/` (`registry.py`: `@part("type")`, `create(type, id, param
   Timed parts use `board.sched_at_ns(t, cb)` / `board.sched_in_ns(dt, cb)` (board wall-clock domain) and must cancel on
   `reset()`.
 - Net rules: a part output port that returns a level is a strong driver (same strength as a chip push-pull output);
-  conflicts resolve to X as for pins. `Net.members` stays pins; part endpoints are in `Net.ports: list[(part, port)]`.
+  conflicts resolve to X as for pins. `pull(port) -> "up"|"down"|None` (default None) is a pull resistor on the
+  port: it sets the net level when nothing drives it (below the net's own `pull`, above chip pin pulls). `Net.members` stays pins; part endpoints are in `Net.ports: list[(part, port)]`.
   Combinational parts propagate with zero delay; the board guards loops (max 16 iterations per event, then a `warn`).
 - Standard types (params in parentheses, port names fixed):
   - inputs: `switch(level="L"|"H"|"X")` port `out`; `button(pressed="L", released="H", pressed=false)` port `out`;
@@ -375,6 +398,12 @@ live in `chipem/parts/` (`registry.py`: `@part("type")`, `create(type, id, param
   - logic: `not` (`in`,`out`), `buf`, `and`, `nand`, `or`, `nor`, `xor`, `xnor` (ports `in0..in{n-1}` with `inputs=2`
     default, `out`); `mux2` (`a`,`b`,`sel`,`out`); `dff(edge="rise")` (`d`,`clk`,`q`,`qn`; optional `rst`); `latch`
     (`d`,`en`,`q`). X on any input gives X out except where logic dominates (AND with an L in = L, OR with an H in = H).
+  - I2C devices (`chipem/parts/_i2c.py` base, open-drain ports `sda`/`scl` (inout, drive "L" or None), `address`,
+    `pullup=true` -> `pull()` "up" on both): `i2c_eeprom(address=0x50, size=256, page=auto, twr="5ms", fill=0xFF,
+    init="")` (24Cxx: 1 word-address byte up to 2 KiB with block bits in the device address, 2 above; page roll-over,
+    NACK during the write cycle, sequential/current-address reads; `mem`, `dump(at, n)`, `set(data=, at=)`) and
+    `i2c_register_device(address=0x48, regs={}, readonly=[], default=0)` (first written byte = register pointer,
+    auto-increment). They decode the bus with `chipem.periph.i2cwire.I2CTarget`.
 - Board YAML:
   ```yaml
   parts:
@@ -395,3 +424,46 @@ live in `chipem/parts/` (`registry.py`: `@part("type")`, `create(type, id, param
   `POST /api/part/set` `{id, values}`, `POST /api/part/remove` `{id}`, `POST /api/part/port` `{id, port, to}` (to =
   net name, `CHIP.PIN`, or null to disconnect). `GET /api/parts/types` lists `{type, params: {name: default}, ports:
   {name: dir}}` for the add-part dialog.
+
+## I2C bus engine (chipem/periph/i2cwire.py; 2026-11-09)
+Generic, shared by `kinetis.i2c`, `stm32.i2c`, `ti_c2000.i2c` and the I2C parts. Levels: L = 0; H, X and "no pin" = 1.
+```python
+class I2CTiming(low_ns, high_ns, hold_ns=0, su_sta_ns=0, hd_sta_ns=0, su_sto_ns=0, buf_ns=0)  # 0 -> high_ns / low/4
+class PinBus(chip, sda_sig, scl_sig, on_change(scl, sda))   # listens on signal_pins of both; set_sda/set_scl(low)
+class I2CMaster(chip, bus, timing: () -> I2CTiming, on_arb_lost=None)
+    start(done()) ; write(byte, done(acked), nbits=8) ; read(ack_fn() -> bool, done(byte, acked), nbits=8) ; stop(done())
+    abort(release=True); busy; owns_bus; scl_changed(scl)    # one operation at a time; SCL held low between them;
+    # releasing SCL waits for it to read high (stretching / clock sync); a sent 1 read as 0 -> on_arb_lost()
+class I2CTarget(handler, drive_sda(low), drive_scl(low))    # bus(scl, sda) on every change; hold()/release() SCL;
+    # send(byte) for a stretched transmit; handler: i2c_start(repeated), i2c_stop(), i2c_bus(busy),
+    # i2c_address(addr7, read) -> ack, i2c_rx_byte(b) -> ack (8th SCL fall), i2c_ack_done(read) -> stretch (9th fall),
+    # i2c_tx_byte() -> int | None (None = stretch), i2c_tx_ack(acked)
+class I2CPort(chip, sda_sig, scl_sig, handler, timing, on_arb_lost)  # bus + master + target, lines ORed; reset()
+```
+Family models expose `timing()`, `baud()` and, for pin models that need it, `lines_active()` (Kinetis PORT: an I2C
+pin without PCR.ODE is push-pull while the module is enabled). Cross-chip buses need a board quantum below the SCL
+low time (`quantum: 1us`).
+
+## CAN bus (chipem/canbus.py; 2026-11-09)
+Generic, vendor-free; shared by `kinetis.flexcan`, `ti_c2000.ecan` (and a future `stm32.can`).
+```python
+class CanFrame(ident, data=b"", *, ext=None, rtr=False, dlc=None, tag=None)  # .arb (lower wins), .bits (SOF..EOF
+    # incl. stuff bits), .stuff_bits, .crc; str() "123#DEADBEEF" / "123#R2"; parse_frame(str)
+class CanErrorCounters:  tec, rec, busoff, state ("active"|"passive"|"busoff"); tx_error(kind), tx_ok(), rx_error(),
+    rx_ok(), recover(), set(tec, rec), reset() -> set of transitions {"tx_warn", "rx_warn", "passive", "busoff", "active"}
+class CanBus(name, *, self_ack=False):
+    nodes, listeners (cb(bus, frame, info)), frames, error_frames, idle_ns
+    attach(node), detach(node), request(node, t=None), withdraw(node), node_reset(node)
+    activity(node, t) -> "tx" | "rx" | None ; transmitting(node) -> CanFrame | None
+    add_host(name="host", *, ack=True, chip=None) -> HostNode ; inject(frame | "ID#DATA", t_ns=None)
+pin_reason(chip, signal, cache) -> None | "pin_not_muxed"     # generic PinBoard owner check
+```
+Node protocol (every callback gets the bus first; see the module docstring): `chip`, `log`, `can_name`,
+`can_bit_ns()`, `can_tx_frame(bus)`, `can_tx_connected(bus)`, `can_tx_done(bus, frame, ok, err, t_sof_ns, t_ns)`,
+`can_rx_state(bus)` (None | "listen" | "active"), `can_rx(bus, frame, t_sof_ns, t_ns)`, `can_rx_error(bus, kind,
+t_ns)`, optional `can_error_passive()`. Controllers also expose `can_attach(bus)` / `can_detach()` (board links;
+`Chip.can_blocks()` finds them by this hook), `can_bus`, `bitrate()` and `can_stats()` -> `{bitrate, tx, rx, lost,
+tec, rec, state, bus}` (run summary). A controller not on a board bus sits alone on a private `CanBus(name)`.
+Board: `links: [{type: can, name?, nodes: [CHIP.CAN, ...], host?: bool}]` (short `{can: [...]}`) ->
+`Board.add_can_link(nodes, name=None, host=False) -> CanLink` (`can_links`, `can_bus(name)`, `CanLink.bus`,
+`to_dict()`); `LinkSpec.type == "can"` with `nodes`, `name`, `host`.

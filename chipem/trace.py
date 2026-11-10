@@ -330,7 +330,7 @@ def format_part_event(f: dict) -> str:
 
 
 class PinEventPrinter:
-    DEFAULT_KINDS = frozenset({"pin", "uart", "irq", "reset", "fault", "warn", "info"})
+    DEFAULT_KINDS = frozenset({"pin", "uart", "can", "irq", "reset", "fault", "warn", "info"})
 
     NOT_PERIPHERAL = frozenset({"GPIO", "disabled", "analog", "power", "special", None})
 
@@ -604,6 +604,12 @@ class PinEventPrinter:
         elif kind == "irq":
             name = f.get("name") or f.get("irq") or ""
             self._emit_t(ev.t_ns, f"{tag}IRQ {name} {msg or ''}".rstrip())
+        elif kind == "can" and "id" in f:
+            from .log import format_can
+            line = f"{tag}CAN {format_can(f)}"
+            if f.get("err") and msg:
+                line += f" ({msg.split(': ', 1)[-1]})"
+            self._emit_t(ev.t_ns, line)
         elif kind == "mmio" and not msg:
             reg = f.get("reg") or f"+0x{f.get('offset', 0):x}"
             acc = "W" if f.get("access") == "w" else "R"

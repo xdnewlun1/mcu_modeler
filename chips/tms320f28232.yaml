@@ -46,12 +46,12 @@ peripherals:
   - {name: CPUTIMER1, model: ti_c2000.cputimer, base: 0x0C08, size: 0x8, params: {index: 1}}
   - {name: CPUTIMER2, model: ti_c2000.cputimer, base: 0x0C10, size: 0x8, params: {index: 2}}
   - {name: PIE, model: ti_c2000.pie, base: 0x0CE0, size: 0x120}   # arch-owned (chipem/arch/c28x), incl. vectors
-  - {name: DMA, model: ti_c2000.storage, base: 0x1000, size: 0x200, params: {gate: DMAENCLK}}
+  - {name: DMA, model: ti_c2000.dma, base: 0x1000, size: 0x200, params: {gate: DMAENCLK}}   # 6 channels, DINTCH1-6 = PIE 7.1-7.6
   # Peripheral Frame 3
   - {name: MCBSPA, model: ti_c2000.storage, base: 0x5000, size: 0x40, params: {gate: MCBSPAENCLK}}
   # Peripheral Frame 1
-  - {name: ECANA, model: ti_c2000.storage, base: 0x6000, size: 0x200, params: {gate: ECANAENCLK}}
-  - {name: ECANB, model: ti_c2000.storage, base: 0x6200, size: 0x200, params: {gate: ECANBENCLK}}
+  - {name: ECANA, model: ti_c2000.ecan, base: 0x6000, size: 0x200, params: {gate: ECANAENCLK}}   # SPRUI07 ch. 13; mailboxes 0x6100
+  - {name: ECANB, model: ti_c2000.ecan, base: 0x6200, size: 0x200, params: {gate: ECANBENCLK}}   # mailboxes 0x6300
   - {name: EPWM1, model: ti_c2000.epwm, base: 0x6800, size: 0x40, params: {gate: EPWM1ENCLK, index: 1}}
   - {name: EPWM2, model: ti_c2000.epwm, base: 0x6840, size: 0x40, params: {gate: EPWM2ENCLK, index: 2}}
   - {name: EPWM3, model: ti_c2000.epwm, base: 0x6880, size: 0x40, params: {gate: EPWM3ENCLK, index: 3}}
@@ -73,7 +73,7 @@ peripherals:
   - {name: XINT, model: ti_c2000.xint, base: 0x7070, size: 0x10}
   - {name: ADC, model: ti_c2000.adc, base: 0x7100, size: 0x20}
   - {name: SCIB, model: ti_c2000.sci, base: 0x7750, size: 0x10}
-  - {name: I2CA, model: ti_c2000.storage, base: 0x7900, size: 0x40, params: {gate: I2CAENCLK}}
+  - {name: I2CA, model: ti_c2000.i2c, base: 0x7900, size: 0x40, params: {gate: I2CAENCLK}}
 
 # Interrupts by vector number (PIE INTx.y = 32 + 8(x-1) + (y-1), table at 0x0D00 + 2n; 13/14 = CPU INT13/INT14).
 # Peripheral models name their lines with these; `set_irq` also accepts "x.y".  Not on F28232: SCI-C (8.5/8.6),
@@ -124,10 +124,10 @@ irqs:
   97: SCITXINTA      # 9.2
   98: SCIRXINTB      # 9.3
   99: SCITXINTB      # 9.4
-  100: ECAN0_INTA
-  101: ECAN1_INTA
-  102: ECAN0_INTB
-  103: ECAN1_INTB
+  100: ECAN0INTA     # 9.5 eCAN-A line 0
+  101: ECAN1INTA     # 9.6
+  102: ECAN0INTB     # 9.7 eCAN-B line 0
+  103: ECAN1INTB     # 9.8
   120: XINT3         # 12.1
   121: XINT4
   122: XINT5

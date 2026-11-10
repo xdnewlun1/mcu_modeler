@@ -1,0 +1,212 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Mon Nov  9 18:25:00 2026
+
+OUTPUT FILE NAME:   <build/i2c_eeprom_coff.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00330000   0000ff80  00000269  0000fd17  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  0000001e  00000fe2  RWIX
+  RAML5                 0000d000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00330000    00000217     
+                  00330000    00000131     i2c_eeprom.obj (.text)
+                  00330131    00000054     rts2800_ml.lib : boot28.asm.obj (.text)
+                  00330185    00000029                    : exit.c.obj (.text)
+                  003301ae    00000024                    : cpy_tbl.c.obj (.text)
+                  003301d2    00000020                    : memcpy.c.obj (.text)
+                  003301f2    00000011                    : args_main.c.obj (.text)
+                  00330203    00000009                    : _lock.c.obj (.text)
+                  0033020c    00000008     codestart.obj (.text)
+                  00330214    00000002     rts2800_ml.lib : pre_init.c.obj (.text)
+                  00330216    00000001                    : startup.c.obj (.text)
+
+.cinit     0    00330250    0000001a     
+                  00330250    0000000e     rts2800_ml.lib : exit.c.obj (.cinit)
+                  0033025e    00000005                    : _lock.c.obj (.cinit:__lock)
+                  00330263    00000005                    : _lock.c.obj (.cinit:__unlock)
+                  00330268    00000002     --HOLE-- [fill = 0]
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000002     DSECT
+                  003fffc0    00000002     rts2800_ml.lib : boot28.asm.obj (.reset)
+
+.pinit     0    00330000    00000000     UNINITIALIZED
+
+.econst    0    00330218    00000038     
+                  00330218    00000029     i2c_eeprom.obj (.econst:.string)
+                  00330241    0000000f     i2c_eeprom.obj (.econst:.string:_message)
+
+.ebss      1    0000c000    0000001e     UNINITIALIZED
+                  0000c000    00000011     i2c_eeprom.obj (.ebss:_rx)
+                  0000c011    00000001     --HOLE--
+                  0000c012    00000006     rts2800_ml.lib : exit.c.obj (.ebss)
+                  0000c018    00000002                    : _lock.c.obj (.ebss:__lock)
+                  0000c01a    00000002                    : _lock.c.obj (.ebss:__unlock)
+                  0000c01c    00000002     i2c_eeprom.obj (.ebss)
+
+MODULE SUMMARY
+
+       Module            code   initialized data   uninitialized data
+       ------            ----   ----------------   ------------------
+    build/obj_coff/i2c_eeprom/
+       i2c_eeprom.obj    305    56                 19                
+       codestart.obj     10     0                  0                 
+    +--+-----------------+------+------------------+--------------------+
+       Total:            315    56                 19                
+                                                                     
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml.lib
+       boot28.asm.obj    84     0                  0                 
+       exit.c.obj        41     14                 6                 
+       cpy_tbl.c.obj     36     0                  0                 
+       memcpy.c.obj      32     0                  0                 
+       _lock.c.obj       9      10                 4                 
+       args_main.c.obj   17     0                  0                 
+       pre_init.c.obj    2      0                  0                 
+       startup.c.obj     1      0                  0                 
+    +--+-----------------+------+------------------+--------------------+
+       Total:            222    24                 10                
+                                                                     
+       Stack:            0      0                  768               
+    +--+-----------------+------+------------------+--------------------+
+       Grand Total:      537    80                 797               
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c012     300 (0000c000)     ___TI_enable_exit_profile_output
+0000c014     300 (0000c000)     ___TI_cleanup_ptr
+0000c016     300 (0000c000)     ___TI_dtors_ptr
+0000c018     300 (0000c000)     __lock
+0000c01a     300 (0000c000)     __unlock
+0000c01c     300 (0000c000)     _poll_count
+0000c01d     300 (0000c000)     _done
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     00330185  C$$EXIT                         
+1     00000700  __STACK_END                     
+abs   00000300  __STACK_SIZE                    
+1     0000c014  ___TI_cleanup_ptr               
+1     0000c016  ___TI_dtors_ptr                 
+1     0000c012  ___TI_enable_exit_profile_output
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+0     00330250  ___cinit__                      
+0     00330217  ___etext__                      
+abs   ffffffff  ___pinit__                      
+0     00330000  ___text__                       
+0     003301f2  __args_main                     
+1     0000c018  __lock                          
+0     0033020b  __nop                           
+0     00330207  __register_lock                 
+0     00330203  __register_unlock               
+1     00000400  __stack                         
+0     00330216  __system_post_cinit             
+0     00330214  __system_pre_init               
+1     0000c01a  __unlock                        
+0     00330185  _abort                          
+0     00330131  _c_int00                        
+0     003301ae  _copy_in                        
+1     0000c01d  _done                           
+0     00330187  _exit                           
+0     003300e6  _main                           
+0     003301d2  _memcpy                         
+1     0000c01c  _poll_count                     
+abs   ffffffff  binit                           
+0     00330250  cinit                           
+0     0033fff6  code_start                      
+0     00330217  etext                           
+abs   ffffffff  pinit                           
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     00330000  ___text__                       
+0     003300e6  _main                           
+0     00330131  _c_int00                        
+0     00330185  C$$EXIT                         
+0     00330185  _abort                          
+0     00330187  _exit                           
+0     003301ae  _copy_in                        
+0     003301d2  _memcpy                         
+0     003301f2  __args_main                     
+0     00330203  __register_unlock               
+0     00330207  __register_lock                 
+0     0033020b  __nop                           
+0     00330214  __system_pre_init               
+0     00330216  __system_post_cinit             
+0     00330217  ___etext__                      
+0     00330217  etext                           
+0     00330250  ___cinit__                      
+0     00330250  cinit                           
+0     0033fff6  code_start                      
+1     00000400  __stack                         
+1     00000700  __STACK_END                     
+1     0000c012  ___TI_enable_exit_profile_output
+1     0000c014  ___TI_cleanup_ptr               
+1     0000c016  ___TI_dtors_ptr                 
+1     0000c018  __lock                          
+1     0000c01a  __unlock                        
+1     0000c01c  _poll_count                     
+1     0000c01d  _done                           
+abs   00000300  __STACK_SIZE                    
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+abs   ffffffff  ___pinit__                      
+abs   ffffffff  binit                           
+abs   ffffffff  pinit                           
+
+[38 symbols]
