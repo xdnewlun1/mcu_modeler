@@ -1,4 +1,5 @@
-"""EventLog: the single stream of runtime observations (pin, mmio, irq, uart, can, reset, fault, info, warn, part).
+"""EventLog: the single stream of runtime observations (pin, mmio, irq, uart, can, i2s, reset, fault, info, warn,
+part).
 
 `log.event(kind, t_ns, **fields)` appends and notifies subscribers; CLI/VCD/web subscribe. See docs/CONTRACTS.md.
 
@@ -19,7 +20,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator
 
-KINDS = ("pin", "mmio", "irq", "uart", "can", "reset", "fault", "info", "warn", "part")
+KINDS = ("pin", "mmio", "irq", "uart", "can", "i2s", "reset", "fault", "info", "warn", "part")
 
 
 @dataclass

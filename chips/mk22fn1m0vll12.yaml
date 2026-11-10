@@ -17,18 +17,18 @@ memory:
 
 # armv7m.scs (0xE000E000, SysTick/NVIC/SCB) is created by the arch layer, not listed here.
 peripherals:
-  - {name: AIPS0, model: stub, base: 0x40000000, size: 0x1000}
-  - {name: AXBS, model: stub, base: 0x40004000, size: 0x1000}
+  - {name: AIPS0, model: kinetis.aips, base: 0x40000000, size: 0x1000}   # RM ch. 20 (no programming model; SVD regs)
+  - {name: AXBS, model: kinetis.axbs, base: 0x40004000, size: 0x1000}   # RM ch. 18
   - {name: DMA, model: kinetis.dma, base: 0x40008000, size: 0x2000}
-  - {name: FB, model: stub, base: 0x4000C000, size: 0x1000}
-  - {name: MPU, model: stub, base: 0x4000D000, size: 0x1000}
-  - {name: FMC, model: stub, base: 0x4001F000, size: 0x1000}
+  - {name: FB, model: kinetis.flexbus, base: 0x4000C000, size: 0x1000}   # RM ch. 31; gate SIM_SCGC7[FLEXBUS]
+  - {name: MPU, model: kinetis.mpu, base: 0x4000D000, size: 0x1000}   # RM ch. 19 (registers; checks not enforced)
+  - {name: FMC, model: kinetis.fmc, base: 0x4001F000, size: 0x1000}   # RM ch. 28
   - {name: FTFE, model: kinetis.ftfe, base: 0x40020000, size: 0x1000}
   - {name: DMAMUX, model: kinetis.dmamux, base: 0x40021000, size: 0x1000}
   - {name: CAN0, model: kinetis.flexcan, base: 0x40024000, size: 0x1000}   # RM ch. 46; 16 MBs, gate SIM_SCGC6[FLEXCAN0]
   - {name: SPI0, model: kinetis.dspi, base: 0x4002C000, size: 0x1000, params: {index: 0}}
   - {name: SPI1, model: kinetis.dspi, base: 0x4002D000, size: 0x1000, params: {index: 1}}
-  - {name: I2S0, model: stub, base: 0x4002F000, size: 0x1000}
+  - {name: I2S0, model: kinetis.sai, base: 0x4002F000, size: 0x1000}   # RM ch. 51; gate SIM_SCGC6[I2S]
   - {name: CRC, model: kinetis.crc, base: 0x40032000, size: 0x1000}
   - {name: USBDCD, model: stub, base: 0x40035000, size: 0x1000}
   - {name: PDB0, model: kinetis.pdb, base: 0x40036000, size: 0x1000}
@@ -50,7 +50,7 @@ peripherals:
   - {name: PORTE, model: kinetis.port, base: 0x4004D000, size: 0x1000, params: {port: E}}
   - {name: WDOG, model: kinetis.wdog, base: 0x40052000, size: 0x1000}
   - {name: EWM, model: kinetis.ewm, base: 0x40061000, size: 0x1000}
-  - {name: CMT, model: stub, base: 0x40062000, size: 0x1000}
+  - {name: CMT, model: kinetis.cmt, base: 0x40062000, size: 0x1000}   # RM ch. 41; gate SIM_SCGC4[CMT]
   - {name: MCG, model: kinetis.mcg, base: 0x40064000, size: 0x1000}
   - {name: OSC, model: kinetis.osc, base: 0x40065000, size: 0x1000}
   - {name: I2C0, model: kinetis.i2c, base: 0x40066000, size: 0x1000}
@@ -68,9 +68,9 @@ peripherals:
   - {name: PMC, model: kinetis.pmc, base: 0x4007D000, size: 0x1000}
   - {name: SMC, model: kinetis.smc, base: 0x4007E000, size: 0x1000}
   - {name: RCM, model: kinetis.rcm, base: 0x4007F000, size: 0x1000}
-  - {name: AIPS1, model: stub, base: 0x40080000, size: 0x1000}
+  - {name: AIPS1, model: kinetis.aips, base: 0x40080000, size: 0x1000}
   - {name: SPI2, model: kinetis.dspi, base: 0x400AC000, size: 0x1000, params: {index: 2}}
-  - {name: SDHC, model: stub, base: 0x400B1000, size: 0x1000}
+  - {name: SDHC, model: kinetis.sdhc, base: 0x400B1000, size: 0x1000}   # SD card host (--sd-card SDHC)
   - {name: FTM2, model: kinetis.ftm, base: 0x400B8000, size: 0x1000}
   - {name: FTM3, model: kinetis.ftm, base: 0x400B9000, size: 0x1000}
   - {name: ADC1, model: kinetis.adc, base: 0x400BB000, size: 0x1000, params: {index: 1}}
@@ -82,7 +82,8 @@ peripherals:
   - {name: GPIOC, model: kinetis.gpio, base: 0x400FF080, size: 0x40, params: {port: C}}
   - {name: GPIOD, model: kinetis.gpio, base: 0x400FF0C0, size: 0x40, params: {port: D}}
   - {name: GPIOE, model: kinetis.gpio, base: 0x400FF100, size: 0x40, params: {port: E}}
-  - {name: MCM, model: stub, base: 0xE0080000, size: 0x1000}
+  - {name: MCM, model: kinetis.mcm, base: 0xE0080000, size: 0x1000}   # RM ch. 17
+  - {name: FB_SPACE, model: kinetis.flexbus_space, base: 0x60000000, size: 0x80000000}   # FlexBus windows 0x6000_0000-0xDFFF_FFFF (Table 4-1), decoded by FB
 
 # External interrupt numbers (exception = 16 + n), MK22F12 header ordering.
 # SVD (MK22F12, which also covers larger K22 packages) peripherals that the 100-pin part does not have.

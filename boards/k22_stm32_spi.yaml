@@ -1,0 +1,22 @@
+# A Kinetis K22 DSPI master and an STM32F405 SPI slave on board nets, bit by bit (kinetis.dspi and stm32.spi both
+# toggle their pins edge by edge).
+#   A (MK22FN1M0VLL12) runs spi_master: SPI0 master, mode 0, 117 kHz (bus 60 MHz / 512), PCS0 on PTC4 asserted for
+#                      the whole 5-byte transaction (PUSHR.CONT); every 2 ms sends "hello" and prints
+#                      "M <n> WORLD" (what the slave shifted back) on UART0 (PTA2).
+#   B (STM32F405ZG)    runs spi_slave: SPI1 slave, NSS from PA4; answers "WORLD" and prints "S <n> hello" on USART1.
+# Nets: SCK (pulled down), MOSI = K22 SOUT -> STM32 MOSI, MISO = STM32 MISO -> K22 SIN (driven by the slave only
+# while selected, pulled up), NSS = K22 PCS0 (pulled up). The 1 us lockstep quantum is well below the 4.3 us SCK half
+# period and the 4.3 us tCSC, so the slave's first MISO bit is on the net before the K22 samples it.
+# Run:   chipem run --board boards/k22_stm32_spi.yaml --for 8ms
+#        chipem serve --board boards/k22_stm32_spi.yaml
+# Build: firmware/samples/build.sh; firmware/samples_stm32/build.sh
+name: k22_stm32_spi
+quantum: 1us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/spi_master.elf, clock_hz: 120000000}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/spi_slave.elf}
+nets:
+  - {name: SCK, pins: [A.PTC5, B.PA5], pull: down}
+  - {name: MOSI, pins: [A.PTC6, B.PA7]}
+  - {name: MISO, pins: [A.PTC7, B.PA6], pull: up}
+  - {name: NSS, pins: [A.PTC4, B.PA4], pull: up}

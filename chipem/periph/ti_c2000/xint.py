@@ -2,7 +2,7 @@
 
 XINTnCR: bit 0 ENABLE, bits 3:2 POLARITY (00/10 falling, 01 rising, 11 both).  The source pin is chosen in the GPIO
 block (GPIOXINT1SEL/2SEL/XNMISEL: GPIO0-31, GPIOXINT3..7SEL: GPIO32-63).  A qualifying edge of the source pin's level
-(X counts as low) pulses XINT1 → PIE 1.4, XINT2 → 1.5, XINT3..7 → 12.1..12.5 and resets the 16-bit counter, which
+after GPIO input qualification (`gpio.qual_listeners`, GPxQSEL sampling windows; X counts as low) pulses XINT1 → PIE 1.4, XINT2 → 1.5, XINT3..7 → 12.1..12.5 and resets the 16-bit counter, which
 then counts SYSCLKOUT cycles (XINT1CTR/XINT2CTR/XNMICTR, read-only).  XNMI (XNMICR: ENABLE, SELECT, POLARITY) pulses
 the NMI, and INT13 when SELECT = 1 (XINT13).  `int_listeners` cb(n) are called with every XINTn / XINT13 (n = 13)
 pulse (DMA triggers).
@@ -57,8 +57,9 @@ class XInt(C2000Block):
         board = getattr(self.chip, "pins", None)
         if board is None or self._gpio is None:
             return
+        ql = self._gpio.qual_listeners
         for pid, cb in self._listeners:
-            lst = board.input_listeners.get(pid)
+            lst = ql.get(pid)
             if lst is not None and cb in lst:
                 lst.remove(cb)
         self._listeners = []
@@ -67,18 +68,18 @@ class XInt(C2000Block):
             self._src[n] = pin
             if pin is None:
                 continue
-            self._level[n] = pin.level() == "H"
+            self._level[n] = self._gpio.qlevel(pin) == "H"
             cb = self._make_cb(n)
-            board.input_listeners[pin.id].append(cb)
+            ql.setdefault(pin.id, []).append(cb)
             self._listeners.append((pin.id, cb))
 
     def _make_cb(self, n: int):
-        def on_level(pin: Any, _n=n) -> None:
-            self._on_level(_n, pin)
+        def on_level(pin: Any, lvl: str, _n=n) -> None:
+            self._on_level(_n, pin, lvl)
         return on_level
 
-    def _on_level(self, n: int, pin: Any) -> None:
-        new = pin.level() == "H"
+    def _on_level(self, n: int, pin: Any, lvl: str) -> None:
+        new = lvl == "H"
         old = self._level.get(n, False)
         self._level[n] = new
         if new == old:
@@ -107,7 +108,7 @@ class XInt(C2000Block):
             n = 0 if reg.name == "XNMICR" else int(reg.name[4])
             pin = self._src.get(n)
             if pin is not None:
-                self._level[n] = pin.level() == "H"
+                self._level[n] = self._gpio.qlevel(pin) == "H"
             if new & 1:
                 self._edge_cycle[n] = self.chip.now_cycles()
         return None

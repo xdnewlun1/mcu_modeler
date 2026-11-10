@@ -4,9 +4,16 @@ at the lower address), 16- and 32-bit accesses allowed.
 * GPxMUX1/2: 2 bits per pin. 0 = GPIO, 1..3 = the pin's `MUX1`..`MUX3` function from the chip YAML (port C: MUX1 is
   still the GPIO, MUX2/MUX3 the XINTF signal). The pin's owner on the PinBoard follows; direction and idle drive of
   a peripheral signal come from the C2000 signal table (`signals.py`: SCITXD -> output idling H, SCIRXD -> input,
-  SDAA/SCLA -> open-drain, unknown -> "none"). Traffic does not toggle the pin.
+  SDAA/SCLA -> open-drain, unknown -> "none"). A block with mode-dependent pins (McBSP, SPI) overrides the static
+  role live through `owned_signals()` / `signal_state(sig)` (and calls `_util.gpio_resync` when it changes); blocks
+  that drive their signals edge by edge use PinBoard.drive_signal.
 * GPxDIR: 1 = output.  GPxPUD: 1 = pull-up disabled (reset: GPIO0-11 disabled, GPIO12-87 enabled).
 * GPxDAT read = resolved pin levels (H → 1; L/X → 0, a floating read logs one `warn` per pin); write = output latch.
+* Input qualification (SPRUI07 1.4.4, ports A/B): GPxQSEL = 1/2 (3/6 samples) with the sampling period from
+  GPxCTRL.QUALPRDn (2 x QUALPRD SYSCLKOUT, 1 if 0): a pin change reaches GPxDAT and XINT only after it has been
+  sampled 3/6 times in a row (first sample clock edge after the change + 2/5 periods); shorter glitches are filtered.
+  Synchronous (0) and asynchronous (3) inputs pass at once (the one-SYSCLKOUT synchronisation delay is not
+  modelled). Peripheral inputs (eCAP, eQEP, TZ, SCI, SPI, McBSP, ...) see the raw pin.
   GPxSET/CLEAR/TOGGLE: writing 1 sets/clears/toggles latch bits; they read 0.  Outputs drive the latch value when the
   pin is muxed to GPIO with DIR = 1.  DAT reads are cached and invalidated by input changes and configuration writes.
 * GPIOXINT1SEL/2SEL/XNMISEL pick GPIO0-31, GPIOXINT3..7SEL GPIO32-63 (value + 32) as external interrupt sources;
@@ -57,6 +64,9 @@ class GPIO(C2000Block):
             ov[f"GP{p}TOGGLE"] = {"on_write": self._toggle_write, "on_read": _zero}
         for n in ("GPIOXINT1SEL", "GPIOXINT2SEL", "GPIOXNMISEL", *(f"GPIOXINT{i}SEL" for i in range(3, 8))):
             ov[n] = {"on_write": self._sel_write}
+        for p in ("A", "B"):
+            for n in (f"GP{p}CTRL", f"GP{p}QSEL1", f"GP{p}QSEL2"):
+                ov[n] = {"on_write": self._qual_write}
         regs = build_regs((name, "GPIO"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self.pins: dict[str, list[Any]] = {p: [None] * 32 for p in PORTS}
@@ -65,6 +75,12 @@ class GPIO(C2000Block):
         self._warned_x: set[str] = set()
         self._rep: Any = None
         self._xint: Any = None
+        self._sig_owners: dict[str, Any] | None = None     # signal name -> block with signal_state (lazy)
+        # input qualification (ports A/B, GPxQSEL = 3 or 6 samples): pin id -> qualified level / pending event
+        self._qlvl: dict[str, str] = {}
+        self._qev: dict[str, Any] = {}
+        self._pos: dict[str, tuple[str, int]] = {}
+        self.qual_listeners: dict[str, list] = {}          # pin id -> [cb(pin, qualified level)] (XINT)
         # pin-discovery counters (kept across resets)
         self.n_reads = {p: 0 for p in PORTS}
         self.writes = {p: [0] * 32 for p in PORTS}
@@ -74,6 +90,7 @@ class GPIO(C2000Block):
     # ------------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
         super().attach(chip)
+        self._sig_owners = None
         board = getattr(chip, "pins", None)
         if board is not None:
             for p in PORTS:
@@ -81,6 +98,7 @@ class GPIO(C2000Block):
                     pin = board.gpio(p, i)
                     self.pins[p][i] = pin
                     if pin is not None:
+                        self._pos[pin.id] = (p, i)
                         board.input_listeners[pin.id].append(self._make_invalidator(p))
             try:
                 from ...pinreport import ensure
@@ -93,10 +111,91 @@ class GPIO(C2000Block):
 
     def _make_invalidator(self, port: str):
         def inv(pin: Any = None, _p=port) -> None:
+            if pin is not None and pin.id in self._qlvl:
+                self._qual_change(pin)
+                return
             self._dat[_p] = None
+            if pin is not None:
+                cbs = self.qual_listeners.get(pin.id)
+                if cbs:
+                    lvl = pin.level()
+                    for cb in list(cbs):
+                        cb(pin, lvl)
         return inv
 
+    # ------------------------------------------------------------------ input qualification (SPRUI07 1.4.4)
+    def qual_mode(self, port: str, i: int) -> tuple[int, int] | None:
+        """(samples, sampling period in SYSCLKOUT cycles) of a pin in sampling-window mode, else None (synchronous /
+        asynchronous: the change is seen at once)."""
+        if port not in ("A", "B"):
+            return None
+        q = (self.get(f"GP{port}QSEL{1 if i < 16 else 2}") >> (2 * (i & 15))) & 3
+        if q not in (1, 2):
+            return None
+        prd = (self.get(f"GP{port}CTRL") >> (8 * (i // 8))) & 0xFF
+        return (3 if q == 1 else 6), (2 * prd if prd else 1)
+
+    def qlevel(self, pin: Any) -> str:
+        """Level of `pin` after input qualification (what GPxDAT and XINT see)."""
+        return self._qlvl.get(pin.id) or pin.level()
+
+    def _qual_change(self, pin: Any) -> None:
+        """A qualified pin changed: the new level passes once it has been sampled `samples` times in a row, i.e. at
+        the first sampling instant after the change (sample clock aligned to SYSCLKOUT / (2 QUALPRD)) plus
+        (samples - 1) sampling periods; a change back before then is a glitch and is filtered out."""
+        ev = self._qev.pop(pin.id, None)
+        if ev is not None:
+            self.chip.sched.cancel(ev)
+        lvl = pin.level()
+        if lvl == self._qlvl.get(pin.id):
+            return
+        port, i = self._pos[pin.id]
+        n, ts = self.qual_mode(port, i) or (3, 1)
+        now = self.chip.now_cycles()
+        first = -(-now // ts) * ts
+        if first == now:
+            first += ts
+        self._qev[pin.id] = self.chip.sched.at_cycles(first + (n - 1) * ts, self._qual_commit, pin, lvl)
+
+    def _qual_commit(self, pin: Any, lvl: str) -> None:
+        self._qev.pop(pin.id, None)
+        if pin.id not in self._qlvl or pin.level() != lvl:
+            return
+        self._qlvl[pin.id] = lvl
+        self._dat[self._pos[pin.id][0]] = None
+        for cb in list(self.qual_listeners.get(pin.id) or ()):
+            cb(pin, lvl)
+
+    def _qual_write(self, blk, reg, old, new):
+        self._store(reg, new)
+        self._qual_sync(reg.name[2])
+        return None
+
+    def _qual_sync(self, port: str) -> None:
+        """Pins entering sampling-window mode start from their current level; pins leaving it see the pin at once."""
+        for i, pin in enumerate(self.pins[port]):
+            if pin is None:
+                continue
+            q = self.qual_mode(port, i)
+            if q is not None and pin.id not in self._qlvl:
+                self._qlvl[pin.id] = pin.level()
+            elif q is None and pin.id in self._qlvl:
+                old = self._qlvl.pop(pin.id)
+                ev = self._qev.pop(pin.id, None)
+                if ev is not None:
+                    self.chip.sched.cancel(ev)
+                lvl = pin.level()
+                if lvl != old:
+                    for cb in list(self.qual_listeners.get(pin.id) or ()):
+                        cb(pin, lvl)
+        self._dat[port] = None
+
     def reset(self) -> None:
+        if self.chip is not None:
+            for ev in self._qev.values():
+                self.chip.sched.cancel(ev)
+        self._qev.clear()
+        self._qlvl.clear()
         super().reset()
         for p in PORTS:
             self.latch[p] = 0
@@ -162,9 +261,35 @@ class GPIO(C2000Block):
                 return "GPIO", "out", ("H" if self.latch[port] >> i & 1 else "L"), pull
             return "GPIO", "in", None, pull
         d, drv = SIGNALS.pin_state(fn if fn != "reserved" else None)
-        if d == "out" and self._signal_released(fn):
+        live = self._live_state(fn) if fn != "reserved" else None
+        if live is not None:
+            d, drv = live
+        elif d == "out" and self._signal_released(fn):
             d, drv = "in", None
         return fn, d, drv, pull
+
+    def _live_state(self, fn: str) -> tuple[str, str | None] | None:
+        """Live (direction, drive) of pin function `fn` from the block that owns one of its '/'-parts: blocks with
+        bidirectional or mode-dependent pins (McBSP clocks / frame syncs, SPI master / slave) offer
+        `owned_signals()` and `signal_state(sig) -> (direction, idle drive) | None`; None keeps the static role."""
+        owners = self._sig_owners
+        if owners is None:
+            owners = {}
+            for b in (getattr(self.chip, "peripherals", None) or {}).values():
+                f = getattr(b, "owned_signals", None)
+                if f is not None and getattr(b, "signal_state", None) is not None:
+                    for s in f():
+                        owners[s] = b
+            self._sig_owners = owners
+        if not owners:
+            return None
+        for part in fn.split("/"):
+            b = owners.get(part.strip())
+            if b is not None:
+                st = b.signal_state(part.strip())
+                if st is not None:
+                    return st
+        return None
 
     def _signal_released(self, fn: str) -> bool:
         """Pin function `fn` (or one of its '/'-parts): does the owning block say it does not drive it now?"""
@@ -217,14 +342,42 @@ class GPIO(C2000Block):
         self.set(reg.name, new)
         rep = self._rep
         pc = rep.pc() if rep is not None else None
+        notify = []
         for i in pins:
             if i >= _PORT_NPINS[port]:
                 continue
+            if "MUX" in reg.name:
+                notify.append(self._owner_block(self._fn_of(port, i, old, reg.name)))
             self._sync_pin(port, i)
             pin = self.pins[port][i]
             if rep is not None and pin is not None:
                 rep.config(pin, self._describe(port, i, reg.name), pc)
+            if "MUX" in reg.name:
+                notify.append(self._owner_block(self.pin_function(port, i)))
         self._dat[port] = None
+        for b in dict.fromkeys(x for x in notify if x is not None):
+            f = getattr(b, "mux_changed", None)
+            if f is not None:
+                f()
+        return None
+
+    def _fn_of(self, port: str, i: int, old_mux: int, regname: str) -> str:
+        """Pin function of `port`/`i` under the previous value `old_mux` of mux register `regname`."""
+        m = (old_mux >> (2 * (i & 15))) & 3
+        pin = self.pins[port][i]
+        if not m or pin is None:
+            return "GPIO"
+        return pin.functions.get(f"MUX{m}") or ""
+
+    def _owner_block(self, fn: str) -> Any:
+        """Block owning a live-role signal of pin function `fn` (see `_live_state`), if any."""
+        if not fn or fn == "GPIO":
+            return None
+        self._live_state("")                               # build the owner map
+        for part in fn.split("/"):
+            b = (self._sig_owners or {}).get(part.strip())
+            if b is not None:
+                return b
         return None
 
     def _describe(self, port: str, i: int, regname: str) -> str:
@@ -314,10 +467,11 @@ class GPIO(C2000Block):
             return v
         v = 0
         new_x = []
+        ql = self._qlvl
         for i, pin in enumerate(self.pins[port]):
             if pin is None:
                 continue
-            lvl = pin.level()
+            lvl = (ql.get(pin.id) or pin.level()) if ql else pin.level()
             if lvl == "H":
                 v |= 1 << i
             elif lvl == "X" and self.is_gpio(port, i) and not self.get(f"GP{port}DIR") >> i & 1:

@@ -23,10 +23,7 @@ auto_stub_ranges: [[0x0800, 0x0FFF], [0x5000, 0x7FFF]]   # unmodelled PF0/PF1-3 
 memory:
   - {name: M0, base: 0x000000, size: 0x0400, kind: ram}        # M0 SARAM (first 0x40 words: M0 vectors, VMAP=0)
   - {name: M1, base: 0x000400, size: 0x0400, kind: ram}        # M1 SARAM; SP = 0x0400 after reset
-  - {name: XINTF0, base: 0x004000, size: 0x1000, kind: ram}    # XINTF zone 0 (external; RAM stub)
   - {name: L0L5, base: 0x008000, size: 0x6000, kind: ram}      # L0-L3 (secure, dual-mapped) + L4-L5 SARAM
-  - {name: XINTF6, base: 0x100000, size: 0x100000, kind: ram}  # XINTF zone 6 (1M x 16; RAM stub)
-  - {name: XINTF7, base: 0x200000, size: 0x100000, kind: ram}  # XINTF zone 7 (1M x 16; RAM stub)
   - {name: FLASH, base: 0x330000, size: 0x10000, kind: flash, fill: 0xFF}  # sectors D,C,B,A (16K each); 0x33FFF6 entry,
                                                                            # 0x33FFF8-0x33FFFF CSM password
   - {name: OTP, base: 0x380000, size: 0x0800, kind: rom, fill: 0xFF}       # ADC cal + PARTID (0x380080-0x380090),
@@ -41,21 +38,26 @@ peripherals:
   - {name: FLASHREGS, model: ti_c2000.flash, base: 0x0A80, size: 0x60, params: {regs: FLASH}}
   - {name: CSM, model: ti_c2000.csm, base: 0x0AE0, size: 0x10}
   - {name: ADCMIRROR, model: ti_c2000.adcmirror, base: 0x0B00, size: 0x10}
-  - {name: XINTF, model: ti_c2000.storage, base: 0x0B20, size: 0x20}
+  - {name: XINTF, model: ti_c2000.xintf, base: 0x0B20, size: 0x20}       # SPRUI07 ch. 14; zones below
+  - {name: XRESET_ALT, model: ti_c2000.alias, base: 0x083D, size: 0x1, params: {target: 0x0B3D}}  # SPRUI07's XRESET address
+  # XINTF zones (external memory attached by a board `devices: [{type: sram, bus: XINTF6, ...}]`; none: undriven bus)
+  - {name: XINTF0, model: ti_c2000.xintf_zone, base: 0x004000, size: 0x1000, params: {zone: 0}}    # 4K x 16, XZCS0
+  - {name: XINTF6, model: ti_c2000.xintf_zone, base: 0x100000, size: 0x100000, params: {zone: 6}}  # 1M x 16, XZCS6
+  - {name: XINTF7, model: ti_c2000.xintf_zone, base: 0x200000, size: 0x100000, params: {zone: 7}}  # 1M x 16, XZCS7
   - {name: CPUTIMER0, model: ti_c2000.cputimer, base: 0x0C00, size: 0x8, params: {index: 0}}
   - {name: CPUTIMER1, model: ti_c2000.cputimer, base: 0x0C08, size: 0x8, params: {index: 1}}
   - {name: CPUTIMER2, model: ti_c2000.cputimer, base: 0x0C10, size: 0x8, params: {index: 2}}
   - {name: PIE, model: ti_c2000.pie, base: 0x0CE0, size: 0x120}   # arch-owned (chipem/arch/c28x), incl. vectors
   - {name: DMA, model: ti_c2000.dma, base: 0x1000, size: 0x200, params: {gate: DMAENCLK}}   # 6 channels, DINTCH1-6 = PIE 7.1-7.6
   # Peripheral Frame 3
-  - {name: MCBSPA, model: ti_c2000.storage, base: 0x5000, size: 0x40, params: {gate: MCBSPAENCLK}}
+  - {name: MCBSPA, model: ti_c2000.mcbsp, base: 0x5000, size: 0x40, params: {gate: MCBSPAENCLK}}   # SPRUI07 ch. 12; MRINTA/MXINTA = PIE 6.5/6.6
   # Peripheral Frame 1
   - {name: ECANA, model: ti_c2000.ecan, base: 0x6000, size: 0x200, params: {gate: ECANAENCLK}}   # SPRUI07 ch. 13; mailboxes 0x6100
   - {name: ECANB, model: ti_c2000.ecan, base: 0x6200, size: 0x200, params: {gate: ECANBENCLK}}   # mailboxes 0x6300
-  - {name: EPWM1, model: ti_c2000.epwm, base: 0x6800, size: 0x40, params: {gate: EPWM1ENCLK, index: 1}}
-  - {name: EPWM2, model: ti_c2000.epwm, base: 0x6840, size: 0x40, params: {gate: EPWM2ENCLK, index: 2}}
-  - {name: EPWM3, model: ti_c2000.epwm, base: 0x6880, size: 0x40, params: {gate: EPWM3ENCLK, index: 3}}
-  - {name: EPWM4, model: ti_c2000.epwm, base: 0x68C0, size: 0x40, params: {gate: EPWM4ENCLK, index: 4}}
+  - {name: EPWM1, model: ti_c2000.epwm, base: 0x6800, size: 0x40, params: {gate: EPWM1ENCLK, index: 1, hrpwm: true, mep_step_ps: 150}}
+  - {name: EPWM2, model: ti_c2000.epwm, base: 0x6840, size: 0x40, params: {gate: EPWM2ENCLK, index: 2, hrpwm: true, mep_step_ps: 150}}
+  - {name: EPWM3, model: ti_c2000.epwm, base: 0x6880, size: 0x40, params: {gate: EPWM3ENCLK, index: 3, hrpwm: true, mep_step_ps: 150}}
+  - {name: EPWM4, model: ti_c2000.epwm, base: 0x68C0, size: 0x40, params: {gate: EPWM4ENCLK, index: 4, hrpwm: true, mep_step_ps: 150}}
   - {name: EPWM5, model: ti_c2000.epwm, base: 0x6900, size: 0x40, params: {gate: EPWM5ENCLK, index: 5}}
   - {name: EPWM6, model: ti_c2000.epwm, base: 0x6940, size: 0x40, params: {gate: EPWM6ENCLK, index: 6}}
   - {name: ECAP1, model: ti_c2000.ecap, base: 0x6A00, size: 0x20, params: {gate: ECAP1ENCLK, index: 1}}
@@ -68,7 +70,7 @@ peripherals:
   # Peripheral Frame 2
   - {name: SYSCTRL, model: ti_c2000.sysctrl, base: 0x7010, size: 0x20,
      params: {ext_hz: 20000000, boot_divsel: 2}}   # 20 MHz crystal: PLLCR=10, DIVSEL=/2 -> 100 MHz (TI 100 MHz setup)
-  - {name: SPIA, model: ti_c2000.spi, base: 0x7040, size: 0x10}
+  - {name: SPIA, model: ti_c2000.spi, base: 0x7040, size: 0x10, params: {gate: SPIAENCLK}}   # SPRUI07 ch. 9; SPIRXINTA/SPITXINTA = PIE 6.1/6.2
   - {name: SCIA, model: ti_c2000.sci, base: 0x7050, size: 0x10}
   - {name: XINT, model: ti_c2000.xint, base: 0x7070, size: 0x10}
   - {name: ADC, model: ti_c2000.adc, base: 0x7100, size: 0x20}

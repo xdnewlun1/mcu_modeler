@@ -161,7 +161,7 @@ def _print_can(session: Session, chip, cid, w, limit: int = 20) -> None:
     blocks = chip.can_blocks() if hasattr(chip, "can_blocks") else {}
     active = {n: b.can_stats() for n, b in blocks.items() if hasattr(b, "can_stats")}
     active = {n: st for n, st in active.items() if st["tx"] or st["rx"] or st["tec"] or st["rec"]
-              or st["state"] not in ("disabled", "init", "freeze", "active")}
+              or st["state"] not in ("disabled", "init", "freeze", "sleep", "active")}
     evs = [ev for ev in session.events(kinds={"can"}, chip=cid)]
     if not active and not evs:
         return

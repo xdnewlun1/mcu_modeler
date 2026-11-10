@@ -428,3 +428,40 @@ def test_can_echo_alone_with_host_node(name):
         assert e.rx_frames == 2 and e.rx_lost == 1 and e.errors.tec == 0
     finally:
         s.close()
+
+
+# ------------------------------------------------------------------------------------------------ McBSP SPI
+@pytest.mark.parametrize("name", ["mcbsp_spi.out", "mcbsp_spi_coff.out"])
+def test_mcbsp_spi_master_with_flash(name):
+    """firmware/samples_c2000_c/mcbsp_spi.c: McBSP-A in clock-stop mode (CLKSTP = 11b, 1 MHz, 8-bit packets) as an SPI
+    master; a SPI NOR flash with GPIO24 as chip select answers RDID, takes a page program and reads it back; MRINTA
+    counts every received word (21)."""
+    from chipem.devices.spi_flash import SpiNorFlash
+    from chipem.session import Session
+    s = Session("tms320f28232", _img(name), quiet=True)
+    try:
+        fl = SpiNorFlash(0xEF4016).attach(s.chip, "MCBSPA", cs="GPIO24")
+        s.run_for(15e6)
+        evs = s.events(kinds={"uart", "pin", "warn", "fault"})
+        m = s.chip.peripherals["MCBSPA"]
+        sent = list(m.sent)
+    finally:
+        s.close()
+    assert [t for _, t in _lines(evs)] == ["MCBSP SPI", "ID EF4016 DATA MCBS RINT 21"]
+    assert bytes(fl.mem[0x100:0x104]) == b"MCBS" and ("program", 0x100) in fl.ops
+    assert sent[:4] == [0x9F, 0, 0, 0] and len(sent) == 21
+    rises = [t for t, v in _edges(evs, "GPIO22") if v == "H"]
+    assert abs((rises[1] - rises[0]) - 0.001) < 1e-9                # 1 MHz SPICLK (times in ms)
+    assert not [e for e in evs if e.kind in ("warn", "fault")]
+
+
+def test_mcbsp_flash_board_yaml():
+    _img("mcbsp_spi.out")
+    from chipem.session import Session
+    s = Session.from_board(ROOT / "boards" / "c2000_mcbsp_flash.yaml", quiet=True)
+    try:
+        s.run_for(15e6)
+        lines = [t for _, t in _lines(s.events(kinds={"uart"}))]
+    finally:
+        s.close()
+    assert lines == ["MCBSP SPI", "ID EF4016 DATA MCBS RINT 21"]

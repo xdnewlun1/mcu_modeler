@@ -8,10 +8,11 @@ SPRUI07 Table 8-2's "i * E3h" channel stride is a typo).  Every register write i
 8-2 note); PCLKCR3.DMAENCLK gates the module.
 
 Triggers (MODE.PERINTSEL, SPRUI07 Table 8-9): 1 SEQ1INT, 2 SEQ2INT (ADC, the gated interrupt pulse: INT_ENA_SEQx),
-3-9 XINT1-7, 10 XINT13 (XNMI with XNMICR.SELECT), 11-13 TINT0-2 (TCR.TIE), 18 + 2(n-1) / 19 + 2(n-1) ePWMn SOCA /
-SOCB.  14-17 (McBSP-A/B MXEVT/MREVT) never fire: McBSP is register storage (one `warn` when such a channel is
-started); 0 and 30-31 have no source.  The models call back through their listener lists (adc.dma_listeners,
-epwm.soc_listeners, cputimer.tint_listeners, xint.int_listeners).  A trigger is latched in CONTROL.PERINTFLG when
+3-9 XINT1-7, 10 XINT13 (XNMI with XNMICR.SELECT), 11-13 TINT0-2 (TCR.TIE), 14/15 McBSP-A MXEVTA / MREVTA (XRDY / RRDY
+0 -> 1), 16/17 McBSP-B, 18 + 2(n-1) / 19 + 2(n-1) ePWMn SOCA / SOCB.  0, 30-31 and the events of a McBSP the part
+does not have (McBSP-B on the F28232) never fire (one `warn` when such a channel is started).  The models call back
+through their listener lists (adc.dma_listeners, epwm.soc_listeners, cputimer.tint_listeners, xint.int_listeners,
+mcbsp.dma_listeners).  A trigger is latched in CONTROL.PERINTFLG when
 MODE.PERINTE = 1 (also while the channel is stopped, as on silicon: firmware clears it with PERINTCLR before RUN); a
 trigger while PERINTFLG is still set is lost and sets OVRFLG (not PERINTFRC), which with OVRINTE and CHINTE pulses
 DINTCHn.  CONTROL.PERINTFRC latches a software trigger whatever PERINTSEL is.  A channel that takes an ADC trigger
@@ -168,6 +169,7 @@ class DMA(C2000Block):
         super().attach(chip)
         self._lines = [irq_line(chip, f"DINTCH{n}", f"7.{n}") for n in range(1, NCH + 1)]
         self._adc = find_model(chip, "ti_c2000.adc")
+        self._mcbsp: set[str] = set()
         for b in (getattr(chip, "peripherals", {}) or {}).values():
             m = getattr(b, "model", None)
             if m == "ti_c2000.adc" and hasattr(b, "dma_listeners"):
@@ -178,6 +180,9 @@ class DMA(C2000Block):
                 b.tint_listeners.append(self._on_timer)
             elif m == "ti_c2000.xint" and hasattr(b, "int_listeners"):
                 b.int_listeners.append(self._on_xint)
+            elif m == "ti_c2000.mcbsp" and hasattr(b, "dma_listeners"):
+                b.dma_listeners.append(self._on_mcbsp)
+                self._mcbsp.add(getattr(b, "letter", "A"))
 
     def reset(self) -> None:
         if self.chip is not None and self._ev is not None:
@@ -248,6 +253,10 @@ class DMA(C2000Block):
 
     def _on_xint(self, n: int) -> None:
         self.trigger(10 if n == 13 else 2 + n)
+
+    def _on_mcbsp(self, letter: str, which: str) -> None:
+        """McBSP MXEVTx (XRDY 0 -> 1) / MREVTx (RRDY 0 -> 1): PERINTSEL 14/15 (A), 16/17 (B)."""
+        self.trigger((14 if letter == "A" else 16) + (which == "R"))
 
     def trigger(self, code: int) -> bool:
         """A peripheral interrupt event `code` (MODE.PERINTSEL value).  Returns True if a channel received it
@@ -324,9 +333,10 @@ class DMA(C2000Block):
                     if m & SYNCE and m & PERINTSEL == 1 and not self._g(c, "CONTROL") & SYNCFLG:
                         c.wait_sync = True
                     sel = m & PERINTSEL
-                    if (14 <= sel <= 17 or sel >= 30) and not c.src_warned:
+                    mc = "AABB"[sel - 14] if 14 <= sel <= 17 else None
+                    if (mc is not None and mc not in self._mcbsp or sel >= 30) and not c.src_warned:
                         c.src_warned = True
-                        why = "McBSP events are not modelled (McBSP is register storage)" if sel <= 17 else \
+                        why = f"no McBSP-{mc} on this part" if sel <= 17 else \
                             "reserved, no peripheral connection"
                         self.emit("warn", block=self.name, msg=f"{self.name} CH{c.i + 1}: PERINTSEL {sel} "
                                   f"({SRC_NAMES.get(sel, 'reserved')}) never triggers: {why}")

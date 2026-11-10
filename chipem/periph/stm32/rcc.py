@@ -15,7 +15,8 @@ Whenever HCLK changes the model calls chip.clock.set_hz(HCLK) unless `frozen` (p
 different from the chip YAML, or chip.clock_override set by Session for --clock), like kinetis.mcg.
 `core_hz`, `apb1_hz`, `apb2_hz`, `timer_hz(bus)` are the derived values; `effective_apb_hz(bus)` /
 `effective_timer_hz(bus)` scale them to the clock the core actually runs at (what USART/TIM models use).
-Other models subscribe to clock-tree changes with `rcc.listeners.append(cb)` (cb() without arguments) and to clock
+Other models subscribe to clock-tree changes with `rcc.listeners.append(cb)` (cb() without arguments; also called when
+only PLL48CLK = PLLQ output starts, stops or changes) and to clock
 gate changes with `rcc.gate_listeners.append(cb)` (cb(enr_name, old, new) after a write that changes an xxxENR).
 
 Clock gates: AHB1ENR/AHB2ENR/AHB3ENR/APB1ENR/APB2ENR; `clock_enabled(name)` / `check_gate(name, block)` (one
@@ -88,6 +89,7 @@ class RCC(MMIOBlock):
         self.source = "HSI"
         self._warned: set[str] = set()
         self._logged: tuple | None = None
+        self._pll48 = 0.0                       # PLL48CLK last reported to listeners (SDIO, USB)
         self._powered = False
         self.pending_reset_flags = 0            # CSR flags the next reset sets (IWDG/WWDG/software)
 
@@ -259,8 +261,14 @@ class RCC(MMIOBlock):
         self.apb1_hz = self.core_hz / self.ppre(1)
         self.apb2_hz = self.core_hz / self.ppre(2)
         key = (round(self.core_hz), round(self.apb1_hz), round(self.apb2_hz), self.source)
+        pll48 = self.pll_q_hz() if self.get("CR") & PLLRDY else 0.0
         if key == self._logged:
+            if pll48 != self._pll48:                # PLL48CLK changed without a bus clock change
+                self._pll48 = pll48
+                for cb in list(self.listeners):
+                    cb()
             return
+        self._pll48 = pll48
         self._logged = key
         chip = self.chip
         if chip is not None and getattr(chip, "clock_override", None):

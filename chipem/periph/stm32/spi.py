@@ -42,7 +42,7 @@ Every frame is recorded in `frames` (tx, rx) and the transmitted words in `tx_by
 endian; not `output`, which marks UART-like blocks for Session.uart_output).
 Not modelled: I2S mode (I2SCFGR.I2SMOD = 1: one `warn`, the block does nothing in I2S mode), TI frame format
 (CR2.FRF: one `warn`, Motorola timing is used), slave BIDIMODE, the NSS pulse / inter-frame gaps of later families,
-pin speed / slew. The Kinetis DSPI (kinetis.dspi) is frame-level and does not toggle pins; only this model does.
+pin speed / slew. The Kinetis DSPI (kinetis.dspi) works the same way (boards/k22_stm32_spi.yaml).
 """
 from __future__ import annotations
 

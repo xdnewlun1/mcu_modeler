@@ -54,8 +54,8 @@ peripherals:
   - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400}
   - {name: I2C2, model: stm32.i2c, base: 0x40005800, size: 0x400}
   - {name: I2C3, model: stm32.i2c, base: 0x40005C00, size: 0x400}
-  - {name: CAN1, model: stub, base: 0x40006400, size: 0x400}
-  - {name: CAN2, model: stub, base: 0x40006800, size: 0x400}
+  - {name: CAN1, model: stm32.can, base: 0x40006400, size: 0x400}            # bxCAN master: owns the 28 filter banks
+  - {name: CAN2, model: stm32.can, base: 0x40006800, size: 0x400}            # bxCAN slave: needs the CAN1 clock
   - {name: PWR, model: stm32.pwr, base: 0x40007000, size: 0x400}
   - {name: DAC, model: stm32.dac, base: 0x40007400, size: 0x400}
   # APB2
@@ -67,7 +67,7 @@ peripherals:
   - {name: ADC2, model: stm32.adc, base: 0x40012100, size: 0x100}
   - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100}
   - {name: C_ADC, model: stm32.adc_common, base: 0x40012300, size: 0x400}   # ADC common registers (SVD extent 0x400)
-  - {name: SDIO, model: stub, base: 0x40012C00, size: 0x400}
+  - {name: SDIO, model: stm32.sdio, base: 0x40012C00, size: 0x400}   # SD card host (card: --sd-card / board devices)
   - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400}
   - {name: SYSCFG, model: stm32.syscfg, base: 0x40013800, size: 0x400}
   - {name: EXTI, model: stm32.exti, base: 0x40013C00, size: 0x400}
@@ -98,7 +98,7 @@ peripherals:
   - {name: HASH, model: stub, base: 0x50060400, size: 0x400}   # STM32F415/417 only
   - {name: RNG, model: stm32.rng, base: 0x50060800, size: 0x400}
   # AHB3
-  - {name: FSMC, model: stub, base: 0xA0000000, size: 0x1000}   # FSMC control registers
+  - {name: FSMC, model: stm32.fsmc, base: 0xA0000000, size: 0x1000}   # FSMC control registers; NE1-4 windows at 0x60000000
   # Cortex-M4 debug MCU
   - {name: DBGMCU, model: stm32.dbgmcu, base: 0xE0042000, size: 0x400}
 

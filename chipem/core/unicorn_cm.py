@@ -203,6 +203,14 @@ class UnicornCortexM(Core):
         self._mmio_keep.append((rd, wr))
         self.uc.mmio_map(base, size, rd, None, wr, None)
 
+    def map_shared(self, base: int, size: int, ptr: int, *, writable: bool = True) -> None:
+        perms = UC_PROT_READ | UC_PROT_EXEC | (UC_PROT_WRITE if writable else 0)
+        self.uc.mem_map_ptr(base, size, perms, ptr)
+
+    def unmap(self, base: int, size: int) -> None:
+        self.uc.mem_unmap(base, size)
+        self._safe_cache.clear()
+
     def set_unmapped_handler(self, fn):
         self._unmapped_handler = fn
 

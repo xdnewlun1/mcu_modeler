@@ -3,6 +3,7 @@
 #   main.c         -> build/uart_chat_hal.elf/.bin/.map  (chat protocol, HAL_UART_Receive_IT)
 #   uart_dma_hal.c -> build/uart_dma_hal.elf/.bin/.map   (HAL_UART_Transmit_DMA / HAL_UART_Receive_DMA)
 #   i2c_eeprom_hal.c -> build/i2c_eeprom_hal.elf/.bin/.map (HAL_I2C_Mem_Write/Mem_Read, Master_Transmit/Receive)
+#   sd_hal.c       -> build/sd_hal.elf/.bin/.map         (HAL_SD_Init / WriteBlocks / ReadBlocks / Erase, SDIO)
 # The HAL, startup and runtime objects are compiled once and linked into each sample.
 #
 # The HAL comes from ../vendor/STM32CubeF4 (STM32CubeF4 at a depth-1 sparse clone + its two submodules,
@@ -29,7 +30,7 @@ CFLAGS="$ARCH $DEFS $INC -Os -g -ffreestanding -nostdlib -fno-builtin -ffunction
 LDFLAGS="-T link.ld -fuse-ld=lld -nostdlib -Wl,--image-base=0x08000000 -Wl,-e,Reset_Handler -Wl,--gc-sections"
 HAL_SRCS="stm32f4xx_hal.c stm32f4xx_hal_cortex.c stm32f4xx_hal_rcc.c stm32f4xx_hal_rcc_ex.c stm32f4xx_hal_gpio.c
  stm32f4xx_hal_uart.c stm32f4xx_hal_dma.c stm32f4xx_hal_pwr.c stm32f4xx_hal_pwr_ex.c stm32f4xx_hal_flash.c
- stm32f4xx_hal_flash_ex.c stm32f4xx_hal_exti.c stm32f4xx_hal_i2c.c"
+ stm32f4xx_hal_flash_ex.c stm32f4xx_hal_exti.c stm32f4xx_hal_i2c.c stm32f4xx_hal_sd.c stm32f4xx_ll_sdmmc.c"
 mkdir -p build/obj
 objs=""
 for s in startup.c system_stm32f4xx.c aeabi_rt.c; do
@@ -42,7 +43,7 @@ for s in $HAL_SRCS; do
     $CC $CFLAGS -w -c "$HAL/Src/$s" -o "$o"      # vendor code: warnings silenced
     objs="$objs $o"
 done
-for pair in main.c:uart_chat_hal uart_dma_hal.c:uart_dma_hal i2c_eeprom_hal.c:i2c_eeprom_hal; do
+for pair in main.c:uart_chat_hal uart_dma_hal.c:uart_dma_hal i2c_eeprom_hal.c:i2c_eeprom_hal sd_hal.c:sd_hal; do
     src=${pair%%:*}
     name=${pair#*:}
     $CC $CFLAGS -Wall -Wextra -c "$src" -o "build/obj/${src%.c}.o"

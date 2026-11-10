@@ -15,6 +15,8 @@ Board description (`boards/<name>.yaml`, paths relative to the board file)::
       - {type: can, name: CANBUS, nodes: [A.CAN0, B.CAN0]}   # CAN bus (any number of nodes; short: {can: [..]})
     devices:
       - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}     # same options as --spi-flash
+      - {type: sram, chip: A, bus: XINTF6, size: 256K, width: 16}   # parallel SRAM on an external bus (chipem/devices)
+      - {type: sd_card, chip: A, host: SDIO, size: 64M, image: card.img}   # SD card; same options as --sd-card
     parts:                             # board parts (chipem/parts): port -> net name, or CHIP.PIN (anonymous net)
       - {id: SW1, type: switch, level: H, ports: {out: BTN}}
       - {id: LED1, type: led, active: L, ports: {in: A.PTC5}}
@@ -121,7 +123,7 @@ class LinkSpec:
 
 @dataclass
 class DeviceSpec:
-    type: str                           # "spi_flash"
+    type: str                           # "spi_flash" | "sram" | "sd_card"
     chip: str
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -315,14 +317,17 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
         if not isinstance(dv, dict):
             raise ValueError(f"board: device {i} must be a mapping")
         typ = str(dv.get("type", "")).lower()
-        if typ != "spi_flash":
-            raise ValueError(f"board: device {i}: unsupported type {typ!r} (supported: spi_flash)")
+        if typ not in ("spi_flash", "sram", "sd_card"):
+            raise ValueError(f"board: device {i}: unsupported type {typ!r} (supported: spi_flash, sram, sd_card)")
         cid, _ = split_qualified(f"{dv.get('chip', ids[0])}.x", ids)
         if cid is None:
             raise ValueError(f"board: device {i}: unknown chip {dv.get('chip')!r}")
         opts = {k: v for k, v in dv.items() if k not in ("type", "chip")}
         if opts.get("file"):
             opts["file"] = _resolve_path(opts["file"], base)
+        for k in ("image", "save"):                 # sd_card image / write-back file
+            if opts.get(k):
+                opts[k] = _resolve_path(opts[k], base)
         devices.append(DeviceSpec(type=typ, chip=cid, options=opts))
 
     parts: list[PartSpec] = []
@@ -398,6 +403,14 @@ def spi_flash_spec(dev: DeviceSpec) -> str:
     spi = str(o.pop("spi", "SPI0")).upper()
     parts = [f"{k}={v}" for k, v in o.items() if v is not None]
     return f"{spi}:{','.join(parts)}" if parts else spi
+
+
+def device_spec(dev: DeviceSpec, key: str, default: str) -> str:
+    """DeviceSpec -> "PERIPH:k=v,..." with PERIPH from option `key` (e.g. sram: bus=XINTF6)."""
+    o = dict(dev.options)
+    per = str(o.pop(key, default)).upper()
+    parts = [f"{k}={v}" for k, v in o.items() if v is not None]
+    return f"{per}:{','.join(parts)}" if parts else per
 
 
 # ------------------------------------------------------------------------------------------------ nets
@@ -1110,8 +1123,9 @@ class Board:
             devs = []
             for dv in self.desc.devices:
                 o = dict(dv.options)
-                if o.get("file"):
-                    o["file"] = path(o["file"])
+                for k in ("file", "image", "save"):
+                    if o.get(k):
+                        o[k] = path(o[k])
                 devs.append({"type": dv.type, "chip": dv.chip, **o})
             out["devices"] = devs
         if self.parts:

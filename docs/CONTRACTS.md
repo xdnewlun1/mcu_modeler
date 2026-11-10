@@ -190,9 +190,12 @@ Chip YAML keys: `name, core{arch, backend, cpu, fpu, clock_hz, addr_unit_bits}, 
 
 ## Events / logging
 All runtime observations go through `chip.log` (a `chipem.log.EventLog`): `log.event(kind, t_ns, **fields)` with kinds
-`pin`, `mmio`, `irq`, `uart`, `can`, `reset`, `fault`, `info`, `warn`, `part`. The CLI/VCD/web subscribe to it.
+`pin`, `mmio`, `irq`, `uart`, `can`, `i2s`, `reset`, `fault`, `info`, `warn`, `part`. The CLI/VCD/web subscribe to it.
 `can` (chipem/canbus.py, one per completed frame, on the transmitter's log): `{link, node, dir: "tx", id, ext, rtr,
 dlc, data: hex str, bits, sof_ns}`, `t_ns` = end of EOF; a failed attempt adds `err` ("ack" | "bit0") and `msg`.
+`i2s` (kinetis.sai, one per `event_frames` frames and direction, at the end of the last frame): `{block, dir: "tx" |
+"rx", frames, words: [channel 0 FIFO words of those frames, at most 64], bits (word 0 width), msg}`; the samples
+themselves stay in the model (`tx_words` / `rx_words`) and in board parts (`i2s_codec.frames`).
 Subscribers receive every event. The stored history (`iter(log)`, `filter`, `Session.events`) bounds fast periodic
 pins: `EventLog(maxlen=1_000_000, *, pin_burst=1000, pin_dense_edges=20, pin_dense_ns=10e6, pin_wave_ns=100e6)`; a
 `pin` level event of a pin (keyed by `chip`, `pin`) with `pin_dense_edges` edges within `pin_dense_ns` is dense; after

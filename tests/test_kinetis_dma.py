@@ -155,6 +155,9 @@ def test_dspi_with_spi_flash():
         for i, b in enumerate(data):
             last = i == len(data) - 1
             bus.write(SPI0 + 0x34, 4, (0 if last else 1 << 31) | b)
+            assert not bus.read(SPI0 + 0x2C, 4) & (1 << 17)  # the frame takes time: RFDF not yet set
+            chip.run_for(150e3)                     # bus 0.5 MHz, SCK = bus/4, 16-bit frames (CTAR0 reset): 136 us
+            assert bus.read(SPI0 + 0x2C, 4) & (1 << 17)
             out.append(bus.read(SPI0 + 0x38, 4) & 0xFF)
         return bytes(out)
 
@@ -165,7 +168,9 @@ def test_dspi_with_spi_flash():
     assert dev.mem[0x200:0x202] == b"\x12\x34" and dev.ops[-1] == ("program", 0x200)
     sr = bus.read(SPI0 + 0x2C, 4)
     assert sr & (1 << 30) and sr & (1 << 31)                # TXRXS, TCF
-    bus.write(SPI0 + 0x34, 4, (1 << 27) | 0x05)             # EOQ stops the module
+    bus.write(SPI0 + 0x34, 4, (1 << 27) | 0x05)             # EOQ stops the module at the end of its frame
+    assert bus.read(SPI0 + 0x2C, 4) & (1 << 30)
+    chip.run_for(150e3)
     assert not bus.read(SPI0 + 0x2C, 4) & (1 << 30)
     bus.write(SPI0 + 0x2C, 4, 1 << 28)                      # clear EOQF -> running again
     assert bus.read(SPI0 + 0x2C, 4) & (1 << 30)

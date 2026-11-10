@@ -82,6 +82,15 @@ class Core(ABC):
     def map_mmio(self, base: int, size: int, read: Callable[[int, int], int],
                  write: Callable[[int, int, int], None]) -> None: ...
 
+    def map_shared(self, base: int, size: int, ptr: int, *, writable: bool = True) -> None:
+        """Map `size` bytes at `base` onto host memory at address `ptr` (several mappings may share one buffer:
+        mirrored external memories). Optional: cores without it raise NotImplementedError."""
+        raise NotImplementedError
+
+    def unmap(self, base: int, size: int) -> None:
+        """Remove a mapping made with map_memory / map_mmio / map_shared (also from inside an MMIO callback)."""
+        raise NotImplementedError
+
     def set_unmapped_handler(self, fn: Callable[[int, int, str], bool] | None) -> None:
         """fn(addr, size, access 'r'|'w'|'x') -> True if it mapped something and the access should be retried."""
 

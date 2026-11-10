@@ -183,7 +183,10 @@ def test_withings_console_answers_help():
     s.apply_stimulus(r"100ms:UART2=help\r\n")       # the shell is up at ~35 ms; earlier bytes would be dropped
     s.run_for(5e9)
     out = s.uart_output("UART2")
-    assert b"UART IS CONNECTED" in out and b"boot_trace" in out and out.rstrip().endswith(b"shell>")
+    # (SPI transfers take real time, so another task's log line may interleave with the banner)
+    import re
+    banner = re.sub(rb"\[VAS\][^\r]*\r\n", b"", out)
+    assert b"UART IS CONNECTED" in banner and b"boot_trace" in out and out.rstrip().endswith(b"shell>")
     assert not [e for e in s.chip.log if e.kind in ("warn", "fault")]
     assert not [e for e in s.chip.log if e.kind == "uart" and e.get("dir") == "drop"]
 

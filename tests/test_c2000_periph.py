@@ -586,8 +586,10 @@ def test_csm_flash_spi_storage(chip):
     assert rd(chip, 0x0A86) == 0x0F0F                      # FBANKWAIT reset
     wr(chip, 0x0A86, 0x0303)
     assert rd(chip, 0x0A86) == 0x0303
-    wr(chip, 0x7040, 0x0087)                              # SPICCR: SPISWRESET, 8 bit
+    wr(chip, 0x7041, 0x0006)                              # SPICTL: master, TALK
+    wr(chip, 0x7040, 0x0097)                              # SPICCR: SPISWRESET, loopback, 8 bit
     wr(chip, 0x7048, 0x5500)
-    assert rd(chip, 0x7042) & 0x40 and rd(chip, 0x7047) == 0xFFFF
+    chip.run_cycles(200)                                  # 8 bits x LSPCLK/4 (16 cycles each)
+    assert rd(chip, 0x7042) & 0x40 and rd(chip, 0x7047) & 0xFF == 0x55
     assert rd(chip, 0x6800) == 0x0083                      # ePWM1 TBCTL reset value (storage)
     assert rd(chip, 0x7400) == 0                           # unmapped PF2 word → auto stub

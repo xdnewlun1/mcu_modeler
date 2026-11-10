@@ -315,3 +315,229 @@ def test_cli_adc_volts_on_stm32():
                        capture_output=True, text=True, cwd=ROOT, timeout=120)
     assert r.returncode == 0, r.stderr
     assert "rejected" not in r.stdout + r.stderr and "stored only" not in r.stdout + r.stderr
+
+
+# ------------------------------------------------------------------------------------------------ injected group
+JOFR1, JSQR, JDR1, CDR = 0x14, 0x38, 0x3C, 8
+JEOC, JSTRT = 4, 8
+JEOCIE, JAUTO, JDISCEN, JAWDEN = 1 << 7, 1 << 10, 1 << 12, 1 << 22
+JSWSTART = 1 << 22
+INJ12 = 2 * (3 + 3 + 12)           # tlatinj 3 + 3 sampling + 12 bits, ADCCLK = 2 core cycles
+CONV = 2 * (3 + 12)                # one conversion, back to back
+
+
+def jsqr(*chs):
+    """JSQR for the sequence chs (1-4 channels): the last len(chs) JSQx fields, JL = len - 1."""
+    v = (len(chs) - 1) << 20
+    for k, ch in enumerate(chs):
+        v |= ch << (5 * (4 - len(chs) + k))
+    return v
+
+
+def _times(chip, adc, name):
+    out = []
+    orig = getattr(adc, name)
+    setattr(adc, name, lambda: (out.append(chip.now_cycles()), orig()))
+    return out
+
+
+def test_injected_sequence_offsets_alignment_and_jeoc(desc):
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    for ch, code in ((1, 1000), (2, 2000), (3, 3000)):
+        adc.set_channel(ch, code)
+    wr(chip, ADC1 + JSQR, jsqr(1, 2, 3))
+    assert rd(chip, ADC1 + JSQR) == (2 << 20) | (1 << 5) | (2 << 10) | (3 << 15)
+    wr(chip, ADC1 + JOFR1 + 4, 2500)                                # JOFR2
+    wr(chip, ADC1 + CR1, SCAN | JEOCIE)
+    wr(chip, ADC1 + CR2, ADON)
+    t0 = chip.now_cycles()
+    wr(chip, ADC1 + CR2, ADON | JSWSTART)
+    assert rd(chip, ADC1 + CR2) & JSWSTART == 0 and rd(chip, ADC1 + SR) == JSTRT
+    sr = _probe(chip, [t0 + INJ12 + 2 * CONV - 1, t0 + INJ12 + 2 * CONV + 1], ADC1 + SR)
+    chip.run_cycles(200)
+    assert sr == [JSTRT, JSTRT | JEOC] and _irq(chip)              # JEOC only at the end of the sequence, no EOC
+    assert [rd(chip, ADC1 + JDR1 + 4 * k) for k in range(3)] == [1000, (2000 - 2500) & 0xFFFF, 3000]
+    assert rd(chip, ADC1 + SR) & JEOC                              # JDR reads do not clear JEOC
+    wr(chip, ADC1 + SR, ~JEOC & 0x3F)
+    assert not _irq(chip)
+    wr(chip, ADC1 + CR2, ADON | ALIGN | JSWSTART)                  # left: one bit less than regular, sign in bit 15
+    chip.run_cycles(200)
+    assert [rd(chip, ADC1 + JDR1 + 4 * k) for k in range(3)] == [1000 << 3, (-500 << 3) & 0xFFFF, 3000 << 3]
+    wr(chip, ADC1 + CR1, 0)                                        # SCAN = 0: only the first channel (JSQ2 here)
+    wr(chip, ADC1 + JOFR1, 1000)
+    wr(chip, ADC1 + CR2, ADON | JSWSTART)
+    chip.run_cycles(200)
+    assert rd(chip, ADC1 + JDR1) == 0 and adc.injected_conversions == 7
+
+
+def test_injected_preempts_regular_which_resumes(desc):
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    wr(chip, ADC1 + SMPR1, 3 << 15)                                 # SMP15 = 56 cycles: 68 ADCCLK = 136 core cycles
+    wr(chip, ADC1 + SQR1, 1 << 20)
+    wr(chip, ADC1 + SQR3, 15 | (6 << 5))
+    wr(chip, ADC1 + JSQR, jsqr(1))
+    wr(chip, ADC1 + CR1, SCAN)
+    rdone, jdone = _times(chip, adc, "_done"), _times(chip, adc, "_jdone")
+    t0 = _swstart(chip)
+    chip.sched.at_cycles(t0 + 50, lambda: wr(chip, ADC1 + CR2, ADON | JSWSTART))
+    chip.run_cycles(400)
+    assert jdone == [t0 + 50 + 6 + CONV]
+    assert rdone == [jdone[0] + 136, jdone[0] + 136 + CONV]        # IN15 converted again from scratch, then IN6
+    assert adc.conversions == 2
+
+
+def test_regular_trigger_during_injected_waits(desc):
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    wr(chip, ADC1 + JSQR, jsqr(1))
+    rdone, jdone = _times(chip, adc, "_done"), _times(chip, adc, "_jdone")
+    wr(chip, ADC1 + CR2, ADON)
+    t0 = chip.now_cycles()
+    wr(chip, ADC1 + CR2, ADON | JSWSTART)
+    chip.sched.at_cycles(t0 + 10, lambda: wr(chip, ADC1 + CR2, ADON | SWSTART))
+    chip.run_cycles(200)
+    assert jdone == [t0 + 6 + CONV] and rdone == [jdone[0] + 4 + CONV]
+
+
+def test_auto_injection_after_regular_group(desc):
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    wr(chip, ADC1 + SQR3, 5)
+    wr(chip, ADC1 + JSQR, jsqr(1, 2))
+    wr(chip, ADC1 + CR1, SCAN | JAUTO)
+    rdone, jdone = _times(chip, adc, "_done"), _times(chip, adc, "_jdone")
+    t0 = _swstart(chip, cr2=CONT)
+    chip.run_cycles(CONV12 + 3 * CONV + 1)
+    assert rdone == [t0 + CONV12, t0 + CONV12 + 3 * CONV]
+    assert jdone == [t0 + CONV12 + CONV, t0 + CONV12 + 2 * CONV]
+    assert rd(chip, ADC1 + SR) & (EOC | JEOC) == EOC | JEOC
+    wr(chip, ADC1 + CR2, ADON | CONT | JSWSTART)                   # ignored with JAUTO
+    assert any("JAUTO" in str(e.fields.get("msg")) for e in chip.log if e.kind == "warn")
+
+
+def test_injected_discontinuous_one_channel_per_trigger(desc):
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    for ch in (1, 2, 3):
+        adc.set_channel(ch, 100 * ch)
+    wr(chip, ADC1 + JSQR, jsqr(1, 2, 3))
+    wr(chip, ADC1 + CR1, JDISCEN)
+    wr(chip, ADC1 + CR2, ADON)
+    jeoc = []
+    for _ in range(4):
+        wr(chip, ADC1 + CR2, ADON | JSWSTART)
+        chip.run_cycles(60)
+        jeoc.append(bool(rd(chip, ADC1 + SR) & JEOC))
+    assert jeoc == [False, False, True, True] and adc.injected_conversions == 4
+    assert [rd(chip, ADC1 + JDR1 + 4 * k) for k in range(3)] == [100, 200, 300]
+
+
+def test_injected_timer_trigger_and_watchdog(desc):
+    """JEXTSEL=0011 TIM2_TRGO (update every 1000 cycles), rising: JEOC 1 PCLK2 + 3 ADCCLK + 15 ADCCLK after it;
+    JAWDEN flags the injected value outside [LTR, HTR]."""
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    adc.set_channel(4, 4000)
+    wr(chip, ADC1 + HTR, 3000)
+    wr(chip, ADC1 + JSQR, jsqr(4))
+    wr(chip, ADC1 + CR1, JAWDEN)
+    jdone = _times(chip, adc, "_jdone")
+    wr(chip, TIM2 + 0x2C, 999)
+    wr(chip, TIM2 + 4, 2 << 4)
+    wr(chip, ADC1 + CR2, ADON | (3 << 16) | (1 << 20))
+    t0 = chip.now_cycles()
+    wr(chip, TIM2, 1)
+    chip.run_cycles(2100)
+    assert jdone == [t0 + 1000 + 1 + INJ12, t0 + 2000 + 1 + INJ12]
+    assert rd(chip, ADC1 + SR) & AWD and adc.conversions == 0
+
+
+# ------------------------------------------------------------------------------------------------ multi-ADC mode
+def test_dual_regular_simultaneous_dma_mode2_cdr(desc, monkeypatch):
+    reqs = []
+    chip = _chip(desc)
+    monkeypatch.setattr(_util, "dma_request", lambda c, name, level=True: reqs.append((name, level,
+                                                                                       chip.now_cycles())))
+    a1, a2 = chip.peripherals["ADC1"], chip.peripherals["ADC2"]
+    a1.set_channel(1, 111)
+    a2.set_channel(2, 222)
+    wr(chip, C_ADC + CCR, 0b00110 | (2 << 14))                     # regular simultaneous, DMA mode 2
+    wr(chip, ADC1 + SQR3, 1)
+    wr(chip, ADC2 + SQR3, 2)
+    wr(chip, ADC2 + CR2, ADON)
+    wr(chip, ADC2 + CR2, ADON | SWSTART)                           # a slave trigger is ignored
+    assert any("multi-ADC mode" in str(e.fields.get("msg")) for e in chip.log if e.kind == "warn")
+    d1, d2 = _times(chip, a1, "_done"), _times(chip, a2, "_done")
+    t0 = _swstart(chip, cr2=CONT)
+    chip.sched.at_cycles(t0 + CONV12 + 1, lambda: reqs.append(("CDR", rd(chip, C_ADC + CDR))))
+    chip.run_cycles(CONV12 + 2)
+    assert d1 == d2 == [t0 + CONV12]
+    assert reqs == [("ADC1", True, t0 + CONV12), ("ADC1", False, t0 + CONV12 + 1), ("CDR", (222 << 16) | 111)]
+    chip.run_cycles(3 * CONV)                                      # CDR not read any more: overrun stops both
+    assert rd(chip, ADC1 + SR) & OVR and rd(chip, ADC2 + SR) & OVR
+    n = a1.conversions
+    chip.run_cycles(5 * CONV)
+    assert a1.conversions == n
+
+
+def test_dual_interleaved_delay_and_dma_mode1(desc, monkeypatch):
+    monkeypatch.setattr(_util, "dma_request", lambda c, name, level=True: None)
+    chip = _chip(desc)
+    a1, a2 = chip.peripherals["ADC1"], chip.peripherals["ADC2"]
+    a1.set_channel(0, 1234)
+    wr(chip, C_ADC + CCR, 0b00111 | (3 << 8) | (1 << 14))          # interleaved, DELAY 3: 8 ADCCLK, DMA mode 1
+    wr(chip, ADC2 + CR2, ADON)
+    d1, d2 = _times(chip, a1, "_done"), _times(chip, a2, "_done")
+    t0 = _swstart(chip)
+    chip.run_cycles(CONV12 + 20)
+    assert d1 == [t0 + CONV12] and d2 == [t0 + CONV12 + 8 * 2]
+    assert [rd(chip, C_ADC + CDR) for _ in range(2)] == [1234, 1234]
+
+
+def test_injected_simultaneous_and_alternate_trigger(desc):
+    chip = _chip(desc)
+    a1, a2, a3 = (chip.peripherals[f"ADC{i}"] for i in (1, 2, 3))
+    for a in (a1, a2, a3):
+        wr(chip, a.base + JSQR, jsqr(1))
+        wr(chip, a.base + CR2, ADON)
+    wr(chip, C_ADC + CCR, 0b10101)                                 # triple injected simultaneous
+    wr(chip, ADC1 + CR2, ADON | JSWSTART)
+    chip.run_cycles(INJ12 + 2)
+    assert [a.injected_conversions for a in (a1, a2, a3)] == [1, 1, 1]
+    wr(chip, C_ADC + CCR, 0b01001)                                 # dual alternate trigger
+    for _ in range(3):
+        wr(chip, ADC1 + CR2, ADON | JSWSTART)
+        chip.run_cycles(INJ12 + 2)
+    assert [a.injected_conversions for a in (a1, a2, a3)] == [3, 2, 1]
+    wr(chip, ADC2 + CR2, ADON | JSWSTART)                          # slave: ignored
+    chip.run_cycles(INJ12 + 2)
+    assert a2.injected_conversions == 2
+
+
+def test_triple_dma_mode2_packing_order(desc, monkeypatch):
+    monkeypatch.setattr(_util, "dma_request", lambda c, name, level=True: None)
+    chip = _chip(desc)
+    adcs = [chip.peripherals[f"ADC{i}"] for i in (1, 2, 3)]
+    for i, a in enumerate(adcs):
+        a.set_channel(10 + i, 100 * (i + 1))
+        wr(chip, a.base + SQR3, 10 + i)
+    for a in adcs[1:]:
+        wr(chip, a.base + CR2, ADON)
+    wr(chip, C_ADC + CCR, 0b10110 | (2 << 14))
+    _swstart(chip)
+    chip.run_cycles(CONV12 + 2)
+    w1 = rd(chip, C_ADC + CDR)
+    wr(chip, ADC1 + CR2, ADON | SWSTART)
+    chip.run_cycles(CONV12 + 2)
+    assert w1 == (200 << 16) | 100                                  # ADC2:ADC1
+    assert [rd(chip, C_ADC + CDR) for _ in range(2)] == [(100 << 16) | 300, (300 << 16) | 200]
+
+
+def test_reserved_multi_mode_warns_once(desc):
+    chip = _chip(desc)
+    wr(chip, C_ADC + CCR, 0b00011)
+    wr(chip, C_ADC + CCR, 0b00011 | (1 << 16))
+    msgs = [e.fields.get("msg") for e in chip.log if e.kind == "warn" and "reserved multi-ADC" in str(e.fields)]
+    assert len(msgs) == 1

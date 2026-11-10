@@ -7,7 +7,7 @@ import { stateText, counterValue, ledColor, LED_COLORS, partCategory, portList }
 import { initBoardDialog, boardDialogOpen, closeBoardDialog } from "./boarddlg.js";
 
 const $ = (id) => document.getElementById(id);
-const KINDS = ["pin", "part", "uart", "irq", "reset", "fault", "warn", "info", "mmio"];
+const KINDS = ["pin", "part", "uart", "can", "i2s", "irq", "reset", "fault", "warn", "info", "mmio"];
 const MAX_EVENT_ROWS = 1500;
 const MAX_LINES = 5000;           // UART transcript lines kept
 const MAX_LINE_CHARS = 2000;      // a line without a line ending (binary data) is wrapped into a new one here

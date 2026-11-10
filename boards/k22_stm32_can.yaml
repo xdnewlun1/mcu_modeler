@@ -1,0 +1,16 @@
+# An MK22FN1M0VLL12 (Kinetis FlexCAN0) and an STM32F405ZG (bxCAN1) on one CAN bus at 500 kbit/s.
+#   A (K22) runs firmware/samples/can_echo.c: every 10 ms a frame 100#<counter>4B32 from message buffer 8; prints
+#     every received frame (IDs 0x200-0x27F) on UART0.
+#   B (STM32) runs firmware/samples_stm32/can_echo.c: filter bank 0 (32-bit mask) passes 0x100 into FIFO 0, the
+#     CAN1_RX0 interrupt queues it, the main loop echoes it as 202#<same data> and prints both on USART1.
+# Run:  chipem run --board boards/k22_stm32_can.yaml --for 50ms
+# Bit timing: K22 60 MHz bus clock / 6 / 20 tq; STM32 PCLK1 16 MHz (HSI) / 2 / 16 tq: both 2 us/bit.  Wiring:
+# PTB18/PTB19 (CAN0_TX/RX, ALT2) and PB9/PB8 (CAN1_TX/RX, AF9) to the transceivers; the link joins the controllers
+# (frames are not carried by pin nets).
+name: k22_stm32_can
+quantum: 10us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/can_echo.elf, clock_hz: 120000000}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/can_echo.elf}
+links:
+  - {type: can, name: CANBUS, nodes: [A.CAN0, B.CAN1]}

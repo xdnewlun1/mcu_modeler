@@ -1,0 +1,11 @@
+# TMS320F28232 with a 256K x 16 asynchronous SRAM on XINTF zone 6 (XZCS6, 16-bit bus; chipem/devices/sram.py).
+# firmware/samples_c2000/xintf_sram.asm configures XINTF (clock, pin mux, zone-6 timing, write buffer), writes 256
+# words, reads them back and drives GPIO34 (LED1) high when every word matched.
+#   chipem run --board boards/c2000_xintf_sram.yaml --for 10ms
+name: c2000_xintf_sram
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/xintf_sram.c28img}
+devices:
+  - {type: sram, chip: A, bus: XINTF6, size: 256K, width: 16}
+parts:
+  - {id: LED1, type: led, active: H, ports: {in: A.GPIO34}}

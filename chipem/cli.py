@@ -112,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
                             "Kinetis comparator, which takes volts only)")
         p.add_argument("--spi-flash", action="append", default=[], metavar="SPIn:cs=PIN,jedec=ID,size=N,file=PATH",
                        help="attach a SPI NOR flash to a DSPI, e.g. SPI0:cs=PTC4 (Micron M25P16 by default)")
+        p.add_argument("--sd-card", action="append", default=[], metavar="HOST:size=N,kind=sdhc|sdsc,image=PATH",
+                       help="insert an SD card into an SD host (SDIO on the STM32, SDHC on the K22), e.g. "
+                            "SDIO:size=64M,image=card.img,save=out.img (writeback=1 saves to the image); empty "
+                            "socket otherwise")
         p.add_argument("--log-mmio", action="store_true", help="log every peripheral register access")
         p.add_argument("--pin-report", action="store_true", help="after the run, print what the firmware did with each pin (chipem.pinreport)")
         p.add_argument("--vcd", default=None, help="write pin waveforms to a VCD file (board: one file per chip, x.A.vcd)")

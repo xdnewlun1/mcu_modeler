@@ -1,7 +1,6 @@
-"""Small C2000 models: register storage with reset values (`ti_c2000.storage` for ePWM/eCAP/eQEP/eCAN/I2C/McBSP/
-XINTF/DMA/device-emulation stubs), flash configuration (`ti_c2000.flash`), code security module (`ti_c2000.csm`,
-always reported unlocked) and SPI (`ti_c2000.spi`, storage with the transmit path looped to RXBUF/flags so
-polling code does not hang)."""
+"""Small C2000 models: register storage with reset values (`ti_c2000.storage`, e.g. device emulation and blocks of
+other parts that have no model yet), flash configuration (`ti_c2000.flash`), code security module (`ti_c2000.csm`,
+always reported unlocked) and the L0-L3 dual mapping (`ti_c2000.alias`).  SPI-A is `ti_c2000.spi` (spi.py)."""
 from __future__ import annotations
 
 from typing import Any
@@ -50,36 +49,6 @@ class CSM(C2000Block):
         regs = build_regs((name, "CSM"), size, {"CSMSCR": {"on_read": lambda b, r: b.get("CSMSCR") & ~1}},
                           params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
-
-
-@register("ti_c2000.spi")
-class SPI(C2000Block):
-    """SPI-A (0x7040), minimal: with SPISWRESET = 1 a write to SPITXBUF/SPIDAT completes at once; with no device
-    attached MISO reads all ones (0xFFFF, or the transmitted word in loopback, SPICCR.SPILBK): SPIRXBUF gets it and
-    SPISTS.INT_FLAG is set (cleared by reading SPIRXBUF).  FIFO status reads empty."""
-
-    def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        params = dict(params or {})
-        ov = {"SPITXBUF": {"on_write": self._tx}, "SPIDAT": {"on_write": self._tx},
-              "SPIRXBUF": {"on_read": self._rx}, "SPISTS": {"ro_mask": 0x7F}}
-        regs = build_regs((name, "SPIA"), size, ov, params.get("regs_file"))
-        super().__init__(name, base, size, regs, params=params, log=log)
-        self.gate = "SPIAENCLK"
-        self.sent: list[int] = []
-
-    def _tx(self, blk, reg, old, new):
-        self.check_gate()
-        if not self.get("SPICCR") & 0x80:
-            return None
-        self.sent.append(new & 0xFFFF)
-        rx = new & 0xFFFF if self.get("SPICCR") & 0x10 else 0xFFFF
-        self.set("SPIRXBUF", rx)
-        self.set("SPISTS", self.get("SPISTS") | 0x40)
-        return None
-
-    def _rx(self, blk, reg):
-        self.set("SPISTS", self.get("SPISTS") & ~0x40)
-        return None
 
 
 @register("ti_c2000.alias")

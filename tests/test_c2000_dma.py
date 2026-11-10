@@ -475,6 +475,12 @@ def test_access_rules(chip):
     w(chip, CH(4) + CONTROL, PERINTFRC)
     chip.run_cycles(10)
     assert any("CH4: destination address 0x00E000" in m for m in warns(chip))
+    from chipem.devices.sram import ParallelSram                     # external SRAM on XINTF zones 0 and 7
+    from test_c2000_xintf import mux_xintf
+    w(chip, PCLKCR3, 0x1F00)                                         # + XINTFENCLK
+    mux_xintf(chip)
+    for z in ("XINTF0", "XINTF7"):
+        chip.peripherals[z].attach_memory(ParallelSram(0x100, 16))
     fill(chip, 0x4000, [0xABCD])                                     # XINTF zone 0 -> zone 7
     setup(chip, 5, 0x4000, 0x200010, burst=1, transfer=1, mode=PERINTE)
     w(chip, CH(5) + CONTROL, PERINTFRC)

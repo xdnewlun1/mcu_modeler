@@ -1,0 +1,14 @@
+# TMS320F28232 McBSP-A as an SPI master (clock-stop mode) with a SPI NOR flash (W25Q32-style, JEDEC ID 0xEF4016).
+#   A (F28232) runs mcbsp_spi (TI cl2000 C): McBSP-A on GPIO20-23 (MDXA = SIMO, MDRA = SOMI, MCLKXA = SPICLK,
+#              MFSXA = per-byte slave enable), 1 MHz, 8-bit packets; GPIO24 is the flash chip select (a GPIO, so one
+#              command spans several packets).  RDID, WREN + PAGE PROGRAM "MCBS" at 0x100, READ back; prints
+#              "ID EF4016 DATA MCBS RINT 21" on SCI-A (GPIO29, 115200 baud).
+# The F28232 programs its PLL first (~6.6 ms PLL lock).
+# Run:   chipem run --board boards/c2000_mcbsp_flash.yaml --for 15ms --pin-report
+# Build: firmware/samples_c2000_c/build.sh (TI cl2000 under toolchains/)
+name: c2000_mcbsp_flash
+quantum: 1us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000_c/build/mcbsp_spi.out}
+devices:
+  - {type: spi_flash, chip: A, spi: MCBSPA, cs: GPIO24, jedec: 0xEF4016}

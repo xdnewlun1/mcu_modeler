@@ -1,0 +1,9 @@
+# STM32F405ZG SDIO host (PC8-PC11 D0-D3, PC12 CK, PD2 CMD) + a 64 MB SDHC card in the socket.
+# The firmware identifies the card at 400 kHz, switches to a 4-bit bus at 8 MHz, writes block 2, reads it back
+# (FIFO polled) and reads blocks 2-3 with CMD18 + CMD12 through DMA2 stream 3; USART1 prints the steps and "done".
+# Give the card an image with `image: card.img` (and `save: out.img` or `writeback: 1` to keep what it wrote).
+name: stm32_sdcard
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/sdio_card.elf}
+devices:
+  - {type: sd_card, chip: A, host: SDIO, size: 64M, kind: sdhc}

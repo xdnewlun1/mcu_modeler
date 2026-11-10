@@ -1,0 +1,13 @@
+# TMS320F28232 SPI-A master with a SPI NOR flash (W25Q32-style, JEDEC ID 0xEF4016, 4 MB, erased).
+#   A (F28232) runs spi_flash: SPI-A on GPIO16-19 (SIMO/SOMI/CLK/STE), mode 0, 5 MHz, FIFO mode; RDID then READ of
+#              four bytes at 0x000000.  SPISTEA (GPIO19) is the flash chip select.  Results: spi_id0..2 = EF 40 16,
+#              spi_data0..3 = FF FF FF FF (erased; give the device `file: image.bin` to preload it), spi_done = 1.
+# The F28232 programs its PLL first (~6.6 ms PLL lock), so the SPI traffic starts at ~6.6 ms.
+# Run:   chipem run --board boards/c2000_spi_flash.yaml --for 10ms --pin-report
+# Build: firmware/samples_c2000/build.sh
+name: c2000_spi_flash
+quantum: 1us
+chips:
+  - {id: A, chip: tms320f28232, firmware: ../firmware/samples_c2000/build/spi_flash.c28img}
+devices:
+  - {type: spi_flash, chip: A, spi: SPIA, cs: GPIO19, jedec: 0xEF4016}

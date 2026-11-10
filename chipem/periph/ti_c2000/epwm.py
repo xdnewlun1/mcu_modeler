@@ -61,7 +61,24 @@ Event trigger (ET): ETSEL INTSEL/SOCASEL/SOCBSEL (ZRO, PRD, CAU, CAD, CBU, CBD),
   `soc_listeners` cb(index, "A" | "B") (the DMA's ePWMxSOCA/B triggers).
 Pins: EPWMxA / EPWMxB follow the outputs (PinBoard.drive_signal); a GPIO muxed to EPWMxA/B later shows the current
   level.  TBPRD = 0 with actions or events enabled schedules an event every TBCLK (correct but slow: one `warn`).
-Not modelled: HRPWM (TBPHSHR/CMPAHR/HRCNFG stored); TBCTL.FREE_SOFT (stored; CHIP_EM has no emulation-suspend
+HRPWM (SPRUI07 ch. 4 = SPRUG02, type-0 HRPWM; `params.hrpwm: true` on the instances that have it, ePWM1-4 on the
+  F28232, SPRS439 Table 5-2; elsewhere the locations are plain storage): TBPHSHR (0x02) and CMPAHR (0x08) hold the
+  8-bit MEP step count in bits 15:8 (bits 7:0 read 0), HRCNFG (0x20, EALLOW) EDGMODE (00 off, 01 rising, 10 falling,
+  11 both edges), CTLMODE (0: CMPAHR = duty control, 1: TBPHSHR = phase control), HRLOAD (CMPAHR shadow loaded at
+  CTR=ZERO / CTR=PRD).  There is no TBPRDHR on this HRPWM type.  CMPAHR is shadowed like CMPA (CMPCTL.SHDWAMODE = 1:
+  immediate), but its load event comes from HRLOAD.  The MEP sits between the action qualifier and the dead band on
+  output A only: an AQ edge of the selected kind made by a counter event is delayed by steps x `params.mep_step_ps`
+  (default 150 ps, SPRS439 MEP step typ. 150 / max 310 ps); steps = 0 disables the MEP (SPRUI07: minimum 1).  The MEP
+  is inactive for an edge in the first 3 SYSCLKOUT of the period (SPRUI07 4.2.3.3; one `warn`), and for software
+  forced (AQSFRC/AQCSFRC) changes.  Phase control (CTLMODE = 1) delays the selected edges by TBPHSHR steps at all
+  times (not only after a TBPHS load).  Resolution: pin edges are timestamped in core cycles (10 ns at 100 MHz), so
+  a delayed edge is shown at the nearest SYSCLKOUT edge; the exact edge times of the MEP output (before dead band)
+  are kept in `hr_rise_ns` / `hr_fall_ns`, `hr_period_ns` / `hr_high_ns` / `hr_duty` (fractional ns, from the
+  last complete period) and `hr_state()`; an `info` event reports every HRCNFG change and active step count change
+  (the first 16 of the latter).  Not modelled: the MEP calibration / diagnostics logic used by TI's SFO library
+  (reserved registers: SFO_MepDis/SFO_MepEn never return a scale factor), MEP step variation with temperature and
+  voltage.
+Not modelled: TBCTL.FREE_SOFT (stored; CHIP_EM has no emulation-suspend
   state, so the counter always runs free); the GPIO input qualification of TZn / EPWMSYNCI (edges act at once);
   INTCNT/SOCxCNT do not count while the source is disabled (ETSEL xxEN = 0).
 """
@@ -79,6 +96,9 @@ TZ_INT, TZ_CBC, TZ_OST = 1 << 0, 1 << 1, 1 << 2
 ET_INT, ET_SOCA, ET_SOCB = 1 << 0, 1 << 2, 1 << 3
 CTRMAX, SYNCI_FLAG = 1 << 2, 1 << 1
 CHPEN = 1 << 0
+EDGMODE, CTLMODE, HRLOAD = 3, 1 << 2, 1 << 3     # HRCNFG
+MEP_INACTIVE = 3                   # SYSCLKOUT cycles at the start of the period without MEP (SPRUI07 4.2.3.3)
+HR_NOTES = 16                      # active MEP step changes reported as `info` events
 SYNC_DELAY = 2                     # SYSCLKOUT cycles from a SYNCI pulse to the earliest TBPHS load (SPRUG04 2.2.3.2)
 SYNCO_PIN_CYCLES = 8               # EPWMSYNCO pulse width, SPRS439 tw(SYNCOUT) = 8 tc(SCO)
 # F2833x synchronization scheme 3 (SPRS439 Figure 8-4)
@@ -128,6 +148,11 @@ class EPWM(C2000Block):
             "ETFRC": {"on_write": self._etfrc_write, "on_read": lambda b, r: 0},
             "PCCTL": {"on_write": self._pcctl_write},
         }
+        self.hr = bool(params.get("hrpwm", False))
+        if self.hr:
+            ov.update({"CMPAHR": {"on_write": self._cmpahr_write, "ro_mask": 0x00FF},
+                       "TBPHSHR": {"on_write": self._tbphshr_write, "ro_mask": 0x00FF},
+                       "HRCNFG": {"on_write": self._hrcnfg_write, "ro_mask": 0xFFF0}})
         regs_ = build_regs((name, "EPWM1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs_, params=params, log=log)
         self.gate = params.get("gate", f"EPWM{self.index}ENCLK")
@@ -172,6 +197,24 @@ class EPWM(C2000Block):
         self._tz_ids: set = set()
         self._tz_unsub = None
         self.periods = 0
+        self.mep_step_ps = float(params.get("mep_step_ps", 150.0))
+        self._hr_init()
+
+    def _hr_init(self) -> None:
+        self._hr_mode = 0                          # HRCNFG.EDGMODE while the MEP is on (0: off, hot path untouched)
+        self._hr_cmp = 0                           # active CMPAHR steps
+        self._hr_pending = False                   # CMPAHR shadow waiting for its HRLOAD event
+        self._hr_pos: int | None = None            # period position of the counter event being processed
+        self._hra_src = self._hra = False          # AQ output A before / after the MEP
+        self._hr_ev = None
+        self._hr_warned: set[str] = set()
+        self._hr_notes = 0
+        self._hr_last: tuple | None = None
+        self.hr_rise_ns: float | None = None       # exact times (fractional ns) of the last MEP-output edges
+        self.hr_fall_ns: float | None = None
+        self.hr_period_ns: float | None = None     # exact period / high time / duty of the last complete period
+        self.hr_high_ns: float | None = None
+        self.hr_duty: float | None = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -234,6 +277,9 @@ class EPWM(C2000Block):
         self._csf = 0
         self._pc_on = False
         self._chop_in = {"A": False, "B": False}
+        if self._hr_ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._hr_ev)
+        self._hr_init()
         self._watch_tz()                            # TZSEL is 0 again: stop watching the trip pins
 
     # ------------------------------------------------------------ geometry
@@ -399,6 +445,8 @@ class EPWM(C2000Block):
         cc = self.get("CMPCTL")
         if self._prd_pending or self._cbc_act:
             rel.add("ZRO")
+        if self._hr_pending:
+            rel.add("PRD" if self.get("HRCNFG") & HRLOAD else "ZRO")
         if self._csf_pending:
             rl = (self.get("AQSFRC") >> 6) & 3
             if rl in (0, 2):
@@ -529,7 +577,9 @@ class EPWM(C2000Block):
         if (so == 1 and "ZRO" in present) or (so == 2 and present & {"CBU", "CBD"}):
             self._sync_out()
         self._shadow_loads(present)
+        self._hr_pos = p
         self._outputs()
+        self._hr_pos = None
 
     def _shadow_loads(self, present: set[str]) -> None:
         cc = self.get("CMPCTL")
@@ -545,6 +595,9 @@ class EPWM(C2000Block):
                     new &= ~full
         if new != cc:
             self.set("CMPCTL", new)
+        if self._hr_pending and ("PRD" if self.get("HRCNFG") & HRLOAD else "ZRO") in present:
+            self._hr_pending = False
+            self._hr_set_cmp(self.get("CMPAHR") >> 8)
         if self._prd_pending and "ZRO" in present:
             self._prd_pending = False
             self.prd = self.get("TBPRD")
@@ -749,6 +802,8 @@ class EPWM(C2000Block):
         cs = self._csf
         a = {1: False, 2: True}.get(cs & 3, a)
         b = {1: False, 2: True}.get((cs >> 2) & 3, b)
+        if self._hr_mode:
+            a = self._mep(a)
         db = self.get("DBCTL")
         inm = (db >> 4) & 3
         red_src = a if inm in (0, 2) else b
@@ -790,6 +845,8 @@ class EPWM(C2000Block):
             cs = self._csf
             a = {1: False, 2: True}.get(cs & 3, self.aqa)
             b = {1: False, 2: True}.get((cs >> 2) & 3, self.aqb)
+            if self._hr_mode:
+                a = self._hra
         db = self.get("DBCTL")
         om, pol = db & 3, (db >> 2) & 3
         oa: Any = (self._red ^ bool(pol & 1)) if om & 2 else a
@@ -826,6 +883,143 @@ class EPWM(C2000Block):
         gp = find_model(self.chip, "ti_c2000.gpio")
         if gp is not None and hasattr(gp, "resync_signal"):
             gp.resync_signal(sig)
+
+    # ------------------------------------------------------------ HRPWM (micro edge positioner on output A)
+    def _hr_steps(self) -> int:
+        return self.get("TBPHSHR") >> 8 if self.get("HRCNFG") & CTLMODE else self._hr_cmp
+
+    def hr_offset_ns(self) -> float:
+        """MEP delay applied to the selected edges of output A now (0 when the MEP is off)."""
+        return self._hr_steps() * self.mep_step_ps / 1000.0 if self._hr_mode else 0.0
+
+    def hr_state(self) -> dict:
+        """Exact HRPWM state: configuration, MEP steps and delay, and the exact edge times / duty of output A after
+        the MEP (fractional ns; the pins show edges at core-cycle resolution)."""
+        cfg = self.get("HRCNFG") if self.hr else 0
+        return {"hrpwm": self.hr, "edgmode": cfg & EDGMODE, "ctlmode": (cfg >> 2) & 1, "hrload": (cfg >> 3) & 1,
+                "steps": self._hr_steps(), "step_ps": self.mep_step_ps, "offset_ns": self.hr_offset_ns(),
+                "cmpahr_pending": self._hr_pending, "rise_ns": self.hr_rise_ns, "fall_ns": self.hr_fall_ns,
+                "period_ns": self.hr_period_ns, "high_ns": self.hr_high_ns, "duty": self.hr_duty}
+
+    def _hr_warn(self, key: str, msg: str) -> None:
+        if key not in self._hr_warned:
+            self._hr_warned.add(key)
+            self.emit("warn", block=self.name, msg=f"{self.name}: {msg}")
+
+    def _hr_note(self, why: str) -> None:
+        """One `info` event per HRPWM configuration / active step change (step changes: the first HR_NOTES)."""
+        if self.chip is None:
+            return
+        cur = (self._hr_mode, self.get("HRCNFG") & CTLMODE, self._hr_steps())
+        if cur == self._hr_last:
+            return
+        steps_only = self._hr_last is not None and cur[:2] == self._hr_last[:2]
+        self._hr_last = cur
+        if steps_only:
+            self._hr_notes += 1
+            if self._hr_notes > HR_NOTES:
+                if self._hr_notes == HR_NOTES + 1:
+                    self.emit("info", block=self.name, msg=f"{self.name}: further MEP step changes not logged "
+                              "(see hr_state())")
+                return
+        mode = self._hr_mode
+        if not mode:
+            self.emit("info", block=self.name, msg=f"EPWM{self.index}A HRPWM off ({why})")
+            return
+        edge = {1: "rising", 2: "falling", 3: "both"}[mode]
+        src = "TBPHSHR" if cur[1] else "CMPAHR"
+        off = self.hr_offset_ns()
+        self.emit("info", block=self.name, hr_steps=cur[2], hr_offset_ns=off,
+                  msg=f"EPWM{self.index}A HRPWM {edge} edge(s) +{off:.3f} ns ({cur[2]} MEP steps x "
+                      f"{self.mep_step_ps:g} ps from {src}; pin edges at core-cycle resolution) ({why})")
+        per_ns = 1e9 / self.chip.clock.hz
+        if off > per_ns + 2 * self.mep_step_ps / 1000.0:
+            self._hr_warn("range", f"MEP delay {off:.3f} ns exceeds one SYSCLKOUT period ({per_ns:.3f} ns): the "
+                          "MEP covers one coarse step (SFO scale factor); applied as is")
+
+    def _hr_set_cmp(self, steps: int) -> None:
+        if steps != self._hr_cmp:
+            self._hr_cmp = steps
+            if self._hr_mode and not self.get("HRCNFG") & CTLMODE:
+                self._hr_note("CMPAHR")
+
+    def _mep(self, a: bool) -> bool:
+        """Output A through the MEP: a change of the AQ output of the selected kind, made by a counter event, reaches
+        the dead band (and the pin) steps x step later (rounded to the nearest core cycle)."""
+        if a == self._hra_src:
+            return self._hra
+        self._hra_src = a
+        sched = self.chip.sched
+        if self._hr_ev is not None:
+            sched.cancel(self._hr_ev)                     # a pending delayed edge is overtaken (pulse < delay)
+            self._hr_ev = None
+        now_ns = self.chip.now_ns()
+        steps = self._hr_steps() if self._hr_mode & (1 if a else 2) else 0
+        pos = self._hr_pos
+        if steps and pos is not None and not self.get("HRCNFG") & CTLMODE and pos * self.tick < MEP_INACTIVE:
+            self._hr_warn("inactive", f"HRPWM edge in the first {MEP_INACTIVE} SYSCLKOUT of the period: the MEP is "
+                          "inactive there (SPRUI07 4.2.3.3), edge not refined")
+            steps = 0
+        if not steps or pos is None:
+            self._hr_edge(a, now_ns)
+            self._hra = a
+            return a
+        d_ns = steps * self.mep_step_ps / 1000.0
+        self._hr_edge(a, now_ns + d_ns)
+        n = int(d_ns * self.chip.clock.hz / 1e9 + 0.5)
+        if n <= 0:
+            self._hra = a
+            return a
+        self._hr_ev = sched.at_cycles(self.chip.now_cycles() + n, self._mep_fire, a)
+        return self._hra
+
+    def _mep_fire(self, a: bool) -> None:
+        self._hr_ev = None
+        self._hra = a
+        self._outputs()
+
+    def _hr_edge(self, a: bool, t: float) -> None:
+        if a:
+            r0, f = self.hr_rise_ns, self.hr_fall_ns
+            if r0 is not None and f is not None and r0 <= f <= t and t > r0:
+                self.hr_period_ns = t - r0
+                self.hr_high_ns = f - r0
+                self.hr_duty = self.hr_high_ns / self.hr_period_ns
+            self.hr_rise_ns = t
+        else:
+            self.hr_fall_ns = t
+
+    def _hrcnfg_write(self, blk, reg, old, new):
+        mode = new & EDGMODE
+        if mode and not self._hr_mode and self.chip is not None:
+            cs = self._csf                                # start from the current AQ output: no glitch
+            self._hra_src = self._hra = {1: False, 2: True}.get(cs & 3, self.aqa)
+        if not mode and self._hr_ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._hr_ev)
+            self._hr_ev = None
+            self._hra = self._hra_src
+        self._hr_mode = mode
+        if (old ^ new) & 0xF:
+            self._hr_note("HRCNFG")
+        if self.chip is not None:
+            self._outputs()
+            if self.running:
+                self._reschedule(first=False)
+        return None
+
+    def _cmpahr_write(self, blk, reg, old, new):
+        if self.get("CMPCTL") & SHDWAMODE or not self.running:
+            self._hr_pending = False
+            self._hr_set_cmp(new >> 8)
+        else:
+            self._hr_pending = True
+            self._reschedule(first=False)
+        return None
+
+    def _tbphshr_write(self, blk, reg, old, new):
+        if self._hr_mode and self.get("HRCNFG") & CTLMODE:
+            self._hr_note("TBPHSHR")
+        return None
 
     # ------------------------------------------------------------ PWM chopper
     def _pc_params(self) -> tuple[int, int, int]:

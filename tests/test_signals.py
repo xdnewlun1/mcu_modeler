@@ -30,7 +30,7 @@ RCC, GPIOA = 0x40023800, 0x40020000
     (KTAB, "SPI0_SIN", IN), (KTAB, "SPI1_PCS0", OUT_H), (KTAB, "I2C0_SDA", OD), (KTAB, "CAN0_TX", OUT_H),
     (KTAB, "CAN0_RX", IN), (KTAB, "FTM0_CH5", OUT_L), (KTAB, "CLKOUT", OUT_L), (KTAB, "RTC_CLKOUT", OUT_L),
     (KTAB, "JTAG_TCLK/SWD_CLK", IN), (KTAB, "JTAG_TDO/TRACE_SWO", OUT_H), (KTAB, "ADC0_SE14", ANALOG),
-    (KTAB, "SDHC0_D1", NONE), (KTAB, "I2S0_TX_FS", NONE),
+    (KTAB, "SDHC0_D1", IN), (KTAB, "I2S0_TX_FS", IN), (KTAB, "I2S0_TXD1", OUT_L),
     (STAB, "USART1_TX", OUT_H), (STAB, "UART4_RX", IN), (STAB, "SPI1_MOSI/I2S1_SD", OUT_L), (STAB, "SPI1_MISO", IN),
     (STAB, "SPI1_NSS/I2S1_WS", OUT_H), (STAB, "I2C1_SCL", OD), (STAB, "TIM2_CH1/TIM2_ETR", OUT_L),
     (STAB, "TIM1_CH1N", OUT_L), (STAB, "MCO1", OUT_L), (STAB, "JTMS-SWDIO", IN), (STAB, "JTDO/TRACESWO", OUT_H),
@@ -113,6 +113,8 @@ def test_c2000_sci_and_i2c_pins():
     assert (tx.direction, tx.drive) == ("out", "H")
     assert rx.direction == "in" and rx.level() == "H"     # GPIO28 has its pull-up enabled out of reset
     c.bus.write(0x6F88, 2, 0x5 << 0)                      # GPAMUX2: GPIO16/17 -> MUX1 = SPISIMOA / SPISOMIA
+    assert c.pins.get("GPIO16").direction == "in"         # SPI-A resets as a slave with TALK = 0 (live role)
+    c.bus.write(0x7041, 1, 0x6)                           # SPICTL: master, TALK -> SIMO drives (idle L)
     assert c.pins.get("GPIO16").direction == "out" and c.pins.get("GPIO16").drive == "L"
     assert c.pins.get("GPIO17").direction == "in"
 

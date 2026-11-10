@@ -270,3 +270,50 @@ def test_eqep_encoder_board_tracks_position_and_direction(tmp_path):
     assert bus.read(sym["eqep_ilat"], 2) == 399                 # reverse marker: latched at QPOSMAX, no error
     assert bus.read(sym["eqep_count"], 1) == 8
     assert not [e for e in s.events(kinds={"warn"})]
+
+
+def test_spi_flash_board_rdid_and_read(tmp_path):
+    """spi_flash.asm on boards/c2000_spi_flash.yaml: SPI-A (mode 0, 5 MHz, FIFO) reads the JEDEC ID and four bytes
+    at 0 from a SPI NOR flash whose chip select is SPISTEA (GPIO19); the flash is preloaded through `file:`."""
+    import json
+    from chipem.board import load_board
+    from chipem.session import Session
+    img = build("spi_flash", tmp_path)
+    sym = json.loads(img.read_text())["symbols"]
+    data = tmp_path / "flash.bin"
+    data.write_bytes(bytes([0xDE, 0xAD, 0xBE, 0xEF]))
+    bd = load_board(ROOT / "boards" / "c2000_spi_flash.yaml")
+    bd.chips[0].firmware = img
+    bd.devices[0].options["file"] = str(data)
+    s = Session.from_board(bd, quiet=True)
+    s.run_for(PLL_LOCK_NS + 1e6)
+    chip = s.ctxs["A"].chip
+    rd = [chip.bus.read(sym[n], 1) for n in ("spi_id0", "spi_id1", "spi_id2", "spi_data0", "spi_data1",
+                                            "spi_data2", "spi_data3", "spi_done")]
+    assert rd == [0xEF, 0x40, 0x16, 0xDE, 0xAD, 0xBE, 0xEF, 1]
+    assert chip.pins.get("GPIO18").owner == "SPICLKA" and chip.pins.get("GPIO19").level() == "H"
+    clk = edges(s, "GPIO18")
+    assert len([1 for _, v in clk if v == "H"]) == 12 * 8          # 12 characters x 8 SPICLK pulses
+    assert not [e for e in s.events(kinds={"warn"})]
+
+
+def test_mcbsp_loopback_dma(tmp_path):
+    """mcbsp.asm: McBSP-A digital loopback, 16-bit words at CLKG = 5 MHz, DMA CH1 (MXEVTA) feeds DXR1 from L4 and
+    CH2 (MREVTA) drains DRR1 into L5; the 8 words come back unchanged.  MCLKXA runs at LSPCLK / 5 (high 3 / low 2
+    LSPCLK cycles: CLKGDV = 4 is an odd divide, SPRUI07 12.4.1.4.1) and MFSXA pulses once per word."""
+    import json
+    s = session("mcbsp", tmp_path)
+    sym = json.loads((tmp_path / "mcbsp.c28img").read_text())["symbols"]
+    s.run_for(PLL_LOCK_NS + 0.2e6)
+    chip = s.chip
+    assert chip.bus.read(sym["mcbsp_done"], 1) == 1 and chip.bus.read(sym["mcbsp_err"], 1) == 0
+    assert [chip.bus.read(0xD000 + i, 1) for i in range(8)] == [chip.bus.read(0xC000 + i, 1) for i in range(8)]
+    m = chip.peripherals["MCBSPA"]
+    assert list(m.sent)[:8] == [0x1234, 0xABCD, 0x0000, 0xFFFF, 0x5A5A, 0x8001, 0x0F0F, 0xC0DE]
+    clk = edges(s, "GPIO22")[10:]          # (the first edges are late: GRST is followed by an atomic RPT || NOP)
+    rises = [t for t, v in clk if v == "H"]
+    falls = [t for t, v in clk if v == "L" and t > rises[0]]
+    assert {round(b - a, 3) for a, b in zip(rises, rises[1:])} == {200.0} and falls[0] - rises[0] == 120.0
+    fs = [t for t, v in edges(s, "GPIO23") if v == "H"]
+    assert len(fs) == 8
+    assert not [e for e in s.events(kinds={"warn"})]

@@ -165,6 +165,11 @@ def test_model_rule_requires_matching_registers():
     flexcan = ["MCR", "CTRL1", "TIMER", "ECR", "ESR1", "IMASK1", "IFLAG1", "CTRL2", "CS0", "ID0", "WORD00"]
     assert new_chip.map_model("kinetis", "CAN0", flexcan)[:2] == ("kinetis.flexcan", {"index": 0})
     assert new_chip.map_model("kinetis", "CAN1", ["MCR", "CTRL1"])[0] == "stub"
+    assert new_chip.map_model("kinetis", "MCM", ["PLASC", "PLAMC", "PLACR", "ISCR"])[0] == "stub"   # PLACR-style MCM
+    assert new_chip.map_model("kinetis", "I2S0", ["TCSR", "TCR2"])[0] == "stub"
+    bxcan = ["MCR", "MSR", "TSR", "RF0R", "RF1R", "IER", "ESR", "BTR", "TI0R", "TDT0R", "RI0R", "FMR", "FA1R"]
+    assert new_chip.map_model("stm32", "CAN2", bxcan)[:2] == ("stm32.can", {"index": 2})
+    assert new_chip.map_model("stm32", "CAN1", ["CREL", "ENDN", "DBTP", "NBTP"])[0] == "stub"   # FDCAN layout
     ecan = ["CANME", "CANMD", "CANTRS", "CANTRR", "CANTA", "CANRMP", "CANMC", "CANBTC", "CANES", "CANGIF0", "CANGIM",
             "MBOX0_MSGID"]
     assert new_chip.map_model("ti_c2000", "ECANB", ecan)[:2] == ("ti_c2000.ecan", {"gate": "ECANBENCLK"})
@@ -183,8 +188,23 @@ def test_model_rule_requires_matching_registers():
                "CH6_DST_ADDR_ACTIVE"]
     assert new_chip.map_model("ti_c2000", "DMA", dma_c2k)[:2] == ("ti_c2000.dma", {"gate": "DMAENCLK"})
     assert new_chip.map_model("ti_c2000", "DMA", ["DMACTRL"])[0] == "stub"     # another DMA layout (e.g. F2837x)
+    mcbsp = ["DRR2", "DRR1", "DXR2", "DXR1", "SPCR2", "SPCR1", "RCR2", "RCR1", "XCR2", "XCR1", "SRGR2", "SRGR1",
+             "PCR", "MFFINT"]
+    assert new_chip.map_model("ti_c2000", "MCBSPB", mcbsp)[:2] == ("ti_c2000.mcbsp", {"gate": "MCBSPBENCLK"})
+    assert new_chip.map_model("ti_c2000", "MCBSPA", ["DRR1"])[0] == "stub"
+    assert new_chip.map_model("ti_c2000", "XINTF", ["XTIMING0", "XINTCNF2", "XBANK"])[0] == "ti_c2000.xintf"
     # F1-style SPI (no I2SCFGR on some parts), F0/F3 CRC with POL/INIT, F1 RTC (CRH/CNTH): not the F4 models
     assert new_chip.map_model("stm32", "SPI1", ["CR1", "CR2", "SR", "DR", "CRCPR"])[0] == "stub"
+    # SD hosts and the FSMC: STM32 SDIO (an SDMMC layout stays a stub), Kinetis SDHC, STM32 FSMC
+    sdio = ["POWER", "CLKCR", "ARG", "CMD", "RESPCMD", "RESP1", "DTIMER", "DLEN", "DCTRL", "STA", "ICR", "MASK", "FIFO"]
+    assert new_chip.map_model("stm32", "SDIO", sdio)[0] == "stm32.sdio"
+    assert new_chip.map_model("stm32", "SDIO", ["POWER", "CLKCR", "ARG", "CMD", "STA", "ICR", "MASK"])[0] == "stub"
+    sdhc = ["DSADDR", "BLKATTR", "CMDARG", "XFERTYP", "CMDRSP0", "PRSSTAT", "PROCTL", "SYSCTL", "IRQSTAT",
+            "IRQSTATEN", "IRQSIGEN", "WML", "ADSADDR"]
+    assert new_chip.map_model("kinetis", "SDHC", sdhc)[0] == "kinetis.sdhc"
+    assert new_chip.map_model("kinetis", "SDHC", ["DSADDR", "BLKATTR"])[0] == "stub"
+    assert new_chip.map_model("stm32", "FSMC", ["BCR1", "BTR1", "BWTR1", "PCR2"])[0] == "stm32.fsmc"
+    assert new_chip.map_model("stm32", "FSMC", ["SDCR1", "SDTR1"])[0] == "stub"
     assert new_chip.map_model("stm32", "SPI2", ["CR1", "CR2", "SR", "DR", "CRCPR", "I2SCFGR"])[0] == "stm32.spi"
     assert new_chip.map_model("stm32", "CRC", ["DR", "IDR", "CR", "INIT", "POL"])[0] == "stm32.crc"
     assert new_chip.map_model("stm32", "RTC", ["CRH", "CRL", "PRLH", "CNTH"])[0] == "stub"
@@ -225,6 +245,12 @@ def test_scaffold_kinetis_and_c2000_match_the_real_chips(tmp_path):
     for n, m in (("CRC", "kinetis.crc"), ("DAC0", "kinetis.dac"), ("CMP0", "kinetis.cmp"), ("CMP1", "kinetis.cmp"),
                  ("CMP2", "kinetis.cmp"), ("EWM", "kinetis.ewm"), ("VREF", "kinetis.vref"), ("CAN0", "kinetis.flexcan")):
         assert k22[n].model == m, n
+    for n, m in (("I2S0", "kinetis.sai"), ("CMT", "kinetis.cmt"), ("MCM", "kinetis.mcm"), ("FMC", "kinetis.fmc"),
+                 ("AIPS0", "kinetis.aips"), ("AIPS1", "kinetis.aips"), ("AXBS", "kinetis.axbs"), ("MPU", "kinetis.mpu"),
+                 ("FB", "kinetis.flexbus")):
+        assert k22[n].model == m, n
+    fbs = k22["FB_SPACE"]                           # FlexBus windows: not in the SVD, added by the alias table
+    assert (fbs.model, fbs.base, fbs.size) == ("kinetis.flexbus_space", 0x60000000, 0x80000000)
     out = io.StringIO()
     assert svd2chip.check(K22_SVD[0], tmp_path / "chips" / "k22test.yaml", out=out) == 0, out.getvalue()
     c2k = load_chip(tmp_path / "chips" / "c2ktest.yaml")

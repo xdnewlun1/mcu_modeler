@@ -21,6 +21,9 @@ TABLE = SignalTable([
     (r"CAN\d+_RX", IN),
     (r"TIM\d+_CH\d+N?(_ETR)?", OUT_L),
     (r"TIM\d+_(ETR|BKIN)", IN),
+    (r"SDIO_CK", OUT_L),                     # card clock (not toggled per edge: stm32.sdio summarises it)
+    (r"SDIO_CMD", OUT_H),                    # idles high (pulled up)
+    (r"SDIO_D\d", IN),
     (r"MCO\d*|RTC_OUT", OUT_L),
     (r"TRACE(CLK|D\d+)", OUT_L),
     (r"JTMS-SWDIO|JTCK-SWCLK|JTDI|NJTRST", IN),

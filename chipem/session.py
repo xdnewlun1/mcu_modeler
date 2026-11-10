@@ -325,6 +325,8 @@ class Session:
                     vcd_path=g("vcd"))
         for spec in g("spi_flash", None) or []:
             s.attach_spi_flash(spec)
+        for spec in g("sd_card", None) or []:
+            s.attach_sd_card(spec)
         for spec in g("part", None) or []:
             s.add_part_spec(spec)
         for spec in g("set", None) or []:
@@ -345,7 +347,7 @@ class Session:
                    vcd_path: str | Path | None = None, quantum_ns: float | None = None,
                    clock_hz: float | None = None, quiet: bool = False) -> "Session":
         """Build a multi-chip session from a board YAML path or a chipem.board.BoardDesc."""
-        from .board import Board, BoardDesc, load_board, spi_flash_spec
+        from .board import Board, BoardDesc, device_spec, load_board, spi_flash_spec
         bd = board if isinstance(board, BoardDesc) else load_board(board)
         ctxs = []
         for spec in bd.chips:
@@ -371,7 +373,12 @@ class Session:
         for ps in bd.parts:
             brd.add_part(ps.id, ps.type, ps.params, ps.ports)
         for d in bd.devices:
-            s.attach_spi_flash(spi_flash_spec(d), chip=d.chip)
+            if d.type == "sram":
+                s.attach_sram(device_spec(d, "bus", "XINTF6"), chip=d.chip)
+            elif d.type == "sd_card":
+                s.attach_sd_card(device_spec(d, "host", ""), chip=d.chip)
+            else:
+                s.attach_spi_flash(spi_flash_spec(d), chip=d.chip)
         for st in bd.stimulus:
             s.apply_stimulus(st)
         s._vcd_parts()
@@ -452,6 +459,31 @@ class Session:
     def attach_spi_flash(self, spec: str, chip: str | None = None):
         """Attach a SPI NOR flash: "[CHIP.]SPI0:cs=PTC4,jedec=0x202015,size=2M,file=img.bin" (see chipem.devices)."""
         from .devices.spi_flash import attach_from_spec
+        if chip is not None:
+            ctx = self._ctx(chip)
+        else:
+            ctx, spec = self.resolve(spec)
+        dev = attach_from_spec(ctx.chip, spec)
+        ctx.devices.append(dev)
+        return dev
+
+    def attach_sd_card(self, spec: str, chip: str | None = None):
+        """Insert an SD card into an SD host controller: "[CHIP.]SDIO:size=64M,kind=sdhc,image=card.img,save=out.img"
+        (chipem.devices.sdcard; the host is any peripheral with `attach_card`, the first one when the name is empty).
+        The card is written back to `save` (or to `image` with writeback=1) when the session closes."""
+        from .devices.sdcard import attach_from_spec
+        if chip is not None:
+            ctx = self._ctx(chip)
+        else:
+            ctx, spec = self.resolve(spec)
+        dev = attach_from_spec(ctx.chip, spec)
+        ctx.devices.append(dev)
+        return dev
+
+    def attach_sram(self, spec: str, chip: str | None = None):
+        """Attach a parallel SRAM to an external bus: "[CHIP.]XINTF6:size=256K,width=16,file=img.bin"
+        (chipem.devices.sram; the bus is any peripheral with `attach_memory`)."""
+        from .devices.sram import attach_from_spec
         if chip is not None:
             ctx = self._ctx(chip)
         else:
@@ -795,6 +827,11 @@ class Session:
             self._flush_waves(stopped_only=False)
         except Exception:
             pass
+        for ctx in self.ctxs.values():
+            for dev in ctx.devices:
+                save = getattr(dev, "save_image", None)      # SD card write-back (chipem.devices.sdcard)
+                if save is not None:
+                    save()
         for ctx in self.ctxs.values():
             ctx.close()
         if self.board is not None:

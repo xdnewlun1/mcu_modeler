@@ -158,3 +158,11 @@ class C2000Block(MMIOBlock):
         if not self._gate_warned and self.gate is not None:
             self.check_gate()
         MMIOBlock.write(self, offset, size, value)
+
+
+def gpio_resync(chip: Any, sig: str) -> None:
+    """A block changed the live direction / drive of its pin signal `sig` (`signal_state`): let the GPIO mux model
+    re-evaluate the pins muxed to it."""
+    g = find_model(chip, "ti_c2000.gpio", "GPIO")
+    if g is not None:
+        g.resync_signal(sig)

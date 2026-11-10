@@ -80,6 +80,8 @@ class _PageDispatch:
 
 
 class Bus:
+    MAX_SHARED_MAPS = 16                                 # map_window: fast mirrored copies, then callbacks
+
     def __init__(self, core: Any, *, addr_unit_bits: int = 8, log: Any = None,
                  catch_all: tuple | list | None = DEFAULT_CATCH_ALL, bitband: bool = False):
         if addr_unit_bits % 8 or addr_unit_bits <= 0:
@@ -98,6 +100,7 @@ class Bus:
         self.regions: dict[str, MemoryRegion] = {}
         self.blocks: dict[str, MMIOBlock] = {}
         self.auto_stubs: dict[int, MMIOBlock] = {}
+        self._windows: dict[str, tuple] = {}            # map_window: name -> (base, size, obj, keep-alive refs)
         self._bitband: list[tuple[int, int]] = []
         core.set_unmapped_handler(self._on_unmapped)
         if bitband:
@@ -183,6 +186,88 @@ class Bus:
                 pb += page
         self._add_entry(base, end, block)
         self.blocks[block.name] = block
+
+    # ---------------------------------------------------------------- dynamic windows (external memory buses)
+    def map_window(self, name: str, base: int, size: int, *, buffer: Any = None, period: int | None = None,
+                   writable: bool = True, read=None, write=None) -> Any:
+        """Map an external-memory window that can come and go at run time (STM32 FSMC banks). With `buffer` (an
+        object exposing the buffer protocol, e.g. an array/bytearray/ctypes buffer that is never resized) the window
+        is backed by that host memory, mirrored every `period` bytes (default: the buffer size; a multiple of the
+        core page): the first MAX_SHARED_MAPS copies are a fast, executable MemoryRegion (kind "ext"), further
+        mirrors go through callbacks on the same buffer. Otherwise `read(off, size)` / `write(off, size, value)` are
+        MMIO callbacks for the whole window. Also callable from an MMIO callback. `unmap_window(name)` removes it."""
+        if name in self._windows:
+            self.unmap_window(name)
+        end = base + size
+        other = self._overlaps(base, end)
+        if other is not None:
+            raise ValueError(f"window {name} overlaps {other!r}")
+        if buffer is not None:
+            import ctypes
+            mv = memoryview(buffer).cast("B")
+            nbytes = mv.nbytes
+            period = int(period or nbytes)
+            if period % self.page or size % period or period > nbytes:
+                raise ValueError(f"window {name}: mirror period 0x{period:x} must be a multiple of the core page "
+                                 f"and divide the window")
+            cbuf = (ctypes.c_char * nbytes).from_buffer(mv) if not mv.readonly else None
+            if cbuf is None:
+                raise ValueError(f"window {name}: buffer is read-only")
+            ptr = ctypes.addressof(cbuf)
+            ncopy = min(size // period, max(1, self.MAX_SHARED_MAPS))
+            fast_end = base + ncopy * period
+            for a in range(base, fast_end, period):
+                self.core.map_shared(a, period, ptr, writable=writable)
+            obj: Any = MemoryRegion(name, base, fast_end - base, "ext", writable)
+            self.regions[name] = obj
+            tail = None
+            if fast_end < end:                     # further mirrors: callbacks on the same buffer (not executable)
+                tail = MMIOBlock(f"{name}_mirror", fast_end, end - fast_end, ram_like=False)
+                off0 = fast_end - base
+
+                def trd(off: int, n: int, _mv=mv, _p=period, _o=off0) -> int:
+                    a = (off + _o) % _p
+                    return int.from_bytes(bytes(_mv[a:a + n]), "little")
+
+                def twr(off: int, n: int, v: int, _mv=mv, _p=period, _o=off0, _w=writable) -> None:
+                    if _w:
+                        a = (off + _o) % _p
+                        _mv[a:a + n] = (v & ((1 << (8 * n)) - 1)).to_bytes(n, "little")
+                tail.read, tail.write = trd, twr
+                self.core.map_mmio(fast_end, end - fast_end, trd, twr)
+                self._add_entry(fast_end, end, tail)
+            keep = (mv, cbuf, tail)
+        else:
+            blk = MMIOBlock(name, base, size, ram_like=False)
+            if read is not None:
+                blk.read = read
+            if write is not None:
+                blk.write = write
+            self.core.map_mmio(base, size, blk.read, blk.write)
+            obj = blk
+            keep = None
+        self._add_entry(base, obj.base + obj.size if isinstance(obj, MemoryRegion) else end, obj)
+        self._windows[name] = (base, size, obj, keep)
+        return obj
+
+    def unmap_window(self, name: str) -> None:
+        w = self._windows.pop(name, None)
+        if w is None:
+            return
+        base, size, obj, keep = w
+        tail = keep[2] if keep else None
+        if tail is not None:
+            self.core.unmap(obj.base, obj.size)
+            self.core.unmap(tail.base, tail.size)
+        else:
+            self.core.unmap(base, size)
+        for o_rm in (obj, tail):
+            for i, (b, e, o) in enumerate(self._entries):
+                if o is o_rm and o is not None:
+                    del self._entries[i]
+                    del self._starts[i]
+                    break
+        self.regions.pop(name, None)
 
     def enable_bitband(self) -> None:
         for alias, target in BITBAND:

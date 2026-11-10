@@ -26,7 +26,7 @@ def part(type_name: str) -> Callable[[type], type]:
 
 
 def _load() -> None:
-    from . import encoder, i2c_eeprom, i2c_register_device, std  # noqa: F401  (registers the standard types)
+    from . import encoder, i2c_eeprom, i2c_register_device, i2s_codec, std  # noqa: F401  (standard types)
 
 
 def get(type_name: str) -> type:

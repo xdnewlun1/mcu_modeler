@@ -172,16 +172,43 @@ peripherals:
     base: 0x0B20
     size: 0x020
     derived_from: null
-    description: "External interface configuration"
+    description: "External interface (XINTF) configuration; all registers EALLOW protected (SPRUI07 ch. 14)"
     group: XINTF
+    # SPRUI07 14.6 / Table 1-99; reset values: XTIMINGx per the field tables 14-12..14-17 (X2TIMING=1, XSIZE=3,
+    # READYMODE=USEREADY=1, lead 3, active 7, trail 3), XINTCNF2 bit map from TI's DSP2833x_Xintf.h (XTIMCLK=1,
+    # CLKMODE=1, HOLDS/HOLDAS = inactive pins), XBANK per Table 14-18 (BCYC=7, BANK=7).  XRESET at 0x0B3D as in
+    # DSP2833x_Xintf.h (SPRUI07 prints 0x083D; the chip YAML maps an alias there).  XREVISION reads X (unpublished): 0.
     registers:
-      - {name: XTIMING0, offset: 0x00, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: XTIMING6, offset: 0x0C, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: XTIMING7, offset: 0x0E, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: XINTCNF2, offset: 0x14, width: 2, reset: 0x00010D7D, reset_mask: 0xFFFFFFFF, access: read-write}
-      - {name: XBANK, offset: 0x18, width: 1, reset: 0x0038, reset_mask: 0xFFFF, access: read-write}
+      - {name: XTIMING0, offset: 0x00, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: XWRTRAIL, lsb: 0, width: 2}, {name: XWRACTIVE, lsb: 2, width: 3}, {name: XWRLEAD, lsb: 5, width: 2},
+          {name: XRDTRAIL, lsb: 7, width: 2}, {name: XRDACTIVE, lsb: 9, width: 3}, {name: XRDLEAD, lsb: 12, width: 2},
+          {name: USEREADY, lsb: 14, width: 1}, {name: READYMODE, lsb: 15, width: 1}, {name: XSIZE, lsb: 16, width: 2},
+          {name: X2TIMING, lsb: 22, width: 1},
+        ]}
+      - {name: XTIMING6, offset: 0x0C, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: XWRTRAIL, lsb: 0, width: 2}, {name: XWRACTIVE, lsb: 2, width: 3}, {name: XWRLEAD, lsb: 5, width: 2},
+          {name: XRDTRAIL, lsb: 7, width: 2}, {name: XRDACTIVE, lsb: 9, width: 3}, {name: XRDLEAD, lsb: 12, width: 2},
+          {name: USEREADY, lsb: 14, width: 1}, {name: READYMODE, lsb: 15, width: 1}, {name: XSIZE, lsb: 16, width: 2},
+          {name: X2TIMING, lsb: 22, width: 1},
+        ]}
+      - {name: XTIMING7, offset: 0x0E, width: 2, reset: 0x0043FFFF, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: XWRTRAIL, lsb: 0, width: 2}, {name: XWRACTIVE, lsb: 2, width: 3}, {name: XWRLEAD, lsb: 5, width: 2},
+          {name: XRDTRAIL, lsb: 7, width: 2}, {name: XRDACTIVE, lsb: 9, width: 3}, {name: XRDLEAD, lsb: 12, width: 2},
+          {name: USEREADY, lsb: 14, width: 1}, {name: READYMODE, lsb: 15, width: 1}, {name: XSIZE, lsb: 16, width: 2},
+          {name: X2TIMING, lsb: 22, width: 1},
+        ]}
+      - {name: XINTCNF2, offset: 0x14, width: 2, reset: 0x00010C04, reset_mask: 0xFFFFFFFF, access: read-write, fields: [
+          {name: WRBUFF, lsb: 0, width: 2}, {name: CLKMODE, lsb: 2, width: 1}, {name: CLKOFF, lsb: 3, width: 1},
+          {name: WLEVEL, lsb: 6, width: 2}, {name: HOLD, lsb: 9, width: 1}, {name: HOLDS, lsb: 10, width: 1},
+          {name: HOLDAS, lsb: 11, width: 1}, {name: XTIMCLK, lsb: 16, width: 3},
+        ]}
+      - {name: XBANK, offset: 0x18, width: 1, reset: 0x003F, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: BANK, lsb: 0, width: 3}, {name: BCYC, lsb: 3, width: 3},
+        ]}
       - {name: XREVISION, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
-      - {name: XRESET, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XRESET, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: XHARDRESET, lsb: 0, width: 1},
+        ]}
   CPUTIMER0:
     base: 0x0C00
     size: 0x008
@@ -2428,7 +2455,7 @@ peripherals:
     base: 0x6800
     size: 0x040
     derived_from: null
-    description: "ePWM1 + HRPWM1 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
+    description: "ePWM1 + HRPWM1 (SPRUI07 ch. 4 Table 4-8: TBPHSHR/CMPAHR bits 15:8, HRCNFG EALLOW; no TBPRDHR)"
     group: EPWM
     interrupts: {40: EPWM1_TZINT, 48: EPWM1_INT}
     registers:
@@ -2444,12 +2471,16 @@ peripherals:
           {name: FREE_SOFT, lsb: 14, width: 2},
         ]}
       - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
-      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TBPHSH, lsb: 8, width: 8},
+        ]}
       - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CMPAHR, lsb: 8, width: 8},
+        ]}
       - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
@@ -2471,12 +2502,16 @@ peripherals:
       - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: EDGMODE, lsb: 0, width: 2},
+          {name: CTLMODE, lsb: 2, width: 1},
+          {name: HRLOAD, lsb: 3, width: 1},
+        ]}
   EPWM2:
     base: 0x6840
     size: 0x040
     derived_from: null
-    description: "ePWM2 + HRPWM2 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
+    description: "ePWM2 + HRPWM2 (SPRUI07 ch. 4 Table 4-8: TBPHSHR/CMPAHR bits 15:8, HRCNFG EALLOW; no TBPRDHR)"
     group: EPWM
     interrupts: {41: EPWM2_TZINT, 49: EPWM2_INT}
     registers:
@@ -2492,12 +2527,16 @@ peripherals:
           {name: FREE_SOFT, lsb: 14, width: 2},
         ]}
       - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
-      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TBPHSH, lsb: 8, width: 8},
+        ]}
       - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CMPAHR, lsb: 8, width: 8},
+        ]}
       - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
@@ -2519,12 +2558,16 @@ peripherals:
       - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: EDGMODE, lsb: 0, width: 2},
+          {name: CTLMODE, lsb: 2, width: 1},
+          {name: HRLOAD, lsb: 3, width: 1},
+        ]}
   EPWM3:
     base: 0x6880
     size: 0x040
     derived_from: null
-    description: "ePWM3 + HRPWM3 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
+    description: "ePWM3 + HRPWM3 (SPRUI07 ch. 4 Table 4-8: TBPHSHR/CMPAHR bits 15:8, HRCNFG EALLOW; no TBPRDHR)"
     group: EPWM
     interrupts: {42: EPWM3_TZINT, 50: EPWM3_INT}
     registers:
@@ -2540,12 +2583,16 @@ peripherals:
           {name: FREE_SOFT, lsb: 14, width: 2},
         ]}
       - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
-      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TBPHSH, lsb: 8, width: 8},
+        ]}
       - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CMPAHR, lsb: 8, width: 8},
+        ]}
       - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
@@ -2567,12 +2614,16 @@ peripherals:
       - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: EDGMODE, lsb: 0, width: 2},
+          {name: CTLMODE, lsb: 2, width: 1},
+          {name: HRLOAD, lsb: 3, width: 1},
+        ]}
   EPWM4:
     base: 0x68C0
     size: 0x040
     derived_from: null
-    description: "ePWM4 + HRPWM4 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
+    description: "ePWM4 + HRPWM4 (SPRUI07 ch. 4 Table 4-8: TBPHSHR/CMPAHR bits 15:8, HRCNFG EALLOW; no TBPRDHR)"
     group: EPWM
     interrupts: {43: EPWM4_TZINT, 51: EPWM4_INT}
     registers:
@@ -2588,12 +2639,16 @@ peripherals:
           {name: FREE_SOFT, lsb: 14, width: 2},
         ]}
       - {name: TBSTS, offset: 0x01, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
-      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: TBPHSHR, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TBPHSH, lsb: 8, width: 8},
+        ]}
       - {name: TBPHS, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBCTR, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: TBPRD, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPCTL, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: CMPAHR, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CMPAHR, lsb: 8, width: 8},
+        ]}
       - {name: CMPA, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: CMPB, offset: 0x0A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: AQCTLA, offset: 0x0B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
@@ -2615,12 +2670,16 @@ peripherals:
       - {name: ETCLR, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: ETFRC, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: PCCTL, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: HRCNFG, offset: 0x20, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: EDGMODE, lsb: 0, width: 2},
+          {name: CTLMODE, lsb: 2, width: 1},
+          {name: HRLOAD, lsb: 3, width: 1},
+        ]}
   EPWM5:
     base: 0x6900
     size: 0x040
     derived_from: null
-    description: "ePWM5 + HRPWM5 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
+    description: "ePWM5 (no HRPWM on the F28232, SPRS439 Table 5-2: TBPHSHR/CMPAHR/HRCNFG are reserved, stored only)"
     group: EPWM
     interrupts: {44: EPWM5_TZINT, 52: EPWM5_INT}
     registers:
@@ -2668,7 +2727,7 @@ peripherals:
     base: 0x6940
     size: 0x040
     derived_from: null
-    description: "ePWM6 + HRPWM6 (ePWM modelled by ti_c2000.epwm; HRPWM registers stored only)"
+    description: "ePWM6 (no HRPWM on the F28232, SPRS439 Table 5-2: TBPHSHR/CMPAHR/HRCNFG are reserved, stored only)"
     group: EPWM
     interrupts: {45: EPWM6_TZINT, 53: EPWM6_INT}
     registers:
@@ -3268,29 +3327,114 @@ peripherals:
     base: 0x5000
     size: 0x040
     derived_from: null
-    description: "McBSP-A (storage only)"
+    description: "McBSP-A (SPRUI07 ch. 12, Table 12-76 offsets; base 0x5000 from SPRS439 Peripheral Frame 3)"
     group: MCBSP
     registers:
       - {name: DRR2, offset: 0x00, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: DRR1, offset: 0x01, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: DXR2, offset: 0x02, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: DXR1, offset: 0x03, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SPCR2, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SPCR1, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: RCR2, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: RCR1, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: XCR2, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: XCR1, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SRGR2, offset: 0x0A, width: 1, reset: 0x2000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SRGR1, offset: 0x0B, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write}
-      - {name: MCR2, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: MCR1, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPCR2, offset: 0x04, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: XRST, lsb: 0, width: 1},
+          {name: XRDY, lsb: 1, width: 1},
+          {name: XEMPTY, lsb: 2, width: 1},
+          {name: XSYNCERR, lsb: 3, width: 1},
+          {name: XINTM, lsb: 4, width: 2},
+          {name: GRST, lsb: 6, width: 1},
+          {name: FRST, lsb: 7, width: 1},
+          {name: SOFT, lsb: 8, width: 1},
+          {name: FREE, lsb: 9, width: 1},
+        ]}
+      - {name: SPCR1, offset: 0x05, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RRST, lsb: 0, width: 1},
+          {name: RRDY, lsb: 1, width: 1},
+          {name: RFULL, lsb: 2, width: 1},
+          {name: RSYNCERR, lsb: 3, width: 1},
+          {name: RINTM, lsb: 4, width: 2},
+          {name: DXENA, lsb: 7, width: 1},
+          {name: CLKSTP, lsb: 11, width: 2},
+          {name: RJUST, lsb: 13, width: 2},
+          {name: DLB, lsb: 15, width: 1},
+        ]}
+      - {name: RCR2, offset: 0x06, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RDATDLY, lsb: 0, width: 2},
+          {name: RFIG, lsb: 2, width: 1},
+          {name: RCOMPAND, lsb: 3, width: 2},
+          {name: RWDLEN2, lsb: 5, width: 3},
+          {name: RFRLEN2, lsb: 8, width: 7},
+          {name: RPHASE, lsb: 15, width: 1},
+        ]}
+      - {name: RCR1, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RWDLEN1, lsb: 5, width: 3},
+          {name: RFRLEN1, lsb: 8, width: 7},
+        ]}
+      - {name: XCR2, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: XDATDLY, lsb: 0, width: 2},
+          {name: XFIG, lsb: 2, width: 1},
+          {name: XCOMPAND, lsb: 3, width: 2},
+          {name: XWDLEN2, lsb: 5, width: 3},
+          {name: XFRLEN2, lsb: 8, width: 7},
+          {name: XPHASE, lsb: 15, width: 1},
+        ]}
+      - {name: XCR1, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: XWDLEN1, lsb: 5, width: 3},
+          {name: XFRLEN1, lsb: 8, width: 7},
+        ]}
+      - {name: SRGR2, offset: 0x0A, width: 1, reset: 0x2000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: FPER, lsb: 0, width: 12},
+          {name: FSGM, lsb: 12, width: 1},
+          {name: CLKSM, lsb: 13, width: 1},
+          {name: GSYNC, lsb: 15, width: 1},
+        ]}
+      - {name: SRGR1, offset: 0x0B, width: 1, reset: 0x0001, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CLKGDV, lsb: 0, width: 8},
+          {name: FWID, lsb: 8, width: 8},
+        ]}
+      - {name: MCR2, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: XMCM, lsb: 0, width: 2},
+          {name: XCBLK, lsb: 2, width: 3},
+          {name: XPABLK, lsb: 5, width: 2},
+          {name: XPBBLK, lsb: 7, width: 2},
+          {name: XMCME, lsb: 9, width: 1},
+        ]}
+      - {name: MCR1, offset: 0x0D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RMCM, lsb: 0, width: 1},
+          {name: RCBLK, lsb: 2, width: 3},
+          {name: RPABLK, lsb: 5, width: 2},
+          {name: RPBBLK, lsb: 7, width: 2},
+          {name: RMCME, lsb: 9, width: 1},
+        ]}
       - {name: RCERA, offset: 0x0E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: RCERB, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: XCERA, offset: 0x10, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: XCERB, offset: 0x11, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: PCR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: MFFINT, offset: 0x23, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: PCR, offset: 0x12, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: CLKRP, lsb: 0, width: 1},
+          {name: CLKXP, lsb: 1, width: 1},
+          {name: FSRP, lsb: 2, width: 1},
+          {name: FSXP, lsb: 3, width: 1},
+          {name: SCLKME, lsb: 7, width: 1},
+          {name: CLKRM, lsb: 8, width: 1},
+          {name: CLKXM, lsb: 9, width: 1},
+          {name: FSRM, lsb: 10, width: 1},
+          {name: FSXM, lsb: 11, width: 1},
+        ]}
+      - {name: RCERC, offset: 0x13, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERD, offset: 0x14, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERC, offset: 0x15, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERD, offset: 0x16, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERE, offset: 0x17, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERF, offset: 0x18, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERE, offset: 0x19, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERF, offset: 0x1A, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERG, offset: 0x1B, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: RCERH, offset: 0x1C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERG, offset: 0x1D, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: XCERH, offset: 0x1E, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: MFFINT, offset: 0x23, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: XINTENA, lsb: 0, width: 1},
+          {name: RINTENA, lsb: 2, width: 1},
+        ]}
   GPIO:
     base: 0x6F80
     size: 0x080
@@ -3514,7 +3658,7 @@ peripherals:
           {name: QUALSTDBY, lsb: 2, width: 6},
           {name: WDINTE, lsb: 15, width: 1},
         ]}
-      - {name: PCLKCR3, offset: 0x10, width: 1, reset: 0x3700, reset_mask: 0xFFFF, access: read-write, fields: [
+      - {name: PCLKCR3, offset: 0x10, width: 1, reset: 0x2700, reset_mask: 0xFFFF, access: read-write, fields: [
           {name: CPUTIMER0ENCLK, lsb: 8, width: 1},
           {name: CPUTIMER1ENCLK, lsb: 9, width: 1},
           {name: CPUTIMER2ENCLK, lsb: 10, width: 1},
@@ -3578,10 +3722,33 @@ peripherals:
       - {name: SPIRXBUF, offset: 0x07, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-only}
       - {name: SPITXBUF, offset: 0x08, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
       - {name: SPIDAT, offset: 0x09, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SPIFFTX, offset: 0x0A, width: 1, reset: 0xA000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SPIFFRX, offset: 0x0B, width: 1, reset: 0x201F, reset_mask: 0xFFFF, access: read-write}
-      - {name: SPIFFCT, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
-      - {name: SPIPRI, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write}
+      - {name: SPIFFTX, offset: 0x0A, width: 1, reset: 0xA000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TXFFIL, lsb: 0, width: 5},
+          {name: TXFFIENA, lsb: 5, width: 1},
+          {name: TXFFINTCLR, lsb: 6, width: 1, access: write-only},
+          {name: TXFFINT, lsb: 7, width: 1, access: read-only},
+          {name: TXFFST, lsb: 8, width: 5, access: read-only},
+          {name: TXFIFO, lsb: 13, width: 1},
+          {name: SPIFFENA, lsb: 14, width: 1},
+          {name: SPIRST, lsb: 15, width: 1},
+        ]}
+      - {name: SPIFFRX, offset: 0x0B, width: 1, reset: 0x201F, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: RXFFIL, lsb: 0, width: 5},
+          {name: RXFFIENA, lsb: 5, width: 1},
+          {name: RXFFINTCLR, lsb: 6, width: 1, access: write-only},
+          {name: RXFFINT, lsb: 7, width: 1, access: read-only},
+          {name: RXFFST, lsb: 8, width: 5, access: read-only},
+          {name: RXFIFORESET, lsb: 13, width: 1},
+          {name: RXFFOVFCLR, lsb: 14, width: 1, access: write-only},
+          {name: RXFFOVF, lsb: 15, width: 1, access: read-only},
+        ]}
+      - {name: SPIFFCT, offset: 0x0C, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: TXDLY, lsb: 0, width: 8},
+        ]}
+      - {name: SPIPRI, offset: 0x0F, width: 1, reset: 0x0000, reset_mask: 0xFFFF, access: read-write, fields: [
+          {name: FREE, lsb: 4, width: 1},
+          {name: SOFT, lsb: 5, width: 1},
+        ]}
   SCIA:
     base: 0x7050
     size: 0x010

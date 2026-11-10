@@ -1,0 +1,8 @@
+# STM32F405ZG FSMC bank 1 / NE1 with a 64K x 16 (128 KB) asynchronous SRAM (chipem.devices.sram on the FSMC).
+# The firmware enables the bank (BCR1 MBKEN | MWID 16 | WREN), tests the SRAM, shows the 128 KB mirror across the
+# 64 MB window, runs code from the SRAM, then disables the bank and takes the bus fault; USART1 prints "done".
+name: stm32_fsmc_sram
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/fsmc_sram.elf}
+devices:
+  - {type: sram, chip: A, bus: FSMC, size: 64K, width: 16}

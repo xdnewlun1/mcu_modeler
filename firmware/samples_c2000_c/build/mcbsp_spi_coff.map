@@ -1,0 +1,222 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Mon Nov  9 22:17:21 2026
+
+OUTPUT FILE NAME:   <build/mcbsp_spi_coff.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00330000   0000ff80  000002d5  0000fcab  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  00000016  00000fea  RWIX
+  RAML5                 0000d000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00330000    00000282     
+                  00330000    0000018f     mcbsp_spi.obj (.text)
+                  0033018f    00000054     rts2800_ml.lib : boot28.asm.obj (.text)
+                  003301e3    00000029                    : exit.c.obj (.text)
+                  0033020c    00000024                    : cpy_tbl.c.obj (.text)
+                  00330230    00000020                    : memcpy.c.obj (.text)
+                  00330250    00000011                    : args_main.c.obj (.text)
+                  00330261    0000000d     mcbsp_spi.obj (.text:retain)
+                  0033026e    00000009     rts2800_ml.lib : _lock.c.obj (.text)
+                  00330277    00000008     codestart.obj (.text)
+                  0033027f    00000002     rts2800_ml.lib : pre_init.c.obj (.text)
+                  00330281    00000001                    : startup.c.obj (.text)
+
+.cinit     0    003302bb    0000001a     
+                  003302bb    0000000e     rts2800_ml.lib : exit.c.obj (.cinit)
+                  003302c9    00000005                    : _lock.c.obj (.cinit:__lock)
+                  003302ce    00000005                    : _lock.c.obj (.cinit:__unlock)
+                  003302d3    00000002     --HOLE-- [fill = 0]
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000002     DSECT
+                  003fffc0    00000002     rts2800_ml.lib : boot28.asm.obj (.reset)
+
+.pinit     0    00330000    00000000     UNINITIALIZED
+
+.econst    0    00330282    00000039     
+                  00330282    00000035     mcbsp_spi.obj (.econst:.string)
+                  003302b7    00000004     mcbsp_spi.obj (.econst:.string:_msg$1)
+
+.ebss      1    0000c000    00000016     UNINITIALIZED
+                  0000c000    00000006     rts2800_ml.lib : exit.c.obj (.ebss)
+                  0000c006    00000004     mcbsp_spi.obj (.ebss:_flash_data)
+                  0000c00a    00000004     mcbsp_spi.obj (.ebss)
+                  0000c00e    00000003     mcbsp_spi.obj (.ebss:_flash_id)
+                  0000c011    00000001     --HOLE--
+                  0000c012    00000002     rts2800_ml.lib : _lock.c.obj (.ebss:__lock)
+                  0000c014    00000002                    : _lock.c.obj (.ebss:__unlock)
+
+MODULE SUMMARY
+
+       Module            code   initialized data   uninitialized data
+       ------            ----   ----------------   ------------------
+    build/obj_coff/mcbsp_spi/
+       mcbsp_spi.obj     412    57                 11                
+       codestart.obj     10     0                  0                 
+    +--+-----------------+------+------------------+--------------------+
+       Total:            422    57                 11                
+                                                                     
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml.lib
+       boot28.asm.obj    84     0                  0                 
+       exit.c.obj        41     14                 6                 
+       cpy_tbl.c.obj     36     0                  0                 
+       memcpy.c.obj      32     0                  0                 
+       _lock.c.obj       9      10                 4                 
+       args_main.c.obj   17     0                  0                 
+       pre_init.c.obj    2      0                  0                 
+       startup.c.obj     1      0                  0                 
+    +--+-----------------+------+------------------+--------------------+
+       Total:            222    24                 10                
+                                                                     
+       Stack:            0      0                  768               
+    +--+-----------------+------+------------------+--------------------+
+       Grand Total:      644    81                 789               
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c000     300 (0000c000)     ___TI_enable_exit_profile_output
+0000c002     300 (0000c000)     ___TI_cleanup_ptr
+0000c004     300 (0000c000)     ___TI_dtors_ptr
+0000c006     300 (0000c000)     _flash_data
+0000c00a     300 (0000c000)     _done
+0000c00c     300 (0000c000)     _rint_count
+0000c00e     300 (0000c000)     _flash_id
+0000c012     300 (0000c000)     __lock
+0000c014     300 (0000c000)     __unlock
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     003301e3  C$$EXIT                         
+1     00000700  __STACK_END                     
+abs   00000300  __STACK_SIZE                    
+1     0000c002  ___TI_cleanup_ptr               
+1     0000c004  ___TI_dtors_ptr                 
+1     0000c000  ___TI_enable_exit_profile_output
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+0     003302bb  ___cinit__                      
+0     00330282  ___etext__                      
+abs   ffffffff  ___pinit__                      
+0     00330000  ___text__                       
+0     00330250  __args_main                     
+1     0000c012  __lock                          
+0     00330276  __nop                           
+0     00330272  __register_lock                 
+0     0033026e  __register_unlock               
+1     00000400  __stack                         
+0     00330281  __system_post_cinit             
+0     0033027f  __system_pre_init               
+1     0000c014  __unlock                        
+0     003301e3  _abort                          
+0     0033018f  _c_int00                        
+0     0033020c  _copy_in                        
+1     0000c00a  _done                           
+0     003301e5  _exit                           
+1     0000c006  _flash_data                     
+1     0000c00e  _flash_id                       
+0     00330103  _main                           
+0     00330230  _memcpy                         
+0     00330261  _mrinta_isr                     
+1     0000c00c  _rint_count                     
+abs   ffffffff  binit                           
+0     003302bb  cinit                           
+0     0033fff6  code_start                      
+0     00330282  etext                           
+abs   ffffffff  pinit                           
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                            
+----  -------   ----                            
+0     00330000  .text                           
+0     00330000  ___text__                       
+0     00330103  _main                           
+0     0033018f  _c_int00                        
+0     003301e3  C$$EXIT                         
+0     003301e3  _abort                          
+0     003301e5  _exit                           
+0     0033020c  _copy_in                        
+0     00330230  _memcpy                         
+0     00330250  __args_main                     
+0     00330261  _mrinta_isr                     
+0     0033026e  __register_unlock               
+0     00330272  __register_lock                 
+0     00330276  __nop                           
+0     0033027f  __system_pre_init               
+0     00330281  __system_post_cinit             
+0     00330282  ___etext__                      
+0     00330282  etext                           
+0     003302bb  ___cinit__                      
+0     003302bb  cinit                           
+0     0033fff6  code_start                      
+1     00000400  __stack                         
+1     00000700  __STACK_END                     
+1     0000c000  ___TI_enable_exit_profile_output
+1     0000c002  ___TI_cleanup_ptr               
+1     0000c004  ___TI_dtors_ptr                 
+1     0000c006  _flash_data                     
+1     0000c00a  _done                           
+1     0000c00c  _rint_count                     
+1     0000c00e  _flash_id                       
+1     0000c012  __lock                          
+1     0000c014  __unlock                        
+abs   00000300  __STACK_SIZE                    
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+abs   ffffffff  ___pinit__                      
+abs   ffffffff  binit                           
+abs   ffffffff  pinit                           
+
+[41 symbols]

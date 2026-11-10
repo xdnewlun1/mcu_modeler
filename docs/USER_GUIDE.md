@@ -156,9 +156,11 @@ clocks, LEDs, probes, counters, gates, flip-flops.
   programs needs `--clock`.
 - **Clock gates only warn.** Accessing a gated-off peripheral logs one `warn` and proceeds; silicon would fault.
 - **Unmodelled peripherals are RAM-like stubs.** A loop that waits for a hardware status bit on a stub spins forever.
-- **UART and Kinetis SPI pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel
-  only through links. The STM32 SPI (`stm32.spi`) is the exception: it drives SCK/MOSI/NSS (master) or MISO (slave)
-  bit by bit, so two STM32s can talk SPI over board nets (`boards/stm32_spi_pair.yaml`). Timer outputs are different: STM32 TIM, Kinetis FTM, C2000 ePWM / eCAP APWM drive their pins edge by
+- **UART pins do not toggle.** A UART TX pin shows its idle level (H), not the bits. Bytes travel
+  only through links. SPI is different: the STM32 SPI (`stm32.spi`) and the Kinetis DSPI (`kinetis.dspi`) drive
+  SCK/MOSI(SOUT)/NSS(PCS) as masters or MISO(SOUT) as slaves bit by bit, so chips talk SPI over board nets
+  (`boards/stm32_spi_pair.yaml`, `boards/k22_stm32_spi.yaml`); the Kinetis SAI (I2S) and CMT (IR carrier) drive
+  their pins too. Timer outputs are different: STM32 TIM, Kinetis FTM, C2000 ePWM / eCAP APWM drive their pins edge by
   edge, and timer inputs (input capture, eCAP, eQEP and FTM quadrature decoders, faults, trip zones) see the edges on
   their pins (section 4.4).
 
@@ -407,6 +409,57 @@ back:
 
 The STM32 SPI also toggles SCK/MOSI on the pins (visible with `--vcd` or in the web UI), and without the device
 MISO floats and reads 0 (`JEDEC 000000`).
+
+On the TMS320F28232 the device attaches to SPI-A (`--spi-flash SPIA:cs=GPIO19`, `boards/c2000_spi_flash.yaml`; with
+SPISTEA as chip select, send a multi-byte command through the FIFO so SPISTE stays low, otherwise use a GPIO chip
+select) or to McBSP-A in clock-stop (SPI master) mode (`spi: MCBSPA`, `boards/c2000_mcbsp_flash.yaml`, where GPIO24 is
+the chip select because MFSXA deasserts after every packet):
+
+```sh
+.venv/bin/chipem run --board boards/c2000_mcbsp_flash.yaml --for 15ms
+#  SCIA (40 bytes): "MCBSP SPI\r\nID EF4016 DATA MCBS RINT 21\r\n"
+```
+
+**SD cards.** `--sd-card HOST:options` inserts an SD memory card (`chipem/devices/sdcard.py`) into the STM32 `SDIO`
+or the K22 `SDHC` (an empty `HOST` picks the chip's only SD host). Without it the socket is empty and every command
+times out, as on a board without a card. Options: `size=` (default 1G, or the image size; sparse, so large cards cost
+nothing), `kind=sdhc|sdsc` (SDHC: block addressing, CSD v2; SDSC: byte addressing, CSD v1, at most 2 GB),
+`version=1` (a v1.x SDSC card that ignores CMD8), `image=PATH` (raw card image, e.g. made with `dd` from a real card:
+a FAT file system in it is visible to the firmware), `save=PATH` or `writeback=1` (write the contents back when the
+session closes), and the timing `init_time=` (ACMD41 power-up, 1 ms), `read_time=` (access time before each block,
+50 us), `busy=` (programming time per written block, 250 us), `erase_time=` (1 ms). The bare-metal and ST HAL
+samples:
+
+```sh
+.venv/bin/chipem run --board boards/stm32_sdcard.yaml --for 30ms           # sdio_card: "... WRITE ok ... DMA ok done"
+.venv/bin/chipem run firmware/samples_stm32_hal/build/sd_hal.elf --chip stm32f405zg --for 60ms \
+      --sd-card SDIO:size=64M                                                # HAL_SD_Init/WriteBlocks/ReadBlocks/Erase
+.venv/bin/chipem run firmware/samples/build/sdhc_card.elf --chip mk22fn1m0vll12 --clock 120e6 --for 30ms \
+      --sd-card SDHC:image=card.img,writeback=1                              # K22: CPU, simple DMA and ADMA2
+```
+
+In a board file: `devices: [{type: sd_card, chip: A, host: SDIO, size: 64M, image: card.img, save: out.img}]`
+(paths relative to the board file). The card checks the protocol like a real one: commands outside their state get
+no response (ILLEGAL_COMMAND shows in the next status), an SDHC card stays busy unless the host sent CMD8 and HCS, a
+host on a 4-bit bus talking to a card still in 1-bit mode gets CRC errors, and the CK/CMD/DAT pins must be muxed to
+the host. The clock pin shows a `wave` summary in the event log instead of every edge (see docs/LIMITATIONS.md).
+
+**External SRAM on the STM32 FSMC.** A board `sram` device with `bus: FSMC` attaches to the first free NOR/SRAM
+sub-bank (NE1 first) and appears at 0x60000000 + 64 MB x (n-1) once the firmware sets RCC_AHB3ENR.FSMCEN and
+BCRn.MBKEN (accesses before that, or after clearing MBKEN, bus-fault); a memory smaller than 64 MB is mirrored:
+
+```sh
+.venv/bin/chipem run --board boards/stm32_fsmc_sram.yaml --for 20ms        # fsmc_sram: "SRAM ok ... FAULT ok done"
+```
+
+Two McBSPs (or SPI ports) on different chips exchange words over board nets; give the board a quantum below half a
+bit period (`quantum: 100ns` at a few MHz) so that a slave's answer to a clock edge reaches the master in time.
+
+External parallel memory is a board device too: `{type: sram, chip: A, bus: XINTF6, size: 256K, width: 16, file:
+init.bin}` puts an SRAM on F28232 XINTF zone 6 (`bus` names a peripheral that can take external memory: XINTF0,
+XINTF6, XINTF7; `size` in locations, `width` 8/16/32 bits, `file` preloads a little-endian image). As on the real
+board, the firmware must enable the XINTF clock (PCLKCR3.XINTFENCLK) and mux the XINTF pins, or the zone reads the
+undriven bus; `boards/c2000_xintf_sram.yaml` runs the `xintf_sram` sample.
 
 ### 3.5 The STM32 HAL ELF
 
@@ -859,8 +912,9 @@ links:                            # byte-level UART links; both directions unles
 nets:                             # wires carrying GPIO levels; a pin can be in one net
   - {name: LED_A, pins: [A.PTC5, B.PA0]}
   - {name: BTN, pins: [A.PTC6, B.PB1], pull: up}     # pull: up|down, or drive: H|L for a fixed level
-devices:                          # SPI NOR flash on a Kinetis DSPI / STM32 SPI (same options as --spi-flash)
-  - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}
+devices:                          # SPI NOR flash on a Kinetis DSPI / STM32 SPI / C2000 SPIA or MCBSPA (same options
+  - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}  # as --spi-flash); parallel SRAM on an external bus:
+  # - {type: sram, chip: A, bus: XINTF6, size: 256K, width: 16, file: init.bin}
 parts:                            # section 6
   - {id: LED1, type: led, ports: {in: LED_A}}
 stimulus: ["5ms:A.PTC6=0", "6ms:A.PTC6=Z"]   # like --set/--at (pins and parts); Z releases
@@ -884,7 +938,7 @@ Rules that matter:
 
 ### 5.1a CAN links
 
-CAN controllers (`chip.can_blocks()`: Kinetis `CAN0`, F28232 `ECANA`/`ECANB`) join a bus with a `can` link; any
+CAN controllers (`chip.can_blocks()`: Kinetis `CAN0`, F28232 `ECANA`/`ECANB`, STM32 `CAN1`/`CAN2`) join a bus with a `can` link; any
 number of nodes:
 
 ```yaml
@@ -899,7 +953,8 @@ links:
   error: an error frame, TEC + 8, an automatic retry (error passive at TEC 128, then the retries continue). A single
   chip without a link is in exactly that situation.
 - The controller must be on the bus: clock gate on, out of freeze / initialization mode, RX (and TX) pins muxed to
-  the CAN function. The pins themselves do not carry bits; nets are not needed.
+  the CAN function. An STM32 bxCAN does not even leave initialization mode (INAK stays 1) while CANx_RX is not
+  muxed, and CAN2 also needs the CAN1 clock (its filter banks live in CAN1, split by FMR.CAN2SB). The pins themselves do not carry bits; nets are not needed.
 - Output: each frame is a `can` event (`A: CAN CAN0 tx 100#00014B32` in the live log), the summary of each chip lists
   `CAN frames: N sent`, its controllers (`CAN0: 500 kbit/s, 9 tx, 9 rx, TEC 0 REC 0, active, bus CANBUS`) and the
   first frames; the board summary shows `can CANBUS: A.CAN0, B.ECANA: 18 frames, 0 error frames`.
@@ -908,6 +963,9 @@ links:
 
 `chipem run --board boards/k22_c2000_can.yaml --for 100ms`: the K22 sends `100#<n>4B32` every 10 ms, the F28232
 echoes `201#<n>4B32` 6 µs after each frame ends plus its polling time; both print the frames on their UARTs.
+`boards/k22_stm32_can.yaml` does the same with an STM32 bxCAN1 (`202#...`, FIFO 0 interrupt), and
+`boards/k22_c2000_stm32_can.yaml` puts all three families on one bus (`201#...` wins the arbitration, `202#...`
+follows).
 
 ### 5.2 Running and watching two chips talk
 
@@ -956,6 +1014,8 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `k22_stm32_uart.yaml` | K22 + STM32F405 | two vendors over a link | 72 / 72 |
 | `c2000_k22_uart.yaml` | K22 + F28232 | bytes lost before the C28x enables SCI-A | 72 / 50 |
 | `k22_c2000_can.yaml` | K22 + F28232 | CAN bus at 500 kbit/s: FlexCAN0 sends every 10 ms, eCAN-A (TI C) echoes | 9 / 9 frames in 100 ms |
+| `k22_stm32_can.yaml` | K22 + STM32F405 | the same with bxCAN1 echoing as 0x202 | 4 / 4 frames in 45 ms |
+| `k22_c2000_stm32_can.yaml` | K22 + F28232 + STM32F405 | three CAN families on one bus | 4 / 8 frames in 45 ms |
 | `c2000_stm32_uart.yaml` | F28232 + STM32F405 | C28x sender, STM32 echo | 48 / 48 |
 | `c2000_stm32_chat.yaml` | F28232 + STM32F405 | two-way "chat" protocol (HELLO/PING/PONG), bare-metal STM32, nets only | 122 / 130 |
 | `c2000_stm32_chat_hal.yaml` | F28232 + STM32F405 | the same with ST's HAL on the STM32 at 168 MHz | 130 / 130 |
@@ -970,6 +1030,8 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `k22_ftm_qd_encoder.yaml` | K22 | the encoder part (600 rpm) on FTM1_QD_PHA/PHB (PTB0/PTB1), reversed at 30 ms | `qd 40 up`, `qd 80 up`, `qd 119 up`, `qd 79 down`, ... |
 | `stm32_i2c_eeprom.yaml` | STM32F405 | I2C1 master + `i2c_eeprom` part | USART1 `EEPROM: Hello I2C!` |
 | `k22_stm32_i2c.yaml` | K22 + STM32F405 | K22 I2C0 master, STM32 I2C1 slave (0x42) on open-drain nets, quantum 1 us | K22 `PASS`, STM32 `SLAVE RX 00:48656C…`, `SLAVE TX 10` |
+| `k22_stm32_spi.yaml` | K22 + STM32F405 | K22 DSPI0 master (`spi_master`) and STM32 SPI1 slave over nets, quantum 1 us | UART0 `M 1 WORLD`, USART1 `S 1 hello` |
+| `k22_i2s_codec.yaml` | K22 | I2S0 master (`i2s_tone`, 8 kHz stereo) and an `i2s_codec` part that records the tone and plays a pattern back | UART0 `I2S 8000 Hz: tx 133 rx 128 ok`, `RX 1234 EDCC 5678 A988 ...` |
 | `k22_i2c_eeprom.yaml` | K22 | I2C0 master and an `i2c_eeprom` part (page writes, ack polling, random read) | UART0 `wrote "Hello over I2C!", read "Hello over I2C!"`, `PASS` |
 | `pwm_capture_3way.yaml` | STM32F405 + K22 + F28232 | one STM32 PWM (PA6, 1 kHz 25 %) measured by a probe, a K22 FTM capture and a C2000 eCAP (`--for 12ms`) | probe 1000 Hz, K22 `period 60000`, eCAP 100000 / 25000 cycles |
 
@@ -1028,6 +1090,7 @@ input port reads the net (H/L/X). Gates are zero-delay. The catalog (from `GET /
 | `latch` | d, en, q | `init` (L) | transparent while en is H |
 | `i2c_eeprom` | sda, scl (open drain) | `address` (0x50), `size` (256), `page` (auto), `twr` (5ms), `fill` (0xFF), `init` (""), `pullup` (true) | 24Cxx serial EEPROM on the I2C bus |
 | `i2c_register_device` | sda, scl (open drain) | `address` (0x48), `regs` ({}), `readonly` ([]), `default` (0), `pullup` (true) | generic register-map target (sensor, expander) |
+| `i2s_codec` | bclk, ws, sdin (in), sdout (out) | `bits` (16), `format` (i2s / left_justified), `edge` (rising: sample edge), `pattern` ("": comma-separated L,R samples), `wav` ("": 16-bit PCM file), `echo` (false), `record_max` (100000) | I2S slave codec: records every received stereo frame (`frames`, signed), plays back the pattern / WAV / echo on sdout; `set reset_record=true` |
 
 A port is wired to a net name (created if absent) or to `CHIP.PIN` (an anonymous net `<id>_<port>` is created).
 
