@@ -1,36 +1,46 @@
 """STM32F415/F417 cryptographic processor (CRYP, RM0090 ch. 23): DES / TDES (ECB, CBC) and AES-128/192/256 (ECB,
 CBC, CTR) with AES key preparation, IN / OUT FIFOs, DMA and interrupts.
 
-Reference: RM0090 ch. 23 as recalled (the RM could not be fetched while this model was written), the register fields
-of the SVD (chips/stm32f405_regs.yaml) and ST's HAL (firmware/vendor/STM32CubeF4 stm32f4xx_hal_cryp.c, CMSIS
-stm32f417xx.h), whose register sequences the model follows.  Ciphers: chipem/crypto_algos.py (pure Python, checked
+Reference: RM0090 Rev 22 ch. 23 (section numbers below), the register fields of the SVD (chips/stm32f405_regs.yaml)
+and ST's HAL (firmware/vendor/STM32CubeF4 stm32f4xx_hal_cryp.c, CMSIS stm32f417xx.h).  Ciphers: chipem/crypto_algos.py (pure Python, checked
 against FIPS-197 / SP 800-38A / FIPS 46-3 vectors).
 
 * Presence: the block exists on STM32F415/F417 only (`params.only`, `_util.part_present`); on other parts it is an
   inactive stub (`_util.make_absent`).  Clock gate RCC_AHB2ENR.CRYPEN (one `warn` on a gated access); RCC_AHB2RSTR
   resets the model.
-* CR: ALGODIR (1 = decrypt), ALGOMODE 0 TDES-ECB, 1 TDES-CBC, 2 DES-ECB, 3 DES-CBC, 4 AES-ECB, 5 AES-CBC, 6 AES-CTR,
-  7 AES key preparation; DATATYPE (00 none, 01 half-word swap, 10 byte swap, 11 bit reversal of each 32-bit DIN /
-  DOUT word); KEYSIZE (AES 128/192/256); FFLUSH (write 1: both FIFOs emptied; reads 0); CRYPEN.  ALGOMODE[3] and
-  GCM_CCMPH (GCM/CCM) exist on STM32F43x only: on these parts they are reserved (one `warn`, nothing is processed).
-* Keys: K0LR..K3RR (write-only, read 0); AES-128 uses K2..K3, AES-192 K1..K3, AES-256 K0..K3 (KxLR = more
-  significant word); DES uses K1, TDES K1|K2|K3 (EDE: E_K3(D_K2(E_K1(P)))).  IV0LR..IV1RR (AES 128-bit IV, DES the
-  IV0 pair) are updated by the hardware after every block (CBC: last ciphertext block; CTR: the 32-bit counter in
-  IV1RR incremented modulo 2^32), so software can read them back for context save.
-* Key preparation (ALGOMODE = 7, CRYPEN set): BUSY for one AES key schedule time, then the key registers hold the
-  last Nk words of the encryption key schedule (the decryption key) and CRYPEN clears.  AES-ECB/CBC decryption uses
+* CR (23.6.1): ALGODIR (1 = decrypt), ALGOMODE 0 TDES-ECB, 1 TDES-CBC, 2 DES-ECB, 3 DES-CBC, 4 AES-ECB, 5 AES-CBC,
+  6 AES-CTR, 7 AES key preparation; DATATYPE (00 none, 01 half-word swap, 10 byte swap, 11 bit reversal of each
+  32-bit DIN / DOUT word); KEYSIZE (AES 128/192/256); FFLUSH (write 1 while CRYPEN = 0: both FIFOs emptied; no effect
+  while CRYPEN = 1; reads 0); CRYPEN.  Writes to CR[9:2] (KEYSIZE, DATATYPE, ALGOMODE, ALGODIR) while BUSY = 1 are
+  ignored (23.3.5, 23.6.1 note).  The reserved bits read 0.  ALGOMODE[3] and GCM_CCMPH (GCM/CCM, 23.6.2) and the
+  context swap registers CSGCMCCM0..7 / CSGCM0..7 (23.6.12) exist on STM32F42x/F43x only: on the F415/F417 they are
+  reserved (the CR bits read 0 and are ignored with one `warn`; the CSGCM* registers read 0).  With `params.gcm`
+  (F43x) GCM/CCM are accepted but not modelled (one `warn`, nothing is processed).
+* Keys (23.3.2, 23.6.10): K0LR..K3RR (write-only, read 0); AES-128 uses K2..K3, AES-192 K1..K3, AES-256 K0..K3
+  (KxLR = more significant word); DES uses K1, TDES K1|K2|K3 (EDE: E_K3(D_K2(E_K1(P)))).  IV0LR..IV1RR (AES 128-bit
+  IV, DES the IV0 pair, 23.6.11) are updated by the hardware after every block (CBC: last ciphertext block; CTR: the
+  32-bit counter in IV1RR incremented modulo 2^32, 23.3.4), so software can read them back for context save.  Key and
+  IV writes while BUSY = 1 are ignored (23.6.10/11 notes).
+* Key preparation (ALGOMODE = 7, CRYPEN set; 23.3.6 step 1d): BUSY, then the key registers hold the last Nk words of
+  the encryption key schedule (the decryption key) and CRYPEN clears.  RM0090 gives no duration for it; the model
+  uses one AES block time (14/16/18 cycles).  AES-ECB/CBC decryption uses
   the key registers as that decryption key: decrypting without a preceding key preparation (or after rewriting a key
   register) gives the wrong plaintext as on silicon (one `warn`).  CTR decryption needs no preparation.
-* FIFOs: IN and OUT are 8 x 32 bits.  A block (2 words DES/TDES, 4 words AES) moves from IN to the core when
-  CRYPEN = 1, the core is idle and OUT has room for a whole block; the result enters OUT after the processing time.
-  A DIN write to a full IN FIFO is lost (one `warn`; silicon stalls the bus).  Clearing CRYPEN lets the block in
-  progress finish; no further block starts.
-* Processing time (HCLK cycles per block, `sched.at_cycles`): AES-128 14, AES-192 16, AES-256 18 (also key
-  preparation), DES 16, TDES 48 (RM0090 23.3, as recalled).  SR.BUSY is set during it.
-* SR: IFEM (IN empty), IFNF (IN not full), OFNE (OUT not empty), OFFU (OUT full), BUSY.  RISR: INRIS while IN holds
-  fewer than 4 words, OUTRIS while OUT is not empty; MISR = RISR & IMSCR; IRQ "CRYP" (level) = MISR != 0.
-* DMA (DMACR): DIEN requests "CRYP_IN" (DMA2 stream 6 channel 2) while IN is not full, DOEN requests "CRYP_OUT"
-  (DMA2 stream 5 channel 2) while OUT is not empty (one request per word).
+* FIFOs (23.2, 23.3.5): IN and OUT are 8 x 32 bits.  An AES block (4 words) moves from IN to the core when CRYPEN = 1,
+  the core is idle and OUT has room for it; a DES/TDES block (2 words) is popped as soon as IN holds one, and if OUT
+  is full when it is done BUSY stays set until 2 words are free (23.3.5 note).  The result enters OUT after the
+  processing time.  A DIN write to a full IN FIFO is lost (one `warn`; silicon stalls the bus).  Clearing CRYPEN
+  lets the block in progress finish; no further block starts.  Reading DIN while CRYPEN = 0 pops the IN FIFO (oldest
+  word first, as written); while CRYPEN = 1 it returns 0 (undefined on silicon, 23.6.4).
+* Processing time (HCLK cycles per block, `sched.at_cycles`; RM0090 23.2 Table 111, 23.3.5): AES-128 14, AES-192 16,
+  AES-256 18, DES 16, TDES 48.  SR.BUSY is set during it.
+* SR (23.6.3, reset 0x3): IFEM (IN empty), IFNF (IN not full), OFNE (OUT not empty), OFFU (OUT full), BUSY.  RISR
+  (23.4, 23.6.8, reset 0x1): INRIS while IN holds fewer than 4 words, OUTRIS while OUT is not empty.  MISR: INMIS =
+  INRIS & INIM & CRYPEN (the input interrupt is enabled with CRYPEN), OUTMIS = OUTRIS & OUTIM (not gated by CRYPEN);
+  IRQ "CRYP" (level) = MISR != 0.
+* DMA (DMACR, 23.5): DIEN requests "CRYP_IN" (DMA2 stream 6 channel 2) while IN is not full, DOEN requests "CRYP_OUT"
+  (DMA2 stream 5 channel 2) while OUT is not empty (one request per word); all requests are deasserted while
+  CRYPEN = 0.  The burst request signals are not modelled separately (single requests only).
 `blocks` counts processed blocks; `trace` keeps the last (mode, dir, input, output) tuples.
 """
 from __future__ import annotations
@@ -45,6 +55,8 @@ from ._util import GatedBlock, build_regs, dma_request, irq_number, make_absent,
 
 ALGODIR, CRYPEN, FFLUSH = 1 << 2, 1 << 15, 1 << 14
 ALGOMODE3, GCM_CCMPH = 1 << 19, 3 << 16
+CR_BITS = 0xC3FC                              # CRYPEN, FFLUSH, KEYSIZE, DATATYPE, ALGOMODE[2:0], ALGODIR (23.6.1)
+CFG_BITS = 0x3FC                              # CR[9:2]: ignored while BUSY (23.3.5)
 IFEM, IFNF, OFNE, OFFU, BUSY = 1, 2, 4, 8, 16
 DIEN, DOEN = 1, 2
 INR, OUTR = 1, 2
@@ -84,15 +96,21 @@ class CRYP(GatedBlock):
         ov: dict[str, dict] = {
             "CR": {"on_write": self._cr_write, "on_read": lambda b, r: self.get("CR") & ~FFLUSH},
             "SR": {**ro, "on_read": lambda b, r: self._sr()},
-            "DIN": {"on_write": self._din_write, "on_read": lambda b, r: 0},
+            "DIN": {"on_write": self._din_write, "on_read": self._din_read},
             "DOUT": {**ro, "on_read": self._dout_read},
             "DMACR": {"on_write": self._ctl_write},
             "IMSCR": {"on_write": self._ctl_write},
             "RISR": {**ro, "on_read": lambda b, r: self._ris()},
-            "MISR": {**ro, "on_read": lambda b, r: self._ris() & self.get("IMSCR")},
+            "MISR": {**ro, "on_read": lambda b, r: self._mis()},
         }
         for k in KEYREGS:
             ov[k] = {"on_write": self._key_write, "on_read": lambda b, r: 0}
+        for k in IVREGS:
+            ov[k] = {"on_write": self._iv_write}
+        if not params.get("gcm", False):          # CSGCMCCM0..7R / CSGCM0..7R: STM32F42x/F43x only (23.6.12)
+            for i in range(8):
+                for k in (f"CSGCMCCM{i}R", f"CSGCM{i}R"):
+                    ov[k] = {**ro, "on_read": lambda b, r: 0}
         r = build_regs((name, "CRYP"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.gcm = bool(params.get("gcm", False))
@@ -106,6 +124,7 @@ class CRYP(GatedBlock):
         self.infifo: deque[int] = deque()
         self.outfifo: deque[int] = deque()
         self.busy = False
+        self._held: list[int] | None = None          # DES/TDES result waiting for OUT space (BUSY stays set)
         self._ev = None
         self._line = False
         self._dma = [False, False]
@@ -162,10 +181,6 @@ class CRYP(GatedBlock):
 
     def _reserved_mode(self) -> bool:
         cr = self._cr()
-        if cr & (ALGOMODE3 | GCM_CCMPH) and not self.gcm:
-            self._warn_once("gcm", f"{self.name}: CR.ALGOMODE[3] / GCM_CCMPH (GCM, CCM) are reserved on the "
-                            f"STM32F415/F417 (CRYP of the F43x only): nothing is processed")
-            return True
         if cr & (ALGOMODE3 | GCM_CCMPH):
             self._warn_once("gcm2", f"{self.name}: GCM/CCM modes are not modelled: nothing is processed")
             return True
@@ -213,15 +228,20 @@ class CRYP(GatedBlock):
     def _ris(self) -> int:
         return (INR if len(self.infifo) < 4 else 0) | (OUTR if self.outfifo else 0)
 
+    def _mis(self) -> int:
+        """INMIS is enabled with CRYPEN, OUTMIS is not (RM0090 23.4, Figure 231)."""
+        m = self._ris() & self.get("IMSCR")
+        return m if self._cr() & CRYPEN else m & ~INR
+
     def _update(self) -> None:
         chip = self.chip
         if chip is None or self.absent:
             return
-        line = bool(self._ris() & self.get("IMSCR"))
+        line = bool(self._mis())
         if line != self._line and self._irqn is not None:
             self._line = line
             self.irq(self._irqn, line)
-        dmacr = self.get("DMACR")
+        dmacr = self.get("DMACR") if self._cr() & CRYPEN else 0      # requests deasserted while disabled (23.5)
         want = [bool(dmacr & DIEN and len(self.infifo) < DEPTH), bool(dmacr & DOEN and self.outfifo)]
         for i, name in enumerate(("CRYP_IN", "CRYP_OUT")):
             if want[i] != self._dma[i] or want[i]:
@@ -237,7 +257,9 @@ class CRYP(GatedBlock):
             self._start(self.cycles(), self._key_done)
             return
         bw = self.block_words()
-        if len(self.infifo) < bw or len(self.outfifo) + bw > DEPTH:
+        if len(self.infifo) < bw:
+            return
+        if m >= 4 and len(self.outfifo) + bw > DEPTH:   # AES waits for OUT room; DES/TDES pops anyway (23.3.5)
             return
         data = [self.infifo.popleft() for _ in range(bw)]
         out = self._process(m, data)
@@ -263,6 +285,9 @@ class CRYP(GatedBlock):
 
     def _block_done(self, out: list[int]) -> None:
         self._ev = None
+        if len(self.outfifo) + len(out) > DEPTH:          # DES/TDES: BUSY until OUT has room (23.3.5 note)
+            self._held = out
+            return
         self.busy = False
         self.outfifo.extend(out)
         self.blocks += 1
@@ -323,12 +348,23 @@ class CRYP(GatedBlock):
     def _cr_write(self, blk, reg, old, new):
         if self.absent:
             return None
+        valid = CR_BITS | ((ALGOMODE3 | GCM_CCMPH) if self.gcm else 0)
+        if new & (ALGOMODE3 | GCM_CCMPH) and not self.gcm:
+            self._warn_once("gcm", f"{self.name}: CR.ALGOMODE[3] / GCM_CCMPH (GCM, CCM) do not exist on the "
+                            f"STM32F415/F417 (CRYP of the F42x/F43x only): ignored")
+        new &= valid
+        if self.busy and (new ^ old) & (CFG_BITS | ALGOMODE3 | GCM_CCMPH):
+            self._warn_once("cfgbusy", f"{self.name}: CR[9:2] written while BUSY = 1: ignored (RM0090 23.3.5)")
+            new = (new & ~(CFG_BITS | ALGOMODE3 | GCM_CCMPH)) | (old & (CFG_BITS | ALGOMODE3 | GCM_CCMPH))
         if new & FFLUSH:
-            if self.busy or old & CRYPEN:
-                self._warn_once("fflush", f"{self.name}: FFLUSH written while CRYPEN = 1 / BUSY (RM0090: flush only "
-                                f"when the processor is disabled)")
-            self.infifo.clear()
-            self.outfifo.clear()
+            if old & CRYPEN:
+                self._warn_once("fflush", f"{self.name}: FFLUSH written while CRYPEN = 1: no effect (RM0090 23.6.1)")
+            else:
+                if self.busy:
+                    self._warn_once("fflushbusy", f"{self.name}: FFLUSH while BUSY: the block in progress still "
+                                    f"enters the OUT FIFO (RM0090 23.6.1 note)")
+                self.infifo.clear()
+                self.outfifo.clear()
             new &= ~FFLUSH
         self._store(reg, new)
         self._update()
@@ -337,7 +373,16 @@ class CRYP(GatedBlock):
         return new
 
     def _key_write(self, blk, reg, old, new):
+        if self.busy:            # ignored while BUSY (RM0090 23.6.10 note)
+            self._warn_once("keybusy", f"{self.name}: key register written while BUSY = 1: ignored")
+            return old
         return None              # a rewritten key no longer matches _key_prepared (checked per block)
+
+    def _iv_write(self, blk, reg, old, new):
+        if self.busy:            # ignored while BUSY (RM0090 23.6.11 note)
+            self._warn_once("ivbusy", f"{self.name}: IV register written while BUSY = 1: ignored")
+            return old
+        return None
 
     def _ctl_write(self, blk, reg, old, new):
         self._store(reg, new)
@@ -356,12 +401,26 @@ class CRYP(GatedBlock):
         self._kick()
         return 0
 
+    def _din_read(self, blk, reg):
+        """CRYPEN = 0: pops the IN FIFO, oldest word first, as written (RM0090 23.6.4); CRYPEN = 1: undefined (0)."""
+        if self.absent:
+            return 0
+        if self._cr() & CRYPEN or not self.infifo:
+            return 0
+        v = swap_word(self.infifo.popleft(), self._datatype())     # the swap is its own inverse
+        self._update()
+        return v
+
     def _dout_read(self, blk, reg):
         if self.absent:
             return 0
         if not self.outfifo:
             return 0
         v = swap_word(self.outfifo.popleft(), self._datatype())
+        if self._held is not None and len(self.outfifo) + len(self._held) <= DEPTH:
+            out, self._held = self._held, None
+            self._block_done(out)
+            return v
         self._update()
         self._kick()
         return v

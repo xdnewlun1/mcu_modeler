@@ -62,6 +62,8 @@ svg.bv#pkg.panning { cursor: grabbing; }
 .bv .pin:hover .pad, .bv .pin:focus .pad { stroke: var(--accent); stroke-width: 2; }
 .bv .pin:hover .lbl-name, .bv .pin:focus .lbl-name { fill: var(--accent); }
 .bv .pin:focus { outline: none; }
+/* keyboard focus (roving tabindex, one stop per package): a solid accent ring around the pad's hit box */
+.bv .pin:focus-visible .hit, .bv .pin:focus .hit { fill: var(--accent-weak); stroke: var(--accent); stroke-width: calc(var(--lw, 1px) * 2); }
 .bv .pin.flash .pad { animation: bv-flash .5s ease-out; }
 @keyframes bv-flash { from { stroke: var(--accent); stroke-width: 3; } }
 .bv .pin.net-hl .pad { stroke: var(--fg); stroke-width: 2.2; }
@@ -99,6 +101,25 @@ svg.bv#pkg.panning { cursor: grabbing; }
 .bv .net-label.hl { fill: var(--fg); }
 .bv .link-label { fill: var(--accent); cursor: default; }
 
+/* ---------- buses: CAN / Ethernet / USB (one track each; dash pattern = type) ---------- */
+.bv .bus { cursor: pointer; }
+.bv .bus-line { fill: none; stroke-width: 3; stroke-linejoin: round; stroke-linecap: butt; }
+.bv .bus-can .bus-line { stroke: var(--own); stroke-dasharray: 10 2 2 2; }
+.bv .bus-eth .bus-line { stroke: var(--port); stroke-dasharray: 12 4; }
+.bv .bus-usb .bus-line { stroke: var(--fg-2); stroke-dasharray: 3 3; }
+.bv .bus.bus-err .bus-line { stroke: var(--danger); }
+.bv .bus:hover .bus-line { stroke-width: 4; }
+.bv .bus-end { fill: var(--panel); stroke: var(--fg-2); stroke-width: 1.6; }
+.bv .bus-label, .bv .bus-node {
+  font: 600 var(--ls, 11px) var(--mono); paint-order: stroke; stroke: var(--panel);
+  stroke-width: calc(var(--lw, 1px) * 3.5); stroke-linejoin: round;
+}
+.bv .bus-label { cursor: pointer; }
+.bv .bus-label.bus-can, .bv .bus-node.bus-can { fill: var(--own); }
+.bv .bus-label.bus-eth, .bv .bus-node.bus-eth { fill: var(--port); }
+.bv .bus-label.bus-usb, .bv .bus-node.bus-usb { fill: var(--fg-2); }
+.bv .bus-node { font-weight: 400; pointer-events: none; }
+
 /* ---------- UART links ---------- */
 .bv .link-line { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 6 4; }
 .bv .link-auto .link-line { stroke-dasharray: 2 3; }
@@ -123,6 +144,7 @@ svg.bv#pkg.panning { cursor: grabbing; }
 .bv .part-state { fill: var(--fg-2); font: 11px var(--mono); font-size: max(11px, calc(var(--lw, 1px) * 8 * var(--pkinv, 1))); }
 .bv .part-box { fill: var(--raise); stroke: var(--fg-3); stroke-width: 1.4; }
 .bv .part-box.meter { fill: var(--panel); }
+.bv .part-sep { stroke: var(--line-2); stroke-width: 1; }
 .bv .gate { fill: var(--raise); stroke: var(--fg-2); stroke-width: 1.6; stroke-linejoin: round; }
 .bv .gate.out-H { stroke: var(--lv-h); stroke-width: 2.4; }
 .bv .gate.out-X { stroke: var(--lv-x); stroke-dasharray: 2 2; }
@@ -248,6 +270,9 @@ svg.bv#pkg.panning { cursor: grabbing; }
 .bv-drive { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); font: var(--fs-1) var(--mono); color: var(--fg-3); }
 .bv-drive span { margin-right: var(--sp-2); }
 .bv-hint { margin-top: var(--sp-3); color: var(--fg-3); font: var(--fs-1) var(--mono); }
+.bv-adc { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); font: var(--fs-1) var(--mono); color: var(--fg-3); }
+.bv-adc span { margin-right: var(--sp-2); }
+.bv-adc input { width: 150px; height: 20px; padding: 0 var(--sp-3); font: var(--fs-1) var(--mono); border-radius: var(--radius); }
 .bv .pin .lbl-bg { display: none; fill: var(--panel); }
 .bv .pin.in-net .lbl-bg { display: inline; }
 .bv .package.lod-nolabel .lbl-bg { display: none; }

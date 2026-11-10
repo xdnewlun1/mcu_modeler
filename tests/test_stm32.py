@@ -330,11 +330,13 @@ def test_usart_baud_frame_tx_rx_irq(desc):
     wr(chip, USART1 + 0x0C, 1 << 13 | 1 << 3 | 1 << 2 | 1 << 5)  # UE TE RE RXNEIE
     assert u.frame() == "8N1" and u.char_bits() == 10
     assert u.char_ns() == pytest.approx(10 * 139 / 16e6 * 1e9)
+    chip.run_for(u.char_ns() + 1000)                             # TE: idle preamble first (RM0090 30.3.2)
     sent = []
     u.tx_listeners.append(lambda blk, b: sent.append(b))
+    rd(chip, USART1)                                             # SR read + DR write clears TC (30.6.1)
     wr(chip, USART1 + 0x04, 0x41)
     assert bytes(u.output) == b"A" and sent == [0x41]
-    assert rd(chip, USART1) & 0xC0 == 0                          # TXE/TC busy for one character
+    assert rd(chip, USART1) & 0xC0 == 0x80                       # straight to the shift register: TXE = 1, TC = 0
     chip.run_for(u.char_ns() + 1000)
     assert rd(chip, USART1) & 0xC0 == 0xC0
     assert [e.fields["byte"] for e in chip.log if e.kind == "uart" and e.fields.get("dir") == "tx"] == [0x41]

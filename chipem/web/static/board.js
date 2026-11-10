@@ -29,6 +29,7 @@
 // Styles: board.css (loaded from here, after style.css).
 import { NS, el, ensureDefs, PackageView, ownerCategory, isGpioFunction, geometry, LABEL_CHARS, LABEL_CHARS_COMPACT } from "./package.js";
 import { PartView, partGeom, partCategory } from "./parts.js";
+import { fmtTime, fmtRate } from "./fmt.js";
 
 if (typeof document !== "undefined" && !document.querySelector('link[data-board-css]')) {
   const l = document.createElement("link");
@@ -38,14 +39,8 @@ if (typeof document !== "undefined" && !document.querySelector('link[data-board-
 
 const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-export function fmtNs(ns) {
-  if (ns == null || !isFinite(ns)) return "—";
-  const a = Math.abs(ns);
-  if (a < 1e3) return `${ns.toFixed(0)} ns`;
-  if (a < 1e6) return `${(ns / 1e3).toFixed(3)} µs`;
-  if (a < 1e9) return `${(ns / 1e6).toFixed(3)} ms`;
-  return `${(ns / 1e9).toFixed(6)} s`;
-}
+export const fmtNs = fmtTime;           // (old name; fmt.js has the one time formatter)
+export { fmtRate };
 
 const LABEL_PX = 11;          // on-screen size of net / link labels
 const MAX_SCALE = 8;          // most zoomed in: screen px per world unit
@@ -94,9 +89,17 @@ export function isUartSignal(owner, periph, dir) {
   return false;
 }
 
-export function fmtRate(bps) {
-  if (!bps) return "";
-  return bps >= 1000 ? `${(bps / 1000).toFixed(bps >= 1e4 ? 0 : 1)} kB/s` : `${Math.round(bps)} B/s`;
+// "A.CAN0" -> live counters text of a bus (CAN / Ethernet / USB link, /api/chip `buses`, state.board.buses)
+export function busText(bus, st) {
+  st = st || bus.stats || {};
+  const n = (v) => (v == null ? 0 : v);
+  if (bus.type === "can") return `${bus.name} · ${n(st.frames)} fr${st.error_frames ? ` · ${st.error_frames} err` : ""}`;
+  if (bus.type === "eth") {
+    const ip = bus.host && typeof bus.host === "object" && bus.host.ip ? ` · host ${bus.host.ip}` : bus.host ? " · host" : "";
+    return `${bus.name} · ${n(st.frames)} fr${ip}`;
+  }
+  if (bus.type === "usb") return `${bus.name} → host · ${st.host_state || st.bus_state || "—"}${st.device ? ` · ${String(st.device).split(" ")[0]}` : ""}`;
+  return bus.name;
 }
 
 export class BoardView {
@@ -114,6 +117,9 @@ export class BoardView {
     this.clickFn = null;            // setPinClickHandler: the app's pin click (drive cycle, wire / pick modes)
     this.card = null;               // pinned/hover pin card state {cid, num, pinned}
     this.pinLog = new Map();        // "A:77" -> level changes from the event log {n, t, last, seq} (loadHistory)
+    this.adcValues = {};            // chip id -> {channel: value} (state `adc`, setAdcValues)
+    this.traced = new Set();        // "A:77" pins in the logic strip (setTraced)
+    this.busStats = new Map();      // bus name -> live stats (state.board.buses)
     svg.classList.add("bv");
     this.buildOverlay();
     this.autoFit = true;
@@ -135,6 +141,7 @@ export class BoardView {
   setInfo(info, first = false) {
     const keep = !first && this.vb ? { vb: { ...this.vb }, W: this.W, H: this.H } : null;
     this.info = info;
+    this._sizeOverride = null;      // gutter / street sizes from the routes that use them (build, second pass)
     this.isBoard = !!info.board;
     this.chips = info.chips;
     this.ids = this.chips.map((c) => c.id);
@@ -186,13 +193,17 @@ export class BoardView {
 
     let nDirs = 0;
     for (const ln of this.info.links || []) nDirs += ln.bidir === false ? 1 : 2;
+    this.nDirs = nDirs;
     this.parts = this.isBoard ? (this.info.parts || []) : [];
     this.netList = this.allNets();
-    const nRoutes = this.netList.length + nDirs;
+    this.busList = this.isBoard ? (this.info.buses || []) : [];
+    const nRoutes = this.netList.length + nDirs + this.busList.length;
     this.nTracks = Math.max(1, nRoutes);
     const B = this.isBoard;
-    this.G = B ? Math.max(GUTTER_MIN, 44 + this.nTracks * TRACK) : 0;       // gutter width
-    this.ST = B ? Math.max(40, 28 + this.nTracks * TRACK) : 0;              // street height
+    const ovr = this._sizeOverride;
+    this.locG = this.locS = null;                   // per gutter / street slot maps (null: one global slot per track)
+    this.G = B ? (ovr ? ovr.G : Math.max(GUTTER_MIN, 44 + this.nTracks * TRACK)) : 0;    // gutter width
+    this.ST = B ? (ovr ? ovr.ST : Math.max(40, 28 + this.nTracks * TRACK)) : 0;          // street height
     this.edge = B ? EDGE : 0;
 
     this.partGeo = new Map(this.parts.map((p) => [p.id, partGeom(p)]));
@@ -203,7 +214,9 @@ export class BoardView {
       const pv = new PackageView(this.pkgLayer, c, {
         onClick: (chip, pin, e) => this.pinClick(chip, pin, e),
         onHover: (chip, pin, e) => this.showCard(chip.id, pin.num, e),
-        onLeave: () => this.hideCard(false),
+        onLeave: () => { if (!this._kbdPin) this.hideCard(false); },
+        onFocus: (chip, pin) => this.pinFocus(chip.id, pin.num),
+        onBlur: (chip, pin) => this.pinBlur(chip.id, pin.num),
         onBody: B ? (chip, e) => this.h.onBodyClick && this.h.onBodyClick(chip, e) : null, showId: B,
         labelChars: plan.chars,
       });
@@ -253,7 +266,40 @@ export class BoardView {
     }
     this.svg.style.aspectRatio = `${this.W} / ${this.H}`;
 
+    // routes, twice: first with one global slot per track, recording which gutters / streets each route uses; then
+    // with per-gutter / per-street slots for just those routes (UART links, routed later from live pin owners, keep a
+    // slot everywhere). If that needs less room than the global sizing, lay the board out again with it.
+    this._rec = new Map();
     this.routeNets();
+    this.buildBuses();
+    const rec = this._rec;
+    this._rec = null;
+    const linkKeys = Array.from({ length: nDirs }, (_, i) => this.linkTrack0 + i);
+    const loc = (prefix, n) => {
+      const out = new Map();
+      for (let i = 0; i <= n; i++) {
+        const ks = [...(rec.get(prefix + i) || [])].sort((a, b) => a - b);
+        out.set(i, new Map([...ks, ...linkKeys].map((k, j) => [k, j])));
+      }
+      return out;
+    };
+    const locG = B ? loc("g", this.ncols) : null, locS = B ? loc("s", this.nrows) : null;
+    if (B) {
+      const maxG = Math.max(1, ...[...locG.values()].map((m) => m.size));
+      const maxS = Math.max(1, ...[...locS.values()].map((m) => m.size));
+      const G2 = Math.max(GUTTER_MIN, 44 + maxG * TRACK), ST2 = Math.max(40, 28 + maxS * TRACK);
+      if (!ovr && (G2 < this.G || ST2 < this.ST)) {
+        this._sizeOverride = { G: G2, ST: ST2 };
+        this.build();
+        return;
+      }
+    }
+    this.wireLayer.innerHTML = "";
+    this.labelLayer.innerHTML = "";
+    this.locG = locG;
+    this.locS = locS;
+    this.routeNets();
+    this.buildBuses();
     this.buildLinks();
   }
 
@@ -506,15 +552,33 @@ export class BoardView {
     const sp = Math.min(TRACK, Math.max(2, (room - 20) / this.nTracks));
     return (k - (this.nTracks - 1) / 2) * sp;
   }
+  // offset of track k in gutter / street i: its local slot when the slot maps exist (build), else the global one
+  slot(loc, i, k, room) {
+    const m = loc && loc.get(i);
+    if (!m) return this.off(k, room);
+    const j = m.get(k);
+    if (j == null) return 0;
+    const n = Math.max(1, m.size);
+    const sp = Math.min(TRACK, Math.max(2, (room - 20) / n));
+    return (j - (n - 1) / 2) * sp;
+  }
+  _note(key, k) {
+    if (!this._rec.has(key)) this._rec.set(key, new Set());
+    this._rec.get(key).add(k);
+  }
   gx(g, k) {
     if (typeof g === "string") {                       // parts row gutter: local slots for the nets that use it
       const i = +g.slice(1), loc = this.pg.loc[i], n = Math.max(1, loc.size);
       const sp = Math.min(TRACK, Math.max(2, (this.pg.w[i] - 16) / n));
       return this.pg.x[i] + ((loc.get(k) ?? 0) - (n - 1) / 2) * sp;
     }
-    return this.gutterC(g) + this.off(k, this.G);
+    if (this._rec) this._note(`g${g}`, k);
+    return this.gutterC(g) + this.slot(this.locG, g, k, this.G);
   }
-  sy(s, k) { return this.streetC(s) + this.off(k, this.ST); }
+  sy(s, k) {
+    if (this._rec) this._note(`s${s}`, k);
+    return this.streetC(s) + this.slot(this.locS, s, k, this.ST);
+  }
   trackX(g, k) { return this.gx(g, k); }
 
   // ---------------------------------------------------------------- coordinates
@@ -583,7 +647,7 @@ export class BoardView {
       // parts-row gutters only reach the street right above the parts row: that one is the trunk then
       const s0 = ex.some((e) => typeof e.idx === "string") ? this.nrows : 0;
       for (let s = s0; s <= this.nrows; s++) {
-        const y = this.sy(s, k);
+        const y = this.streetC(s);
         const cost = ex.reduce((acc, e) => acc + Math.abs(last(e.pts)[1] - y), 0);
         if (cost < bestCost - 0.5) { bestCost = cost; ts = s; }
       }
@@ -758,6 +822,71 @@ export class BoardView {
     }
   }
 
+  // ---------------------------------------------------------------- buses: CAN, Ethernet, USB (/api/chip `buses`)
+  // Each node chip gets a drop from the top-left corner of its footprint (no pins there) up into the street above
+  // it, tagged with the node's block name; the drops are joined along the street like a net (own track). A bus with a
+  // single chip node (USB device -> host PC, Ethernet MAC + host) gets a short stub along the street for its label.
+  buildBuses() {
+    this.busEls = new Map();        // bus name -> {bus, g, label, tags: [{text, x, y}], segs, track}
+    if (!this.isBoard) return;
+    let k = (this.linkTrack0 || 0) + (this.nDirs || 0);
+    const perChip = new Map();
+    for (const bus of this.busList || []) {
+      const track = k++;
+      const members = [], tags = [];
+      for (const q of bus.nodes || []) {
+        const [cid, blk] = splitQualified(typeof q === "string" ? q : q.node, this.ids);
+        const ci = this.ids.indexOf(cid);
+        const b = this.boxes[ci];
+        if (ci < 0 || !b) continue;
+        const j = perChip.get(cid) || 0;
+        perChip.set(cid, j + 1);
+        const x = b.x + Math.min(b.body * 0.25, 30) + j * 14, y = b.y + b.body * 0.55;
+        members.push({ side: "T", x, y, dx: 0, dy: -1, ci });
+        tags.push({ text: blk, x, y, right: b.x + b.body - 2 });
+      }
+      if (!members.length) continue;
+      const { d, segs } = this.route(members, track);
+      if (members.length === 1) {                       // single chip node: a stub along the street for the label
+        const [x, y] = segs[0][segs[0].length - 1];
+        const b = this.boxes[members[0].ci];
+        segs.push([[x, y], [x + Math.max(120, b.w * 0.45), y]]);
+      }
+      const r = (v) => Math.round(v * 10) / 10;
+      const dd = segs.map((pts) => "M" + pts.map((p) => `${r(p[0])},${r(p[1])}`).join(" L")).join(" ");
+      const g = el("g", { class: `bus bus-${bus.type}`, "data-bus": bus.name }, this.wireLayer);
+      el("path", { d: dd, class: "wire-hit" }, g);
+      el("path", { d: dd, class: "wire-halo" }, g);
+      el("path", { d: dd, class: "bus-line" }, g);
+      for (const m of members) el("circle", { cx: m.x, cy: m.y, r: 3.5, class: "bus-end" }, g);
+      const title = el("title", {}, g);
+      const label = el("text", { class: `bus-label bus-${bus.type}`, "text-anchor": "middle" }, this.labelLayer);
+      label.dataset.bus = bus.name;
+      const tagEls = tags.map((t) => {
+        const te = el("text", { class: `bus-node bus-${bus.type}`, "text-anchor": "start" }, this.labelLayer);
+        te.textContent = t.text;
+        return { ...t, el: te };
+      });
+      const click = (e) => { e.stopPropagation(); this.h.onBusClick && this.h.onBusClick(bus); };
+      g.addEventListener("click", click);
+      label.addEventListener("click", click);
+      const B = { bus, g, label, title, tags: tagEls, segs, track, d: dd };
+      this.busEls.set(bus.name, B);
+      this.setBusText(B);
+    }
+  }
+
+  setBusText(B) {
+    const st = this.busStats.get(B.bus.name) || B.bus.stats || {};
+    const t = busText(B.bus, st);
+    if (B.label.textContent !== t) B.label.textContent = t;
+    const kv = Object.entries(st).filter(([, v]) => v != null && typeof v !== "object").map(([k, v]) => `${k}=${v}`).join(" ");
+    const tt = `${B.bus.type.toUpperCase()} ${B.bus.describe || B.bus.name}${kv ? `\n${kv}` : ""} · click: show in the links pane`;
+    if (B.title.textContent !== tt) B.title.textContent = tt;
+    const err = B.bus.type === "can" && st.error_frames > 0;
+    B.g.classList.toggle("bus-err", !!err);
+  }
+
   // ---------------------------------------------------------------- UART links
   buildLinks() {
     this.links = [];
@@ -918,6 +1047,11 @@ export class BoardView {
         (n.name === (this.hlNet || this.selNet) ? " hl" : "") + (n.name === this.selNet ? " sel" : "");
       if (g.getAttribute("class") !== c) g.setAttribute("class", c);
     }
+    for (const bs of board.buses || []) {
+      this.busStats.set(bs.name, bs.stats || bs);
+      const B = this.busEls && this.busEls.get(bs.name);
+      if (B) this.setBusText(B);
+    }
     const t = board.t_ns;
     for (const s of board.links || []) {
       const L = this.linkByDesc && this.linkByDesc.get(s.link);
@@ -977,6 +1111,7 @@ export class BoardView {
     }
     for (const segs of (this.netSegs || new Map()).values()) for (const pts of segs) for (const [x, y] of pts) add(x, y);
     for (const L of this.links || []) for (const D of L.dirs) for (const [x, y] of D.pts || []) add(x, y);
+    for (const B of (this.busEls || new Map()).values()) for (const pts of B.segs) for (const [x, y] of pts) add(x, y);
     if (!isFinite(x0)) return { x: 0, y: 0, w: this.W, h: this.H };
     const pad = 8;
     return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad };
@@ -995,7 +1130,7 @@ export class BoardView {
     const top = ch - tb.h > 200 ? tb.h : 0;
     // room for the net / link labels (constant on-screen size) on the outermost wires: they prefer the side above /
     // left of a wire, so most of it goes there
-    const wired = (this.netSegs && this.netSegs.size) || (this.links && this.links.length);
+    const wired = (this.netSegs && this.netSegs.size) || (this.links && this.links.length) || (this.busEls && this.busEls.size);
     const m = wired ? (LABEL_PX + 6) / Math.min(cw / bb.w, ch / bb.h) : 0;
     bb.x -= m; bb.y -= m; bb.w += 1.4 * m; bb.h += 1.4 * m;
     const sA = Math.min(cw / bb.w, (ch - top) / bb.h), sB = Math.min((cw - tb.w) / bb.w, ch / bb.h);
@@ -1170,8 +1305,11 @@ export class BoardView {
         <span class="board-only">${wire("net-H")}net H</span><span class="board-only">${wire("net-L")}net L</span>
         <span class="board-only">${wire("net-X")}net X</span><span class="board-only">${wire("net-X conflict")}conflict</span>
         <span class="board-only"><svg class="bv" width="24" height="12" viewBox="0 0 24 12"><g class="link"><path class="link-line" d="M2,6 H22"/></g></svg>UART link</span>
+        <span class="board-only"><svg class="bv" width="24" height="12" viewBox="0 0 24 12"><g class="bus bus-can"><path class="bus-line" d="M2,6 H22"/></g></svg>CAN bus</span>
+        <span class="board-only"><svg class="bv" width="24" height="12" viewBox="0 0 24 12"><g class="bus bus-eth"><path class="bus-line" d="M2,6 H22"/></g></svg>Ethernet</span>
+        <span class="board-only"><svg class="bv" width="24" height="12" viewBox="0 0 24 12"><g class="bus bus-usb"><path class="bus-line" d="M2,6 H22"/></g></svg>USB → host</span>
       </div>
-      <div class="bv-keys">hover pin: data · click: pin card (copy, drive) · alt-click: drive H→L→open · / find · + − 0 zoom</div>`;
+      <div class="bv-keys">hover pin: data · click: pin card (copy, drive, analog, trace) · alt-click: drive H→L→open · / find · + − 0 zoom · Tab: pins, arrows: next pin</div>`;
     wrap.appendChild(lg);
     this.legend = lg;
 
@@ -1189,18 +1327,31 @@ export class BoardView {
       else if (act === "copy") this.copyCard(b);
       else if (act === "drive") this.drive(this.card.cid, this.card.num, b.dataset.lv || null);
       else if (act === "find") this.zoomToPin(this.card.cid, this.card.num);
+      else if (act === "trace") { this.h.onTracePin && this.h.onTracePin(this.card.cid, this.card.num); }
+      else if (act === "adc") { const inp = card.querySelector("input.bv-adc-in"); if (inp) this.setAdc(this.card.cid, this.card.num, inp.value); }
+    });
+    card.addEventListener("keydown", (e) => {
+      if (e.target.matches("input.bv-adc-in") && e.key === "Enter") {
+        e.preventDefault();
+        if (this.card) this.setAdc(this.card.cid, this.card.num, e.target.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        this.closeCard();
+      }
     });
   }
 
   wireKeys() {
     document.addEventListener("keydown", (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.target.closest && e.target.closest("input, select, textarea, [contenteditable]")) return;
+      if (document.body.classList.contains("modal-open")) return;            // Board dialog (app.js)
+      const t = e.target;
+      if (t.closest && t.closest("input, select, textarea, [contenteditable], dialog, .dialog")) return;
       if (e.key === "+" || e.key === "=") { e.preventDefault(); this.zoom(1 / 1.4); }
       else if (e.key === "-" || e.key === "_") { e.preventDefault(); this.zoom(1.4); }
-      else if (e.key === "0") { e.preventDefault(); this.fit(); }
+      else if (e.key === "0" || e.key === ")") { e.preventDefault(); this.fit(); }
       else if (e.key === "/") { e.preventDefault(); this.findInput && this.findInput.focus(); this.findInput && this.findInput.select(); }
-      else if (e.key === "Escape" && this.card && this.card.pinned) this.hideCard(true);
+      else if (e.key === "Escape" && this.card && this.card.pinned) { e.preventDefault(); this.closeCard(); }
     });
   }
 
@@ -1234,10 +1385,82 @@ export class BoardView {
       const r = it.g.getBoundingClientRect();
       x = r.right; y = r.bottom;
     }
-    this.card = { cid, num, pinned: true, x, y };
+    this.card = { cid, num, pinned: true, x, y, kbd: !e || e.clientX === undefined || this._kbdPin === `${cid}:${num}` };
     this.renderCard();
     this.loadHistory(cid, num);
     if (this.h.onPinSelect) this.h.onPinSelect(this.chips.find((c) => c.id === cid), it.pin);
+  }
+
+  // close the pinned card; a card opened from the keyboard gives the focus back to its pin
+  closeCard() {
+    const c = this.card;
+    this.hideCard(true);
+    if (c && c.kbd) this.pkgs.get(c.cid)?.items.get(c.num)?.g.focus();
+  }
+
+  // keyboard focus on a pin (roving tabindex, package.js): the hover card at the pin, unless another card is pinned
+  pinFocus(cid, num) {
+    this._kbdPin = `${cid}:${num}`;
+    const it = this.pkgs.get(cid)?.items.get(num);
+    if (!it || (this.card && this.card.pinned)) return;
+    const r = it.g.getBoundingClientRect();
+    this.showCard(cid, num, { clientX: r.right, clientY: r.bottom });
+    const vb = this.vb, a = this.anchor(cid, num);            // keep the focused pin on screen
+    if (a && vb && (a.x < vb.x || a.x > vb.x + vb.w || a.y < vb.y || a.y > vb.y + vb.h)) this.zoomToPin(cid, num);
+  }
+
+  pinBlur(cid, num) {
+    if (this._kbdPin === `${cid}:${num}`) this._kbdPin = null;
+    if (this.card && !this.card.pinned && this.card.cid === cid && this.card.num === num) this.hideCard(false);
+  }
+
+  // state `adc` ({chip: {channel: value}}): analog values shown in the pin card
+  setAdcValues(map) {
+    const m = map || {};
+    if (JSON.stringify(m) === this._adcSig) return;
+    this._adcSig = JSON.stringify(m);
+    this.adcValues = m;
+    if (this.card) this.renderCard();
+  }
+
+  // pins in the logic strip ("cid:num"): the pin card's trace button shows on / off
+  setTraced(keys) {
+    this.traced = new Set(keys || []);
+    if (this.card && this.card.pinned) this.renderCard();
+  }
+
+  adcValue(cid, pin) {
+    const ch = String(pin.adc || "").toUpperCase();
+    if (!ch) return undefined;
+    const m = this.adcValues[cid] || (this.isBoard ? {} : Object.values(this.adcValues)[0]) || {};
+    for (const [k, v] of Object.entries(m)) {
+      const K = k.toUpperCase();
+      if (K === ch || K.endsWith(`_${ch}`) || ch.endsWith(`_${K}`)) return v;
+    }
+    return undefined;
+  }
+
+  fail(msg) {
+    if (this.h.onError) { this.h.onError(msg); return; }
+    if (this.card) { this.card.err = msg; this.renderCard(); }
+  }
+
+  async setAdc(cid, num, value) {
+    const pin = this.pkgs.get(cid)?.items.get(num)?.pin;
+    const v = String(value ?? "").trim();
+    if (!pin || !pin.adc || !v) return;
+    const channel = this.isBoard ? `${cid}.${pin.adc}` : pin.adc;
+    try {
+      const r = await fetch("/api/adc", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ channel, value: v }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      (this.adcValues[cid] ||= {})[pin.adc] = d.value ?? v;
+      this._adcSig = null;
+      if (this.card) { this.card.err = null; this.card.adcIn = ""; this.renderCard(); }
+    } catch (err) {
+      this.fail(`${channel} = ${v}: ${err.message}`);
+    }
   }
 
   hideCard(evenPinned) {
@@ -1263,6 +1486,10 @@ export class BoardView {
     if (this.isBoard) rows.unshift(["chip", `${cid} ${pv.chip.name}`]);
     if (net) rows.push(["net", net]);
     if (r.cfg_by) rows.push(["config", `${r.cfg_by} @ ${fmtNs(r.cfg_t)}${r.cfg_what ? ` · ${r.cfg_what}` : ""}`]);
+    if (pin.adc) {
+      const v = this.adcValue(cid, pin);
+      rows.push(["analog", `${pin.adc} = ${v === undefined ? "not set" : typeof v === "number" && !Number.isInteger(v) ? `${v} V` : v}`]);
+    }
     // level changes counted from the event log (fetched once per pin, then kept current by notePinEvents)
     const h = this.pinLog.get(`${cid}:${num}`);
     rows.push(["changes", !h || h.loading ? "… (event log)" : h.err ? h.err
@@ -1290,15 +1517,30 @@ export class BoardView {
     const hint = this.wireMode ? "click: wire" : c.pinned ? "" : `click: pin card${gpio ? " · alt-click: drive" : ""}`;
     const html = `
       <div class="bv-card-h"><b class="mono">${esc(m.name)}</b><span class="bv-lv lv-${lv}">${lv}</span>
-        ${c.pinned ? `<button type="button" data-act="find" title="Centre the drawing on this pin">locate</button>
+        ${c.pinned ? `<button type="button" data-act="trace" class="${this.traced.has(`${c.cid}:${c.num}`) ? "on" : ""}" aria-pressed="${this.traced.has(`${c.cid}:${c.num}`)}" title="Show this pin in the logic strip (pins tray, Logic tab)">trace</button>
+        <button type="button" data-act="find" title="Centre the drawing on this pin">locate</button>
         <button type="button" data-act="copy" title="Copy as text">copy</button>
         <button type="button" data-act="close" title="Close (Esc)" aria-label="close">×</button>` : ""}</div>
       <dl>${m.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
       ${m.alts.length ? `<div class="bv-alts">${m.alts.map(([k, v, on]) => `<span>${esc(k)}</span><span${on ? ' class="on"' : ""}>${esc(v)}</span>`).join("")}</div>` : ""}
       ${c.pinned && gpio ? `<div class="bv-drive"><span>drive</span>${["H", "L", ""].map((l) =>
         `<button type="button" data-act="drive" data-lv="${l}" class="${(ext || "") === l ? "on" : ""}">${l || "open"}</button>`).join("")}</div>` : ""}
+      ${c.pinned && m.pin.adc ? `<div class="bv-adc"><span>analog</span><input type="text" class="bv-adc-in" spellcheck="false" autocomplete="off"
+        aria-label="analog input value for ${esc(m.pin.adc)}" placeholder="2048 · 1.65V · 1200mV" title="integer = raw ADC code; decimal or V / mV suffix = volts · Enter: set"><button type="button" data-act="adc">set</button></div>` : ""}
       ${hint ? `<div class="bv-hint">${esc(hint)}</div>` : ""}`;
-    if (html !== this._cardHtml) { this.cardEl.innerHTML = html; this._cardHtml = html; }
+    if (html !== this._cardHtml) {
+      const ae = document.activeElement, keep = ae && this.cardEl.contains(ae) && ae.matches("input")
+        ? { v: ae.value, a: ae.selectionStart, b: ae.selectionEnd } : null;
+      const old = this.cardEl.querySelector("input.bv-adc-in");
+      const typed = old ? old.value : "";
+      this.cardEl.innerHTML = html;
+      this._cardHtml = html;
+      const inp = this.cardEl.querySelector("input.bv-adc-in");
+      if (inp && (keep || typed)) {
+        inp.value = keep ? keep.v : typed;
+        if (keep) { inp.focus(); try { inp.setSelectionRange(keep.a, keep.b); } catch { /* */ } }
+      }
+    }
     this.cardEl.classList.toggle("pinned", c.pinned);
     this.cardEl.hidden = false;
     // position: beside the pointer, kept inside the window
@@ -1393,7 +1635,7 @@ export class BoardView {
       this.pkgs.get(cid).update([row]);
       if (this.card) { this.card.err = null; if (this.card.pinned) this.renderCard(); }
     } catch (err) {
-      if (this.card) { this.card.err = `drive failed: ${err.message}`; this.renderCard(); }
+      this.fail(`drive ${name} failed: ${err.message}`);
     }
   }
 
@@ -1490,6 +1732,7 @@ export class BoardView {
     };
     for (const [name, segs] of this.netSegs || []) addWire(name, segs);
     for (const L of this.links || []) for (const D of L.dirs) if (D.pts && !D.onNet) addWire(D, [D.pts]);
+    for (const B of (this.busEls || new Map()).values()) addWire(B, B.segs);
     const ov = (b, t) => b.x < t.x + t.w && t.x < b.x + b.w && b.y < t.y + t.h && t.y < b.y + b.h;
     let owner = null;
     const hit = (b) => labels.some((t) => ov(b, t)) || taken.some((t) => ov(b, t)) || wires.some((w) => w.owner !== owner && ov(b, w));
@@ -1533,6 +1776,19 @@ export class BoardView {
       }
       labels.push(c.box);
     };
+    // bus node tags: fixed, beside the drop inside the footprint corner (taken before the wire labels are placed)
+    for (const B of (this.busEls || new Map()).values()) {
+      for (const t of B.tags) {
+        // inside the footprint corner (right of the drop, left of the top pins' labels): shortened to fit, else hidden
+        const tx = t.x + 3 / s, ty = t.y + fs * 0.35;
+        const n = Math.floor((t.right - tx) / cw);
+        const txt = t.text.length <= n ? t.text : n >= 4 ? `${t.text.slice(0, n - 1)}…` : "";
+        if (t.el.textContent !== txt) t.el.textContent = txt;
+        t.el.setAttribute("x", tx); t.el.setAttribute("y", ty);
+        if (txt) labels.push({ x: tx, y: ty - fs, w: txt.length * cw, h: fs });
+      }
+    }
+    for (const B of (this.busEls || new Map()).values()) place(B.label, B.segs, [-1, 1], B);
     for (const [name, lab] of this.netLabel || []) place(lab, this.netSegs.get(name), [-1, 1], name);
     for (const L of this.links || []) for (const D of L.dirs) {
       if (D.label && D.pts) place(D.label, [D.pts], D.key === "ab" ? [-1, 1] : [1, -1], D);

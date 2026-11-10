@@ -1,10 +1,11 @@
-"""STM32F4 DMA controller (DMA1/DMA2, RM0090 ch. 10): 8 streams x 8 channels, request mapping per Tables 42/43.
+"""STM32F4 DMA controller (DMA1/DMA2, RM0090 ch. 10): 8 streams x 8 channels, request mapping per Tables 43/44
+(RM0090 Rev 22 numbering; the F42x/F43x-only requests SAI1/SPI4-6/UART7-8 are left out).
 
 Request API (used by the stm32 peripheral models; also reachable through `_util.dma_request(chip, name, level)`):
 
     DMA.request(name: str, level: bool) -> bool
 
-`name` is the request name of RM0090 Table 42 (DMA1) / Table 43 (DMA2): "USART1_RX", "USART1_TX", "UART4_TX",
+`name` is the request name of RM0090 Table 43 (DMA1) / Table 44 (DMA2): "USART1_RX", "USART1_TX", "UART4_TX",
 "TIM3_CH1", "TIM3_UP", "TIM3_TRIG", "TIM1_COM", "ADC1", "SPI1_RX", "I2C1_TX", "DAC1", "SDIO", "DCMI" ...  Table cells
 that hold several requests ("TIM2_UP/TIM2_CH3") are ORed onto one stream request line, so either name works.  A
 request that is not in this controller's table is ignored (returns False); the other controller may take it, which is
@@ -26,8 +27,13 @@ request; a memory-to-memory stream stays ready, so a higher-priority M2M stream 
 
 Per stream (SxCR, SxNDTR, SxPAR, SxM0AR, SxM1AR, SxFCR; registers from the SVD):
   * DIR P2M (00), M2P (01), M2M (10, DMA2 only: on DMA1 it is a transfer error, RM0090 10.3.6; DMDIS forced to 1
-    at enable).  CHSEL picks the request (Tables 42/43, `REQUESTS`).  PL 0..3.  PFCTRL (peripheral flow control,
-    SDIO only) is not modelled: the stream uses NDTR (one `warn`).
+    at enable).  CHSEL picks the request (Tables 43/44, `REQUESTS`).  PL 0..3.
+  * PFCTRL (peripheral flow control, SDIO only, RM0090 10.3.15): NDTR is forced to 0xFFFF at enable, CIRC (and DBM,
+    forbidden by Table 50) forced to 0; the stream completes (TCIF, EN cleared, FIFO flushed) after serving the
+    request the peripheral flagged as its last (`request(name, True, last=True)`), or when NDTR reaches 0.  The data
+    count is 0xFFFF - NDTR.  In M2M mode PFCTRL is forced to 0.
+  * NDTR = 0 when EN is set: the register is reloaded with the value software last wrote (RM0090 10.5.6, e.g.
+    re-enabling a completed stream repeats the same count).  PINCOS is forced to 0 in direct mode or with PBURST != 0.
   * NDTR counts peripheral-size items (PSIZE) down; PINC/MINC increment by PSIZE/MSIZE (PINCOS: the peripheral
     address steps by 4 whatever PSIZE is; forced to 0 in direct mode).  SxPAR/SxM0AR/SxM1AR are not modified by the
     transfer (internal pointers, as on silicon).  At NDTR = 0: TCIF; in circular mode (CIRC, forced to 1 by DBM at
@@ -37,9 +43,10 @@ Per stream (SxCR, SxNDTR, SxPAR, SxM0AR, SxM1AR, SxFCR; registers from the SVD):
     moves one item straight through.  FIFO mode (DMDIS = 1): a 16-byte FIFO packs/unpacks between PSIZE and MSIZE
     with the same data as silicon: P2M/M2M data goes to memory in MSIZE units whenever the FIFO reaches the FTH
     threshold, at the end of the transfer (or of each circular/double-buffer cycle) and when the stream is disabled
-    (remaining bytes: largest naturally sized units); M2P reads MSIZE units from memory when the FIFO cannot supply
+    (RM0090 10.3.12 "FIFO flush": fewer bytes than MSIZE are still written as one MSIZE unit, the missing bytes as 0
+    -- silicon writes "an undesired value"); M2P reads MSIZE units from memory when the FIFO cannot supply
     the next PSIZE item.  FS reports the FIFO level.  Burst beats/timing are not modelled.  An FTH/MBURST/MSIZE
-    combination forbidden by RM0090 Table 48 sets FEIF and the stream is not enabled.
+    combination forbidden by RM0090 Table 49 sets FEIF and the stream is not enabled.
   * EN: SxCR (except EN and the interrupt enables), NDTR, PAR, FCR (except FEIE) and, unless in double-buffer mode,
     M0AR/M1AR are write-protected while EN = 1 (writes ignored).  In double-buffer mode, writing the memory address
     register in use (M0AR with CT = 0, M1AR with CT = 1) is refused with TEIF and the stream is disabled.  Clearing EN
@@ -66,7 +73,7 @@ from ._util import GatedBlock, build_regs, irq_number
 
 NSTREAMS = 8
 
-# RM0090 Table 42 "DMA1 request mapping": REQ1[channel][stream] (None = no request)
+# RM0090 Table 43 "DMA1 request mapping": REQ1[channel][stream] (None = no request)
 _T42 = [
     ("SPI3_RX", None, "SPI3_RX", "SPI2_RX", "SPI2_TX", "SPI3_TX", None, "SPI3_TX"),
     ("I2C1_RX", None, "TIM7_UP", None, "TIM7_UP", "I2C1_RX", "I2C1_TX", "I2C1_TX"),
@@ -78,7 +85,7 @@ _T42 = [
     ("TIM5_CH3/TIM5_UP", "TIM5_CH4/TIM5_TRIG", "TIM5_CH1", "TIM5_CH4/TIM5_TRIG", "TIM5_CH2", None, "TIM5_UP", None),
     (None, "TIM6_UP", "I2C2_RX", "I2C2_RX", "USART3_TX", "DAC1", "DAC2", "I2C2_TX"),
 ]
-# RM0090 Table 43 "DMA2 request mapping"
+# RM0090 Table 44 "DMA2 request mapping"
 _T43 = [
     ("ADC1", None, "TIM8_CH1/TIM8_CH2/TIM8_CH3", None, "ADC1", None, "TIM1_CH1/TIM1_CH2/TIM1_CH3", None),
     (None, "DCMI", "ADC2", "ADC2", None, None, None, "DCMI"),
@@ -115,7 +122,7 @@ _BURST = (1, 4, 8, 16)
 
 
 def _fifo_cfg_ok(msize: int, mburst: int, fth: int) -> bool:
-    """RM0090 Table 48: a memory burst must fit the FIFO threshold (threshold bytes a multiple of the burst)."""
+    """RM0090 Table 49: a memory burst must fit the FIFO threshold (threshold bytes a multiple of the burst)."""
     beats = _BURST[mburst]
     if beats == 1:
         return True
@@ -124,13 +131,15 @@ def _fifo_cfg_ok(msize: int, mburst: int, fth: int) -> bool:
 
 class _Stream:
     __slots__ = ("idx", "n0", "pptr", "mptr", "fifo", "mleft", "warned_flags", "pf_warned", "dir", "psize",
-                 "msize", "pstep", "mstep", "circ", "fifo_mode", "thresh", "irq", "line", "names")
+                 "msize", "pstep", "mstep", "circ", "fifo_mode", "thresh", "irq", "line", "names",
+                 "prog", "pfc")
 
     def __init__(self, idx: int):
         self.idx = idx
         self.irq: int | None = None
         self.line = False
         self.pf_warned = False
+        self.prog = 0                     # NDTR value last written by software (reloaded by EN, RM0090 10.5.6)
         self.clear()
 
     def clear(self) -> None:
@@ -147,6 +156,7 @@ class _Stream:
         self.fifo_mode = False
         self.thresh = 4
         self.names: tuple[str, ...] = ()
+        self.pfc = False                  # peripheral is the flow controller (PFCTRL)
 
 
 @register("stm32.dma")
@@ -171,7 +181,7 @@ class DMA(GatedBlock):
         }
         for s in range(NSTREAMS):
             ov[f"S{s}CR"] = {"on_write": self._cr_write(s)}
-            ov[f"S{s}NDTR"] = {"on_write": self._prot_write(s), "ro_mask": 0xFFFF0000}
+            ov[f"S{s}NDTR"] = {"on_write": self._ndtr_write(s), "ro_mask": 0xFFFF0000}
             ov[f"S{s}PAR"] = {"on_write": self._prot_write(s)}
             ov[f"S{s}M0AR"] = {"on_write": self._mar_write(s, 0)}
             ov[f"S{s}M1AR"] = {"on_write": self._mar_write(s, 1)}
@@ -181,6 +191,7 @@ class DMA(GatedBlock):
         self.table = REQUESTS[self.controller]
         self.known = {n for row in self.table for cell in row for n in cell}
         self.levels: dict[str, bool] = {}
+        self.lasts: dict[str, bool] = {}
         self.streams = [_Stream(s) for s in range(NSTREAMS)]
         self._cr = [self.regs[f"S{s}CR"] for s in range(NSTREAMS)]
         self._ev = None
@@ -208,6 +219,7 @@ class DMA(GatedBlock):
             if st.line and st.irq is not None and self.chip is not None:
                 self.irq(st.irq, False)
             st.line = False
+            st.prog = 0
             st.clear()
         super().reset()
 
@@ -217,15 +229,18 @@ class DMA(GatedBlock):
         MMIOBlock.write(self, offset, size, value)
 
     # ------------------------------------------------------------------ request API
-    def request(self, name: str, level: bool = True) -> bool:
-        """A peripheral asserts (level=True) or deasserts DMA request `name` (RM0090 Table 42/43 name). Returns
-        False when this controller has no stream/channel for it (ignored)."""
+    def request(self, name: str, level: bool = True, last: bool = False) -> bool:
+        """A peripheral asserts (level=True) or deasserts DMA request `name` (RM0090 Table 43/44 name). Returns
+        False when this controller has no stream/channel for it (ignored).  `last`: the request is the peripheral's
+        "last data" signal (RM0090 10.3.15, SDIO only): a stream with PFCTRL = 1 completes after serving it."""
         if name not in self.known:
             return name == "MEM2MEM"
         if not level:
             self.levels[name] = False
+            self.lasts[name] = False
             return True
         self.levels[name] = True
+        self.lasts[name] = bool(last)
         for s in range(NSTREAMS):
             cr = self._crv(s)
             if cr & EN and name in self.table[s][cr >> 25 & 7]:
@@ -302,6 +317,14 @@ class DMA(GatedBlock):
             return None
         return wr
 
+    def _ndtr_write(self, s: int):
+        def wr(blk, reg, old, new):
+            if self._crv(s) & EN:
+                return old                # protected while the stream is enabled
+            self.streams[s].prog = new & 0xFFFF
+            return None
+        return wr
+
     def _mar_write(self, s: int, which: int):
         def wr(blk, reg, old, new):
             cr = self._crv(s)
@@ -358,16 +381,21 @@ class DMA(GatedBlock):
             return
         if direction == DIR_M2M:
             fcr |= DMDIS                                  # direct mode is not allowed in M2M (hardware sets DMDIS)
+            cr &= ~PFCTRL                                 # RM0090 10.5.5: PFCTRL forced to 0 in M2M
             if cr & (CIRC | DBM):
                 self.emit("warn", block=self.name, msg=f"{self.name} stream {s}: circular/double-buffer mode is not "
                           "allowed in memory-to-memory mode; running a single transfer")
                 cr &= ~(CIRC | DBM)
-        if cr & PFCTRL and not st.pf_warned:
-            st.pf_warned = True
-            self.emit("warn", block=self.name, msg=f"{self.name} stream {s}: PFCTRL (peripheral flow control) is not "
-                      "modelled; the transfer length is NDTR")
-        if cr & DBM:
+        if cr & PFCTRL:
+            if cr & DBM and not st.pf_warned:
+                st.pf_warned = True
+                self.emit("warn", block=self.name, msg=f"{self.name} stream {s}: double-buffer mode is forbidden with "
+                          "peripheral flow control (RM0090 Table 50); DBM ignored")
+            cr &= ~(CIRC | DBM)                           # RM0090 10.5.5: CIRC forced to 0 with PFCTRL
+        elif cr & DBM:
             cr |= CIRC                                    # RM0090: CIRC forced to 1 when DBM is set and EN = 1
+        if cr >> 21 & 3:
+            cr &= ~PINCOS                                 # RM0090 10.5.5: PINCOS forced low with PBURST != 00
         fifo_mode = bool(fcr & DMDIS)
         psz = cr >> 11 & 3
         if not fifo_mode:
@@ -381,7 +409,7 @@ class DMA(GatedBlock):
             return
         if fifo_mode and not _fifo_cfg_ok(msize, cr >> 23 & 3, fcr & FTH_MASK):
             self.emit("warn", block=self.name, msg=f"{self.name} stream {s}: FIFO threshold FTH={fcr & FTH_MASK} "
-                      f"incompatible with MBURST={cr >> 23 & 3} / MSIZE={msize} (RM0090 Table 48): FEIF, not enabled")
+                      f"incompatible with MBURST={cr >> 23 & 3} / MSIZE={msize} (RM0090 Table 49): FEIF, not enabled")
             self.set(f"S{s}FCR", fcr)
             self._set_cr(s, cr & ~EN)
             self._set_flags(s, F_FE)
@@ -403,6 +431,11 @@ class DMA(GatedBlock):
         st.fifo_mode = fifo_mode
         st.thresh = 4 * ((fcr & FTH_MASK) + 1)
         st.names = self.table[s][cr >> 25 & 7]
+        st.pfc = bool(cr & PFCTRL)
+        if st.pfc:
+            self.set(f"S{s}NDTR", 0xFFFF)                # RM0090 10.3.15: forced to 0xFFFF at enable
+        elif not self._sreg(s, "NDTR") & 0xFFFF:
+            self.set(f"S{s}NDTR", st.prog)               # RM0090 10.5.6: reloaded with the programmed value
         st.n0 = self._sreg(s, "NDTR") & 0xFFFF
         st.fifo = bytearray()
         self._load_ptrs(s, cr)
@@ -494,9 +527,13 @@ class DMA(GatedBlock):
     def _item(self, s: int) -> None:
         """Move one peripheral-size data item on stream s (one granted request)."""
         st = self.streams[s]
+        last = False
         if st.dir != DIR_M2M:
             for n in st.names:                             # acknowledge before the access: a peripheral that
                 self.levels[n] = False                     # re-requests during it keeps its new request
+                if self.lasts.get(n):
+                    last = True
+                    self.lasts[n] = False
         ps, ms = st.psize, st.msize
         try:
             if st.dir == DIR_M2P:
@@ -529,10 +566,12 @@ class DMA(GatedBlock):
             flags = 0
             if ndtr == st.n0 // 2:
                 flags |= F_HT
-            if ndtr == 0:
+            if ndtr == 0 or (last and st.pfc):
                 if st.fifo and st.dir != DIR_M2P:
                     self._flush(s, all_=True)
                 flags |= F_TC
+                if ndtr == 0 and st.names:
+                    self._notify_last(st.names)
                 cr = self._crv(s)
                 if st.circ:
                     if cr & DBM:
@@ -550,6 +589,13 @@ class DMA(GatedBlock):
         except _DmaFault as e:
             self._fault(s, e)
 
+    def _notify_last(self, names: tuple[str, ...]) -> None:
+        """The DMA's "last transfer" signal to the requesting peripheral (used by the ADC's DDS bit)."""
+        for blk in (getattr(self.chip, "peripherals", {}) or {}).values():
+            fn = getattr(blk, "dma_transfer_complete", None)
+            if fn is not None:
+                fn(names)
+
     def _flush(self, s: int, all_: bool) -> None:
         """P2M/M2M FIFO -> memory in MSIZE units (all_: also the remainder, in the largest aligned units)."""
         st = self.streams[s]
@@ -559,12 +605,12 @@ class DMA(GatedBlock):
             self._wr(st.mptr, ms, int.from_bytes(f[:ms], "little"))
             del f[:ms]
             st.mptr = (st.mptr + st.mstep) & 0xFFFFFFFF
-        if all_:
-            while f:
-                k = 2 if len(f) >= 2 and not st.mptr & 1 else 1
-                self._wr(st.mptr, k, int.from_bytes(f[:k], "little"))
-                del f[:k]
-                st.mptr = (st.mptr + (k if st.mstep else 0)) & 0xFFFFFFFF
+        if all_ and f:
+            # RM0090 10.3.12 "FIFO flush": fewer bytes than MSIZE left are still written with the MSIZE width
+            # ("memory is written with an undesired value"); the missing bytes are written as 0 here.
+            self._wr(st.mptr, ms, int.from_bytes(bytes(f) + bytes(ms - len(f)), "little"))
+            del f[:]
+            st.mptr = (st.mptr + st.mstep) & 0xFFFFFFFF
 
 
 class _DmaFault(Exception):

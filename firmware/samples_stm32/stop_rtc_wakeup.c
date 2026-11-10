@@ -91,9 +91,10 @@ int main(void)
     uint32_t from_standby = PWR_CSR & PWR_CSR_SBF;
     if (from_standby) {
         puts1((PWR_CSR & PWR_CSR_WUF) ? "standby wake-up (SBF WUF)\r\n" : "standby exit (SBF)\r\n");
-        PWR_CR |= PWR_CR_CSBF | PWR_CR_CWUF;
+        PWR_CR |= PWR_CR_CSBF | PWR_CR_CWUF | PWR_CR_DBP;
+        RTC_ISR = ~(RTC_ISR_WUTF | RTC_ISR_INIT) & 0xFFFFu;  /* Stop entry is ignored while WUTF is set (RM0090 5.3.4) */
         for (;;)
-            enter_low_power(0);                     /* the RTC is still running: Stop, wake, Stop ... */
+            enter_low_power(0);                     /* Stop (EXTI line 22 is off after the reset: stays stopped) */
     }
     puts1("boot\r\n");
 

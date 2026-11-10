@@ -24,20 +24,59 @@ export function initBoardDialog(d) {
   $("bdChips").addEventListener("change", onFieldChange);
   $("bdChips").addEventListener("input", onFieldChange);
   $("bdAddRow").addEventListener("change", onFieldChange);
+  $("bdConfirmYes").addEventListener("click", () => askDone(true));
+  $("bdConfirmNo").addEventListener("click", () => askDone(false));
+  const dlg = $("boardDlg");
+  dlg.addEventListener("close", () => {
+    document.body.classList.remove("modal-open");
+    askDone(false);
+    if (opener && opener.isConnected) opener.focus();
+    opener = null;
+  });
+  dlg.addEventListener("cancel", (e) => {          // Esc: close the confirm row first, then the dialog
+    if (!$("bdConfirm").hidden) { e.preventDefault(); askDone(false); }
+  });
 }
 
-export function boardDialogOpen() { return !$("boardDlg").hidden; }
+export function boardDialogOpen() { return !!$("boardDlg").open; }
 
-export function closeBoardDialog() { $("boardDlg").hidden = true; }
+let opener = null;          // element focused before the dialog opened (focus returns there)
+export function closeBoardDialog() {
+  const d = $("boardDlg");
+  askDone(false);
+  if (d.open) d.close();
+}
+
+// inline confirmation row (replaces window.confirm): resolves true on OK, false on Cancel / Esc / close
+let askResolve = null;
+function askDone(v) {
+  $("bdConfirm").hidden = true;
+  const r = askResolve; askResolve = null;
+  if (r) r(v);
+}
+function ask(text, ok = "OK") {
+  askDone(false);
+  $("bdConfirmText").textContent = text;
+  $("bdConfirmYes").textContent = ok;
+  $("bdConfirm").hidden = false;
+  $("bdConfirmYes").focus();
+  return new Promise((res) => { askResolve = res; });
+}
 
 async function openBoardDialog() {
-  $("boardDlg").hidden = false;
+  const d = $("boardDlg");
+  if (d.open) return;
+  opener = document.activeElement;
+  if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+  document.body.classList.add("modal-open");
+  $("bdClose").focus();
   $("bdBusy").textContent = "loading…";
   try {
     [cat, setup] = await Promise.all([cat ? Promise.resolve(cat) : deps.api("/api/catalog"), deps.api("/api/board/setup")]);
   } catch (e) { $("bdBusy").textContent = ""; deps.toastErr(`board setup: ${e.message}`); return; }
   $("bdBusy").textContent = "";
   render();
+  ($("bdChips").querySelector("select") || $("bdAddChip")).focus();
 }
 
 // ---------------------------------------------------------------- rendering
@@ -74,7 +113,7 @@ function fwOptions(sel) {
   return html;
 }
 
-function fmtHz(hz) { return hz ? String(+hz / 1e6) : ""; }
+function fmtMHz(hz) { return hz ? String(+hz / 1e6) : ""; }   // clock field value in MHz (an input, not a display)
 
 function render() {
   $("bdName").value = setup.name || "";
@@ -86,7 +125,7 @@ function render() {
       <label class="pd-row"><span>chip</span><select data-f="chip" data-orig="${esc(c.chip)}">${chipOptions(c.chip)}</select></label>
       <label class="pd-row"><span>firmware</span><select data-f="firmware">${fwOptions(c.firmware || "")}</select></label>
       <label class="pd-row bd-path" hidden><span>path</span><input type="text" data-f="path" spellcheck="false" placeholder="/path/to/firmware.elf"></label>
-      <label class="pd-row"><span>clock MHz</span><input type="text" data-f="clock" value="${esc(fmtHz(c.clock_hz))}" placeholder="reset default" size="8"></label>
+      <label class="pd-row"><span>clock MHz</span><input type="text" data-f="clock" value="${esc(fmtMHz(c.clock_hz))}" placeholder="reset default" size="8"></label>
     </div>`).join("");
   for (const row of $("bdChips").querySelectorAll(".bd-chip")) row._orig = snapshot(row);
   $("bdAddChip").innerHTML = chipOptions(null);
@@ -129,7 +168,7 @@ function clockHz(v) {
 // ---------------------------------------------------------------- actions
 async function rebuild(path, body, what) {
   $("bdBusy").textContent = `${what}…`;
-  for (const b of $("boardDlg").querySelectorAll("button")) b.disabled = true;
+  for (const b of $("boardDlg").querySelectorAll("button:not(#bdClose)")) b.disabled = true;
   try {
     await deps.api(path, body);
     deps.toast(`${what}: done, reloading`);
@@ -149,7 +188,7 @@ async function onChipsClick(e) {
   const id = row.dataset.id;
   if (btn.dataset.act === "remove") {
     if ((setup.chips || []).length <= 1) { deps.toastErr("a board needs at least one MCU"); return; }
-    if (!confirm(`Remove MCU ${id} and the wires, links and part connections to it? The emulation restarts at t=0.`)) return;
+    if (!await ask(`Remove MCU ${id} and the wires, links and part connections to it? The emulation restarts at t=0.`, "Remove")) return;
     return rebuild("/api/board/chip/remove", { id }, `remove ${id}`);
   }
   if (btn.dataset.act === "apply") {
@@ -157,7 +196,7 @@ async function onChipsClick(e) {
     const chipSel = row.querySelector('[data-f="chip"]');
     const orig = chipSel.dataset.orig.replace(/^.*\//, "").replace(/\.ya?ml$/i, "").toLowerCase();
     if (chipSel.value !== orig) {
-      if (!confirm(`Change ${id} to ${chipSel.value}? Its wiring is removed (pin names differ). The emulation restarts at t=0.`)) return;
+      if (!await ask(`Change ${id} to ${chipSel.value}? Its wiring is removed (pin names differ). The emulation restarts at t=0.`, "Change")) return;
       body.chip = chipSel.value;
     }
     try { body.clock_hz = clockHz(row.querySelector('[data-f="clock"]').value); } catch (err) { deps.toastErr(err.message); return; }
@@ -174,7 +213,7 @@ async function addChip() {
 }
 
 async function newBoard() {
-  if (!confirm("Start a new board with only the MCU chosen under “Add MCU” (as chip A)? The current setup is discarded unless you saved it.")) return;
+  if (!await ask("Start a new board with only the MCU chosen under “Add MCU” (as chip A)? The current setup is discarded unless you saved it.", "New board")) return;
   const body = { name: $("bdName").value.trim() || "board", chip: $("bdAddChip").value, firmware: fwValue($("bdAddRow")) || null };
   try { body.clock_hz = clockHz($("bdAddClock").value); } catch (err) { deps.toastErr(err.message); return; }
   return rebuild("/api/board/new", body, "new board");
@@ -183,7 +222,7 @@ async function newBoard() {
 async function openBoard() {
   const p = $("bdOpenSel").value;
   if (!p) return;
-  if (!confirm(`Open ${p.replace(/^.*\//, "")}? The current setup is discarded unless you saved it.`)) return;
+  if (!await ask(`Open ${p.replace(/^.*\//, "")}? The current setup is discarded unless you saved it.`, "Open")) return;
   return rebuild("/api/board/open", { path: p }, "open board");
 }
 
@@ -198,7 +237,7 @@ async function save(overwrite) {
     render();
   } catch (e) {
     if (!overwrite && /exists/.test(e.message)) {
-      if (confirm(`boards/${name}.yaml already exists. Replace it?`)) return save(true);
+      if (await ask(`boards/${name}.yaml already exists. Replace it?`, "Replace")) return save(true);
       return;
     }
     deps.toastErr(`save: ${e.message}`);

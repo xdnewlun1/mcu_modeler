@@ -347,6 +347,8 @@ Measured at 1366x768 (canvas ~950 x 500 px):
 
 Left open:
 
-- Streets and gutters are sized for all tracks of the board; sizing each from the nets that actually use it would
-  give two- and three-chip boards a few percent more scale.
-- 144- and 176-pin packages on a three-chip board at 1366x768 stay below the name threshold; zoom or find a pin.
+- ~~Streets and gutters are sized for all tracks of the board.~~ Done in phase 4: each gutter / street is sized from the
+  routes that use it (three_chip_demo: gutter 124 -> 116, street 108 -> 100). UART links still reserve a slot
+  everywhere (their routes depend on live pin owners).
+- 144- and 176-pin packages on a three-chip board: readable at fit at 1920 since phase 4; at 1366x768 they still stay
+  below the name threshold (three packages need ~0.68 scale, the fit gives ~0.45); zoom or find a pin.

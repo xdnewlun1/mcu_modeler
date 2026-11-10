@@ -67,11 +67,11 @@ def test_frame_time_is_8_bit_times(desc, b, ppre):
     assert chip.peripherals["SPI1"].baud() == pytest.approx(16e6 / (2 * half))
     t0 = chip.now_cycles()
     wr(chip, SPI1 + DR, 0xA5)
-    assert rd(chip, SPI1 + SR) == TXE | BSY                  # buffer moved to the shifter at once
-    end = t0 + 16 * half
-    sr = _probe(chip, [end - 1, end + 1], SPI1 + SR)          # a probe runs before an event of the same cycle
+    assert rd(chip, SPI1 + SR) == TXE                        # buffer moved to the shifter at once; BSY follows
+    end = t0 + 16 * half                                     # 2 PCLK later (RM0090 28.3.9 note)
+    sr = _probe(chip, [t0 + 2 * ppre - 1, t0 + 2 * ppre + 1, end - 1, end + 1], SPI1 + SR)
     chip.run_cycles(16 * half + 4)
-    assert sr == [TXE | BSY, TXE | RXNE]
+    assert sr == [TXE, TXE | BSY, TXE | BSY, TXE | RXNE]
 
 
 def test_spi2_on_apb1(desc):
@@ -94,7 +94,7 @@ def test_double_buffer_back_to_back_and_overrun(desc):
     t0 = chip.now_cycles()
     wr(chip, SPI1 + DR, 0x11)
     wr(chip, SPI1 + DR, 0x22)                                # waits in the TX buffer
-    assert rd(chip, SPI1 + SR) == BSY                        # TXE = 0: buffer full
+    assert rd(chip, SPI1 + SR) == 0                          # TXE = 0: buffer full; BSY sets 2 PCLK later
     sr = _probe(chip, [t0 + 15, t0 + 17, t0 + 31, t0 + 33], SPI1 + SR)
     chip.run_cycles(40)
     assert sr == [BSY, TXE | BSY | RXNE, TXE | BSY | RXNE, TXE | RXNE | OVR]
@@ -425,3 +425,177 @@ def test_slave_two_frames_per_select_and_reselect(desc, cpha):
     pins.set_external("PA4", 1)
     pins.set_external("PA4", 0)
     assert [frame(0xA2), frame(0xA3)] == [0x33, 0x44]
+
+
+# ------------------------------------------------------------------------------------------------ RM0090 28.3.6-28.3.10
+FRF, BIDIMODE, BIDIOE, FRE = 0x10, 0x8000, 0x4000, 0x100
+
+
+def test_bidi_receive_master_keeps_bsy_low(desc):
+    """28.3.7: master bidirectional receive mode (MSTR=1, BIDIMODE=1, BIDIOE=0) keeps BSY low; RXONLY sets it."""
+    chip = _chip(desc)
+    wr(chip, SPI1 + CR1, MASTER | BIDIMODE)
+    srs = _probe(chip, [chip.now_cycles() + k for k in (1, 5, 9, 13)], SPI1 + SR)
+    chip.run_cycles(20)
+    assert not any(s & BSY for s in srs) and chip.peripherals["SPI1"].frames
+    wr(chip, SPI1 + CR1, MSTR | SSM | SSI)
+    rd(chip, SPI1 + DR)
+    rd(chip, SPI1 + SR)
+    wr(chip, SPI1 + CR1, MASTER | RXONLY)
+    srs = _probe(chip, [chip.now_cycles() + k for k in (5, 9)], SPI1 + SR)
+    chip.run_cycles(12)
+    assert all(s & BSY for s in srs)
+
+
+def test_overrun_loses_every_later_word_until_cleared(desc):
+    """28.3.10: on overrun the RX buffer keeps the old word and all later words are lost until OVR is cleared."""
+    chip = _chip(desc)
+    spi = chip.peripherals["SPI1"]
+    words = iter([0x11, 0x22, 0x33, 0x44])
+    spi.responder = lambda tx, pcs, bits: next(words)
+    wr(chip, SPI1 + CR1, MASTER | br(0))
+    for d in (1, 2):
+        wr(chip, SPI1 + DR, d)
+    chip.run_cycles(40)
+    assert rd(chip, SPI1 + DR) == 0x11                         # the second word was lost: OVR
+    wr(chip, SPI1 + DR, 3)
+    chip.run_cycles(20)
+    assert not spi.get("SR") & RXNE                            # OVR still set: 0x33 lost as well
+    assert rd(chip, SPI1 + SR) & OVR                           # DR read then SR read clears OVR
+    wr(chip, SPI1 + DR, 4)
+    chip.run_cycles(20)
+    assert rd(chip, SPI1 + SR) & RXNE and rd(chip, SPI1 + DR) == 0x44
+
+
+def _slave_frame(chip, send, cpha=0):
+    pins = chip.pins
+    got, bsy = 0, []
+    for i in range(8):
+        pins.set_external("PA7", (send >> (7 - i)) & 1)
+        if not cpha:
+            got = got << 1 | (pins.get("PA6").level() == "H")
+        pins.set_external("PA5", 1)
+        if cpha:
+            got = got << 1 | (pins.get("PA6").level() == "H")
+        pins.set_external("PA5", 0)
+        bsy.append(bool(chip.peripherals["SPI1"].get("SR") & BSY))
+    return got, bsy
+
+
+def test_slave_bsy_follows_transfers(desc):
+    """28.3.7: a slave sets BSY when a transfer starts (first SCK edge), not on NSS; low between frames."""
+    chip = _chip(desc, nss=True)
+    pins = chip.pins
+    pins.set_external("PA4", 1)
+    pins.set_external("PA5", 0)
+    wr(chip, SPI1 + CR1, SPE)
+    pins.set_external("PA4", 0)
+    assert not rd(chip, SPI1 + SR) & BSY
+    _, bsy = _slave_frame(chip, 0x5A)
+    assert bsy == [True] * 7 + [False]
+    _, bsy = _slave_frame(chip, 0xA5)
+    assert bsy == [True] * 7 + [False]
+
+
+def test_slave_crcnext_sends_and_checks_crc(desc):
+    """28.3.6: CRC in slave mode: CRCNEXT after the last data written makes the next frame TXCRCR, the received
+    frame is checked against RXCRCR (CRCERR on mismatch)."""
+    chip = _chip(desc, nss=True)
+    pins = chip.pins
+    pins.set_external("PA4", 1)
+    pins.set_external("PA5", 0)
+    wr(chip, SPI1 + CRCPR, 7)
+    wr(chip, SPI1 + CR1, SPE | CRCEN)
+    wr(chip, SPI1 + DR, 0x12)
+    wr(chip, SPI1 + CR1, SPE | CRCEN | CRCNEXT)
+    pins.set_external("PA4", 0)
+    got, _ = _slave_frame(chip, 0x34)
+    assert got == 0x12 and rd(chip, SPI1 + DR) == 0x34
+    rx_crc = crc_update(0, 0x34, 8, 7)
+    got, _ = _slave_frame(chip, rx_crc)
+    assert got == crc_update(0, 0x12, 8, 7)
+    assert not rd(chip, SPI1 + SR) & CRCERR and rd(chip, SPI1 + DR) == rx_crc
+    # a wrong CRC from the master (CRC cleared between deselection and reselection as 28.3.6 prescribes)
+    pins.set_external("PA4", 1)
+    wr(chip, SPI1 + CR1, 0)
+    wr(chip, SPI1 + CR1, CRCEN)
+    wr(chip, SPI1 + CR1, SPE | CRCEN)
+    wr(chip, SPI1 + DR, 0x55)
+    wr(chip, SPI1 + CR1, SPE | CRCEN | CRCNEXT)
+    pins.set_external("PA4", 0)
+    got, _ = _slave_frame(chip, 0x66)
+    assert got == 0x55
+    rd(chip, SPI1 + DR)
+    _slave_frame(chip, crc_update(0, 0x66, 8, 7) ^ 1)
+    assert rd(chip, SPI1 + SR) & CRCERR
+
+
+def test_ti_master_frame_pulse_and_timing(desc):
+    """28.3.3, Figures 251/252: TI master: CPOL=0/CPHA=1 and MSB first forced, NSS pulses high for one SCK cycle
+    before the first frame and during the LSB of a frame followed at once by the next one (no extra clock)."""
+    chip = _chip(desc, nss=True)
+    wr(chip, SPI1 + CR2, FRF)
+    wr(chip, SPI1 + CR1, MSTR | SPE | CPOL | LSBFIRST | br(1))   # CPOL / LSBFIRST ignored in TI mode
+    assert chip.pins.get("PA5").level() == "L" and chip.pins.get("PA4").level() == "L"
+    ev = _trace(chip, "PA4", "PA5", "PA7")
+    t0 = chip.now_cycles()
+    wr(chip, SPI1 + DR, 0xA5)
+    wr(chip, SPI1 + DR, 0x3C)
+    chip.run_cycles(200)
+    sck = [t - t0 for (t, p, lvl) in ev if p == "PA5"]
+    assert len(sck) == 2 * (1 + 8 + 8) and sck == [2 * (k + 1) for k in range(34)]   # one prefix clock only
+    nss = [(t - t0, lvl) for (t, p, lvl) in ev if p == "PA4"]
+    assert nss == [(2, "H"), (6, "L"), (2 + 4 * 8, "H"), (2 + 4 * 9, "L")]
+    rises = [t for (t, p, lvl) in ev if p == "PA5" and lvl == "H"][1:]
+    falls = [t for (t, p, lvl) in ev if p == "PA5" and lvl == "L"][1:]
+    assert _bits_at(ev, falls, "PA7") == [1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0]    # sampled on falling
+    assert len(rises) == 16
+    assert not any("TI frame" in e.fields.get("msg", "") for e in chip.log if e.kind == "warn")
+
+
+def test_ti_slave_receive_transmit_and_frame_error(desc):
+    """28.3.2 / 28.3.10: TI slave: NSS sampled on falling SCK edges, data out on rising edges, MISO released after
+    the frame; an NSS pulse inside a frame sets FRE (cleared by an SR read) and the frame is dropped."""
+    chip = _chip(desc, nss=True)
+    pins = chip.pins
+    pins.set_external("PA4", 0)
+    pins.set_external("PA5", 0)
+    wr(chip, SPI1 + CR2, FRF)
+    wr(chip, SPI1 + CR1, SPE | CPHA)
+    wr(chip, SPI1 + DR, 0xC3)
+    assert pins.get("PA6").direction == "in"
+
+    def clk(nss=0, mosi=0):
+        pins.set_external("PA4", nss)
+        pins.set_external("PA7", mosi)
+        pins.set_external("PA5", 1)
+        b = pins.get("PA6").level() == "H"
+        pins.set_external("PA5", 0)
+        return b
+
+    clk(nss=1)                                                 # frame pulse
+    assert pins.get("PA6").direction == "out"
+    got = 0
+    for i in range(8):
+        got = got << 1 | clk(mosi=(0x96 >> (7 - i)) & 1)
+    assert got == 0xC3 and rd(chip, SPI1 + DR) == 0x96
+    chip.run_cycles(64)
+    assert pins.get("PA6").direction == "in"                   # t_release after the LSB
+    clk(nss=1)
+    for _ in range(3):
+        clk(mosi=1)
+    clk(nss=1)                                                 # pulse inside the frame: FRE
+    assert rd(chip, SPI1 + SR) & FRE
+    assert not rd(chip, SPI1 + SR) & FRE
+    for _ in range(8):
+        clk(mosi=1)
+    assert not rd(chip, SPI1 + SR) & RXNE                      # waits for the next pulse
+
+
+def test_reset_values_and_reserved_bits(desc):
+    """28.5.2/28.5.8/28.5.9: I2SPR resets to 0x0002 (I2SDIV = 2); reserved bits read 0 (CR2 bit 3, I2SCFGR bit 6)."""
+    chip = _chip(desc)
+    assert rd(chip, SPI1 + 0x20) == 0x0002 and rd(chip, SPI1 + SR) == TXE
+    wr(chip, SPI1 + CR2, 0xFFFF)
+    assert rd(chip, SPI1 + CR2) == 0xF7
+    wr(chip, SPI1 + CR2, 0)

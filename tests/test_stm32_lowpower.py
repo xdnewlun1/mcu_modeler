@@ -92,7 +92,7 @@ def test_stop_mode_only_exti_wakes_and_usart_freezes(desc):
     chip = _chip(desc, LOOP)
     u = chip.peripherals["USART1"]
     wr(chip, USART1 + 0x08, 139)
-    wr(chip, USART1 + 0x0C, 1 << 13 | 1 << 3 | 1 << 2)             # UE TE RE
+    wr(chip, USART1 + 0x0C, 1 << 13 | 1 << 3 | 1 << 2)             # UE TE RE (idle preamble starts)
     # TIM6 update interrupt every 1 ms: not an EXTI line, it must not end Stop
     wr(chip, 0x40001000 + 0x28, 15)                                 # PSC: 1 MHz
     wr(chip, 0x40001000 + 0x2C, 999)
@@ -103,7 +103,8 @@ def test_stop_mode_only_exti_wakes_and_usart_freezes(desc):
     wr(chip, EXTI + 0x0C, 1)                                        # FTSR0: PA0 falling edge
     wr(chip, ISER0, 1 << EXTI0_IRQ)
     chip.pins.set_external("PA0", "H")
-    wr(chip, USART1 + 0x04, 0x41)                                   # character in progress at Stop entry
+    rd(chip, USART1)                                                # SR read, then DR write: clears TC
+    wr(chip, USART1 + 0x04, 0x41)                                   # in TDR behind the preamble at Stop entry
     wr(chip, SCR, SLEEPDEEP)
     chip.run_for(5e6)
     pwr = chip.peripherals["PWR"]
@@ -125,6 +126,7 @@ def test_iwdg_keeps_running_in_stop(desc):
     wr(chip, IWDG + 4, 0)                                           # /4: 8 kHz
     wr(chip, IWDG + 8, 79)                                          # 10 ms
     wr(chip, IWDG, 0xCCCC)
+    wr(chip, IWDG, 0xAAAA)                                          # load RLR (0xCCCC starts from 0xFFF, RM0090 21.3)
     wr(chip, SCR, SLEEPDEEP)
     chip.run_for(20e6)
     assert [e.get("reason") for e in chip.log if e.kind == "reset"][-1] == "watchdog"
@@ -233,6 +235,7 @@ def _usart(desc, cr3=0, cr1_extra=0):
     wr(chip, USART1 + 0x08, 139)
     wr(chip, USART1 + 0x14, cr3)
     wr(chip, USART1 + 0x0C, 1 << 13 | 1 << 3 | 1 << 2 | cr1_extra)
+    chip.run_for(u.char_ns() + 1)                                   # TE sends an idle preamble first (30.3.2)
     return chip, u
 
 
@@ -241,6 +244,7 @@ def test_usart_cts_holds_transmission_until_asserted(desc):
     _af7(chip, 11)                                                  # PA11 = USART1_CTS
     chip.pins.set_external("PA11", "H")                             # deasserted
     wr(chip, USART1 + 0x14, 1 << 9 | 1 << 10)                       # CTSE, CTSIE
+    rd(chip, USART1)                                                # SR read + DR write: TC cleared
     wr(chip, USART1 + 0x04, 0x41)
     chip.run_for(2 * u.char_ns())
     assert bytes(u.output) == b"" and not rd(chip, USART1) & 0xC0   # held in TDR: TXE = TC = 0
@@ -281,8 +285,12 @@ def test_usart_break_lin_detection_and_parity(desc):
     wr(chip, USART1 + 0x0C, rd(chip, USART1 + 0x0C) | 1)            # SBK
     assert [e.get("brk") for e in chip.log if e.kind == "uart" and e.get("dir") == "tx"] == [1]
     assert rd(chip, USART1 + 0x0C) & 1
-    chip.run_for(10 * 139 / 16e6 * 1e9 + 1e3)
-    assert not rd(chip, USART1 + 0x0C) & 1                          # SBK cleared at the end of the break
+    bit = 139 / 16e6 * 1e9
+    chip.run_for(12.5 * bit)
+    assert rd(chip, USART1 + 0x0C) & 1                              # LIN break: 13 low bits (RM0090 30.3.8)
+    chip.run_for(1 * bit)
+    assert not rd(chip, USART1 + 0x0C) & 1                          # SBK cleared during the break's stop bit
+    chip.run_for(1 * bit)
     u.receive_break()
     sr = rd(chip, USART1)
     assert sr & (1 << 8 | 1 << 1 | 1 << 5) == (1 << 8 | 1 << 1 | 1 << 5) and (16 + 37) in chip.arch.asserted

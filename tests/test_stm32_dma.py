@@ -281,13 +281,16 @@ def test_usart1_tx_dma_one_byte_per_txe(desc):
     chip = spin_chip(desc)
     u = chip.peripherals["USART1"]
     _usart(chip)
+    chip.run_for(u.char_ns())                                          # TE: idle preamble (RM0090 30.3.2)
+    wr(chip, USART1, 0x3FF & ~0x40)                                    # clear TC by writing 0 (multibuffer)
     chip.bus.write_bytes(RAM, b"DMA!")
     setup(chip, DMA2, 7, M2P | MINC | chsel(4) | TCIE | EN, 4, USART1 + 4, RAM)
     settle(chip)
     assert bytes(u.output) == b""                                     # no request yet (CR3.DMAT = 0)
     wr(chip, USART1 + 0x14, 1 << 7)                                    # CR3.DMAT
     settle(chip)
-    assert bytes(u.output) == b"D" and rd(chip, sreg(DMA2, 7, NDTR)) == 3   # one item per TXE
+    # one item per TXE: 'D' goes straight to the shift register (TXE stays 1), 'M' waits in TDR (RM0090 30.3.2)
+    assert bytes(u.output) == b"D" and rd(chip, sreg(DMA2, 7, NDTR)) == 2
     chip.run_for(u.char_ns() + 500)
     assert bytes(u.output) == b"DM"
     chip.run_for(2 * u.char_ns() + 200)
@@ -421,3 +424,49 @@ def test_chip_reset_deasserts_irq_and_cancels_service(desc):
     chip.peripherals["DMA2"].reset()
     settle(chip)
     assert rd(chip, RAM + 0x100) == 0 and flags(chip, DMA2, 0) == 0
+
+
+# ------------------------------------------------------------------------------------------------ RM0090 Rev 22 checks
+def test_flush_remainder_written_with_msize(desc):
+    """RM0090 10.3.12 "FIFO flush": fewer bytes than MSIZE left in the FIFO are still written with the MSIZE width."""
+    chip = spin_chip(desc)
+    u6 = chip.peripherals["USART6"]
+    dma = chip.peripherals["DMA2"]
+    chip.bus.write_bytes(RAM, b"\xff" * 8)
+    setup(chip, DMA2, 2, P2M | MINC | chsel(5) | psize(1) | msize(4) | EN, 16, 0x40011404, RAM, fcr=0x4 | 0)
+    for c in b"ABCDEF":
+        u6._rx_byte = c
+        dma.request("USART6_RX", True)
+        settle(chip)
+    wr(chip, sreg(DMA2, 2, CR), P2M | MINC | chsel(5) | psize(1) | msize(4))           # disable: flush
+    assert chip.bus.read_bytes(RAM, 8) == b"ABCDEF\x00\x00"                             # one word, not a halfword
+    assert flags(chip, DMA2, 2) == TCIF and rd(chip, sreg(DMA2, 2, NDTR)) == 10
+
+
+def test_ndtr_reloaded_on_reenable(desc):
+    """RM0090 10.5.6: after a normal-mode transfer NDTR stays 0 and is reloaded with the programmed value by EN."""
+    chip = spin_chip(desc)
+    src, dst = RAM, RAM + 0x100
+    chip.bus.write_bytes(src, bytes(range(1, 17)))
+    setup(chip, DMA2, 0, M2M | PINC | MINC | psize(4) | msize(4) | EN, 4, src, dst)
+    settle(chip)
+    assert rd(chip, sreg(DMA2, 0, NDTR)) == 0 and chip.bus.read_bytes(dst, 16) == bytes(range(1, 17))
+    wr(chip, DMA2 + LIFCR, 0x3D)
+    chip.bus.write_bytes(dst, bytes(16))
+    wr(chip, sreg(DMA2, 0, CR), M2M | PINC | MINC | psize(4) | msize(4) | EN)
+    assert rd(chip, sreg(DMA2, 0, NDTR)) == 4
+    settle(chip)
+    assert chip.bus.read_bytes(dst, 16) == bytes(range(1, 17)) and flags(chip, DMA2, 0) & TCIF
+
+
+def test_pfctrl_forced_off_in_m2m_and_pincos_with_pburst(desc):
+    """RM0090 10.5.5: PFCTRL forced to 0 in M2M; PINCOS forced low when PBURST != 00; CIRC forced 0 with PFCTRL."""
+    chip = spin_chip(desc)
+    setup(chip, DMA2, 0, M2M | PINC | MINC | psize(4) | msize(4) | 1 << 5 | PINCOS | 1 << 21 | EN, 4, RAM,
+          RAM + 0x100, fcr=0x7)
+    cr = rd(chip, sreg(DMA2, 0, CR))
+    assert not cr & 1 << 5 and not cr & PINCOS
+    settle(chip)
+    assert rd(chip, sreg(DMA2, 0, NDTR)) == 0                        # DMA flow control: NDTR used
+    setup(chip, DMA2, 2, P2M | MINC | chsel(5) | psize(1) | msize(1) | 1 << 5 | CIRC | EN, 3, 0x40011404, RAM)
+    assert rd(chip, sreg(DMA2, 2, NDTR)) == 0xFFFF and not rd(chip, sreg(DMA2, 2, CR)) & CIRC

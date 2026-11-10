@@ -1,8 +1,7 @@
 """STM32F4 DCMI (digital camera interface, RM0090 ch. 15), STM32F407/F417 only.
 
 Registers from the SVD (CR, SR, RIS, IER, MIS, ICR, ESCR, ESUR, CWSTRT, CWSIZE, DR); behaviour hand-written from
-RM0090 ch. 15 as remembered, the STM32CubeF4 HAL (stm32f4xx_hal_dcmi.c) and the CMSIS stm32f407xx.h bit definitions
-(the RM PDF could not be fetched while this model was written).
+RM0090 Rev 22 ch. 15 (section numbers below), checked against the STM32CubeF4 HAL (stm32f4xx_hal_dcmi.c).
 
 * Presence: `params.only` (chip YAML: STM32F407, STM32F417).  On an F405/F415 the block behaves like the `stub`
   model (`_util.make_absent`).  Clock gate RCC_AHB2ENR.DCMIEN (one `warn` when accessed gated off); RCC_AHB2RSTR
@@ -16,27 +15,36 @@ RM0090 ch. 15 as remembered, the STM32CubeF4 HAL (stm32f4xx_hal_dcmi.c) and the 
 * Polarity (CR.HSPOL / VSPOL): the level of the "active" sync state, i.e. blanking (data are captured while HSYNC
   and VSYNC are *not* at that level).  SR.HSYNC / SR.VSYNC read 1 during horizontal / vertical blanking
   (while ENABLE = 1; 0 otherwise, the reset value).
-* Capture (CR.ENABLE + CR.CAPTURE): starts at the next frame start (VSYNC leaving blanking); CM = 1 (snapshot)
-  captures one frame and clears CAPTURE at its end; CM = 0 (continuous) captures every frame selected by FCRC (all,
-  1 of 2, 1 of 4); a CAPTURE cleared by software in continuous mode stops after the current frame.  CROP: the window
-  starts at line VST and pixel clock HOFFCNT of each line and is VLINE + 1 lines by CAPCNT + 1 pixel clocks (counts in
-  pixel clocks, not pixels).  JPEG = 1: no crop, HSYNC is a data-valid signal, the last word of a frame is padded.
+* Capture (CR.ENABLE + CR.CAPTURE, 15.5.4): starts at the next frame start (VSYNC leaving blanking); CM = 1
+  (snapshot) captures one frame and clears CAPTURE at its end; CM = 0 (continuous) captures every frame selected by
+  FCRC (all, 1 of 2, 1 of 4); a CAPTURE cleared by software in continuous mode stops after the current frame.  CROP
+  (15.5.5, 15.8.9/10): the window starts at line VST and pixel clock HOFFCNT of each line and is VLINE + 1 lines by
+  CAPCNT + 1 pixel clocks (counts in pixel clocks, not pixels); FRAME is set at the end of the last line of the window
+  (15.8.3), or at VSYNC if the frame ends first.  JPEG = 1 (15.5.6): no crop, no embedded sync (ESS ignored), HSYNC is
+  a data-valid signal, the last word of a frame is padded.
 * Packing (EDM): 8-bit = 4 samples per word (first sample in bits 7:0); 10/12/14-bit = 2 samples per word (first in
   bits 15:0), each masked to the data width.  A partial word at frame end is padded with zeros.  Only the data lines
   D0..D(n-1) of the selected width are used.  A data bit whose DCMI_Dk pin is not muxed reads 0; a muxed pin that is
   not on the camera's d<k> net reads its own level (H = 1) for the whole line.
-* Embedded synchronisation (ESS = 1, 8-bit only): the stream carries 0xFF 0x00 0x00 XY codes; XY is compared with
-  ESCR.FSC / LSC / LEC / FEC under the ESUR unmask bits.  Frame start replaces the first line start, frame end the
-  last line end (the camera part's convention).  FSC = 0xFF: the first LSC after an FEC starts the frame; FEC = 0xFF:
-  every unrecognised code ends the frame.  A line start inside a line, a line end outside one, or an unknown code sets
-  ERR_RIS.  The HSYNC/VSYNC pins are ignored.
-* FIFO: 8 x 32-bit words (RM0090 15.5.2 "8-word FIFO"; SR.FNE).  DR pops the oldest word (0 when empty).  A word that
-  finds the FIFO full is lost and sets OVR_RIS.  DMA: the "DCMI" request (DMA2 stream 1 / 7 channel 1) is asserted
-  while the FIFO is not empty (`_util.dma_request`).
-* Flags (RIS): FRAME (end of every captured frame), OVR, ERR, VSYNC (VSYNC entering blanking / FE code), LINE (HSYNC
-  entering blanking / LE code); set only while ENABLE = 1.  MIS = RIS & IER, ICR write 1 clears, IRQ "DCMI" (level).
+* Embedded synchronisation (ESS = 1, 8-bit only, 15.5.3): the stream carries 0xFF 0x00 0x00 XY codes; XY is
+  compared with ESCR.FSC / LSC / LEC / FEC under the ESUR unmask bits.  Frame start replaces the first line start,
+  frame end the last line end (the camera part's convention).  After ENABLE is set, capture starts only at the first
+  FS that follows an FE (15.5.3 mode 2).  FSC = 0xFF: the first LSC after an FEC starts the frame; FEC = 0xFF: every
+  unrecognised code ends the frame (15.8.7).  A line start inside a line, a line end outside one, or an unknown code
+  sets ERR_RIS; like an overrun it resets the FIFO and the frame is dropped until the next frame start (15.5.7).  The
+  HSYNC/VSYNC pins are ignored; LINE / VSYNC flags are set only while CAPTURE = 1 (15.8.3).
+* FIFO: 4 x 32-bit words (RM0090 15.5.7 "four-word FIFO", 15.8.11 "4-word deep FIFO"; SR.FNE).  DR pops the oldest
+  word (0 when empty).  A word that finds the FIFO full sets OVR_RIS; the FIFO is reset and the rest of the frame is
+  lost, capture resumes at the next frame start, and in snapshot mode CAPTURE is cleared (15.5.4, 15.5.7; no FRAME
+  flag for the lost frame).  DMA: the "DCMI" request (DMA2 stream 1 / 7 channel 1) is asserted while the FIFO is not
+  empty (`_util.dma_request`).
+* Flags (RIS, 15.8.3): FRAME (end of every captured frame / crop window), OVR, ERR, VSYNC (VSYNC entering blanking /
+  FE code; with hardware sync also while CAPTURE = 0, 15.5.4 note), LINE (HSYNC entering blanking / LE code); set only
+  while ENABLE = 1.  MIS = RIS & IER, ICR write 1 clears, IRQ "DCMI" (level).
 Not modelled: pixel clock polarity effects (PCKPOL stored only), the F42x/F446 BSM/OEBS/LSM/OELS fields (they do not
-exist on the F407: written bits are kept but have no effect, one `warn`), sync/data timing violations, JPEG headers.
+exist on the F407: written bits are kept but have no effect, one `warn`), sync/data timing violations (PIXCLK period
+> 2.5 HCLK, 15.4), JPEG headers, the bus error on non-word register accesses (15.8), the CAPCNT word-alignment rule
+(15.5.5: CAPCNT is used as written).
 """
 from __future__ import annotations
 
@@ -51,7 +59,7 @@ CAPTURE, CM, CROP, JPEG, ESS, PCKPOL, HSPOL, VSPOL, ENABLE = 1, 2, 4, 8, 0x10, 0
 F42X_BITS = 0x3F << 16                    # BSM, OEBS, LSM, OELS (later DCMI revisions)
 SR_HSYNC, SR_VSYNC, SR_FNE = 1, 2, 4
 FRAME, OVR, ERR, VSYNC, LINE = 1, 2, 4, 8, 0x10
-DEPTH = 8
+DEPTH = 4                                 # RM0090 15.5.7 / 15.8.11
 EDM_BITS = (8, 10, 12, 14)
 
 
@@ -93,7 +101,7 @@ class DCMI(GatedBlock):
         # embedded sync
         self._e_inframe = False
         self._e_inline = False
-        self._e_after_fe = True
+        self._e_after_fe = False          # FE seen since ENABLE (mode 2: capture starts at FE followed by FS)
 
     # ------------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
@@ -164,6 +172,29 @@ class DCMI(GatedBlock):
         self.set("RIS", self.get("RIS") | f)
         self._update()
 
+    def _ess(self, cr: int | None = None) -> bool:
+        """Embedded synchronisation in effect (ESS is disabled in JPEG mode, RM0090 15.8.1)."""
+        cr = self._cr() if cr is None else cr
+        return bool(cr & ESS) and not cr & JPEG
+
+    def _sync_flag(self, f: int) -> None:
+        """LINE / VSYNC: with embedded sync set only while CAPTURE = 1 (RM0090 15.8.3)."""
+        cr = self._cr()
+        if self._ess(cr) and not cr & CAPTURE:
+            return
+        self._flag(f)
+
+    def _abort_frame(self) -> None:
+        """Overrun or synchronisation error: the FIFO is reset and the DCMI waits for a new frame start (15.5.7)."""
+        self._cancel_words()
+        self.fifo.clear()
+        self._acc = []
+        self._capturing = False
+        if self._stop_after:                              # continuous mode, CAPTURE cleared: that frame has ended
+            self._stop_after = False
+            self.set("CR", self._cr() & ~CAPTURE)
+        self._update()
+
     def _update(self) -> None:
         if self.chip is None or self.absent:
             return
@@ -189,7 +220,7 @@ class DCMI(GatedBlock):
             if blank == self._vs_blank:
                 return
             self._vs_blank = blank
-            if cr & ESS:
+            if self._ess(cr):
                 return
             if blank:
                 self._frame_end()
@@ -200,10 +231,12 @@ class DCMI(GatedBlock):
             if blank == self._hs_blank:
                 return
             self._hs_blank = blank
-            if cr & ESS:
+            if self._ess(cr):
                 return
             if blank:
                 self._flag(LINE)
+                if self._capturing and self._crop_last_line():
+                    self._complete_capture()
             elif self._in_frame:
                 self._y += 1
 
@@ -221,23 +254,41 @@ class DCMI(GatedBlock):
         if (fcrc == 1 and n % 2) or (fcrc == 2 and n % 4):
             return
         self._capturing = True
-        if not cr & ESS:
+        if not self._ess(cr):
             for s in ("DCMI_HSYNC", "DCMI_VSYNC"):
                 if self._muxed_pin(s) is None:
                     self._warn_once("nosync", f"{self.name}: {s} is not muxed to a pin (hardware synchronisation "
                                     f"needs HSYNC and VSYNC)")
 
+    def _crop_window(self) -> tuple[int, int, int, int] | None:
+        """(HOFFCNT, VST, CAPCNT + 1, VLINE + 1) when cropping is in effect."""
+        cr = self._cr()
+        if not cr & CROP or cr & JPEG:
+            return None
+        st, sz = self.get("CWSTRT"), self.get("CWSIZE")
+        return st & 0x3FFF, (st >> 16) & 0x1FFF, (sz & 0x3FFF) + 1, ((sz >> 16) & 0x3FFF) + 1
+
+    def _crop_last_line(self) -> bool:
+        w = self._crop_window()
+        return w is not None and self._y == w[1] + w[3] - 1
+
     def _frame_end(self) -> None:
-        self._flag(VSYNC)
+        self._sync_flag(VSYNC)
         was = self._capturing
         self._in_frame = False
-        self._capturing = False
         if not was:
             return
+        self._complete_capture()
+
+    def _complete_capture(self) -> None:
+        """End of the captured frame or crop window: FRAME_RIS (RM0090 15.8.3), snapshot clears CAPTURE."""
         if self._acc:
             n = 4 if self.data_bits() == 8 else 2
             self._push_word(self._acc + [0] * (n - len(self._acc)))
             self._acc = []
+            if not self._capturing:                        # the padded word overran: frame lost
+                return
+        self._capturing = False
         self.frames_captured += 1
         self._flag(FRAME)
         cr = self._cr()
@@ -285,7 +336,7 @@ class DCMI(GatedBlock):
         mask = (1 << width) - 1
         vals = [((s & carried) | forced) & mask for s in samples]
         per_word = 4 if width == 8 else 2
-        if cr & ESS:
+        if self._ess(cr):
             if width != 8:
                 self._warn_once("ess", f"{self.name}: embedded synchronisation needs 8-bit data (EDM = 00)")
             take = self._embedded(vals)
@@ -295,11 +346,9 @@ class DCMI(GatedBlock):
             if not self._capturing:
                 return
             idx = range(len(vals))
-            if cr & CROP and not cr & JPEG:
-                hoff = self.get("CWSTRT") & 0x3FFF
-                vst = (self.get("CWSTRT") >> 16) & 0x1FFF
-                cap = (self.get("CWSIZE") & 0x3FFF) + 1
-                vl = ((self.get("CWSIZE") >> 16) & 0x3FFF) + 1
+            win = self._crop_window()
+            if win is not None:
+                hoff, vst, cap, vl = win
                 if not vst <= self._y < vst + vl:
                     return
                 idx = range(hoff, min(len(vals), hoff + cap))
@@ -317,6 +366,8 @@ class DCMI(GatedBlock):
         self._acc = acc
         now = self.chip.now_ns()
         for t, w in pending:
+            if not self._capturing:                          # overrun / sync error: rest of the frame dropped
+                break
             if t <= now:
                 self._push_word(w)
             else:
@@ -324,7 +375,7 @@ class DCMI(GatedBlock):
 
     def _word_due(self, w: list[int]) -> None:
         self._evs = [e for e in self._evs if not getattr(e, "cancelled", False)]
-        if self._enabled():
+        if self._enabled() and self._capturing:
             self._push_word(w)
 
     def _push_word(self, samples: list[int]) -> None:
@@ -333,7 +384,11 @@ class DCMI(GatedBlock):
         else:
             word = samples[0] | samples[1] << 16
         if len(self.fifo) >= DEPTH:
-            self._flag(OVR)                                  # the word is lost
+            self._flag(OVR)                                  # FIFO reset, frame lost (RM0090 15.5.4 / 15.5.7)
+            self._abort_frame()
+            if self._cr() & CM:
+                self.set("CR", self._cr() & ~CAPTURE)
+                self._frame_no = 0
             return
         self.fifo.append(word)
         self.words.append(word)
@@ -367,38 +422,48 @@ class DCMI(GatedBlock):
                 kind = self._code_kind(vals[i + 3])
                 i += 4
                 if kind is None:
-                    self._flag(ERR)
+                    out = self._sync_error()
                     continue
                 if kind == "ls" and fsc_ff and self._e_after_fe and not self._e_inframe:
                     kind = "fs"
                 if kind == "fs":
                     if self._e_inline:
-                        self._flag(ERR)
+                        out = self._sync_error()
+                    armed = self._e_after_fe
                     self._e_inframe = True
                     self._e_after_fe = False
                     self._in_frame = True
                     self._vs_blank = False
-                    self._frame_start()
+                    if armed:
+                        self._frame_start()
+                    else:                                   # no FE seen since ENABLE: frame not captured
+                        self._y = -1
+                        self._acc = []
+                        self._capturing = False
                     self._e_inline = True
                     self._hs_blank = False
                     self._y = 0
                 elif kind == "ls":
                     if self._e_inline:
-                        self._flag(ERR)
+                        out = self._sync_error()
                     self._e_inline = True
                     self._hs_blank = False
                     self._y += 1
                 elif kind == "le":
                     if not self._e_inline:
-                        self._flag(ERR)
+                        out = self._sync_error()
                     self._e_inline = False
                     self._hs_blank = True
-                    self._flag(LINE)
+                    self._sync_flag(LINE)
+                    if self._capturing and self._crop_last_line():
+                        self._push_samples(self._crop_embedded(out))     # window complete at this line end
+                        out = []
+                        self._complete_capture()
                 else:                                                   # fe
                     if self._e_inline:
                         self._e_inline = False
                         self._hs_blank = True
-                        self._flag(LINE)
+                        self._sync_flag(LINE)
                     self._e_inframe = False
                     self._e_after_fe = True
                     self._vs_blank = True
@@ -410,23 +475,32 @@ class DCMI(GatedBlock):
             i += 1
         return self._crop_embedded(out)
 
-    def _finish_embedded_frame(self, out: list[tuple[int, int]]) -> None:
-        # samples of the last line are pushed before the frame end flags
-        for _k, v in self._crop_embedded(out):
+    def _sync_error(self) -> list:
+        """Embedded codes out of order / unknown: ERR_RIS, FIFO reset, wait for a new frame start (15.5.7)."""
+        self._flag(ERR)
+        if self._capturing:
+            self._abort_frame()
+        return []
+
+    def _push_samples(self, out: list[tuple[int, int]]) -> None:
+        for _k, v in out:
+            if not self._capturing:
+                return
             self._acc.append(v)
             if len(self._acc) == 4:
                 self._push_word(self._acc)
                 self._acc = []
+
+    def _finish_embedded_frame(self, out: list[tuple[int, int]]) -> None:
+        # samples of the last line are pushed before the frame end flags
+        self._push_samples(self._crop_embedded(out))
         self._frame_end()
 
     def _crop_embedded(self, out: list[tuple[int, int]]) -> list[tuple[int, int]]:
-        cr = self._cr()
-        if not out or not cr & CROP or cr & JPEG:
+        win = self._crop_window()
+        if not out or win is None:
             return out
-        hoff = self.get("CWSTRT") & 0x3FFF
-        vst = (self.get("CWSTRT") >> 16) & 0x1FFF
-        cap = (self.get("CWSIZE") & 0x3FFF) + 1
-        vl = ((self.get("CWSIZE") >> 16) & 0x3FFF) + 1
+        hoff, vst, cap, vl = win
         if not vst <= self._y < vst + vl:
             return []
         return out[hoff:hoff + cap]
@@ -454,13 +528,13 @@ class DCMI(GatedBlock):
             self._stop_after = False
         if new & ENABLE and not old & ENABLE:
             self._sync_from_pins()
+            self._e_after_fe = False                      # embedded: capture waits for FE then FS (15.5.3)
+            self._e_inframe = self._e_inline = False
         if old & CAPTURE and not new & CAPTURE and self._capturing and not new & CM:
             self._stop_after = True                       # continuous: stop after the current frame
             new |= CAPTURE
         if new & CAPTURE and not old & CAPTURE:
             self._frame_no = 0
-        if new & ENABLE and new & ESS and new & CAPTURE and (old ^ new) & CAPTURE:
-            self._e_after_fe = True
         self._store(reg, new)
         self._update()
         return new

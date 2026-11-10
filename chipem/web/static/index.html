@@ -30,35 +30,45 @@
     </div>
 
     <div class="controls" role="toolbar" aria-label="Emulator controls">
-      <button id="btnRun" class="btn primary" title="Run until paused (Space)">
+      <button id="btnRun" class="btn primary run-ctl" title="Run until paused (Space)">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>Run
       </button>
-      <button id="btnPause" class="btn" title="Pause (Space)">
+      <button id="btnPause" class="btn run-ctl" title="Pause (Space)">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/></svg>Pause
       </button>
-      <button id="btnStep" class="btn" title="Execute one instruction (S)">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5v11l7-5.5zM11 2.5h2.5v11H11z"/></svg>Step
-      </button>
-      <button id="btnReset" class="btn" title="Reset the chip (R)">
+      <div class="joined">
+        <button id="btnStep" class="btn run-ctl" title="Execute N instructions on the selected chip (S)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5v11l7-5.5zM11 2.5h2.5v11H11z"/></svg>Step
+        </button>
+        <input id="stepN" class="run-ctl" type="text" value="1" size="4" spellcheck="false" aria-label="Instructions per step" title="Instructions per step (1 … 1000000)">
+      </div>
+      <button id="btnReset" class="btn run-ctl" title="Reset chip(s) (R): virtual time continues, logs are kept">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 1-5.2 3.7l1.4.5A4 4 0 1 0 8 4v2L4.8 3.3 8 .5z"/></svg>Reset
       </button>
-      <div class="runfor">
-        <input id="runFor" type="text" value="100ms" spellcheck="false" aria-label="Run duration" title="Duration, e.g. 500us, 10ms, 1.5s (Enter runs)">
-        <button id="btnRunFor" class="btn" title="Run for the given virtual time">Run for</button>
+      <button id="btnRestart" class="btn run-ctl" title="Restart at t=0: rebuild the emulation with the same chips, firmware, wiring and parts (the page reloads)">Restart</button>
+      <div class="runfor joined">
+        <input id="runFor" class="run-ctl" type="text" value="100ms" spellcheck="false" aria-label="Run duration" title="Duration, e.g. 500us, 10ms, 1.5s (Enter runs)">
+        <button id="btnRunFor" class="btn run-ctl" title="Run for the given virtual time">Run for</button>
       </div>
       <button id="btnBoard" class="btn" title="Board setup (B): add or remove MCUs, choose firmware, new / open / save a board">Board</button>
+    </div>
+    <div class="confirm-pop" id="restartPop" role="alertdialog" aria-label="Restart at t=0" hidden>
+      <span>Restart at t=0? Chips, firmware, wiring and parts are kept; logs start over.</span>
+      <button type="button" class="btn small primary" id="restartYes">Restart</button>
+      <button type="button" class="btn small" id="restartNo">Cancel</button>
     </div>
 
     <div class="chip-sel" id="chipSel" role="tablist" aria-label="Selected chip (1-9)" hidden></div>
 
     <div class="readouts" aria-live="off">
       <span class="status-badge connecting" id="status" title="">CONNECTING</span>
+      <button type="button" class="err-text" id="errText" hidden title="click: copy"></button>
       <span class="ro" title="Virtual time (board: the common board time)"><i>t</i><b id="tTime">—</b></span>
       <span class="ro" title="Speed: virtual time per wall-clock second while running"><i>speed</i><b id="tSpeed">—</b></span>
       <span class="ro ro-clk" title="Core clock of the selected chip"><i>clk</i><b id="tClock">—</b></span>
-      <span class="ro" title="Program counter of the selected chip"><i>pc</i><b id="tPc">—</b></span>
+      <button type="button" class="ro ro-pc" id="btnRegs" title="Program counter of the selected chip · click: CPU registers" aria-expanded="false"><i>pc</i><b id="tPc">—</b></button>
       <span class="ro ro-insn" title="Instructions executed by the selected chip"><i>insn</i><b id="tInsn">—</b></span>
-      <span class="ro" title="Core cycles of the selected chip"><i>cyc</i><b id="tCycles">—</b></span>
+      <span class="ro ro-cyc" title="Core cycles of the selected chip"><i>cyc</i><b id="tCycles">—</b></span>
       <span class="conn" id="conn" title="Live stream (Server-Sent Events)">connecting</span>
       <button id="btnTheme" class="btn small ghost theme-btn" type="button" title="Theme" aria-label="Switch theme">
         <svg class="ico-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M7.3 0h1.4v2.6H7.3zM7.3 13.4h1.4V16H7.3zM0 7.3h2.6v1.4H0zM13.4 7.3H16v1.4h-2.6zM2.1 3.1l1-1 1.8 1.8-1 1zM11.1 12.1l1-1 1.8 1.8-1 1zM2.1 12.9l1.8-1.8 1 1-1.8 1.8zM11.1 3.9l1.8-1.8 1 1-1.8 1.8z"/></svg>
@@ -68,23 +78,34 @@
     </div>
   </header>
 
+  <div id="regsPop" class="help-pop regs-pop" role="dialog" aria-label="CPU registers" hidden>
+    <div class="pop-head"><b id="regsTitle">CPU</b><button type="button" class="btn small ghost" id="regsCopy">copy</button></div>
+    <table id="regsTable" class="kv"></table>
+  </div>
+
   <div id="helpPop" class="help-pop" role="dialog" aria-label="Keyboard shortcuts" hidden>
     <table>
-      <tr><th>Space</th><td>run / pause</td></tr>
-      <tr><th>S</th><td>step one instruction</td></tr>
-      <tr><th>R</th><td>reset</td></tr>
-      <tr><th>F</th><td>fit the board</td></tr>
+      <tr><th>Space</th><td>run / pause (on a focused button: press it)</td></tr>
+      <tr><th>S</th><td>step N instructions on the selected chip (N: field next to Step)</td></tr>
+      <tr><th>R</th><td>reset the chip(s); virtual time continues</td></tr>
+      <tr><th></th><td>Restart button: rebuild at t=0 (page reloads)</td></tr>
+      <tr><th>F, 0</th><td>fit the board</td></tr>
+      <tr><th>+ −</th><td>zoom the board</td></tr>
       <tr><th>B</th><td>board setup (MCUs, firmware, open / save)</td></tr>
       <tr class="board-row"><th>W</th><td>wire mode (click two pins)</td></tr>
       <tr class="board-row"><th>1–9</th><td>select chip</td></tr>
-      <tr class="board-row"><th>Del</th><td>remove the selected net</td></tr>
+      <tr class="board-row"><th>Del</th><td>remove the selected net (undo in the toast)</td></tr>
+      <tr><th>T</th><td>trace the selected pin in the Logic tab</td></tr>
       <tr><th>/</th><td>focus the filter of the pane under the pointer (over the board: find pin)</td></tr>
-      <tr><th>Esc</th><td>clear the filter / cancel</td></tr>
+      <tr><th>Enter</th><td>find pin: next match · Shift+Enter: previous</td></tr>
+      <tr><th>Tab, arrows</th><td>board: one stop per package, arrows move between pins, Enter opens the pin card</td></tr>
+      <tr><th>Esc</th><td>close dialog / popover, cancel pick or wire mode, clear the filter</td></tr>
       <tr><th>End</th><td>jump to the newest line (UART, events)</td></tr>
       <tr><th>?</th><td>this list</td></tr>
     </table>
     <p class="help-filter">Filters: plain text = case-insensitive substring; <code>/regex/</code> = regular expression.</p>
     <p class="help-board" id="pkgHint">Canvas: wheel zooms, drag pans, double-click fits; hover a pin for its data, click for the pin card, alt-click to drive it H → L → open.</p>
+    <p>Panes: double-click a header to collapse, double-click a sidebar title to maximise / restore; splitters: drag or focus + arrows (Shift: ×5). Nets: double-click or ✎ to rename inline.</p>
   </div>
 
   <main class="shell">
@@ -101,18 +122,21 @@
         <div class="svg-wrap board-canvas-wrap">
           <!-- board canvas: every chip's package, nets and UART links (chipem/web/static/board.js) -->
           <svg id="pkg" class="board-canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="bootMsg" class="boot-msg" hidden></div>
         </div>
       </section>
 
-      <div class="split split-h" id="splitTray" role="separator" aria-orientation="horizontal" title="drag: resize the pins tray"></div>
+      <div class="split split-h" id="splitTray" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize the pins tray" title="drag or arrows: resize the pins tray"></div>
 
       <section class="pane pins-panel tray" id="panePins" data-pane="pins">
         <div class="pane-head">
           <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
-          <div class="tabs" role="tablist">
-            <button class="tab on" id="tabPins" role="tab" aria-selected="true">Pins <span class="count" id="pinCount"></span></button>
-            <button class="tab" id="tabDisc" role="tab" aria-selected="false"
+          <div class="tabs" role="tablist" aria-label="Pins tray">
+            <button class="tab on" id="tabPins" role="tab" aria-selected="true" aria-controls="pinWrap">Pins <span class="count" id="pinCount"></span></button>
+            <button class="tab" id="tabDisc" role="tab" aria-selected="false" aria-controls="discPane" tabindex="-1"
                     title="What the firmware did with each pin: configuring code, reads/writes, interrupts, floating inputs">Discovery</button>
+            <button class="tab" id="tabLogic" role="tab" aria-selected="false" aria-controls="logicPane" tabindex="-1"
+                    title="Logic analyser: traced pins over time (T on a selected pin, or 'trace' in the pin card)">Logic <span class="count" id="logicCount"></span></button>
           </div>
           <span class="pins-chip" id="pinsChip"></span>
           <div class="head-tools" id="discTools" hidden>
@@ -123,33 +147,40 @@
             <label class="toggle" title="only pins that changed since load / reset"><input type="checkbox" id="changedOnly"> changed</label>
             <label class="toggle" title="hide power pins and disabled pins"><input type="checkbox" id="hideDisabled" checked> hide pwr/off</label>
           </div>
+          <form class="stim" id="stimForm" title="Timed stimulus: TIME:PIN=LEVEL (absolute virtual time), +TIME:PIN=LEVEL (from now), PIN=LEVEL (now); also UARTn=TEXT and PART=VALUE">
+            <input id="stimText" type="text" list="stimHist" placeholder="at 10ms:PTC6=0  +5ms:…" spellcheck="false" autocomplete="off" aria-label="timed stimulus">
+            <datalist id="stimHist"></datalist>
+            <button class="btn small" type="submit">at</button>
+          </form>
           <div class="pane-tools">
             <input id="pinFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter pins">
             <button class="btn small ghost" id="pinCopy" title="Copy the visible rows as tab-separated text (pastes into a spreadsheet)">copy</button>
             <button class="btn small ghost" id="pinCsv" title="Download the visible rows as CSV">csv</button>
+            <button class="btn small ghost" id="pinVcd" title="Download a VCD of the pin events the emulator keeps (traced pins, else the selected chip)">vcd</button>
           </div>
         </div>
         <div class="pane-body">
-          <div class="table-wrap" id="pinWrap">
+          <div class="table-wrap" id="pinWrap" role="tabpanel" aria-labelledby="tabPins">
             <table id="pinTable" class="pins">
               <thead>
                 <tr>
-                  <th data-k="num" class="num">#</th>
-                  <th data-k="short">pin</th>
-                  <th data-k="owner">owner / function</th>
-                  <th data-k="direction">dir</th>
-                  <th data-k="level">level</th>
-                  <th data-k="wave" title="periodic pins: frequency and duty (% high) of the recent edges; hover for the edge count">wave</th>
-                  <th data-k="pull">pull</th>
-                  <th data-k="external">external</th>
-                  <th data-k="net">net</th>
-                  <th data-k="name">datasheet name</th>
+                  <th data-k="num" class="num" tabindex="0" aria-sort="ascending">#</th>
+                  <th data-k="short" tabindex="0" aria-sort="none">pin</th>
+                  <th data-k="owner" tabindex="0" aria-sort="none">owner / function</th>
+                  <th data-k="direction" tabindex="0" aria-sort="none">dir</th>
+                  <th data-k="level" tabindex="0" aria-sort="none">level</th>
+                  <th data-k="wave" tabindex="0" aria-sort="none" title="periodic pins: frequency and duty (% high) of the recent edges; hover for the edge count">wave</th>
+                  <th data-k="analog" tabindex="0" aria-sort="none" title="analog input value set for this pin (integer = raw code, 1.65V / 1200mV = volts); click to edit">analog</th>
+                  <th data-k="pull" tabindex="0" aria-sort="none">pull</th>
+                  <th data-k="external" tabindex="0" aria-sort="none">external</th>
+                  <th data-k="net" tabindex="0" aria-sort="none">net</th>
+                  <th data-k="name" tabindex="0" aria-sort="none">datasheet name</th>
                 </tr>
               </thead>
               <tbody></tbody>
             </table>
           </div>
-          <div id="discPane" class="disc" hidden>
+          <div id="discPane" class="disc" role="tabpanel" aria-labelledby="tabDisc" hidden>
             <div class="table-wrap">
               <table id="discTable" class="pins">
                 <thead>
@@ -164,11 +195,12 @@
             </div>
             <pre id="discText" class="term disc-text"></pre>
           </div>
+          <div id="logicPane" class="logic-pane" role="tabpanel" aria-labelledby="tabLogic" hidden></div>
         </div>
       </section>
     </div>
 
-    <div class="split split-v" id="splitSide" role="separator" aria-orientation="vertical" title="drag: resize the sidebar"></div>
+    <div class="split split-v" id="splitSide" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the sidebar" title="drag or arrows: resize the sidebar"></div>
 
     <aside class="sidebar" id="sidebar">
       <section class="pane uart-panel" id="paneUart" data-pane="uart">
@@ -188,7 +220,7 @@
             <input id="uartFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter UART lines">
             <button class="btn small ghost" id="uartCopy" title="Copy the visible text">copy</button>
             <button class="btn small ghost" id="uartDl" title="Download as .txt (raw: the complete output from the emulator; lines: the transcript as shown)">txt</button>
-            <button class="btn small ghost" id="uartClear" title="Clear the view (the emulator keeps the output)">clear</button>
+            <button class="btn small ghost" id="uartClear" title="Clear the view of every UART and the drop counters (the emulator keeps the output)">clear</button>
           </div>
         </div>
         <div class="pane-body">
@@ -197,7 +229,7 @@
             <button class="follow" id="uartFollow" type="button" hidden title="scrolled up: new output is not followed · click or End: jump to the end"></button>
           </div>
           <form id="uartForm" class="uart-input">
-            <input id="uartText" type="text" placeholder="send (escapes: \n \r \xNN)" spellcheck="false" autocomplete="off">
+            <input id="uartText" type="text" placeholder="send (escapes: \n \r \xNN)" spellcheck="false" autocomplete="off" aria-label="text to send">
             <select id="uartEol" aria-label="Line ending">
               <option value="\r\n">CRLF</option>
               <option value="\n">LF</option>
@@ -211,22 +243,9 @@
             <summary>link monitor <span class="count" id="linkMonCount"></span></summary>
             <div id="linkMon" class="link-mon" aria-label="Link monitor: last bytes crossing each link"></div>
           </details>
-          <details class="link-mon-wrap" id="hostSerWrap" hidden>
-            <summary>host serial <span class="count" id="hostSerCount"></span> <span class="host-rt" id="hostRt"></span></summary>
-            <div class="host-ser">
-              <div class="host-ctl">
-                <label class="toggle" title="lock virtual time to the wall clock (needed for PC software on a host serial port; idle firmware costs no CPU)"><input type="checkbox" id="rtOn"> real time</label>
-                <label class="toggle" title="speed factor: virtual seconds per wall second">×<input id="rtSpeed" type="text" value="1" size="4" spellcheck="false" aria-label="real-time speed factor"></label>
-              </div>
-              <table class="host-tbl" aria-label="Host serial endpoints">
-                <thead><tr><th>endpoint</th><th>transport</th><th>path</th><th>conn</th><th>line</th><th title="bytes host → emulation">in</th><th title="bytes emulation → host">out</th><th title="bytes lost: framing mismatch / host not connected">lost</th></tr></thead>
-                <tbody id="hostSerBody"></tbody>
-              </table>
-            </div>
-          </details>
         </div>
       </section>
-      <div class="split split-p" role="separator" aria-orientation="horizontal"></div>
+      <div class="split split-p" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize panes"></div>
 
       <section class="pane events-panel" id="paneEvents" data-pane="events">
         <div class="pane-head">
@@ -237,18 +256,40 @@
             <button class="btn small ghost" id="evCopy" title="Copy the visible rows">copy</button>
             <button class="btn small ghost" id="evTxt" title="Download every kept event matching the kind/chip/text filters as .txt (from the emulator, up to 20000 events)">txt</button>
             <button class="btn small ghost" id="evCsv" title="Same as .csv">csv</button>
-            <button class="btn small ghost" id="evClear" title="Clear the view">clear</button>
+            <button class="btn small ghost" id="evClear" title="Clear the view and the counters">clear</button>
           </div>
-          <div class="kind-filter" id="kindFilter"></div>
+          <div class="kind-filter" id="kindFilter" role="group" aria-label="event kinds and chips"></div>
         </div>
         <div class="pane-body">
           <div class="log-wrap">
             <div id="events" class="events" role="log" tabindex="0"></div>
+            <div class="empty-note" id="evEmpty" hidden></div>
             <button class="follow" id="evFollow" type="button" hidden title="scrolled up: new events are not followed · click or End: jump to the end"></button>
           </div>
         </div>
       </section>
-      <div class="split split-p board-only" role="separator" aria-orientation="horizontal"></div>
+      <div class="split split-p" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize panes"></div>
+
+      <section class="pane status-panel" id="paneStatus" data-pane="status" aria-label="Peripheral and bus status">
+        <div class="pane-head">
+          <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
+          <h2>Status <span class="count" id="statCount"></span></h2>
+          <div class="pane-tools">
+            <input id="statFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter status rows">
+            <button class="btn small ghost" id="statCopy" title="Copy the visible rows">copy</button>
+            <button class="btn small ghost" id="statCsv" title="Download the visible rows as CSV">csv</button>
+          </div>
+        </div>
+        <div class="pane-body">
+          <div class="host-ctl" id="hostSerWrap">
+            <label class="toggle" title="lock virtual time to the wall clock (needed for PC software on a host serial port; idle firmware costs no CPU)"><input type="checkbox" id="rtOn"> real time</label>
+            <label class="toggle" title="speed factor: virtual seconds per wall second">speed<input id="rtSpeed" type="text" value="1" size="4" spellcheck="false" aria-label="real-time speed factor"></label>
+            <span class="host-rt" id="hostRt"></span>
+          </div>
+          <div class="stat-list" id="statList"></div>
+        </div>
+      </section>
+      <div class="split split-p board-only" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize panes"></div>
 
       <section class="pane wiring-panel board-only" id="paneNets" data-pane="nets" aria-label="Nets">
         <div class="pane-head">
@@ -258,23 +299,23 @@
             <input id="netFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter nets">
             <button class="btn small ghost" id="netCopy" title="Copy the visible nets (name, level, pins)">copy</button>
             <button class="btn small ghost" id="netCsv" title="Download the visible nets as CSV">csv</button>
-            <button id="btnExport" class="btn small ghost" title="Download the current board (chips, firmware, nets, links, parts) as board YAML">yaml</button>
+            <button id="btnExport" class="btn small ghost" title="Download the current board (chips, firmware, nets, links, buses, parts) as board YAML">yaml</button>
           </div>
         </div>
         <div class="pane-body">
           <div id="netList" class="net-list" aria-label="Nets: hover to highlight, click to select, Delete removes the selected net"></div>
         </div>
       </section>
-      <div class="split split-p board-only" role="separator" aria-orientation="horizontal"></div>
+      <div class="split split-p board-only" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize panes"></div>
 
-      <section class="pane board-only" id="paneLinks" data-pane="links" aria-label="UART links">
+      <section class="pane board-only" id="paneLinks" data-pane="links" aria-label="Links and buses">
         <div class="pane-head">
           <button class="pane-tog" type="button" aria-expanded="true" title="collapse / expand"></button>
           <h2>Links <span class="count" id="linkCount"></span></h2>
           <div class="pane-tools">
             <input id="linkFilter" class="pane-filter" type="search" placeholder="filter  /re/" spellcheck="false" aria-label="filter links">
-            <button class="btn small ghost" id="linkCopy" title="Copy the visible links">copy</button>
-            <button class="btn small ghost" id="linkCsv" title="Download the visible links as CSV">csv</button>
+            <button class="btn small ghost" id="linkCopy" title="Copy the visible links and buses">copy</button>
+            <button class="btn small ghost" id="linkCsv" title="Download the visible links and buses as CSV">csv</button>
           </div>
         </div>
         <div class="pane-body">
@@ -288,7 +329,7 @@
           </div>
         </div>
       </section>
-      <div class="split split-p board-only" role="separator" aria-orientation="horizontal"></div>
+      <div class="split split-p board-only" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize panes"></div>
 
       <section class="pane board-only" id="paneParts" data-pane="parts" aria-label="Parts">
         <div class="pane-head">
@@ -312,7 +353,7 @@
   <div id="partDlg" class="dialog" role="dialog" aria-labelledby="pdTitle" hidden>
     <div class="dlg-head">
       <h3 id="pdTitle">Add part</h3>
-      <button type="button" id="pdClose" class="btn small ghost" title="Close (Esc)">×</button>
+      <button type="button" id="pdClose" class="btn small ghost" title="Close (Esc)" aria-label="close">×</button>
     </div>
     <form id="partForm" autocomplete="off">
       <label class="pd-row"><span>type</span><select id="pdType"></select></label>
@@ -326,15 +367,20 @@
     </form>
   </div>
 
-  <div id="boardDlg" class="dialog board-dlg" role="dialog" aria-labelledby="bdTitle" hidden>
+  <dialog id="boardDlg" class="dialog board-dlg" aria-labelledby="bdTitle" aria-modal="true">
     <div class="dlg-head">
       <h3 id="bdTitle">Board setup</h3>
       <span id="bdBusy" class="bd-busy" aria-live="polite"></span>
-      <button type="button" id="bdClose" class="btn small ghost" title="Close (Esc)">×</button>
+      <button type="button" id="bdClose" class="btn small ghost" title="Close (Esc)" aria-label="close">×</button>
     </div>
     <div class="bd-body">
       <p class="bd-note">Changing MCUs or firmware rebuilds the board: virtual time restarts at 0; nets, links and parts
         are kept. Wire pins in the board view (wire mode <kbd>W</kbd>, links panel, + part).</p>
+      <div class="bd-confirm" id="bdConfirm" role="alert" hidden>
+        <span id="bdConfirmText"></span>
+        <button type="button" class="btn small primary" id="bdConfirmYes">OK</button>
+        <button type="button" class="btn small" id="bdConfirmNo">Cancel</button>
+      </div>
       <div class="pd-sub">MCUs</div>
       <div id="bdChips" class="bd-chips"></div>
       <div class="pd-sub">Add MCU</div>
@@ -354,9 +400,9 @@
       </div>
       <label class="pd-row"><span>open</span><select id="bdOpenSel"></select><button type="button" id="bdOpen" class="btn small">Open</button></label>
     </div>
-  </div>
+  </dialog>
 
   <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" hidden><span id="toastText"></span><button type="button" class="btn small" id="toastAct" hidden></button></div>
 </body>
 </html>

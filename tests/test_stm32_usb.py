@@ -47,13 +47,15 @@ def r(c, a):
     return c.bus.read(a, 4)
 
 
-def usb_chip(desc, *, pll=True, pins=True, base=FS):
+def usb_chip(desc, *, pll=True, pins=True, base=FS, sysclk_pll=False):
     c = spin_chip(desc, clock_hz=16e6)
     w(c, RCC + 0x30, r(c, RCC + 0x30) | 1 | (1 << 29))       # GPIOA, OTGHSEN
     w(c, RCC + 0x34, r(c, RCC + 0x34) | (1 << 7))            # OTGFSEN
     if pll:                                                  # HSE 8 MHz / 8 * 336 / 7 = 48 MHz PLL48CLK
         w(c, RCC + 0x04, 8 | (336 << 6) | (1 << 22) | (7 << 24))
         w(c, RCC, r(c, RCC) | (1 << 16) | (1 << 24))
+        if sysclk_pll:                                       # HCLK = 168 MHz (OTG_HS needs > 30 MHz, 35.3.3)
+            w(c, RCC + 0x08, (r(c, RCC + 0x08) & ~3) | 2)
     if pins:
         afrh = r(c, GPIOA + 0x24) | (10 << 12) | (10 << 16)  # PA11/PA12 AF10
         w(c, GPIOA + 0x24, afrh)
@@ -63,6 +65,8 @@ def usb_chip(desc, *, pll=True, pins=True, base=FS):
 
 def core_init(c, b=FS, *, vbus_sense=False):
     w(c, b + GRSTCTL, 1)
+    assert r(c, b + GRSTCTL) & 1                             # CSRST self-clears after a few clocks
+    c.run_for(1e3)
     assert r(c, b + GRSTCTL) & 1 == 0 and r(c, b + GRSTCTL) >> 31
     w(c, b + GCCFG, PWRDWN | (VBUSBSEN if vbus_sense else NOVBUSSENS))
     w(c, b + GRXFSIZ, 64)
@@ -114,38 +118,62 @@ class Bus:
 
 
 # ------------------------------------------------------------------------------------------------ registers
-def test_reset_values_match_svd(desc):
+def test_reset_values_match_rm0090(desc):
     c = spin_chip(desc)
     svd = {s["name"]: s["reset"] for name in ("OTG_FS_GLOBAL", "OTG_FS_DEVICE")
            for s in regs_for(name, str(ROOT / "chips/stm32f405_regs.yaml")).reg_specs()}
     base_dev = {"FS_DCFG": DCFG, "FS_DCTL": DCTL, "FS_DSTS": DSTS, "FS_DAINTMSK": DAINTMSK, "DVBUSDIS": 0x828,
-                "DVBUSPULSE": 0x82C, "DOEPCTL1": DOEPCTL(1), "DIEPTSIZ0": DIEPTSIZ(0)}
-    base_glb = {"FS_GOTGINT": GOTGINT, "FS_GAHBCFG": GAHBCFG, "FS_GRSTCTL": GRSTCTL, "FS_GINTMSK": GINTMSK,
-                "FS_GCCFG": GCCFG, "FS_CID": CID, "FS_HPTXFSIZ": 0x100, "FS_DIEPTXF1": 0x104, "FS_GRXFSIZ": GRXFSIZ}
-    for name, off in {**base_glb, **base_dev}.items():
-        exp = svd[name]
-        if name == "FS_GRSTCTL":
-            exp |= 1 << 31                                   # AHBIDL: the AHB master is idle
-        assert r(c, FS + off) == exp, name
-    assert r(c, FS + GUSBCFG) == 0x00000A40                  # SVD 0xA00 + PHYSEL "always 1" (RM0090 34.16.4)
+                "DVBUSPULSE": 0x82C, "DOEPCTL1": DOEPCTL(1), "DIEPTSIZ0": DIEPTSIZ(0), "DOEPINT1": DOEPINT(1)}
+    base_glb = {"FS_GOTGINT": GOTGINT, "FS_GAHBCFG": GAHBCFG, "FS_GINTMSK": GINTMSK, "FS_GCCFG": GCCFG,
+                "FS_GRXFSIZ": GRXFSIZ, "FS_DIEPTXF2": 0x108}
+    for name, off in {**base_glb, **base_dev}.items():   # where the SVD agrees with RM0090
+        assert r(c, FS + off) == svd[name], name
+    # RM0090 34.16.2 register descriptions (and Table 205) where the SVD differs
+    assert r(c, FS + GOTGCTL) == 0x00010000                  # CIDSTS = 1 (B-device); SVD 0x800
+    assert r(c, FS + GRSTCTL) == 0x80000000                  # AHBIDL; SVD 0x20000000
+    assert r(c, FS + CID) == 0x00001200                      # SVD 0x1000
+    assert r(c, FS + 0x100) == 0x02000400                    # HPTXFSIZ; SVD 0x02000600
+    assert r(c, FS + 0x104) == 0x02000200                    # DIEPTXF1; SVD 0x02000400
+    assert r(c, FS + GUSBCFG) == 0x00000A40                  # SVD 0xA00 + PHYSEL "always 1"
     assert r(c, FS + GSNPSID) == 0x4F54281A                  # core 2.81a (the HAL tests > 3.00a)
     assert r(c, FS + GINTSTS) & 1 == 0                       # CMOD: device (ID pin pulled up)
     assert r(c, FS + DOEPCTL(0)) & USBAEP and r(c, FS + DIEPCTL(0)) & USBAEP
-    assert r(c, HS + GSNPSID) == 0x4F54281A and r(c, HS + GUSBCFG) & 0x40 == 0
+    # OTG_HS (35.12.2): GUSBCFG 0x1440 (embedded FS PHY selected), GRXFSIZ 0x400, GNPTXSTS 0x80400, CID 0x1100,
+    # HPTXFSIZ 0x02000800
+    assert r(c, HS + GSNPSID) == 0x4F54281A and r(c, HS + GUSBCFG) == 0x00001440
+    assert (r(c, HS + GRXFSIZ), r(c, HS + 0x2C), r(c, HS + CID), r(c, HS + 0x100)) == \
+        (0x400, 0x00080400, 0x1100, 0x02000800)
+    # reserved bits read 0 (GAHBCFG FS: only GINTMSK / TXFELVL / PTXFELVL)
+    w(c, FS + GAHBCFG, 0xFFFFFFFF)
+    assert r(c, FS + GAHBCFG) == 0x181
     assert set(c.usb_blocks()) == {"OTG_HS", "OTG_FS"} and c.find_usb("fs") == "OTG_FS"
     assert c.find_usb("OTG_HS_GLOBAL") == "OTG_HS" and c.find_usb(None) == "OTG_HS"
 
 
-def test_core_soft_reset_keeps_config_and_flushes(desc):
+def test_core_soft_reset_clears_csrs_and_flushes(desc):
+    """CSRST "clears the interrupts and all the CSR register bits except" PCGCCTL, HCFG.FSLSPCS and DCFG.DSPD (RM0090
+    34.16.2); GUSBCFG survives (DWC2 force-mode bits).  The bit self-clears after a few clocks."""
     c = usb_chip(desc)
     core_init(c)
+    w(c, FS + GUSBCFG, r(c, FS + GUSBCFG) | (1 << 30) | (6 << 10))
+    w(c, FS + PCGCCTL, 1)
     t = Bus(c)
     assert t.setup(setup_pkt(0x80, 6, 0x100, 0, 18)) == "ACK"
     assert r(c, FS + GINTSTS) & RXFLVL
     w(c, FS + GRSTCTL, 1)
+    assert r(c, FS + GRSTCTL) & 1
     assert r(c, FS + GINTSTS) & RXFLVL == 0
-    assert r(c, FS + GRXFSIZ) == 64 and r(c, FS + GCCFG) & PWRDWN
-    assert r(c, FS + GINTMSK) & USBRST
+    assert r(c, FS + GRXFSIZ) == 0x200 and r(c, FS + GCCFG) == 0 and r(c, FS + GINTMSK) == 0
+    assert r(c, FS + GAHBCFG) == 0 and r(c, FS + DIEPTXF0) == 0x200
+    assert r(c, FS + DCFG) & 3 == 3 and r(c, FS + DCFG) & ~3 == 0x02200000          # DSPD kept
+    assert r(c, FS + PCGCCTL) == 1 and r(c, FS + GUSBCFG) & (1 << 30)
+    c.run_for(1e3)
+    assert r(c, FS + GRSTCTL) == 0x80000000
+    # RXFFLSH / TXFFLSH: "8 clocks (slowest of PHY or AHB clock)"
+    w(c, FS + GRSTCTL, (0x10 << 6) | (1 << 5) | (1 << 4))
+    assert r(c, FS + GRSTCTL) & 0x30 == 0x30
+    c.run_for(1e3)
+    assert r(c, FS + GRSTCTL) & 0x30 == 0
 
 
 def test_forced_mode_takes_25ms(desc):
@@ -230,20 +258,26 @@ def test_out_transfer_completion_and_toggle(desc):
     assert t.out(1, b"A" * 64, "DATA0") == "ACK"
     assert t.out(1, b"B" * 64, "DATA0") == "ACK"              # wrong toggle: acknowledged and dropped
     assert t.out(1, b"C" * 10, "DATA1") == "ACK"              # short packet ends the transfer
-    assert r(c, FS + DOEPCTL(1)) & EPENA == 0
+    # the core sets the endpoint NAK; EPENA is cleared when the completion entry is popped (RM0090 34.17.6)
+    assert r(c, FS + DOEPCTL(1)) & NAKSTS and r(c, FS + DOEPCTL(1)) & EPENA
+    assert (r(c, FS + DOEPTSIZ(1)) >> 19) & 0x3FF == 0 and r(c, FS + DOEPTSIZ(1)) & 0x7FFFF == 128
+    assert t.out(1, b"D", "DATA0") == "NAK"
     assert t.pop() == (2, 1, 64, 0, b"A" * 64)
+    assert r(c, FS + DOEPTSIZ(1)) & 0x7FFFF == 64            # XFRSIZ counts down as packets are read out
     assert t.pop() == (2, 1, 10, 2, b"C" * 10)
     assert r(c, FS + DOEPINT(1)) & 1 == 0
     assert t.pop()[:3] == (3, 1, 0)                          # OUT transfer completed -> XFRC on pop
-    assert r(c, FS + DOEPINT(1)) & 1
-    assert (r(c, FS + DOEPTSIZ(1)) >> 19) & 0x3FF == 0 and r(c, FS + DOEPTSIZ(1)) & 0x7FFFF == 54
+    assert r(c, FS + DOEPINT(1)) & 1 and r(c, FS + DOEPCTL(1)) & EPENA == 0
+    assert r(c, FS + DOEPTSIZ(1)) & 0x7FFFF == 54
     assert t.out(1, b"D", "DATA0") == "NAK"                   # disabled after completion
+    assert r(c, FS + DOEPINT(1)) & (1 << 13)                 # NAK interrupt
 
 
 def test_rx_fifo_full_naks(desc):
+    """10 RX FIFO words are kept for SETUP packets and never used for data (RM0090 34.17.6)."""
     c = usb_chip(desc)
     core_init(c)
-    w(c, FS + GRXFSIZ, 20)
+    w(c, FS + GRXFSIZ, 30)
     t = Bus(c)
     w(c, FS + DOEPCTL(1), 64 | (2 << 18) | USBAEP | (1 << 28))
     w(c, FS + DOEPTSIZ(1), (8 << 19) | 512)
@@ -339,7 +373,9 @@ def test_bus_reset_suspend_resume_interrupts(desc):
     c.run_for(1.5e6)
     assert r(c, FS + GINTSTS) & ENUMDNE and (r(c, FS + DSTS) >> 1) & 3 == 3
     host.suspend()
-    c.run_for(4e6)
+    c.run_for(4e6)                                           # 3 ms idle: early suspend only (RM0090 34.5.2)
+    assert r(c, FS + GINTSTS) & (1 << 10) and not r(c, FS + GINTSTS) & USBSUSP and not r(c, FS + DSTS) & 1
+    c.run_for(3e6)                                           # "confirmed 3 ms later" by USBSUSP + SUSPSTS
     assert r(c, FS + GINTSTS) & USBSUSP and r(c, FS + DSTS) & 1
     host.resume()
     c.run_for(1e6)
@@ -354,6 +390,9 @@ def test_hs_core_ulpi_warns_and_dma_out(desc):
     core_init(c, HS)
     w(c, HS + GAHBCFG, r(c, HS + GAHBCFG) | (1 << 5))       # DMAEN
     t = Bus(c, HS, "OTG_HS")
+    assert t.setup(setup_pkt(0x21, 0x20, 0, 0, 7)) is None   # HCLK 16 MHz: below the 30 MHz OTG_HS needs
+    assert any("30.000 MHz" in m for m in warns(c))
+    w(c, RCC + 0x08, (r(c, RCC + 0x08) & ~3) | 2)            # SYSCLK = PLL (168 MHz)
     w(c, HS + 0xB14, 0x20001000)                             # DOEPDMA0
     pkt = setup_pkt(0x21, 0x20, 0, 0, 7)
     assert t.setup(pkt) == "ACK"
@@ -402,7 +441,7 @@ def test_bare_metal_cdc_suspend_resume_reset_and_unplug():
     del fw
     otg = s.chip.peripherals["OTG_FS"]
     host.suspend()
-    s.run_for(5e6)
+    s.run_for(7e6)                                           # ESUSP at 3 ms idle, USBSUSP 3 ms later
     assert otg.usb_stats()["suspended"]
     host.resume()
     s.run_for(5e6)
@@ -490,7 +529,7 @@ def test_cdc_bridge_forwards_dtr_and_line_speed():
 
 
 def test_hs_dma_in_reads_memory(desc):
-    c = usb_chip(desc)
+    c = usb_chip(desc, sysclk_pll=True)
     w(c, HS + GUSBCFG, r(c, HS + GUSBCFG) | 0x40)
     core_init(c, HS)
     w(c, HS + GAHBCFG, r(c, HS + GAHBCFG) | (1 << 5))

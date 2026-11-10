@@ -25,16 +25,19 @@ card every command that waits for a response ends in CTIMEOUT, as with an empty 
   (DTIMER bounds it: DTIMEOUT), then DBCKEND and DATAEND / the next block. No card (or the card not expecting data):
   no CRC status, DTIMEOUT. DTEN written while the DPSM is busy is ignored (one `warn`). Stream mode (DTMODE, MMC
   only) and SDIO read wait (RWSTART/RWSTOP/SDIOEN): one `warn`; an SD card does not answer a stream transfer.
-* FIFO: 32 words. TXFIFOHE / RXFIFOHF at 8 free / 8 stored words (RM0090 31.9.12), TXFIFOF/E, RXFIFOF/E, TXDAVL,
-  RXDAVL, TXACT, RXACT, CMDACT are live; static flags clear through ICR. Received words stay readable after DATAEND
+* FIFO: 32 words. TXFIFOHE / RXFIFOHF at 8 free / 8 stored words (RM0090 31.9.11), TXFIFOF/E, RXFIFOF/E, TXDAVL,
+  RXDAVL, TXACT, RXACT, CMDACT are live (with CLKCR.HWFC_EN, TXFIFOE is active at <= 2 words and RXFIFOF 2 words
+  before full, RM0090 31.9.11; no FIFO flag before the first data transfer: STA resets to 0, RM0090
+  31.9.11); static flags clear through ICR. Received words stay readable after DATAEND
   (RXDAVL) until read. A FIFO write outside a transmit transfer or into a full FIFO is dropped (one `warn`).
 * IRQ "SDIO" = (STA & MASK) != 0 (level). DMA (DCTRL.DMAEN): request "SDIO" (DMA2 stream 3 or 6, channel 4) while the
   receive FIFO holds data / the transmit FIFO has room and FIFOCNT > 0, one word per request (silicon issues bursts;
-  the DMA model moves one item per request). DMA PFCTRL is not modelled by stm32.dma (it uses NDTR).
+  the DMA model moves one item per request). The request for the last word (FIFOCNT = 1) is flagged as the last
+  one, so a DMA stream with PFCTRL = 1 (peripheral flow control, RM0090 10.3.15) completes after it.
 * Pins (family signals table): SDIO_CK out L, SDIO_CMD out H, SDIO_D0-7 in. The card only sees the bus when SDIO_CK
   and SDIO_CMD are muxed to pins (else commands time out, one `warn`); data needs D0 (and D1-D3 in 4-bit mode). The
   CK pin is not toggled per edge (up to 48 MHz); while the clock runs, one `pin` event with `field="wave"` (edges,
-  since_ns, freq_hz, duty 0.5) per 100 ms window / clock change summarises it, as the event log does for dense pins.
+  since_ns, freq_hz, duty 50 %) per 100 ms window / clock change summarises it, as the event log does for dense pins.
   CMD/DAT levels do not follow the bit stream (like UART/SPI frame contents elsewhere).
 * RCC: APB2ENR.SDIOEN gate (a gated-off access logs one `warn`), APB2RSTR.SDIORST resets the block.
 """
@@ -47,6 +50,7 @@ from ..base import MMIOBlock
 from ..registry import register
 from ..sdbus import ClockWave, lines_muxed
 from ._util import GatedBlock, build_regs, dma_request, fmt_hz, irq_number
+from .dma import controllers as dma_controllers
 
 # CLKCR
 CLKEN, PWRSAV, BYPASS, NEGEDGE, HWFC_EN = 1 << 8, 1 << 9, 1 << 10, 1 << 13, 1 << 14
@@ -90,7 +94,7 @@ class SDIO(GatedBlock):
 
     def _init_state(self) -> None:
         self.fifo: deque[int] = deque()
-        self.fifo_dir = "rx"
+        self.fifo_dir: str | None = None   # None until the first data transfer: STA resets to 0 (RM0090 31.9.11)
         self.sta = 0                       # static flags
         self.cpsm = IDLE
         self.dpsm = IDLE
@@ -227,6 +231,7 @@ class SDIO(GatedBlock):
         if self.cpsm != IDLE or self._pending_cmd:
             s |= CMDACT
         n = len(self.fifo)
+        hwfc = 2 if self.get("CLKCR") & HWFC_EN else 0     # RM0090 31.9.11: HW flow control moves TXFIFOE / RXFIFOF
         if self.dpsm in (WAIT_S, SEND, BUSY):
             s |= TXACT
         elif self.dpsm in (WAIT_R, RECV):
@@ -234,11 +239,11 @@ class SDIO(GatedBlock):
         if self.fifo_dir == "tx":
             if s & TXACT and FIFO_WORDS - n >= 8:
                 s |= TXFIFOHE
-            s |= (TXFIFOF if n >= FIFO_WORDS else 0) | (TXFIFOE if n == 0 else TXDAVL)
-        else:
+            s |= (TXFIFOF if n >= FIFO_WORDS else 0) | (TXFIFOE if n <= hwfc else 0) | (TXDAVL if n else 0)
+        elif self.fifo_dir == "rx":
             if n >= 8:
                 s |= RXFIFOHF
-            s |= (RXFIFOF if n >= FIFO_WORDS else 0) | (RXFIFOE if n == 0 else RXDAVL)
+            s |= (RXFIFOF if n >= FIFO_WORDS - hwfc else 0) | (RXFIFOE if n == 0 else RXDAVL)
         return s
 
     def _flag(self, bits: int) -> None:
@@ -263,7 +268,11 @@ class SDIO(GatedBlock):
             elif self.dpsm in (WAIT_S, SEND, BUSY):
                 want = len(self.fifo) < FIFO_WORDS and self._fifocnt > 0
         if want:
-            dma_request(self.chip, "SDIO", True)            # re-armed after every acknowledged item
+            # re-armed after every acknowledged item; the request that moves the last word (FIFOCNT = 1) carries
+            # the "last data" signal for a DMA stream with PFCTRL (RM0090 10.3.15)
+            last = self._fifocnt == 1
+            for c in dma_controllers(self.chip):
+                c.request("SDIO", True, last=last)
             self._dma = True
         elif self._dma:
             dma_request(self.chip, "SDIO", False)

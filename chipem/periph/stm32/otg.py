@@ -7,11 +7,14 @@ FS PHY only: selecting the ULPI PHY logs a `warn` and the core never connects, s
 modelled).  Params: `endpoints`, `fifo_words`, `dma`, `prefix` (signal / IRQ name prefix "OTG_FS" / "OTG_HS"),
 `gate` (RCC clock gate), `exti_line` (wakeup line: 18 FS, 20 HS), `clk48_hz` (48 MHz clock when there is no RCC).
 
-Register file (offsets in the 256 KB window; reset values as in the SVD, checked by tests/test_stm32_usb.py):
-  0x000 GOTGCTL (BSVLD/ASVLD/CIDSTS live), 0x004 GOTGINT (rc_w1: SEDET ...), 0x008 GAHBCFG (GINT, TXFELVL; HS: DMAEN,
-  HBSTLEN), 0x00C GUSBCFG (PHYSEL, TRDT, FHMOD/FDMOD), 0x010 GRSTCTL (CSRST, RXFFLSH, TXFFLSH + TXFNUM self-clearing;
-  AHBIDL = 1), 0x014 GINTSTS, 0x018 GINTMSK, 0x01C GRXSTSR, 0x020 GRXSTSP, 0x024 GRXFSIZ, 0x028 DIEPTXF0
-  (HNPTXFSIZ), 0x02C HNPTXSTS, 0x038 GCCFG (PWRDWN, VBUSASEN, VBUSBSEN, SOFOUTEN, NOVBUSSENS), 0x03C CID,
+Register file (offsets in the 256 KB window; reset values and writable bits from the RM0090 register descriptions
+34.16 / 35.12, checked by tests/test_stm32_usb.py; where they differ from the SVD the RM wins: GOTGCTL 0x00010000,
+GRSTCTL 0x80000000, CID 0x1200 (HS 0x1100), HPTXFSIZ 0x02000400 (HS 0x02000800), DIEPTXF1 0x02000200, HS GUSBCFG
+0x1440 / GRXFSIZ 0x400 / GNPTXSTS 0x80400; reserved bits read 0):
+  0x000 GOTGCTL (BSVLD / ASVLD / CIDSTS live), 0x004 GOTGINT (rc_w1: SEDET ...), 0x008 GAHBCFG (GINT, TXFELVL; HS:
+  DMAEN, HBSTLEN), 0x00C GUSBCFG (PHYSEL, TRDT, FHMOD/FDMOD), 0x010 GRSTCTL (CSRST, RXFFLSH, TXFFLSH + TXFNUM
+  self-clearing; AHBIDL = 1), 0x014 GINTSTS, 0x018 GINTMSK, 0x01C GRXSTSR, 0x020 GRXSTSP, 0x024 GRXFSIZ, 0x028
+  DIEPTXF0 (HNPTXFSIZ), 0x02C HNPTXSTS, 0x038 GCCFG (PWRDWN, VBUSASEN, VBUSBSEN, SOFOUTEN, NOVBUSSENS), 0x03C CID,
   0x040 GSNPSID (0x4F54281A: core 2.81a, read by the HAL), 0x100 HPTXFSIZ, 0x104.. DIEPTXFx,
   0x400.. host registers (HCFG, HFIR, HFNUM, HPTXSTS, HAINT, HAINTMSK, HPRT, HCCHARx/HCINTx/HCINTMSKx/HCTSIZx/HCDMAx:
   storage only; forcing host mode logs one `warn`),
@@ -19,57 +22,69 @@ Register file (offsets in the 256 KB window; reset values as in the SVD, checked
   0x82C DVBUSPULSE, 0x834 DIEPEMPMSK, (HS: 0x830 DTHRCTL, 0x838 DEACHINT, 0x83C DEACHMSK, 0x844 DINEP1MSK,
   0x884 DOUTEP1MSK), 0x900 + 0x20n DIEPCTLn / +8 DIEPINTn / +0x10 DIEPTSIZn / +0x14 DIEPDMAn (HS) / +0x18 DTXFSTSn,
   0xB00 + 0x20n DOEPCTLn / DOEPINTn / DOEPTSIZn / DOEPDMAn, 0xE00 PCGCCTL, 0x1000 * (n + 1) data FIFO push/pop
-  windows, 0x20000 direct access to the FIFO RAM.
+  windows, 0x20000 direct access to the FIFO RAM.  A host register accessed in device mode (or a device register in
+  host mode) sets GINTSTS.MMIS and is ignored (34.15).
 
-Behaviour (device mode, DWC2 dedicated-FIFO mode as used by the HAL PCD driver and ST's USB device library):
+Behaviour (device mode, DWC2 dedicated-FIFO mode as used by the HAL PCD driver and ST's USB device library; section
+numbers are RM0090 Rev 22, ch. 34 OTG_FS, the OTG_HS chapter 35 says the same):
 * Mode: GINTSTS.CMOD = 0 (device) unless GUSBCFG.FHMOD forces host (or the ID pin is grounded); a forced mode
-  change takes effect 25 ms after the write (the HAL polls GetMode every 10 ms).  Host mode is not modelled.
+  change takes effect 25 ms after the write ("must wait at least 25 ms", 34.16.2 GUSBCFG).  Host mode is not
+  modelled.
 * Connection: the D+ pull-up is on when the core is in device mode, the transceiver is powered (GCCFG.PWRDWN), the
   B-session is valid (NOVBUSSENS = 1, or VBUSBSEN = 1 and VBUS present on the OTG_FS_VBUS pin PA9 / OTG_HS_VBUS
   PB13; the cable drives that pin), DCTL.SDIS = 0 and the DP/DM pins are muxed to the OTG function (AF10 / AF12).
-  VBUS rising with sensing on -> GINTSTS.SRQINT (session request / new session); falling -> GOTGINT.SEDET (OTGINT).
-* Clocks: the FS PHY needs a 48 MHz clock (PLL48CLK = PLLQ output) within +-0.25 % (the USB full-speed bit-rate
-  tolerance) and HCLK >= 14.2 MHz; otherwise the core does not answer on the bus (the host times out: "device not
-  recognised") and one `warn` explains why.  RCC_AHBxENR gate (an access with the clock off logs one `warn`; the core
-  ignores the bus), RCC_AHBxRSTR resets the model.
-* Bus events: USB reset -> GINTSTS.USBRST (2.5 us after SE0 started; all OUT endpoints NAK, USBAEP cleared on
-  endpoints 1..n) and ENUMDNE at its end (DSTS.ENUMSPD = 3, full speed 48 MHz PHY clock).  3 ms idle -> ESUSP +
-  USBSUSP, DSTS.SUSPSTS = 1; resume K -> WKUINT (SUSPSTS = 0) and the EXTI wakeup line (18 / 20).  SOF -> GINTSTS.SOF,
-  DSTS.FNSOF; GCCFG.SOFOUTEN pulses the OTG_FS_SOF pin.  DCTL.RWUSIG set while suspended = remote wakeup signalling.
+  VBUS rising with sensing on -> GINTSTS.SRQINT; falling -> GOTGINT.SEDET (OTGINT) (34.5.2 "Powered state").
+* Clocks: the FS PHY needs 48 MHz +-0.25 % (34.3.2) and HCLK above 14.2 MHz (OTG_FS, 34.3.3) / 30 MHz (OTG_HS,
+  35.3.3); otherwise the core does not answer on the bus (the host times out: "device not recognised") and one
+  `warn` explains why.  GUSBCFG.TRDT below the minimum of Table 203 / 213 for HCLK: one `warn` only.
+  RCC_AHBxENR gate (an access with the clock off logs one `warn`; the core ignores the bus), RCC_AHBxRSTR resets
+  the model.
+* Bus events: USB reset -> GINTSTS.USBRST (2.5 us after SE0 started; USBAEP cleared on endpoints 1..n; NAKing the
+  OUT endpoints is the firmware's job, 34.17.5) and ENUMDNE at its end (DSTS.ENUMSPD = 3).  3 ms idle -> ESUSP,
+  "confirmed 3 ms later" by USBSUSP with DSTS.SUSPSTS = 1 (34.5.2); resume K -> WKUINT (SUSPSTS = 0) and the EXTI
+  wakeup line (18 / 20).  SOF -> GINTSTS.SOF, DSTS.FNSOF; GCCFG.SOFOUTEN gives a 20-HCLK pulse on OTG_FS_SOF
+  (34.7.2).  DCTL.RWUSIG set while suspended = remote wakeup signalling and clears SUSPSTS (34.16.4 DSTS).
 * Address: tokens are answered for DCFG.DAD; a DAD change during a control transfer takes effect after its status
-  stage (the core keeps answering the old address until then, which is what lets the ST stack program the address
-  in the SETUP stage of SET_ADDRESS).
-* SETUP: always accepted on EP0 (if the RX FIFO has room for the 3-word entry): RX FIFO entry PKTSTS 6 (SETUP data,
-  8 bytes, DATA0), DOEPTSIZ0.STUPCNT decremented, STALL cleared and NAK set on IN/OUT EP0, EP0 toggles reset.  The
-  next IN or OUT token on EP0 pushes the "SETUP stage done" entry (PKTSTS 4); popping it sets DOEPINT0.STUP.
-  More than 3 back-to-back SETUPs set B2BSTUP.
-* OUT: ACK if the endpoint is enabled, not NAKing, global OUT NAK off and the RX FIFO has room for status + data,
-  else NAK; STALL if DOEPCTL.STALL.  Entry PKTSTS 2 (OUT data, BCNT, DPID), then DOEPTSIZ.XFRSIZ/PKTCNT count down;
-  when PKTCNT reaches 0 or a short packet ends the transfer the endpoint is disabled (EPENA = 0) and entry PKTSTS 3
-  (OUT transfer completed) follows; popping it sets DOEPINT.XFRC.  Data with the wrong toggle (bulk/interrupt DPID,
-  EP0 after SETUP DATA1 first) is ACKed and dropped.  OUT token while EP0 is disabled: DOEPINT.OTEPDIS; OUT status
-  stage of a control read: DOEPINT.STSPHSRX (OTEPSPR).  GRXSTSP pops the status word, reading any FIFO window pops
-  data words, all from the RX FIFO ring in the FIFO RAM (GRXFSIZ words at address 0).
-* IN: STALL if DIEPCTL.STALL; NAK if disabled, NAKSTS, global IN NAK, PKTCNT = 0 or fewer than ceil(len / 4) words
-  in the endpoint's TX FIFO (DIEPCTL.TXFNUM; FIFO 0 for EP0; DIEPINT.ITTXFE then); else a packet of
-  min(MPS, XFRSIZ) bytes with DPID (EP0: DATA1 first after SETUP).  On the host's ACK the words are popped,
-  XFRSIZ/PKTCNT count down and PKTCNT = 0 completes the transfer: DIEPINT.XFRC, EPENA = 0.  TX FIFOs are rings in
-  the FIFO RAM at DIEPTXF0 / DIEPTXFx (start address and depth in words); DIEPINT.TXFE = FIFO half empty (TXFELVL =
-  0) or completely empty (1), unmasked through DIEPEMPMSK; DTXFSTS.INEPTFSAV = free words.  Pushing into a full FIFO
-  is lost (one `warn`): silicon overwrites, here the word is dropped.
-* Endpoint control: CNAK/SNAK (NAKSTS; SNAK on IN sets INEPNE), SD0PID/SD1PID (DPID), EPDIS on an enabled endpoint
-  disables it at once (EPDISD), STALL (EP0: set only, cleared by the next SETUP).  DCTL SGINAK/CGINAK (GINAKEFF,
-  GINSTS), SGONAK/CGONAK (RX FIFO entry PKTSTS 1, GONAKEFF when popped, GONSTS).
+  stage: 34.17.5 has the firmware program DAD on SetAddress *before* the status IN, which must still go out at the
+  old address.
+* SETUP (34.17.6 "SETUP transactions"): accepted on EP0 whatever NAK / STALL / EPENA say, written to the RX FIFO
+  "without checking for available space" into the 10 words the core keeps for SETUPs (never used for data):
+  entry PKTSTS 6 (8 bytes, DATA0), DOEPTSIZ0.STUPCNT decremented; the core sets NAK on IN and OUT EP0 (DIEPINT0.INEPNE)
+  and clears STALL; EP0 toggles reset.  The setup-stage-done entry (PKTSTS 4) is written "when the Setup stage
+  changes to a Data IN/OUT stage" (the next IN or OUT token on EP0); popping it sets DOEPINT0.STUP and clears
+  DOEPCTL0.EPENA.  More than 3 back-to-back SETUPs set B2BSTUP (34.17.6; the FS DOEPINT table marks bit 6 reserved).
+* OUT (34.17.6): ACK if the endpoint is enabled, not NAKing, global OUT NAK off and the RX FIFO has room for status
+  + data outside the SETUP reserve, else NAK (DOEPINT.NAK); STALL if DOEPCTL.STALL.  Entry PKTSTS 2 (BCNT, DPID);
+  PKTCNT counts down per packet written, XFRSIZ as the application pops the packets (status-word pop).  PKTCNT = 0 or
+  a short packet: the core sets the endpoint NAK and writes PKTSTS 3; popping it clears EPENA and sets XFRC.  Data
+  with the wrong toggle is ACKed and dropped.  OUT token while EP0 is disabled: OTEPDIS.  A non-zero-length status
+  OUT of a control read is STALLed when DCFG.NZLSOHSK = 1.  OTG_FS: the status IN token of a control write sets
+  DOEPINT0.STSPHSRX ("status phase received for control write").  GRXSTSP pops the status word, reading any FIFO
+  window pops data words, all from the RX FIFO ring in the FIFO RAM (GRXFSIZ words at address 0).
+* IN (34.17.6 "Generic non-periodic IN data transfers"): each packet the application writes into the TX FIFO
+  (min(MPS, XFRSIZ) bytes) decrements XFRSIZ; an IN token sends the oldest complete packet (or a zero-length packet
+  when XFRSIZ = 0 and PKTCNT > 0) with DPID (EP0: DATA1 first after SETUP); the host's ACK pops it and decrements
+  PKTCNT; XFRSIZ = PKTCNT = 0 -> XFRC, EPENA = 0.  STALL if DIEPCTL.STALL; NAK (DIEPINT.NAK) if NAKSTS / global IN
+  NAK; with no complete packet: ITTXFE + NAK.  TX FIFOs are rings in the FIFO RAM at DIEPTXF0 / DIEPTXFx;
+  DIEPINT.TXFE = half / completely empty (TXFELVL), unmasked through DIEPEMPMSK; DTXFSTS.INEPTFSAV = free words.
+  Pushing into a full FIFO is lost (one `warn`; the RM requires the firmware to check DTXFSTS first).
+* Endpoint control: CNAK/SNAK (NAKSTS; SNAK on IN sets INEPNE, CNAK clears it), SD0PID/SD1PID (DPID), EPDIS on an
+  enabled endpoint disables it at once (EPDISD; EP0 OUT cannot be disabled), STALL (EP0: set only, cleared by the
+  next SETUP).  DCTL SGINAK/CGINAK (GINAKEFF, GINSTS), SGONAK/CGONAK (RX FIFO entry PKTSTS 1, GONAKEFF when popped,
+  GONSTS).
 * Interrupts: DAINT bit n = DIEPINTn & (DIEPMSK | TXFE if DIEPEMPMSK bit n), bit 16+n = DOEPINTn & DOEPMSK;
   GINTSTS.IEPINT/OEPINT = DAINT & DAINTMSK; RXFLVL = RX FIFO not empty; OTGINT = GOTGINT != 0; the NVIC line
   "<prefix>" = GAHBCFG.GINT & (GINTSTS & GINTMSK) != 0.  HS dedicated EP1 lines (OTG_HS_EP1_IN/OUT) follow DEACHINT
   & DEACHMSK.
 * DMA (HS, GAHBCFG.DMAEN): OUT data and SETUP packets are written to memory at DOEPDMAn (incremented), IN data read
-  from DIEPDMAn at the IN token; no RX FIFO entries, XFRC/STUP set directly.
-* Core soft reset (GRSTCTL.CSRST): FIFOs flushed, interrupt status and endpoint state cleared, GUSBCFG / GCCFG /
-  GAHBCFG / FIFO sizes / DCFG kept (DWC2 behaviour); the bit self-clears at once.
+  from DIEPDMAn at the IN token; no RX FIFO entries, XFRC/STUP set directly.  A DMA address in Flash reads zeros
+  with a `warn` ("The USB DMA cannot directly address the internal Flash memory", Figure 410).
+* Core soft reset (GRSTCTL.CSRST, 34.16.2): all CSRs back to reset except PCGCCTL, DCFG.DSPD, HCFG.FSLSPCS (RM) and
+  GUSBCFG (DWC2: the force-mode bits survive; Linux dwc2_core_reset), FIFOs flushed.  CSRST, RXFFLSH and TXFFLSH
+  act at once and read 1 for 8 clocks of the slower of PHY / AHB clock (the RM gives 8 clocks for RXFFLSH and
+  "several clocks" for CSRST).
 Not modelled: isochronous endpoints (no IISOIXFR / INCOMPISOOUT / EOPF), high speed, host mode, HNP/SRP protocol
-(SRQ/HNPRQ are storage), LPM, threshold control, TRDT/TOCAL timing checks.
+(SRQ/HNPRQ are storage), LPM, threshold control, TOCAL, the TX FIFO 8-packet limit.
 """
 from __future__ import annotations
 
@@ -104,13 +119,19 @@ SUSPSTS = 1
 # EP control
 USBAEP, DPID, NAKSTS, STALL, CNAK, SNAK, SD0PID, SD1PID, EPDIS, EPENA = (1 << 15, 1 << 16, 1 << 17, 1 << 21, 1 << 26,
                                                                         1 << 27, 1 << 28, 1 << 29, 1 << 30, 1 << 31)
-CTL_WO = CNAK | SNAK | SD0PID | SD1PID
 # DIEPINT
-XFRC, EPDISD, TOC, ITTXFE, INEPNM, INEPNE, TXFE = 1, 2, 8, 16, 32, 64, 128
+XFRC, EPDISD, TOC, ITTXFE, INEPNM, INEPNE, TXFE, EPNAK = 1, 2, 8, 16, 32, 64, 128, 1 << 13
 # DOEPINT
-STUP, OTEPDIS, STSPHSRX, B2BSTUP = 8, 16, 32, 64
-DIEPINT_W1C = XFRC | EPDISD | TOC | ITTXFE | INEPNM | INEPNE      # core 2.81a: other bits reserved (read 0)
-DOEPINT_W1C = XFRC | EPDISD | STUP | OTEPDIS | STSPHSRX | B2BSTUP
+AHBERR, STUP, OTEPDIS, STSPHSRX, B2BSTUP, OUTPKTERR, BERR, NYET = 4, 8, 16, 32, 64, 1 << 8, 1 << 12, 1 << 14
+# rc_w1 bits (RM0090 34.16.4 / 35.12.4 DIEPINTx / DOEPINTx; TXFE is read-only, the rest reserved)
+DIEPINT_W1C = XFRC | EPDISD | TOC | ITTXFE | INEPNM | INEPNE | EPNAK
+DOEPINT_W1C_FS = XFRC | EPDISD | STUP | OTEPDIS | STSPHSRX | B2BSTUP | OUTPKTERR | BERR | EPNAK
+DOEPINT_W1C_HS = DOEPINT_W1C_FS | AHBERR | NYET
+# writable bits of the endpoint control registers (RM0090 34.16.4: reserved bits read 0)
+DIEPCTL0_RW = EPENA | EPDIS | STALL | (0xF << 22) | 3
+DOEPCTL0_RW = EPENA | STALL | (1 << 20)                                 # EPDIS: EP0 OUT cannot be disabled
+DIEPCTLX_RW = EPENA | EPDIS | STALL | (0xF << 22) | (3 << 18) | USBAEP | 0x7FF
+DOEPCTLX_RW = EPENA | EPDIS | STALL | (1 << 20) | (3 << 18) | USBAEP | 0x7FF
 # GOTGINT
 SEDET = 4
 # RX status PKTSTS
@@ -119,6 +140,13 @@ ST_GONAK, ST_OUT, ST_OUT_DONE, ST_SETUP_DONE, ST_SETUP = 1, 2, 3, 4, 6
 GSNPSID = 0x4F54281A
 EP0_MPS = (64, 32, 16, 8)
 USB_TOL = 0.0025
+SETUP_RESERVE = 10            # RX FIFO words the core keeps for SETUP packets (RM0090 34.17.6 "SETUP transactions")
+FLUSH_CLOCKS = 8              # RXFFLSH: "8 clocks (slowest of PHY or AHB clock)" (34.16.2 GRSTCTL)
+SOF_PULSE_HCLK = 20           # SOF output pulse width in HCLK cycles (34.7.2)
+# Table 203 (OTG_FS) minimum GUSBCFG.TRDT per AHB frequency (MHz lower bound, TRDT); Table 213 (OTG_HS)
+TRDT_FS = ((32, 0x6), (27.5, 0x7), (24, 0x8), (21.8, 0x9), (20, 0xA), (18.5, 0xB), (17.2, 0xC), (16, 0xD),
+           (15, 0xE), (14.2, 0xF))
+TRDT_HS = ((30, 0x9),)
 
 
 class _Ring:
@@ -210,35 +238,52 @@ class OtgCore(GatedBlock):
         self._irq_ep1in: int | None = None
         self._irq_ep1out: int | None = None
         self._pins: dict = {}
+        self._doepint_w1c = DOEPINT_W1C_HS if self.has_dma else DOEPINT_W1C_FS
+        self.hclk_min = float(p.get("hclk_min", 30e6 if self.has_dma else 14.2e6))   # 35.3.3 / 34.3.3 cautions
+        self._inq: dict[int, list[int]] = {}          # IN endpoint -> lengths of complete packets in its TX FIFO
+        self._in_part: dict[int, list[int]] = {}      # IN endpoint -> [packet length, words written so far]
+        self._grst_busy: dict[int, float] = {}        # GRSTCTL self-clearing bit -> time (ns) it clears
+        self._susp_ev = None                          # pending USBSUSP (3 ms after ESUSP)
+        self._esusp = False
+        self._ctrl_wlen = 0                           # wLength of the control transfer in progress
+        self._trdt_key = None
         self.stats = {"setup": 0, "out": 0, "in": 0, "nak": 0, "stall": 0, "sof": 0, "resets": 0}
         regs = self._build_regs()
         super().__init__(name, base, size, regs, log=log, params=p)
 
     # ------------------------------------------------------------------ register list
     def _build_regs(self) -> list[Reg]:
+        """Reset values and writable bits from the RM0090 register descriptions (34.16 OTG_FS, 35.12 OTG_HS), which
+        differ from the SVD in GOTGCTL, GRSTCTL, CID, HPTXFSIZ, DIEPTXF1 and (HS) GUSBCFG / GRXFSIZ / GNPTXSTS."""
         R = Reg
+        hs = self.has_dma
         out = [
-            R("GOTGCTL", 0x000, reset=0x00000800, ro_mask=0x000F3005, on_read=self._gotgctl_read),
-            R("GOTGINT", 0x004, w1c_mask=0x000E0304, on_write=self._irq_write),
-            R("GAHBCFG", 0x008, on_write=self._irq_write),
-            R("GUSBCFG", 0x00C, reset=0x00000A00 | (PHYSEL if not self.has_dma else 0), on_write=self._gusbcfg_write),
-            R("GRSTCTL", 0x010, reset=0x20000000 | AHBIDL, ro_mask=AHBIDL | (1 << 29), on_write=self._grstctl_write,
-              on_read=lambda b, r: (b.get("GRSTCTL") & ~0x37) | AHBIDL),
+            R("GOTGCTL", 0x000, ro_mask=~0x00000E02, on_read=self._gotgctl_read),      # CIDSTS (live) = 1: 0x10000
+            R("GOTGINT", 0x004, ro_mask=~0x000E0304, w1c_mask=0x000E0304, on_write=self._irq_write),
+            R("GAHBCFG", 0x008, ro_mask=~(0x1BF if hs else 0x181), on_write=self._irq_write),
+            R("GUSBCFG", 0x00C, reset=0x00001440 if hs else 0x00000A40,
+              ro_mask=~(0xE3FEBF47 if hs else 0xE0003F47), on_write=self._gusbcfg_write),
+            R("GRSTCTL", 0x010, reset=AHBIDL, ro_mask=~(0x7C0 | 0x37), on_write=self._grstctl_write,
+              on_read=self._grstctl_read),
             R("GINTSTS", 0x014, reset=0x04000020, ro_mask=GINTSTS_LIVE, w1c_mask=GINTSTS_W1C,
               on_read=self._gintsts_read, on_write=self._irq_write),
-            R("GINTMSK", 0x018, on_write=self._irq_write),
+            R("GINTMSK", 0x018, ro_mask=0x08C30301, on_write=self._irq_write),
             R("GRXSTSR", 0x01C, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._rx_status(pop=False)),
             R("GRXSTSP", 0x020, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._rx_status(pop=True)),
-            R("GRXFSIZ", 0x024, reset=0x00000200, on_write=self._fifo_cfg_write),
+            R("GRXFSIZ", 0x024, reset=0x00000400 if hs else 0x00000200, ro_mask=0xFFFF0000,
+              on_write=self._fifo_cfg_write),
             R("DIEPTXF0", 0x028, reset=0x00000200, on_write=self._fifo_cfg_write),
-            R("HNPTXSTS", 0x02C, reset=0x00080200, ro_mask=0xFFFFFFFF),
-            R("GCCFG", 0x038, on_write=self._gccfg_write),
-            R("CID", 0x03C, reset=0x00001000 if not self.has_dma else 0x00001100),
+            R("HNPTXSTS", 0x02C, reset=0x00080400 if hs else 0x00080200, ro_mask=0xFFFFFFFF),
+            R("GCCFG", 0x038, ro_mask=~(0x003F0000 if hs else 0x003D0000), on_write=self._gccfg_write),
+            R("CID", 0x03C, reset=0x00001100 if hs else 0x00001200),
             R("GSNPSID", 0x040, reset=GSNPSID, ro_mask=0xFFFFFFFF),
-            R("HPTXFSIZ", 0x100, reset=0x02000600),
+            R("HPTXFSIZ", 0x100, reset=0x02000800 if hs else 0x02000400),
         ]
         for n in range(1, self.n_eps):
-            out.append(R(f"DIEPTXF{n}", 0x100 + 4 * n, reset=0x02000400, on_write=self._fifo_cfg_write))
+            # DIEPTXF1 = 0x02000200 (34.16.2 text and Table 205 agree); DIEPTXF2/3: Table 205 and the SVD 0x02000400
+            # (the text gives 0x02000200 for all x); OTG_HS: 0x02000400 (35.12.2)
+            rst = 0x02000200 if (n == 1 and not hs) else 0x02000400
+            out.append(R(f"DIEPTXF{n}", 0x100 + 4 * n, reset=rst, on_write=self._fifo_cfg_write))
         # host mode (storage)
         for nm, off, rst in (("HCFG", 0x400, 0), ("HFIR", 0x404, 0xEA60), ("HFNUM", 0x408, 0x3FFF),
                              ("HPTXSTS", 0x410, 0x00080100), ("HAINT", 0x414, 0), ("HAINTMSK", 0x418, 0),
@@ -250,16 +295,16 @@ class OtgCore(GatedBlock):
             if self.has_dma:
                 out.append(R(f"HCDMA{c}", b + 0x14))
         out += [
-            R("DCFG", 0x800, reset=0x02200000, on_write=self._dcfg_write),
-            R("DCTL", 0x804, ro_mask=GINSTS | GONSTS, on_write=self._dctl_write, on_read=self._dctl_read),
+            R("DCFG", 0x800, reset=0x02200000, ro_mask=~(0x03001FF7 if hs else 0x1FF7), on_write=self._dcfg_write),
+            R("DCTL", 0x804, ro_mask=~0xFF3, on_write=self._dctl_write, on_read=self._dctl_read),
             R("DSTS", 0x808, reset=0x00000010, ro_mask=0xFFFFFFFF),
-            R("DIEPMSK", 0x810, on_write=self._irq_write),
-            R("DOEPMSK", 0x814, on_write=self._irq_write),
+            R("DIEPMSK", 0x810, ro_mask=~(0x217F if hs else 0x207B), on_write=self._irq_write),
+            R("DOEPMSK", 0x814, ro_mask=~(0x717F if hs else 0x313B), on_write=self._irq_write),
             R("DAINT", 0x818, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._daint()),
             R("DAINTMSK", 0x81C, on_write=self._irq_write),
-            R("DVBUSDIS", 0x828, reset=0x000017D7),
-            R("DVBUSPULSE", 0x82C, reset=0x000005B8),
-            R("DIEPEMPMSK", 0x834, on_write=self._irq_write),
+            R("DVBUSDIS", 0x828, reset=0x000017D7, ro_mask=0xFFFF0000),
+            R("DVBUSPULSE", 0x82C, reset=0x000005B8, ro_mask=0xFFFFF000),
+            R("DIEPEMPMSK", 0x834, ro_mask=0xFFFF0000, on_write=self._irq_write),
         ]
         if self.has_dma:
             out += [R("DTHRCTL", 0x830), R("DEACHINT", 0x838, w1c_mask=0x00030003, on_write=self._irq_write),
@@ -271,18 +316,19 @@ class OtgCore(GatedBlock):
                       reset=USBAEP if n == 0 else 0, on_write=self._ctl_writer(n, True)),
                     R(f"DIEPINT{n}", b + 8, reset=TXFE, ro_mask=~DIEPINT_W1C, w1c_mask=DIEPINT_W1C,
                       on_read=self._diepint_reader(n), on_write=self._irq_write),
-                    R(f"DIEPTSIZ{n}", b + 0x10),
+                    R(f"DIEPTSIZ{n}", b + 0x10, ro_mask=~(0x0018007F if n == 0 else 0x7FFFFFFF)),
                     R(f"DTXFSTS{n}", b + 0x18, ro_mask=0xFFFFFFFF, on_read=self._dtxfsts_reader(n))]
             if self.has_dma:
                 out.append(R(f"DIEPDMA{n}", b + 0x14))
             b = 0xB00 + 0x20 * n
             out += [R(f"DOEPCTL{n}", b, ro_mask=DPID | NAKSTS | (USBAEP if n == 0 else 0),
                       reset=USBAEP if n == 0 else 0, on_write=self._ctl_writer(n, False)),
-                    R(f"DOEPINT{n}", b + 8, ro_mask=~DOEPINT_W1C, w1c_mask=DOEPINT_W1C, on_write=self._irq_write),
-                    R(f"DOEPTSIZ{n}", b + 0x10)]
+                    R(f"DOEPINT{n}", b + 8, reset=0x80, ro_mask=~self._doepint_w1c, w1c_mask=self._doepint_w1c,
+                      on_write=self._irq_write),
+                    R(f"DOEPTSIZ{n}", b + 0x10, ro_mask=~(0x6008007F if n == 0 else 0x7FFFFFFF))]
             if self.has_dma:
                 out.append(R(f"DOEPDMA{n}", b + 0x14))
-        out.append(R("PCGCCTL", 0xE00))
+        out.append(R("PCGCCTL", 0xE00, ro_mask=~0x13))
         return out
 
     # ------------------------------------------------------------------ attach / reset
@@ -302,6 +348,12 @@ class OtgCore(GatedBlock):
         if self._mode_ev is not None and self.chip is not None:
             self.chip.sched.cancel(self._mode_ev)
         self._mode_ev = None
+        self._cancel_susp()
+        self._esusp = False
+        self._inq.clear()
+        self._in_part.clear()
+        self._grst_busy.clear()
+        self._ctrl_wlen = 0
         super().reset()
         self.ram[:] = [0] * self.fifo_words
         self.rx.config(0, 0)
@@ -323,6 +375,11 @@ class OtgCore(GatedBlock):
             self.bus.device_changed()
 
     # ------------------------------------------------------------------ helpers
+    def _cancel_susp(self) -> None:
+        if self._susp_ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._susp_ev)
+        self._susp_ev = None
+
     def _r(self, off: int) -> int:
         return int.from_bytes(self.mem[off:off + 4], "little")
 
@@ -381,7 +438,7 @@ class OtgCore(GatedBlock):
         v = self._r(0x000) & ~0x000F0000
         v |= 1 << 16                                         # CIDSTS: B-device (ID pin floating / pulled up)
         if self._session:
-            v |= (1 << 19) | (1 << 18)                       # BSVLD, ASVLD
+            v |= (1 << 18) if self._cmod else (1 << 19)      # ASVLD (host mode) / BSVLD (device mode)
         return v
 
     def _dctl_read(self, blk, reg) -> int:
@@ -455,7 +512,18 @@ class OtgCore(GatedBlock):
         self._update_irq()
 
     # ------------------------------------------------------------------ fast path (FIFO windows, RAM)
+    def _mode_mismatch(self, offset: int) -> bool:
+        """Host register (0x400..0x7FF) in device mode or device register (0x800..0xDFF) in host mode: GINTSTS.MMIS,
+        the access completes on the AHB but the core ignores it (RM0090 34.15 / 34.16)."""
+        if (0x400 <= offset < 0x800 and not self._cmod) or (0x800 <= offset < 0xE00 and self._cmod):
+            self._gint(MMIS)
+            return True
+        return False
+
     def read(self, offset: int, size: int) -> int:
+        if 0x400 <= offset < 0xE00 and self._mode_mismatch(offset):
+            self._gate_ok()
+            return 0
         if 0x1000 <= offset < 0x20000:
             self._gate_ok()
             if not self.rx.n:
@@ -485,6 +553,8 @@ class OtgCore(GatedBlock):
             if not f.push(value):
                 self._warn_once(f"txfull{n}", f"{self.name}: TX FIFO {self._txfnum(n)} (IN endpoint {n}) "
                                 f"overflow: word lost (depth {f.depth} words)")
+            elif not self._dma():
+                self._in_word(n)
             self._update_irq()
             return
         if 0x20000 <= offset < 0x40000:
@@ -496,47 +566,105 @@ class OtgCore(GatedBlock):
             return
         if offset < 0x1000:
             self._gate_ok()
+            if 0x400 <= offset < 0xE00 and self._mode_mismatch(offset):
+                return
         super().write(offset, size, value)
 
+    def _in_word(self, n: int) -> None:
+        """A word pushed into IN endpoint n's TX FIFO.  The core counts packets as the application writes them:
+        each complete packet (min(MPS, XFRSIZ) bytes) decrements DIEPTSIZ.XFRSIZ by its size (RM0090 34.17.6,
+        "Generic non-periodic IN data transfers", internal data flow 3)."""
+        part = self._in_part.get(n)
+        ts_off = self._ictl(n) + 0x10
+        xmask = 0x7F if n == 0 else 0x7FFFF
+        if part is None:
+            xfr = self._r(ts_off) & xmask
+            if xfr == 0:
+                self._warn_once(f"txnoxfr{n}", f"{self.name}: data written to the TX FIFO of IN endpoint {n} while "
+                                f"DIEPTSIZ{n}.XFRSIZ = 0: not part of any packet")
+                return
+            part = self._in_part[n] = [min(self._mps(n, True), xfr), 0]
+        part[1] += 1
+        if part[1] * 4 >= part[0]:
+            del self._in_part[n]
+            self._inq.setdefault(n, []).append(part[0])
+            ts = self._r(ts_off)
+            self._w(ts_off, (ts & ~xmask) | max(0, (ts & xmask) - part[0]))
+
     # ------------------------------------------------------------------ register hooks
+    def _grst_clocks_ns(self, n: int) -> float:
+        """n clocks of the slower of the PHY (48 MHz) and AHB clocks."""
+        r = rcc(self.chip) if self.chip is not None else None
+        hclk = getattr(r, "core_hz", 0) if r is not None else 0
+        f = min(48e6, hclk) if hclk else 48e6
+        return n * 1e9 / f
+
+    def _grstctl_read(self, blk, reg) -> int:
+        v = (self._r(0x010) & ~0x37) | AHBIDL
+        if self._grst_busy:
+            now = self.chip.now_ns()
+            for bit, t in list(self._grst_busy.items()):
+                if now < t:
+                    v |= bit
+                else:
+                    del self._grst_busy[bit]
+        return v
+
     def _grstctl_write(self, blk, reg, old, new):
+        """Self-clearing reset / flush bits (RM0090 34.16.2 GRSTCTL).  The effect is immediate; the bit reads 1
+        until the core is done: RXFFLSH "requires 8 clocks (slowest of PHY or AHB clock)"; TXFFLSH and CSRST
+        ("several clocks") are given the same 8 clocks.  HSRST and FCRST (host) clear at once."""
+        busy = self._grst_clocks_ns(FLUSH_CLOCKS) if self.chip is not None else 0.0
+        now = self.chip.now_ns() if self.chip is not None else 0.0
         if new & CSRST:
             self._soft_reset()
+            self._grst_busy[CSRST] = now + busy
         if new & RXFFLSH:
             self.rx.flush()
+            self._grst_busy[RXFFLSH] = now + busy
         if new & TXFFLSH:
             num = (new >> 6) & 0x1F
             for i, f in enumerate(self.tx):
                 if num == 0x10 or i == num:
                     f.flush()
-            for n in list(self._in_pending):
+            for n in range(self.n_eps):
                 if num == 0x10 or self._txfnum(n) == num:
                     self._in_pending.pop(n, None)
+                    self._inq.pop(n, None)
+                    self._in_part.pop(n, None)
+            self._grst_busy[TXFFLSH] = now + busy
         self._update_irq()
         return (new & ~(CSRST | HSRST | FCRST | RXFFLSH | TXFFLSH)) | AHBIDL
 
     def _soft_reset(self) -> None:
-        keep = {r: self._r(o) for r, o in (("GUSBCFG", 0x00C), ("GCCFG", 0x038), ("GAHBCFG", 0x008),
-                                             ("GRXFSIZ", 0x024), ("DIEPTXF0", 0x028), ("DCFG", 0x800),
-                                             ("PCGCCTL", 0xE00), ("CID", 0x03C))}
-        keep.update({f"DIEPTXF{n}": self.get(f"DIEPTXF{n}") for n in range(1, self.n_eps)})
-        mk = self._r(0x018)
-        for name in ("GINTSTS", "GOTGINT", "DCTL", "DSTS", "DAINTMSK", "DIEPMSK", "DOEPMSK", "DIEPEMPMSK"):
-            self.set(name, self.regs[name].reset)
-        for n in range(self.n_eps):
-            for nm in (f"DIEPCTL{n}", f"DIEPINT{n}", f"DIEPTSIZ{n}", f"DOEPCTL{n}", f"DOEPINT{n}", f"DOEPTSIZ{n}"):
-                self.set(nm, self.regs[nm].reset)
+        """GRSTCTL.CSRST (RM0090 34.16.2): "clears the interrupts and all the CSR register bits except" PCGCCTL
+        (RSTPDMODL, GATEHCLK, PWRCLMP, STPPCLK), HCFG.FSLSPCS and DCFG.DSPD; all FIFOs are flushed and the state
+        machines go idle.  GUSBCFG is kept too: the DWC2 force-mode bits survive a core soft reset (Linux dwc2
+        driver, dwc2_core_reset) and PHYSEL is what the reset is for (the RM: "when you change the PHY ...")."""
+        keep = {"GUSBCFG": self._r(0x00C), "PCGCCTL": self._r(0xE00), "HCFG": self._r(0x400) & 3}
+        dspd = self._r(0x800) & 3
+        for name, reg in self.regs.items():
+            if name in ("GSNPSID", "GRXSTSR", "GRXSTSP"):
+                continue
+            self.set(name, reg.reset)
         for k, v in keep.items():
             self.set(k, v)
-        self._w(0x018, mk)
+        self._w(0x800, (self._r(0x800) & ~3) | dspd)
+        self._fifo_cfg_write(self, None, 0, 0)
         self.rx.flush()
         for f in self.tx:
             f.flush()
         self._in_pending.clear()
+        self._inq.clear()
+        self._in_part.clear()
         self._setup_pending = False
         self._gonak = None
         self._ginak = False
         self._suspended = False
+        self._esusp = False
+        self._cancel_susp()
+        self._addr_old = None
+        self._after_cfg()
 
     def _gusbcfg_write(self, blk, reg, old, new):
         if not self.has_dma:
@@ -612,18 +740,22 @@ class OtgCore(GatedBlock):
                 self._gonak = "effective"
         if new & CGONAK:
             self._gonak = None
-        if (new & RWUSIG) and not (old & RWUSIG) and self._suspended and self.bus is not None:
-            self.bus.remote_wakeup()
+        if (new & RWUSIG) and not (old & RWUSIG) and self._suspended:
+            self._clr_bits(0x808, SUSPSTS)          # DSTS.SUSPSTS: cleared by the RWUSIG write (34.16.4 DSTS)
+            if self.bus is not None:
+                self.bus.remote_wakeup()
         if (old ^ new) & SDIS:
             self._after_cfg()
         self._update_irq()
         return new & ~(SGINAK | CGINAK | SGONAK | CGONAK)
 
     def _ctl_writer(self, n: int, is_in: bool):
+        rw = (DIEPCTL0_RW if is_in else DOEPCTL0_RW) if n == 0 else (DIEPCTLX_RW if is_in else DOEPCTLX_RW)
+
         def wr(blk, reg, old, new):
             off = self._ictl(n) if is_in else self._octl(n)
             ioff = off + 8
-            v = new & ~CTL_WO
+            v = (new & rw) | (old & (DPID | NAKSTS))          # reserved bits read 0 (34.16.4)
             v |= old & EPENA                                  # EPENA: cleared by the core only
             if n == 0:
                 v |= USBAEP
@@ -635,6 +767,8 @@ class OtgCore(GatedBlock):
                 self._check_fifos((self._txfnum(n),))
             if new & CNAK:
                 v &= ~NAKSTS
+                if is_in:
+                    self._clr_bits(ioff, INEPNE)              # "cleared ... by writing to the CNAK bit" (DIEPINTx)
             if new & SNAK:
                 v |= NAKSTS
                 if is_in:
@@ -643,7 +777,7 @@ class OtgCore(GatedBlock):
                 v &= ~DPID
             if n and new & SD1PID:
                 v |= DPID
-            if new & EPDIS:
+            if new & EPDIS and (n or is_in):                  # "The application cannot disable control OUT EP 0"
                 if old & EPENA:
                     v &= ~(EPENA | EPDIS)
                     self._set_bits(ioff, EPDISD)
@@ -666,9 +800,21 @@ class OtgCore(GatedBlock):
         self.rx.pop()
         st = (w >> 17) & 0xF
         ep = w & 0xF
-        if st == ST_OUT_DONE and ep < self.n_eps:
+        if st == ST_OUT and ep < self.n_eps:
+            # XFRSIZ counts down as packets are read out of the RX FIFO (34.16.4 DOEPTSIZx, 34.17.6 step 5)
+            ts_off = self._octl(ep) + 0x10
+            xmask = 0x7F if ep == 0 else 0x7FFFF
+            ts = self._r(ts_off)
+            self._w(ts_off, (ts & ~xmask) | max(0, (ts & xmask) - ((w >> 4) & 0x7FF)))
+        elif st == ST_OUT_DONE and ep < self.n_eps:
+            # "When the application pops this entry, a transfer completed interrupt is generated for the endpoint
+            # and the endpoint enable is cleared" (34.17.6 step 7)
+            self._clr_bits(self._octl(ep), EPENA)
             self._set_bits(self._octl(ep) + 8, XFRC)
         elif st == ST_SETUP_DONE:
+            # STUP on popping the setup-stage-done word; "the core clears the endpoint enable bit for control OUT
+            # endpoints" (34.17.6 "SETUP transactions", internal data flow 5)
+            self._clr_bits(self._octl(0), EPENA)
             self._set_bits(self._octl(0) + 8, STUP | (B2BSTUP if self._b2b > 3 else 0))
             self._b2b = 0
         elif st == ST_GONAK and self._gonak == "pending":
@@ -676,9 +822,9 @@ class OtgCore(GatedBlock):
         self._update_irq()
         return w
 
-    def _rx_entry(self, st: int, ep: int, data: bytes = b"", dpid: int = 0) -> bool:
+    def _rx_entry(self, st: int, ep: int, data: bytes = b"", dpid: int = 0, reserve: int = 0) -> bool:
         words = _words(data)
-        if self.rx.free < 1 + len(words):
+        if self.rx.free < 1 + len(words) + reserve:
             return False
         self.rx.push((st << 17) | ((dpid & 3) << 15) | ((len(data) & 0x7FF) << 4) | (ep & 0xF))
         for w in words:
@@ -706,10 +852,26 @@ class OtgCore(GatedBlock):
             return False
         r = rcc(self.chip)
         hclk = getattr(r, "core_hz", None) if r is not None else None
-        if hclk is not None and hclk < 14.2e6:
-            self._warn_once("hclk", f"{self.name}: HCLK {fmt_hz(hclk)} is below the 14.2 MHz the USB FS core needs")
+        if hclk is not None and hclk < self.hclk_min:
+            self._warn_once("hclk", f"{self.name}: HCLK {fmt_hz(hclk)} is below the {fmt_hz(self.hclk_min)} the "
+                            f"{self.prefix} core needs (RM0090 {'35.3.3' if self.has_dma else '34.3.3'})")
             return False
+        if hclk is not None:
+            self._check_trdt(hclk)
         return True
+
+    def _check_trdt(self, hclk: float) -> None:
+        """GUSBCFG.TRDT below the minimum of Table 203 (OTG_FS) / Table 213 (OTG_HS) for this AHB frequency: one
+        `warn` (silicon may underrun the TX FIFO on IN tokens; the data are still sent correctly here)."""
+        trdt = (self._r(0x00C) >> 10) & 0xF
+        key = (round(hclk), trdt)
+        if key == self._trdt_key:
+            return
+        self._trdt_key = key
+        need = next((t for mhz, t in (TRDT_HS if self.has_dma else TRDT_FS) if hclk >= mhz * 1e6), None)
+        if need is not None and trdt < need:
+            self._warn_once(f"trdt{key}", f"{self.name}: GUSBCFG.TRDT = {trdt} is below the minimum {need} for "
+                            f"HCLK {fmt_hz(hclk)} (RM0090 Table {213 if self.has_dma else 203})")
 
     def _vbus_pin(self) -> Any:
         pb = getattr(self.chip, "pins", None)
@@ -801,16 +963,17 @@ class OtgCore(GatedBlock):
     def usb_reset(self, bus, active: bool, t: float) -> None:
         if self._cmod:
             return
+        self._cancel_susp()
+        self._esusp = False
         if active:
+            # The core only flags the reset and deactivates endpoints 1..n (USBAEP, 34.16.4 DIEPCTLx/DOEPCTLx);
+            # NAKing the OUT endpoints is the application's job (34.17.5 "Endpoint initialization on USB reset").
             self.stats["resets"] += 1
             self._suspended = False
             self._clr_bits(0x808, SUSPSTS)
-            for n in range(self.n_eps):
-                o = self._octl(n)
-                self._set_bits(o, NAKSTS)
-                if n:
-                    self._clr_bits(o, USBAEP)
-                    self._clr_bits(self._ictl(n), USBAEP)
+            for n in range(1, self.n_eps):
+                self._clr_bits(self._octl(n), USBAEP)
+                self._clr_bits(self._ictl(n), USBAEP)
             self._setup_pending = False
             self._addr_old = None
             self._gint(USBRST)
@@ -820,11 +983,33 @@ class OtgCore(GatedBlock):
             self._gint(ENUMDNE)
 
     def usb_suspend(self, bus, t: float) -> None:
+        """3 ms of bus idle: ESUSP; "confirmed 3 ms later, if appropriate, by the suspend interrupt (USBSUSP)", with
+        DSTS.SUSPSTS set then (RM0090 34.5.2 "Suspended state")."""
+        self._esusp = True
+        self._gint(ESUSP)
+        self._cancel_susp()
+        if self.chip is not None:
+            self._susp_ev = self.chip.sched.in_ns(3e6, self._enter_suspend)
+
+    def _enter_suspend(self) -> None:
+        self._susp_ev = None
+        if not self._esusp:
+            return
+        self._esusp = False
         self._suspended = True
         self._set_bits(0x808, SUSPSTS)
-        self._gint(ESUSP | USBSUSP)
+        self._gint(USBSUSP)
+
+    def _bus_activity(self) -> None:
+        """Traffic during early suspend: the idle bus was not a suspend after all."""
+        if self._esusp:
+            self._esusp = False
+            self._cancel_susp()
 
     def usb_resume(self, bus, t: float) -> None:
+        if self._esusp:
+            self._bus_activity()
+            return
         if not self._suspended:
             return
         self._suspended = False
@@ -835,6 +1020,7 @@ class OtgCore(GatedBlock):
             exti_input(self.chip, self.exti_line, False)
 
     def usb_sof(self, bus, frame: int, t: float) -> None:
+        self._bus_activity()
         self.stats["sof"] += 1
         self._w(0x808, (self._r(0x808) & ~(0x3FFF << 8)) | ((frame & 0x3FFF) << 8))
         if self._r(0x018) & SOF or not (self._r(0x014) & SOF):
@@ -844,27 +1030,41 @@ class OtgCore(GatedBlock):
             sig = f"{self.prefix}_SOF"
             if any(pb.signal_matches(p.owner, sig) for p in pb.signal_pins(sig)):
                 pb.drive_signal(sig, "H")
-                self._evs.append(self.chip.sched.in_ns(1e3, pb.drive_signal, sig, "L"))
+                r = rcc(self.chip)
+                hclk = getattr(r, "core_hz", 0) if r is not None else 0
+                width = SOF_PULSE_HCLK * 1e9 / hclk if hclk else 1e3     # 20 HCLK cycles (34.7.2)
+                self._evs.append(self.chip.sched.in_ns(width, pb.drive_signal, sig, "L"))
                 if len(self._evs) > 8:
                     self._evs = [e for e in self._evs if not e.cancelled]
 
     def _setup_done(self) -> None:
-        """An IN/OUT token on EP0 after a SETUP: push the "SETUP stage done" entry."""
+        """An IN/OUT token on EP0 after a SETUP: "when the Setup stage changes to a Data IN/OUT stage, the core writes
+        an entry (Setup stage done word)" (34.17.6 "SETUP transactions", internal data flow 3)."""
         if not self._setup_pending:
             return
         self._setup_pending = False
         if self._dma():
+            self._clr_bits(self._octl(0), EPENA)
             self._set_bits(self._octl(0) + 8, STUP)
             self._update_irq()
         else:
-            self.rx.push((ST_SETUP_DONE << 17) | 0)
+            if not self.rx.push((ST_SETUP_DONE << 17) | 0):
+                self._warn_once("setupfull", f"{self.name}: SETUP stage done word lost: RX FIFO full")
             self._update_irq()
+
+    def _nak(self, intoff: int) -> str:
+        """A NAK handshake on an endpoint: DIEPINTx / DOEPINTx.NAK (bit 13, "generated when a NAK is transmitted")."""
+        self.stats["nak"] += 1
+        self._set_bits(intoff, EPNAK)
+        self._update_irq()
+        return "NAK"
 
     def usb_setup(self, bus, x) -> str | None:
         if not self._ready() or x.ep >= self.n_eps or not self._addr_match(x.addr):
             return None
         if x.ep != 0:
             return None
+        self._bus_activity()
         self.stats["setup"] += 1
         if self._dma():
             dst = self._r(self._octl(0) + 0x14)
@@ -872,6 +1072,8 @@ class OtgCore(GatedBlock):
                 self.chip.bus.write(dst + i, 1, b)
             self._w(self._octl(0) + 0x14, dst + 8)
         elif not self._rx_entry(ST_SETUP, 0, x.data[:8], dpid=0):
+            # written "without checking for available space" into the 10 words the core keeps for SETUPs
+            # (34.17.6); a FIFO that is really full (entries never popped) loses it
             self._warn_once("setupfull", f"{self.name}: SETUP packet lost: no room in the RX FIFO (GRXFSIZ too "
                             f"small or entries not popped)")
             return "ACK"
@@ -880,12 +1082,16 @@ class OtgCore(GatedBlock):
         ts = (ts & ~(3 << 29)) | (max(cnt - 1, 0) << 29)
         self._w(self._octl(0) + 0x10, ts)
         self._b2b = self._b2b + 1 if self._setup_pending else 1
+        # "The core internally sets the IN NAK and OUT NAK bits for the control IN/OUT endpoints on which the SETUP
+        # packet was received" (34.17.6); STALL is cleared by a SETUP (DIEPCTL0/DOEPCTL0.STALL)
         for off in (self._ictl(0), self._octl(0)):
             self._w(off, (self._r(off) & ~STALL) | NAKSTS)
+        self._set_bits(self._ictl(0) + 8, INEPNE)      # NAK set "by the core" has taken effect (DIEPINTx.INEPNE)
         self._in_pending.pop(0, None)
         self._ep0_in_tog = 1
         self._ep0_out_tog = 1
         self._ctrl_in = bool(x.data[0] & 0x80)
+        self._ctrl_wlen = int.from_bytes(bytes(x.data[6:8]), "little") if len(x.data) >= 8 else 0
         self._setup_pending = True
         self._update_irq()
         return "ACK"
@@ -893,13 +1099,16 @@ class OtgCore(GatedBlock):
     def usb_out(self, bus, x) -> str | None:
         if not self._ready() or x.ep >= self.n_eps or not self._addr_match(x.addr):
             return None
+        self._bus_activity()
         n = x.ep
         o = self._octl(n)
         ctl = self._r(o)
         if n == 0:
             self._setup_done()
-            if self._ctrl_in:
-                self._set_bits(o + 8, STSPHSRX)
+            if self._ctrl_in and x.data and self._r(0x800) & 4:
+                # status OUT of a control read with data and DCFG.NZLSOHSK: STALL, packet not delivered (34.16.4)
+                self.stats["stall"] += 1
+                return "STALL"
         elif not ctl & USBAEP:
             return None
         if ctl & STALL:
@@ -908,12 +1117,9 @@ class OtgCore(GatedBlock):
         if not ctl & EPENA:
             if n == 0:
                 self._set_bits(o + 8, OTEPDIS)
-                self._update_irq()
-            self.stats["nak"] += 1
-            return "NAK"
+            return self._nak(o + 8)
         if ctl & NAKSTS or self._gonak is not None:
-            self.stats["nak"] += 1
-            return "NAK"
+            return self._nak(o + 8)
         data = x.data
         # data toggle
         if n == 0:
@@ -925,28 +1131,31 @@ class OtgCore(GatedBlock):
             return "ACK"
         mps = self._mps(n, False)
         ts = self._r(o + 0x10)
+        xfr_mask = 0x7F if n == 0 else 0x7FFFF
         if self._dma():
             dst = self._r(o + 0x14)
             for i, b in enumerate(data):
                 self.chip.bus.write(dst + i, 1, b)
             self._w(o + 0x14, dst + len(data))
-        elif not self._rx_entry(ST_OUT, n, data, dpid=2 if got else 0):
-            self.stats["nak"] += 1
-            return "NAK"
+            ts = (ts & ~xfr_mask) | max(0, (ts & xfr_mask) - len(data))
+        elif not self._rx_entry(ST_OUT, n, data, dpid=2 if got else 0, reserve=SETUP_RESERVE):
+            # "If there is no space in the receive FIFO ... non-isochronous OUT tokens receive a NAK" (34.17.6);
+            # the 10 SETUP words are never used for data
+            return self._nak(o + 8)
         self.stats["out"] += 1
         if n == 0:
             self._ep0_out_tog ^= 1
         else:
             self._w(o, ctl ^ DPID)
-        xfr_mask = 0x7F if n == 0 else 0x7FFFF
         pk_mask = 1 if n == 0 else 0x3FF
-        xfr = max(0, (ts & xfr_mask) - len(data))
-        pk = max(0, ((ts >> 19) & pk_mask) - 1)
-        ts = (ts & ~(xfr_mask | (pk_mask << 19))) | xfr | (pk << 19)
+        pk = max(0, ((ts >> 19) & pk_mask) - 1)                  # PKTCNT: per packet written to the RX FIFO
+        ts = (ts & ~(pk_mask << 19)) | (pk << 19)
         self._w(o + 0x10, ts)
         if pk == 0 or len(data) < mps:
-            self._w(o, self._r(o) & ~EPENA)
+            # transfer done on the USB side: the core sets the endpoint NAK (34.17.6 OUT internal data flow 3)
+            self._set_bits(o, NAKSTS)
             if self._dma():
+                self._clr_bits(o, EPENA)
                 self._set_bits(o + 8, XFRC)
             else:
                 self._rx_entry(ST_OUT_DONE, n)
@@ -956,41 +1165,51 @@ class OtgCore(GatedBlock):
     def usb_in(self, bus, x):
         if not self._ready() or x.ep >= self.n_eps or not self._addr_match(x.addr):
             return None
+        self._bus_activity()
         n = x.ep
         i = self._ictl(n)
         ctl = self._r(i)
         if n == 0:
             self._setup_done()
+            if not self._ctrl_in and self._ctrl_wlen and not self.has_dma:
+                # IN token of the status stage of a control write: DOEPINT0.STSPHSRX (34.16.4, OTG_FS only)
+                self._set_bits(self._octl(0) + 8, STSPHSRX)
         elif not ctl & USBAEP:
             return None
         if ctl & STALL:
             self.stats["stall"] += 1
             return "STALL"
-        if not ctl & EPENA or ctl & NAKSTS or self._ginak:
-            self.stats["nak"] += 1
-            return "NAK"
+        if ctl & NAKSTS or self._ginak:
+            return self._nak(i + 8)
         ts = self._r(i + 0x10)
         pk = (ts >> 19) & (3 if n == 0 else 0x3FF)
         xfr = ts & (0x7F if n == 0 else 0x7FFFF)
-        if pk == 0:
-            self.stats["nak"] += 1
-            return "NAK"
-        mps = self._mps(n, True)
-        ln = min(mps, xfr)
         if self._dma():
+            if not ctl & EPENA or pk == 0:
+                return self._nak(i + 8)
+            ln = min(self._mps(n, True), xfr)
             src = self._r(i + 0x14)
-            data = bytes(self.chip.bus.read(src + k, 1) for k in range(ln))
+            if 0x08000000 <= src < 0x08100000 or 0x1FFF0000 <= src < 0x1FFF7A20:
+                self._warn_once(f"dmaflash{n}", f"{self.name}: IN endpoint {n} DMA address 0x{src:08X} is in Flash: "
+                                f"the USB DMA cannot address the internal Flash memory (RM0090 Figure 410): "
+                                f"zeros sent")
+                data = bytes(ln)
+            else:
+                data = bytes(self.chip.bus.read(src + k, 1) for k in range(ln))
             words = 0
         else:
-            words = (ln + 3) // 4
+            q = self._inq.get(n)
             f = self.tx[self._txfnum(n)]
-            if f.n < words:
+            if ctl & EPENA and pk and q and f.n >= (q[0] + 3) // 4:
+                ln = q[0]
+                words = (ln + 3) // 4
+                data = b"".join(f.peek(k).to_bytes(4, "little") for k in range(words))[:ln]
+            elif ctl & EPENA and pk and not q and n not in self._in_part and xfr == 0:
+                ln, words, data = 0, 0, b""                     # zero-length packet (internal ZLP flag)
+            else:
+                # no complete packet in the TX FIFO: ITTXFE ("provided that the endpoint NAK bit is not set"), NAK
                 self._set_bits(i + 8, ITTXFE)
-                self._update_irq()
-                self.stats["nak"] += 1
-                return "NAK"
-            raw = b"".join(f.peek(k).to_bytes(4, "little") for k in range(words))
-            data = raw[:ln]
+                return self._nak(i + 8)
         tog = self._ep0_in_tog if n == 0 else (1 if ctl & DPID else 0)
         self._in_pending[n] = (ln, words, data)
         return ("DATA1" if tog else "DATA0", data)
@@ -999,29 +1218,35 @@ class OtgCore(GatedBlock):
         n = x.ep
         p = self._in_pending.pop(n, None)
         if p is None or not acked:
-            return
+            return                                     # timeout: PKTCNT not decremented, the FIFO rewinds
         ln, words, _data = p
         i = self._ictl(n)
         self.stats["in"] += 1
+        ts = self._r(i + 0x10)
+        xfr_mask = 0x7F if n == 0 else 0x7FFFF
+        pk_mask = 3 if n == 0 else 0x3FF
         if self._dma():
             self._w(i + 0x14, self._r(i + 0x14) + ln)
+            ts = (ts & ~xfr_mask) | max(0, (ts & xfr_mask) - ln)
         else:
             f = self.tx[self._txfnum(n)]
             for _ in range(words):
                 f.pop()
+            q = self._inq.get(n)
+            if q and words:
+                q.pop(0)
         if n == 0:
             self._ep0_in_tog ^= 1
             if self._addr_old is not None and ln == 0:
                 self._addr_old = None                  # status stage of SET_ADDRESS done: new address only
         else:
             self._w(i, self._r(i) ^ DPID)
-        ts = self._r(i + 0x10)
-        xfr_mask = 0x7F if n == 0 else 0x7FFFF
-        pk_mask = 3 if n == 0 else 0x3FF
-        xfr = max(0, (ts & xfr_mask) - ln)
-        pk = max(0, ((ts >> 19) & pk_mask) - 1)
-        self._w(i + 0x10, (ts & ~(xfr_mask | (pk_mask << 19))) | xfr | (pk << 19))
-        if pk == 0:
+        pk = max(0, ((ts >> 19) & pk_mask) - 1)        # PKTCNT: decremented on the host's ACK (34.17.6)
+        ts = (ts & ~(pk_mask << 19)) | (pk << 19)
+        self._w(i + 0x10, ts)
+        if pk == 0 and ts & xfr_mask == 0:
+            # "When the transfer size is 0 and the packet count is 0, the transfer complete (XFRC) interrupt for the
+            # endpoint is generated and the endpoint enable is cleared"
             self._w(i, self._r(i) & ~EPENA)
             self._set_bits(i + 8, XFRC)
         self._update_irq()

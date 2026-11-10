@@ -275,13 +275,16 @@ def test_master_rx_overrun_and_irq():
     g.w(SPI2 + CR2, ERRIE | RXNEIE)
     g.w(SPI2 + I2SCFGR, cfg(mode=MASTER_RX) | I2SE)
     g.run(20e3)
-    assert g.r(SPI2 + SR) & RXNE and g.r(SPI2 + DR) == 0xFFFF
-    g.run(40e3)
     sr = g.r(SPI2 + SR)
-    assert sr & OVR and (16 + SPI2_IRQ) in g.chip.arch.asserted
-    g.r(SPI2 + DR)
+    assert sr & RXNE and sr & OVR and (16 + SPI2_IRQ) in g.chip.arch.asserted
+    assert not sr & BSY                                        # master receiver: BSY kept low (RM0090 28.4.7)
+    assert g.r(SPI2 + DR) == 0xFFFF
+    g.run(20e3)
+    assert not g.spi.get("SR") & RXNE                          # OVR set: every later half-word is lost (28.4.8)
     assert g.r(SPI2 + SR) & OVR                                # DR read then SR read clears OVR (returned set)
     assert not g.r(SPI2 + SR) & OVR
+    g.run(20e3)
+    assert g.r(SPI2 + SR) & RXNE                               # receiving again
 
 
 def test_slave_tx_underrun_and_frame_error():
@@ -437,3 +440,86 @@ def test_sample_board():
     eng = a.peripherals["SPI2"].i2s
     assert eng.fs_hz() == pytest.approx(8000) and eng.mck_out_hz() == pytest.approx(2.048e6)
     s.close()
+
+
+# ------------------------------------------------------------------------------------------------ RM0090 28.4.5-28.4.8
+def test_master_stops_at_the_end_of_the_current_half_word():
+    """28.4.5 (receiver switch-off sequences, e.g. 16-bit data in a 32-bit LSB-justified channel: wait 17 CK after the
+    second-to-last RXNE): clearing I2SE stops a master at the end of the current 16-bit half-word, not of the slot."""
+    g = Rig()
+    g.w(SPI2 + I2SPR, 25)
+    g.w(SPI2 + I2SCFGR, cfg(std=MSB, chlen=1) | I2SE)
+    eng = g.spi.i2s
+    while not (eng.p >= 32 and 3 <= eng.p % 32 <= 10):
+        g.run(100)
+    t_clear = g.chip.now_ns()
+    g.w(SPI2 + I2SCFGR, cfg(std=MSB, chlen=1))
+    assert not g.r(SPI2 + I2SCFGR) & I2SE
+    g.run(30e3)
+    assert not eng.running
+    rises = [t for t, p, v in g.edges if p == "PB13" and v == "H"]
+    n = len(rises) - 2                                         # two lead-in bit clocks
+    assert n % 16 == 0 and n % 32 == 16                        # ended after the first half-word of a slot
+    assert len([t for t in rises if t > t_clear]) < 16
+
+
+def test_txe_reset_while_disabled():
+    """28.4.7: TXE is reset when the I2S is disabled; it is set again once enabled with an empty TX buffer."""
+    g = Rig()
+    g.w(SPI2 + I2SPR, 25)
+    g.w(SPI2 + I2SCFGR, cfg() | I2SE)
+    assert g.r(SPI2 + SR) & TXE
+    g.w(SPI2 + I2SCFGR, cfg())
+    assert not g.r(SPI2 + SR) & TXE
+    g.run(30e3)
+    g.w(SPI2 + I2SCFGR, cfg() | I2SE)
+    assert g.r(SPI2 + SR) & TXE
+
+
+def _slave_bits(g, ws_seq, sd=0):
+    pins = g.chip.pins
+    out = []
+    for w in ws_seq:
+        pins.set_external("PB12", w)
+        pins.set_external("PB15", sd)
+        pins.set_external("PB13", 1)
+        pins.set_external("PB13", 0)
+        out.append(g.spi.get("SR"))
+    return out
+
+
+def test_slave_bsy_low_one_clock_between_half_words():
+    """28.4.7: in slave mode BSY goes low for one I2S clock cycle between transfers (16-bit half-words)."""
+    g = Rig()
+    g.chip.pins.set_external("PB13", 0)
+    g.w(SPI2 + I2SCFGR, cfg(mode=SLAVE_RX, std=MSB) | I2SE)
+    assert not g.r(SPI2 + SR) & BSY
+    _slave_bits(g, [0] * 4)
+    srs = _slave_bits(g, [1] * 16 + [0] * 16 + [1] * 16)        # synchronised at the first WS rise
+    bsy = [bool(s & BSY) for s in srs]
+    assert bsy == ([True] * 15 + [False]) * 3
+    g.r(SPI2 + DR)
+
+
+def test_slave_frame_error_needs_reenable():
+    """28.4.8: after FRE the slave stays desynchronised; it resynchronises only after I2SE is cleared and set."""
+    g = Rig()
+    g.chip.pins.set_external("PB13", 0)
+    g.w(SPI2 + I2SCFGR, cfg(mode=SLAVE_RX, std=MSB) | I2SE)
+    _slave_bits(g, [0] * 4 + [1] * 16 + [0] * 5 + [1])          # WS changes 5 bits into the right slot: FRE
+    assert g.r(SPI2 + SR) & FRE
+    g.r(SPI2 + DR)
+    srs = _slave_bits(g, [1] * 15 + ([0] * 16 + [1] * 16) * 2)  # valid frames: ignored
+    assert not any(s & (RXNE | BSY) for s in srs)
+    g.w(SPI2 + I2SCFGR, cfg(mode=SLAVE_RX, std=MSB))
+    g.w(SPI2 + I2SCFGR, cfg(mode=SLAVE_RX, std=MSB) | I2SE)
+    srs = _slave_bits(g, [0] * 4 + [1] * 16)
+    assert srs[-1] & RXNE
+
+
+def test_plli2s_wrong_configuration_warns():
+    """7.3.23: PLLI2SN must be 50..432, the VCO 100..432 MHz, the I2S clock at most 192 MHz."""
+    g = Rig(n=40, r=2, pins=False, ext_pin=False)               # 1 MHz x 40 = 40 MHz VCO, N < 50
+    assert g.chip.peripherals["RCC"].plli2s_hz() == pytest.approx(20e6)
+    msgs = [e.fields["msg"] for e in g.ses.log if e.kind == "warn"]
+    assert any("PLLI2SN = 40" in m for m in msgs) and any("VCO 40 MHz" in m for m in msgs)

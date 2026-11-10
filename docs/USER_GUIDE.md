@@ -803,31 +803,41 @@ The page:
 
 | area | what you do there |
 |---|---|
-| Toolbar | Run, Pause, Step, Reset, "Run for" a duration (Enter runs); readouts: status, virtual time, cycles, instructions, clock, PC, speed; chip selector on boards |
-| Package / board canvas | the package drawn to scale, pins coloured by level, owner tags (`UART0_TX`). Wheel zooms, drag pans, double-click fits. Hover a pin for its data, click for the pin card, **alt-click to drive it H → L → open** |
-| Pins tab | sortable, filterable pin table; "changed only" and "hide power/disabled" toggles; copy and CSV export |
+| Toolbar | Run, Pause, Step N (count field; steps the selected chip), Reset (chips reset, virtual time continues), Restart (rebuild the current setup at t=0, the page reloads), "Run for" a duration (Enter runs); readouts: status badge (with the emulator error inline: click copies it), virtual time, speed, clock, PC (click: CPU registers popover, copyable), instructions, cycles; chip tabs on boards |
+| Package / board canvas | the package drawn to scale, pins coloured by level, owner tags (`UART0_TX`); on boards also nets, UART links and CAN / Ethernet / USB buses (bus line with name and live counters; click: its row in Links). Wheel zooms, drag pans, double-click fits. Hover a pin for its data, click for the pin card (copy, locate, drive H / L / open, trace, analog value for ADC pins), **alt-click to drive it H → L → open**. Keyboard: one Tab stop per package, arrows move between pins, Enter opens the card, Esc closes it |
+| Pins tab | sortable (click or Enter on a header), filterable pin table with wave (frequency and duty %) and analog columns; "changed only" and "hide power/disabled" toggles; a row click shows the pin on the canvas; copy, CSV, `vcd` (traced pins, else the selected chip); `at` field for timed stimulus (`10ms:PTC6=0`, `+5ms:B.PA0=H`, `1ms:UART0=hi\r\n`, `SW1=H`) with a history |
 | Discovery tab | the pin report (section 4.6), with a toggle to compare against the static guess |
-| UART | choose a UART, read its output ("lines" with optional timestamps, or "raw"), send text with a line ending; a drop counter shows bytes the receiver lost; copy and download; link monitor on boards |
-| Events | live log with per-kind (and per-chip) filters, text filter, follow, copy, `.txt`/CSV download |
-| Nets, Links, Parts | on boards (section 5.5 and 6) |
+| Logic tab | logic-analyser strip of the traced pins (T on a table row, or "trace" in the pin card): wheel zooms, drag pans, double-click fits, cursor with time and levels, follow, copy |
+| UART | choose a UART (it follows the first one that prints), read its output ("lines" with optional timestamps, or "raw"; default lines on boards with UART links, else raw, your choice is kept), send text with a line ending; a drop counter shows bytes the receiver lost; copy and download; link monitor on boards |
+| Events | live log with per-kind (and per-chip) filters (kinds without events sit behind "+N"), text filter, follow, copy, `.txt`/CSV download; identical consecutive events fold into one row with ×N |
+| Status | CAN TEC / REC / bus state, USB host state, address and device strings, Ethernet link and frame counters, SD card state and capacity, host serial endpoints (connection, line, bytes, lost, errors, modem lines) and real-time pacing |
+| Nets, Links, Parts | on boards (section 5.5 and 6): rename a net inline (double-click), deleting a net, link or part shows a toast with "undo" |
 
-Filters accept plain text (case-insensitive substring) or `/regex/`.
+Filters accept plain text (case-insensitive substring) or `/regex/`. Double-click a pane header to collapse it, a
+sidebar pane title to maximise / restore it; splitters can be dragged or focused and moved with the arrow keys
+(Shift: bigger steps).
 
-Keyboard shortcuts (ignored while typing in a field; `?` shows the list):
+Keyboard shortcuts (case-insensitive; ignored while typing in a field or while a dialog is open; `?` shows the list):
 
 | key | action |
 |---|---|
-| Space | run / pause |
-| S | step one instruction |
-| R | reset |
-| F | fit the canvas |
+| Space | run / pause (on a focused button: presses it) |
+| S | step N instructions on the selected chip |
+| R | reset (time continues) |
+| F, 0 | fit the canvas |
+| + − | zoom the canvas |
+| B | board setup dialog |
 | W | wire mode (boards; click two pins) |
+| T | trace the selected pin in the Logic tab |
 | 1–9 | select a board chip |
-| Del | remove the selected net |
-| / | focus the filter of the pane under the pointer (over the board: find a pin) |
-| Esc | clear the filter / cancel |
+| Del | remove the selected net (undo in the toast) |
+| / | focus the filter of the pane under the pointer (over the board: find a pin; Enter / Shift+Enter: next / previous) |
+| Esc | close a dialog or popover, cancel pick / wire mode, clear the filter |
 | End | jump to the newest line (UART, events) |
 | ? | shortcut list |
+
+If the server stops, the badge shows OFFLINE, the run controls are disabled and the page reconnects (and reloads when
+the server was restarted).
 
 **(new) Light mode.** The sun/moon button in the header switches between the dark and light themes. The page
 starts with your system's preference; once you pick one, it is remembered in the browser (`localStorage`).

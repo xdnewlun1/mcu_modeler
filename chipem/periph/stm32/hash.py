@@ -1,38 +1,48 @@
 """STM32F415/F417 hash processor (HASH, RM0090 ch. 25): SHA-1 and MD5, HMAC, DMA, interrupts, context swapping.
 
-Reference: RM0090 ch. 25 as recalled (the RM could not be fetched while this model was written), the SVD fields
-(chips/stm32f405_regs.yaml) and ST's HAL (firmware/vendor/STM32CubeF4 stm32f4xx_hal_hash.c: HMAC steps, DCAL /
-BUSY polling, context save / restore order).  Algorithms: chipem/crypto_algos.py (pure-Python compression functions
+Reference: RM0090 Rev 22 ch. 25 (section numbers below), the SVD fields (chips/stm32f405_regs.yaml) and ST's HAL
+(firmware/vendor/STM32CubeF4 stm32f4xx_hal_hash.c: HMAC steps, DCAL / BUSY polling, context save / restore order).  Algorithms: chipem/crypto_algos.py (pure-Python compression functions
 with an explicit state, checked against hashlib).
 
 * Presence: STM32F415/F417 only (`params.only`, `_util.part_present`); elsewhere an inactive stub.  Clock gate
-  RCC_AHB2ENR.HASHEN; RCC_AHB2RSTR resets the model.  `params.sha2: true` gives the STM32F43x variant: CR.ALGO[1]
-  (SHA-224 / SHA-256), CR.MDMAT and HASH_HR5..7.  Without it ALGO[1] (bit 18) and MDMAT are reserved: writing them
-  logs one `warn` and they are ignored.
+  RCC_AHB2ENR.HASHEN; RCC_AHB2RSTR resets the model.  SHA-1 and MD5 only on the F415/F417 (RM0090 25.2: SHA-224 /
+  SHA-256 are F43x only).  `params.sha2: true` gives the STM32F43x variant: CR.ALGO[1] (SHA-224 / SHA-256), CR.MDMAT,
+  HASH_HR0..7 at 0x310 and CSR51..53.  Without it ALGO[1] (bit 18) and MDMAT are reserved: writing them logs one
+  `warn` and they are ignored; the reserved CR bits read 0 (25.4.1).
 * CR.INIT (write 1, reads 0) starts a new digest with the ALGO / MODE (HMAC) / LKEY configuration of that write; it
-  clears DCIS and the input buffer.  DATATYPE (00 none, 01 half-word swap, 10 byte swap, 11 bit reversal) applies to
-  every DIN write; the swapped word is the next 32 message bits, most significant first.
-* Input buffer (RM: DIN + 16-word IN FIFO = 17 words): CR.DINNE = DIN holds a word, CR.NBW = words pushed into the
-  FIFO behind it.  Writing a 17th word moves the 16 FIFO words (one 512-bit block) to the core: BUSY for the block
-  time and SR.DINIS is set (16 locations free).  DINIS clears on a DIN write or by writing it 0.
-* STR.NBLW = valid bits of the last DIN word (0 = 32); writing STR.DCAL pads the message (any bit length) and
-  computes the digest: BUSY for every remaining block, then HR0..HR4 (HASH_HR0..7 with sha2; the digest as big-endian
-  words, as HAL_HASH reads it with __REV) and SR.DCIS (cleared by writing 0 or INIT).
-* HMAC (MODE = 1), the three DCAL-terminated phases of RM0090 25.3.x / HAL HMAC_Processing: (1) key: with LKEY = 0
+  clears DCIS, the input buffer and HR0..HR7 (25.4.5 note); DMAE is kept (25.4.1).  DATATYPE (00 none, 01 half-word
+  swap, 10 byte swap, 11 bit reversal) applies to every DIN write; the swapped word is the next 32 message bits, most
+  significant first.
+* Input buffer (25.3.3: DIN + 16-word IN FIFO = 17 words): CR.DINNE = DIN holds a word, CR.NBW = words pushed into
+  the FIFO behind it.  Writing a 17th word moves the 16 FIFO words (one 512-bit block) to the core: BUSY for the block
+  time and SR.DINIS is set (16 locations free).  DINIS clears on a DIN write or by writing it 0 (rc_w0, 25.4.7).
+  Reading DIN returns the last word written (as written, before swapping; 0 after reset, 25.4.3).
+* STR (25.4.4): NBLW = valid bits of the last DIN word (0 = 32); a write with DCAL = 1 leaves NBLW unchanged (NBLW
+  must be written before DCAL, as HAL does).  DCAL pads the message (any bit length) and computes the digest: BUSY
+  for every remaining block, then HR0..HR4 (HASH_HR0..7 with sha2; the digest as big-endian words, as HAL_HASH reads
+  it with __REV) and SR.DCIS (cleared by writing 0 or INIT).  A digest register read while the final digest is being
+  computed stalls on silicon until it is ready (25.4.5): the model returns the final value.
+* HMAC (MODE = 1), the three DCAL-terminated phases of RM0090 25.3.6 / HAL HMAC_Processing: (1) key: with LKEY = 0
   (key <= 64 bytes) the key words are only buffered; with LKEY = 1 the key is hashed first; the core then processes
   the block (key ^ ipad).  (2) message: the inner digest is computed and kept.  (3) key again: the core computes the
   outer hash (key ^ opad, inner digest) and sets DCIS.  BUSY covers each phase's blocks.
-* Processing time per 512-bit block (HCLK cycles, RM0090 25.x as recalled): SHA-1 66, MD5 50, SHA-224/256 50.
+* Processing time per 512-bit block (HCLK cycles, RM0090 25.3.1 / 25.3.5): SHA-1 66, MD5 50, SHA-224/256 50.  The
+  RM adds "at least 16 cycles" to load a block and a factor 1..2.5 (hash) / 2.5..5 (HMAC key) for the last block;
+  the model charges 66 / 50 cycles per compressed block (padding blocks and HMAC pad blocks included).
 * DMA: CR.DMAE requests "HASH_IN" (DMA2 stream 7 channel 2) while the input buffer accepts a word.  When the DMA
   stream serving HASH_IN writes its last item (NDTR 1 -> 0) the hardware sets DCAL itself and clears DMAE, unless
   MDMAT (sha2 parts).  SR.DMAS = DMAE.
 * IRQ "HASH_RNG" (shared with RNG, `_util.shared_irq`) = SR & IMR & (DINIS | DCIS).
-* Context swap registers CSR0..CSR53 (ST does not document their content).  CHIP_EM's layout: CSR0 = 0x5A000000 |
-  algo (bits 0-1) | HMAC (2) | LKEY (3) | phase (4-5) | buffered words (8-13) | inner digest valid (16); CSR1 = 512-bit
-  blocks compressed in the current hash; CSR2..9 = hash state words; CSR10..26 = buffered input words (message order,
-  after swapping); CSR27..34 = HMAC inner digest; CSR35..53 = 0.  Reading them snapshots the live state; writing them
-  (after INIT, as HAL_HASH_ContextRestoring does) restores it, so suspend / resume works across other hashes.  A key
-  phase with LKEY = 0 longer than 17 words cannot be saved (one `warn`).
+* Context swap registers (25.3.7, 25.4.8): CSR0..CSR50 on the F415/F417 (CSR51..53 read 0, writes ignored), CSR0..53
+  with sha2.  ST documents only their reset values (CSR0 = 0x00000002, others 0) and groups: CSR22..37 hold the IN FIFO
+  (not needed when NBW = 0), CSR38..50 the HMAC state (not needed for a plain hash).  CHIP_EM's layout keeps those
+  groups: CSR0 = 0x5A000000 | algo (bits 0-1) | HMAC (2) | LKEY (3) | phase (4-5) | buffered words (8-13) | inner
+  digest valid (16) | HMAC done (17); CSR1 = 512-bit blocks compressed in the current hash; CSR2..9 = hash state words;
+  CSR10 = the DIN word; CSR22..37 = the FIFO words (message order, after swapping); CSR38..45 = HMAC inner digest.
+  Until the first INIT after reset they read their reset values.  Reading them snapshots the live state; writing them
+  (after INIT, as RM0090 25.3.7 and HAL_HASH_ContextRestoring do) restores it, so suspend / resume works across other
+  hashes.  A key phase with LKEY = 0 longer than 17 words cannot be saved (one `warn`).  HAL saves 54 registers on
+  every part (HASH_NUMBER_OF_CSR_REGISTERS); on the F415/F417 the last three are reserved and harmless.
 `digests` keeps (algo, hmac, digest hex) of every completed computation.
 """
 from __future__ import annotations
@@ -51,8 +61,11 @@ DCAL = 1 << 8
 DINIS, DCIS, DMAS, BUSY = 1, 2, 4, 8
 ALGOS = ("sha1", "md5", "sha224", "sha256")
 CYCLES = {"sha1": 66, "md5": 50, "sha224": 50, "sha256": 50}
-NCSR = 54
+NCSR = 54                       # register slots in the SVD; the F415/F417 implement CSR0..50 (RM0090 25.4.8)
+NCSR_F415 = 51
 MAGIC = 0x5A000000
+CR_BITS = LKEY | ALGO0 | MODE | (3 << 4) | DMAE                  # writable CR bits on the F415/F417 (25.4.1)
+CSR_DIN, CSR_FIFO, CSR_HMAC = 10, 22, 38                          # DIN word, IN FIFO (16), HMAC inner digest
 
 
 @register("stm32.hash")
@@ -64,20 +77,24 @@ class HASH(GatedBlock):
         ro = {"ro_mask": 0xFFFFFFFF}
         ov: dict[str, dict] = {
             "CR": {"on_write": self._cr_write, "on_read": self._cr_read},
-            "DIN": {"on_write": self._din_write, "on_read": lambda b, r: 0},
+            "DIN": {"on_write": self._din_write, "on_read": lambda b, r: self._din_last},
             "STR": {"on_write": self._str_write, "on_read": lambda b, r: self.get("STR") & 0x1F},
             "IMR": {"on_write": self._imr_write},
             "SR": {"ro_mask": 0xFFFFFFFF & ~(DINIS | DCIS), "on_write": self._sr_write, "on_read": self._sr_read},
         }
         for i in range(5):
-            ov[f"HR{i}"] = dict(ro)
+            ov[f"HR{i}"] = {**ro, "on_read": self._hr_read(i)}
         for i in range(8):
-            ov[f"HASH_HR{i}"] = dict(ro)
+            ov[f"HASH_HR{i}"] = {**ro, "on_read": self._hr_read(i, True)}
+        sha2 = bool(params.get("sha2", False))
         for i in range(NCSR):
-            ov[f"CSR{i}"] = {"on_read": self._csr_read(i), "on_write": self._csr_write}
+            if i < NCSR_F415 or sha2:
+                ov[f"CSR{i}"] = {"on_read": self._csr_read(i), "on_write": self._csr_write}
+            else:                       # CSR51..53: STM32F43x only
+                ov[f"CSR{i}"] = {**ro, "on_read": lambda b, r: 0}
         r = build_regs((name, "HASH"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
-        self.sha2 = bool(params.get("sha2", False))
+        self.sha2 = sha2
         self._irqn: int | None = None
         self._warned: set[str] = set()
         self.digests: deque = deque(maxlen=1000)
@@ -98,6 +115,9 @@ class HASH(GatedBlock):
         self._line = False
         self._dma = False
         self._restoring = False
+        self._din_last = 0               # HASH_DIN reads back the last word written (25.4.3)
+        self._ctx_live = False           # CSRx read their reset values until the first INIT (25.4.8)
+        self._pending_digest: list[int] | None = None   # digest being computed (an HR read "stalls" until it is ready)
 
     # ------------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
@@ -255,11 +275,13 @@ class HASH(GatedBlock):
         if final is not None:
             if self._done_ev is not None:
                 self.chip.sched.cancel(self._done_ev)
+            self._pending_digest = [int.from_bytes(final[i:i + 4], "big") for i in range(0, len(final), 4)]
             self._done_ev = self.chip.sched.at_cycles(self.busy_until, self._digest_done, final)
         self._sr_flags(DINIS, True)
 
     def _digest_done(self, d: bytes) -> None:
         self._done_ev = None
+        self._pending_digest = None
         ws = [int.from_bytes(d[i:i + 4], "big") for i in range(0, len(d), 4)]
         for i in range(5):
             self.set(f"HR{i}", ws[i] if i < len(ws) else 0)
@@ -292,18 +314,23 @@ class HASH(GatedBlock):
         words[1] = self.nblocks
         for i, v in enumerate(self.st):
             words[2 + i] = v
-        for i, v in enumerate(self.pending[:17]):
-            words[10 + i] = v
+        if n:
+            buf = self.pending[:n]
+            words[CSR_DIN] = buf[-1]                       # the newest word sits in HASH_DIN
+            for i, v in enumerate(buf[:-1]):               # the older ones in the IN FIFO
+                words[CSR_FIFO + i] = v
         if self.inner is not None:
             for i in range(len(self.inner) // 4):
-                words[27 + i] = int.from_bytes(self.inner[4 * i:4 * i + 4], "big")
+                words[CSR_HMAC + i] = int.from_bytes(self.inner[4 * i:4 * i + 4], "big")
         return words
 
     def _csr_read(self, i: int):
         def rd(blk, reg):
+            if not self._ctx_live:
+                return 2 if i == 0 else (0x20000000 if i == 2 and self.sha2 else 0)   # reset values (25.4.8)
             if self.busy():
-                self._warn_once("ctxbusy", f"{self.name}: context swap registers read while BUSY (RM0090: wait for "
-                                f"BUSY = 0 before saving the context)")
+                self._warn_once("ctxbusy", f"{self.name}: context swap registers read while BUSY (RM0090 25.3.7: "
+                                f"wait until no block is being processed before saving the context)")
             return self._ctx()[i]
         return rd
 
@@ -320,12 +347,22 @@ class HASH(GatedBlock):
         n = min((c0 >> 8) & 0x3F, 17)
         self.nblocks = w[1]
         self.st = tuple(w[2:2 + len(self.alg.iv)])
-        self.pending = list(w[10:10 + n])
-        self.inner = (b"".join(x.to_bytes(4, "big") for x in w[27:27 + self.alg.digest_words])
+        self.pending = (list(w[CSR_FIFO:CSR_FIFO + n - 1]) + [w[CSR_DIN]]) if n else []
+        self.inner = (b"".join(x.to_bytes(4, "big") for x in w[CSR_HMAC:CSR_HMAC + self.alg.digest_words])
                       if c0 >> 16 & 1 else None)
+        self._ctx_live = True
         return None
 
     # ------------------------------------------------------------------ register hooks
+    def _hr_read(self, i: int, wide: bool = False):
+        def rd(blk, reg):
+            if wide and not self.sha2:
+                return 0
+            if self._pending_digest is not None:                  # read stalled until the digest is ready (25.4.5)
+                return self._pending_digest[i] if i < len(self._pending_digest) and (wide or i < 5) else 0
+            return self.get(reg.name)
+        return rd
+
     def _cr_read(self, blk, reg):
         v = self.get("CR") & ~(INIT | DINNE | (0xF << 8))
         n = len(self.pending)
@@ -340,7 +377,7 @@ class HASH(GatedBlock):
             self._warn_once("sha2", f"{self.name}: CR.ALGO[1] / MDMAT (SHA-224/256, multi-DMA) exist on the "
                             f"STM32F43x only: ignored on this part")
             new &= ~(ALGO1 | MDMAT)
-        new &= ~(DINNE | (0xF << 8))
+        new &= CR_BITS | INIT | ((ALGO1 | MDMAT) if self.sha2 else 0)
         if new & INIT:
             new &= ~INIT
             algo = (1 if new & ALGO0 else 0) | (2 if new & ALGO1 else 0)
@@ -354,6 +391,12 @@ class HASH(GatedBlock):
             if self._done_ev is not None:
                 self.chip.sched.cancel(self._done_ev)
                 self._done_ev = None
+            self._pending_digest = None
+            for i in range(5):                            # digest registers take their reset value (25.4.5)
+                self.set(f"HR{i}", 0)
+            for i in range(8):
+                self.set(f"HASH_HR{i}", 0)
+            self._ctx_live = True
             self._store(reg, new)
             self.set("SR", (self.get("SR") & ~DCIS) | DINIS)
         self._store(reg, new)
@@ -364,6 +407,7 @@ class HASH(GatedBlock):
         if self.absent:
             return None
         cr = self.get("CR")
+        self._din_last = new & 0xFFFFFFFF
         self._sr_flags(DINIS, False)
         self._push(swap_word(new, (cr >> 4) & 3))
         if cr & DMAE and self._dma_last():
@@ -376,10 +420,12 @@ class HASH(GatedBlock):
     def _str_write(self, blk, reg, old, new):
         if self.absent:
             return None
-        self._store(reg, new & 0x1F)
-        if new & DCAL:
+        if new & DCAL:                                    # NBLW is not changed by a write with DCAL = 1 (25.4.4)
+            self._store(reg, old & 0x1F)
             self._dcal()
             self._update()
+            return old & 0x1F
+        self._store(reg, new & 0x1F)
         return new & 0x1F
 
     def _imr_write(self, blk, reg, old, new):

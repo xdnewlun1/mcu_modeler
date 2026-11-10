@@ -244,8 +244,18 @@ The page shows:
   the rows the filter shows.
 - **Pins**: a sortable, filterable table (by name, function or owner) with "changed only" and "hide
   power/disabled" toggles. Rows flash when they change.
-- **Toolbar**: Run, Pause, Step, Reset, "Run for" a duration, plus readouts of status, virtual time,
-  cycles, core clock and PC, the theme switch and `?` (keyboard shortcuts).
+- **Toolbar**: Run, Pause, Step N (on the selected chip), Reset (time continues), Restart (rebuild at t=0),
+  "Run for" a duration, plus readouts of status, virtual time, cycles, core clock and PC (click: CPU registers
+  popover), the theme switch and `?` (keyboard shortcuts). When the server is gone the badge says OFFLINE, run
+  controls are disabled and the page reconnects by itself.
+- **Logic tab**: a compact logic-analyser strip for pins you trace (pin card "trace", or T on a table row): zoom,
+  pan, cursor readout, copy. "vcd" downloads a VCD of the traced pins (or the selected chip) from the kept pin
+  events; "at" schedules a timed stimulus (`10ms:PTC6=0`, `+5ms:B.PA0=H`, `SW1=H`).
+- **Links / Status**: UART links and CAN / Ethernet / USB buses (also drawn on the board) with live counters; the
+  Status pane shows CAN TEC/REC/bus state, USB host state and device, Ethernet link and frames, SD card state,
+  host serial endpoints and real-time lag.
+- **Analog inputs**: the pin table's "analog" column and the pin card set an ADC input (integer = raw code,
+  `1.65V` / `1200mV` = volts, as `/api/adc`).
 - **Light and dark theme**: the page follows the system setting (`prefers-color-scheme`) until you click the
   sun / moon button in the header; the choice is then kept in the browser (`localStorage`, key `chipem.theme`).
   Both themes use the same encoding (H solid, L hollow, X hatched), so levels never depend on colour alone.
@@ -323,14 +333,21 @@ The HTTP API used by the page is plain JSON and can also be scripted:
 
 - `GET`: `/api/chip`, `/api/state`, `/api/events?since=SEQ`, `/api/uart?uart=UART0`,
   `/api/pinreport?chip=B&static=1`, `/api/stream` (Server-Sent Events).
-- `POST`: `/api/run {"ms": 2}` (omit `ms` to free-run), `/api/pause`, `/api/step {"n": 1}`, `/api/reset`,
+- `GET` (more): `/api/events?pin=A.PTC6` (exact pin), `/api/uart/lines` (transcript lines built from the kept uart
+  events), `/api/vcd?chip=A&pins=A.PTC6` (VCD from the kept pin events; dense PWM kept as `wave` summaries is not
+  expanded).
+- `POST`: `/api/run {"ms": 2}` (omit `ms` to free-run), `/api/pause`, `/api/step {"n": 1, "chip": "B"}`, `/api/reset`,
+  `/api/restart` (t=0 rebuild of the current setup), `/api/stimulus {"spec": "+5ms:PTC6=0"}`,
   `/api/pin {"name": "PTC6", "level": "L"}` (`null` = disconnect), `/api/uart {"uart": "UART0", "text": "hi\r\n"}`,
   `/api/adc {"channel": "ADC0_SE14", "value": 2048}`.
 - On a board, names are qualified with the chip id (`B.PTC6`, `B.UART0`). `/api/chip` keeps the single-chip
   fields at the top level and adds `chips` (`id`, `name`, `package`, `pin_count`, `pins`, `uarts`, `adcs`),
   `board` (`name`, `quantum_ns`), `nets` (`name`, `pins`, `pull`, `level`) and `links` (`type`, `from`, `to`,
   `stats`). `/api/state` has `pins` rows for every chip (each with `chip`), `chips` (per-chip state) and
-  `board` (time, skew, net levels, link byte counts). SSE `state` frames carry `pins` only when a pin changed.
+  `board` (time, skew, net levels, link byte counts, `buses`). `/api/chip` also has `buses` (CAN / Ethernet / USB:
+  `type`, `name`, `nodes`, `host`, `stats`) and a per-pin `adc` channel. SSE `state` frames carry slim pin rows
+  (dynamic fields only): the full set with `pins_full` first, then only the rows that changed; `waves`
+  (`{"A:77": {edges, freq_hz, duty %}}`, at most 2 Hz), `adc` values and `periph` status rows.
 
 ```
 $ curl -s -X POST localhost:8765/api/pin -d '{"name":"PTC6","level":"L"}'
@@ -594,7 +611,7 @@ costs no CPU. Host bytes follow the UART wire rules (paced at the host's baud, d
 listening, a baud mismatch is a framing error with a `warn`). The serial parts (`usb_serial_adapter`,
 `rs232_transceiver`, `db9`/`rj50`/`connector`, `cable` with an explicit pin `map`) carry bytes only along an
 electrically sound path: a swapped cable, a missing transceiver or GND wire fail as they would on the bench. See
-docs/USER_GUIDE.md 6.2; web UI: the "host serial" box in the UART pane, `GET /api/hostserial`.
+docs/USER_GUIDE.md 6.2; web UI: the Status pane, `GET /api/hostserial`.
 
 ### C2000 ↔ STM32 over UART
 
@@ -941,7 +958,7 @@ Modelled (behaviour beyond register storage):
 | STM32 I2S2/I2S3, I2S2ext/I2S3ext | `stm32.spi` (I2S mode), `stm32.i2s_ext` | I2S mode of SPI2/SPI3: master/slave TX/RX, Philips/MSB/LSB/PCM (short/long sync), DATLEN 16/24/32 and CHLEN 16/32 (two DR accesses for 24/32 bit), CKPOL, Fs from PLLI2S (RCC_PLLI2SCFGR N/R) or I2S_CKIN with I2SDIV/ODD/MCKOE (MCK = 256 Fs), CK/WS/SD waveforms on the pins (MCK toggled up to 1 MHz, faster summarised as `wave`), CHSIDE/UDR/OVR/FRE/BSY, IRQ, DMA; full-duplex extensions on their own SD pins (DMA I2Sx_EXT_RX/TX); interoperates with the `i2s_codec` part; `i2s` log events |
 | STM32 Ethernet (F407/F417) | `stm32.eth` | MAC + MMC + PTP + DMA (one 0x1400 block): MII/RMII selection (SYSCFG_PMC, latched at clock enable / MAC reset), DMABMR software reset that needs the PHY clock pin, MDIO (MACMIIAR/MIIDR, 64 MDC clocks at HCLK/42..102, busy bit) to a clause-22 PHY (LAN8720/LAN8742/DP83848/KSZ8081 IDs and vendor status registers, auto-negotiation delay, latched link status), frame filter (perfect MACA0-3 with SA/MBC, 64-bit hash, promiscuous, broadcast/multicast, receive all), pause frames, magic packet wake-up (EXTI19), MMC counters, normal/enhanced TX/RX descriptors in RAM (ring/chained, multi-descriptor frames, TBUS/RBUS suspend, poll demands), checksum insertion/verification (IPv4/IPv6 TCP/UDP/ICMP), DMASR NIS/AIS/TPS/RPS, ETH IRQ; wire timing at 10/100 Mbit/s; frames on a board `eth` segment with a host node (ARP, ping) and pcap capture; ST's HAL ETH driver works. Absent (stub) on F405/F415 |
 | STM32 DCMI (F407/F417) | `stm32.dcmi` | camera interface: hardware/embedded sync, crop window, FCRC, snapshot/continuous, JPEG, 8–14-bit packing (EDM), 8-word FIFO with overrun, FRAME/OVR/ERR/VSYNC/LINE flags, IRQ, DMA request `DCMI`; fed line by line by the `camera` board part. Absent (stub) on F405/F415 |
-| STM32 CRYP, HASH (F415/F417) | `stm32.cryp`, `stm32.hash` | CRYP: AES-128/192/256 ECB/CBC/CTR with key preparation, DES/TDES ECB/CBC, 8-word IN/OUT FIFOs, data type swapping, IV update, DMA CRYP_IN/CRYP_OUT, CRYP IRQ, processing time per block; HASH: SHA-1, MD5, HMAC (LKEY), NBLW, DCAL, DINIS/DCIS (IRQ HASH_RNG shared with RNG), DMA HASH_IN with automatic DCAL, context swap CSR0-53; SHA-224/256 with `sha2: true` (F43x). Pure-Python AES/DES/SHA (`chipem/crypto_algos.py`). Absent (stub) on F405/F407; chips `stm32f415zg`, `stm32f417zg` |
+| STM32 CRYP, HASH (F415/F417) | `stm32.cryp`, `stm32.hash` | CRYP: AES-128/192/256 ECB/CBC/CTR with key preparation, DES/TDES ECB/CBC, 8-word IN/OUT FIFOs, data type swapping, IV update, DMA CRYP_IN/CRYP_OUT, CRYP IRQ, processing time per block; HASH: SHA-1, MD5, HMAC (LKEY), NBLW, DCAL, DINIS/DCIS (IRQ HASH_RNG shared with RNG), DMA HASH_IN with automatic DCAL, context swap CSR0-50 (CSR0-53 with `sha2`); SHA-224/256 with `sha2: true` (F43x). Pure-Python AES/DES/SHA (`chipem/crypto_algos.py`). Absent (stub) on F405/F407; chips `stm32f415zg`, `stm32f417zg` |
 | STM32 SDIO | `stm32.sdio` | SD host: SDIO_CK from PLL48CLK (CLKDIV/BYPASS/CLKEN/PWRSAV, WIDBUS 1/4), CPSM (CMDSENT/CMDREND/CCRCFAIL incl. R3/CTIMEOUT after 64 clocks, RESPCMD/RESP1-4), DPSM (DTIMER/DLEN/DCTRL, DCOUNT/FIFOCNT, block CRC checks, DBCKEND/DATAEND/DCRCFAIL/DTIMEOUT/TXUNDERR/RXOVERR, HWFC_EN), 32-word FIFO with all STA flags, ICR/MASK, SDIO IRQ, DMA request `SDIO`; a card device (`--sd-card SDIO`) answers; ST's HAL SD driver works |
 | STM32 FSMC | `stm32.fsmc` | BCR/BTR/BWTR 1-4 (RM0090 reset values), NAND/PC Card registers as storage; NE1-NE4 64 MB windows at 0x60000000 open while MBKEN and the FSMC clock are set (bus fault otherwise), board SRAMs mirrored across the window at full speed, WREN read-only windows; no access timing |
 | STM32 CRC, RNG | `stm32.crc`, `stm32.rng` | CRC-32 (0x04C11DB7) on 32-bit words, RESET, IDR; RNG: a value 40 PLL48CLK after enable / DR read, clock error CECS/CEIS, seeded deterministic values, HASH_RNG IRQ |

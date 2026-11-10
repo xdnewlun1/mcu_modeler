@@ -36,7 +36,8 @@ muxed: the SOF reads back recessive, LEC = 5 bit dominant error) sets TERRx and 
 MCR.NART = 1: then the mailbox completes with RQCPx = 1, TXOKx = 0, TERRx = 1.  Losing arbitration to another node's
 frame sets ALSTx (NART = 1: the mailbox completes with TXOK = 0).  TSR.ABRQx aborts a pending mailbox at once
 (RQCP = 1, TXOK = 0); while its frame is on the bus the abort waits for the outcome (success: normal completion).
-Writing 1 to RQCPx clears RQCPx, TXOKx, ALSTx and TERRx.
+Writing 1 to RQCPx clears RQCPx, TXOKx, ALSTx and TERRx; so does a new transmit request (TXRQ = 1) on that mailbox
+(RM0090 32.9.2 CAN_TSR).
 MCR.TTCM: the 16-bit CAN timer counts bit times from the end of synchronisation; TDTxR.TIME / RDTxR.TIME get its
 value at the SOF (0 with TTCM = 0).  TGT (TTCM, DLC = 8): bytes 6-7 carry TIME (taken when the frame is chosen for
 arbitration, i.e. at most one frame earlier than the real SOF).
@@ -69,9 +70,12 @@ Pins: CANx_RX / CANx_TX from the family signal table (pin muxed to the function,
 transmit (else bit errors), RX to receive and to synchronise.  Clock: RCC_APB1ENR.CANxEN (an access with the clock
 off logs one `warn`; the node is off the bus), RCC_APB1RSTR.CANxRST resets the model (CAN1: the filters too).
 
-Not modelled: resynchronisation / SJW / sample point, MSR.SAMP/RX (read 1 = recessive), stuff/CRC/form errors of
-corrupted frames (frames on the emulated bus are never corrupted), overload frames, DBF, the wake-up SOF timing (a
-sleeping node notices bus activity at the ACK slot of the frame).
+Not modelled: resynchronisation / SJW / sample point, MSR.SAMP/RX (read 1 = recessive, the 0x0C02 reset value),
+stuff/CRC/form errors of corrupted frames (frames on the emulated bus are never corrupted), overload frames, DBF, the
+wake-up SOF timing (RM0090 32.9.2: WKUI and the AWUM wake-up happen at the SOF; here a sleeping node notices bus
+activity at the ACK slot of the frame, chipem/canbus.py reports nothing earlier).  FULL and FOVR are cleared by
+software only (rc_w1, RM0090 32.9.2 CAN_RFxR; releasing a message does not clear FULL).  The RM does not state
+the FMI numbering for CAN2: it restarts at CAN2SB here (ST's HAL makes the same assumption).
 """
 from __future__ import annotations
 
@@ -141,7 +145,7 @@ class BxCAN(GatedBlock):
             "RF1R": dict(ro_mask=0xFFFFFFFF, on_read=self._rfr_reader(1), on_write=self._rfr_writer(1)),
             "IER": dict(on_write=self._ier_write),
             "ESR": dict(ro_mask=0xFFFFFF8F, on_read=self._esr_read, on_write=self._esr_write),
-            "BTR": dict(on_write=self._btr_write),
+            "BTR": dict(on_write=self._btr_write, reset=0x01230000),     # RM0090 32.9.2 (the SVD says 0)
             "FMR": dict(on_write=self._fmr_write),
             "FM1R": dict(on_write=self._finit_guard),
             "FS1R": dict(on_write=self._finit_guard),
@@ -686,6 +690,9 @@ class BxCAN(GatedBlock):
                 self._seq += 1
                 self._order[k] = self._seq
                 self.set(ti, new)
+                # RM0090 32.9.2 CAN_TSR: RQCPx (and with it TXOKx/ALSTx/TERRx) cleared by hardware on TXRQ
+                self._tsr_bits(k, RQCP | TXOK | ALST | TERR, 0)
+                self._update_irq()
                 self._tx_changed()
             return None
         return hook

@@ -9,7 +9,8 @@ Registers from the SVD: DR (+0), IDR (+4), CR (+8).
   not touch.
 * The F4 unit has no byte enables: an 8/16-bit write to DR is fed as a 32-bit word (the access value zero-extended)
   and logs one `warn`.
-The calculation is instantaneous (the RM: 4 AHB cycles, below one instruction's bus access). Clock gate:
+The calculation is instantaneous (4.2/4.3: 4 HCLK cycles during which the DR write is stalled, so back-to-back
+writes and a write-then-read need no polling; bus stall cycles are not modelled). Clock gate:
 RCC_AHB1ENR.CRCEN (a gated-off access logs one `warn`); RCC_AHB1RSTR resets the unit.
 """
 from __future__ import annotations

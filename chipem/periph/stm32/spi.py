@@ -8,8 +8,12 @@ Registers from the SVD (CR1, CR2, SR, DR, CRCPR, RXCRCR, TXCRCR, I2SCFGR, I2SPR)
   register moves the buffer into the shift register at once (TXE = 1 again) and starts the frame; the next buffered
   word follows back to back. A frame is 8 or 16 bits (CR1.DFF), MSB or LSB first (LSBFIRST) and lasts
   bits x 2^(BR+1) PCLK cycles. When it ends the received word goes to the RX buffer (SR.RXNE = 1); if RXNE is still
-  set the new word is lost and SR.OVR is set (cleared by a DR read followed by an SR read). Reading DR clears RXNE.
-  SR.BSY is set while a frame shifts or a master has a word waiting.
+  or OVR is still set the new word is lost and SR.OVR is set (28.3.10: every later word is lost until OVR is cleared
+  by a DR read followed by an SR read). Reading DR clears RXNE.
+  BSY (28.3.7): a master sets it 2 APB clock periods after the DR write that starts a discontinuous transfer (28.3.9
+  note) and keeps it high through a continuous transfer; a BIDIMODE receive master (BIDIOE = 0) keeps it low; a slave
+  sets it at the first SCK edge of a frame and clears it when the frame ends (low for about one SCK cycle between
+  continuous frames). Cleared when SPE clears and on MODF.
 * Pins (master, MSTR = 1, SPE = 1): SCK idles at CPOL and toggles at every half period; MOSI changes before the
   first edge (CPHA = 0) or on each leading edge (CPHA = 1); MISO is sampled on the other edge from the pin muxed to
   SPIx_MISO (H = 1, L or floating X = 0, like IDR), so another chip or a board net can answer. Outputs go through
@@ -26,26 +30,37 @@ Registers from the SVD (CR1, CR2, SR, DR, CRCPR, RXCRCR, TXCRCR, I2SCFGR, I2SPR)
   low (SSM = 0; NSS pin not muxed = not selected) or SSI = 0 (SSM = 1). Bits shift on SCK pin edges per CPOL/CPHA;
   MISO is driven while selected and SPE = 1. The TX buffer is loaded into the shift register when a frame starts (the
   first leading edge, or NSS falling / the previous frame's last trailing edge with CPHA = 0); with an empty TX buffer
-  the slave sends the previous frame again (UDR is I2S-only on the F4). Deselecting mid-frame drops the partial word.
+  the slave sends the previous frame again (UDR is I2S-only on the F4; a DR write while deselected replaces that
+  resend). Deselecting mid-frame drops the partial word.
 * Modes: RXONLY = 1 and BIDIMODE = 1 / BIDIOE = 0 make a master clock continuously while SPE = 1 (receive only;
   BIDIMODE receives on the MOSI pin); BIDIOE = 1 is transmit only (received data not stored, RXNE/OVR unchanged).
-* MODF (28.4.8): a master whose NSS input goes low (SSM = 0, SSOE = 0, NSS pin L) or with SSM = 1 and SSI = 0 sets
-  SR.MODF and clears SPE and MSTR; MODF clears with an SR access followed by a CR1 write.
+* MODF (28.3.10): a master whose NSS input goes low (SSM = 0, SSOE = 0, NSS pin L) or with SSM = 1 and SSI = 0 sets
+  SR.MODF and clears SPE and MSTR (SPE/MSTR cannot be set while MODF = 1); MODF clears with an SR access followed by
+  a CR1 write.
 * CRC (28.3.6): with CRCEN the TXCRCR / RXCRCR registers accumulate a CRC (polynomial CRCPR, 8 or 16 bits per DFF,
   MSB first over the data word, initial value 0) of every transmitted / received word. CRCNEXT set before the last
   frame ends makes the next frame transmit TXCRCR; the word received in that frame is compared with RXCRCR (taken
-  before it) and SR.CRCERR (rc_w0) is set on a mismatch. Writing CRCEN clears both CRC registers.
-* IRQ "SPIx" (level): (TXE & TXEIE) | (RXNE & RXNEIE) | ((OVR | MODF | CRCERR) & ERRIE).
+  before it) and SR.CRCERR (rc_w0) is set on a mismatch. Writing CRCEN clears both CRC registers. A slave works the
+  same way (CRCNEXT after the last data written: its next frame sends TXCRCR). Not modelled: the automatic CRC phase
+  at the end of a DMA transfer (28.3.9 "DMA capability with CRC"; CRCNEXT must be used).
+* TI mode (CR2.FRF = 1, 28.3.2/28.3.3, Figures 249-252, 28.3.10): CPOL = 0 / CPHA = 1 and MSB first are forced and
+  SSM/SSI/SSOE are ignored (no MODF). A master drives NSS: high for one extra SCK cycle before a frame that does not
+  follow another at once, and high during the LSB of a frame when the next frame follows (continuous: no extra
+  clock). A slave samples NSS on falling SCK edges (high = a frame starts at the next rising edge), shifts data out
+  on rising edges and in on falling edges, drives MISO from the pulse until t_release = BR half period + 5 PCLK after
+  the LSB (the RM gives 4..6 PCLK), and sets FRE (cleared by an SR read) when a pulse comes inside a frame: the
+  pulse is ignored, the partial word lost, and the slave waits for the next pulse.
+* IRQ "SPIx" (level): (TXE & TXEIE) | (RXNE & RXNEIE) | ((OVR | MODF | CRCERR | FRE) & ERRIE) (Table 126).
 * DMA (28.3.9): CR2.TXDMAEN requests "SPIx_TX" while TXE = 1, RXDMAEN requests "SPIx_RX" while RXNE = 1 (RM0090
-  Tables 42/43, through `_util.dma_request`).
+  Tables 43/44, through `_util.dma_request`).
 Every frame is recorded in `frames` (tx, rx) and the transmitted words in `tx_bytes` (bytes; 16-bit words big
 endian; not `output`, which marks UART-like blocks for Session.uart_output).
 I2S mode (I2SCFGR.I2SMOD = 1) of SPI2/SPI3: chipem/periph/stm32/i2s.py (`I2SEngine`; SPI1 has no I2S mode on the F4:
 setting I2SMOD there logs one `warn` and the block stays idle); the I2S2ext/I2S3ext blocks are `stm32.i2s_ext` below.
 The IRQ line goes through `_util.shared_irq` (SPIx and I2SxEXT share it).
-Not modelled: TI frame format
-(CR2.FRF: one `warn`, Motorola timing is used), slave BIDIMODE, the NSS pulse / inter-frame gaps of later families,
-pin speed / slew. The Kinetis DSPI (kinetis.dspi) works the same way (boards/k22_stm32_spi.yaml).
+Not modelled: slave BIDIMODE, the PCLK synchronisation of the TX buffer to the shift register (the
+buffer moves at once and back-to-back frames have no gap), pin speed / slew. The Kinetis DSPI (kinetis.dspi) works
+the same way (boards/k22_stm32_spi.yaml).
 """
 from __future__ import annotations
 
@@ -90,7 +105,8 @@ class SPI(GatedBlock):
               "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
               "CRCPR": {"on_write": self._crcpr_write},
               "RXCRCR": {"ro_mask": 0xFFFFFFFF}, "TXCRCR": {"ro_mask": 0xFFFFFFFF},
-              "I2SCFGR": {"on_write": self._i2s_write}, "I2SPR": {"on_write": self._i2spr_write}}
+              "I2SCFGR": {"on_write": self._i2s_write}, "I2SPR": {"on_write": self._i2spr_write,
+                        "reset": 0x0002}}                  # RM0090 28.5.9 / Table 129 (the SVD says 0x0A)
         r = build_regs((name, "SPI1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         i2s = params.get("i2s", name in ("SPI2", "SPI3"))
@@ -128,6 +144,12 @@ class SPI(GatedBlock):
         self._last_tx = 0
         self._crc_after = False
         self._preloaded = False
+        self._bsy_ev = None
+        self._bsy_hold = False
+        self._ti_pulsed = False          # TI master: NSS pulse already sent during the previous frame's LSB
+        self._ti_state = 0               # TI slave: 0 idle, 1 NSS pulse seen (frame starts at the next rising edge),
+        self._ti_miso = False            # 2 in a frame; MISO driven (until t_release after the LSB)
+        self._ti_rel_ev = None
 
     # ------------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
@@ -149,6 +171,10 @@ class SPI(GatedBlock):
     def reset(self) -> None:
         if getattr(self, "_ev", None) is not None and self.chip is not None:
             self.chip.sched.cancel(self._ev)
+        if getattr(self, "_bsy_ev", None) is not None and self.chip is not None:
+            self.chip.sched.cancel(self._bsy_ev)
+        if getattr(self, "_ti_rel_ev", None) is not None and self.chip is not None:
+            self.chip.sched.cancel(self._ti_rel_ev)
         had_out = any(v is not None for v in getattr(self, "_out", {}).values())
         if getattr(self, "_line", False) and self.chip is not None:
             shared_irq(self.chip, self._irqn, self.name, False)
@@ -204,6 +230,17 @@ class SPI(GatedBlock):
     def is_master(self) -> bool:
         return bool(self._cr1() & MSTR)
 
+    def ti(self) -> bool:
+        """TI frame format (CR2.FRF = 1, RM0090 28.3.3/28.3.2): CPOL = 0 / CPHA = 1 and MSB first are forced, NSS is
+        the frame pulse (SSM/SSI/SSOE ignored)."""
+        return bool(self.get("CR2") & FRF)
+
+    def _cpol_cpha(self) -> tuple[bool, bool]:
+        cr1 = self._cr1()
+        if self.ti():
+            return False, True
+        return bool(cr1 & CPOL), bool(cr1 & CPHA)
+
     def enabled(self) -> bool:
         return bool(self._cr1() & SPE) and not self.get("I2SCFGR") & I2SMOD
 
@@ -255,11 +292,16 @@ class SPI(GatedBlock):
         if not self.enabled():
             return out
         if cr1 & MSTR:
-            out["SCK"] = "H" if cr1 & CPOL else "L"
+            out["SCK"] = "H" if cr1 & CPOL and not cr2 & FRF else "L"
             if not (cr1 & BIDIMODE and not cr1 & BIDIOE) and not cr1 & RXONLY:
                 out["MOSI"] = self._out["MOSI"] or "L"
-            if cr2 & SSOE and not cr1 & SSM:
+            if cr2 & FRF:
+                out["NSS"] = self._out["NSS"] or "L"            # TI: NSS is the frame pulse output
+            elif cr2 & SSOE and not cr1 & SSM:
                 out["NSS"] = "L"
+        elif cr2 & FRF:
+            if self._ti_miso:
+                out["MISO"] = self._out["MISO"] or "L"
         elif self._selected:
             out["MISO"] = self._out["MISO"] or "L"
         return out
@@ -280,7 +322,7 @@ class SPI(GatedBlock):
                 self._out[k] = lvl
                 newly.append(k)
                 changed = True
-            elif lvl != cur and (k == "NSS" or (k == "SCK" and not self.busy)):
+            elif lvl != cur and ((k == "NSS" and not self.ti()) or (k == "SCK" and not self.busy)):
                 self._drive(k, lvl)
         if changed:
             self._resync()
@@ -325,11 +367,11 @@ class SPI(GatedBlock):
     def _bit_of(self, word: int, i: int) -> int:
         """Bit transmitted in position i (0 = first on the wire)."""
         n = self._bits
-        return (word >> (i if self._cr1() & LSBFIRST else n - 1 - i)) & 1
+        return (word >> (i if self._cr1() & LSBFIRST and not self.ti() else n - 1 - i)) & 1
 
     def _set_rx_bit(self, i: int, b: int) -> None:
         n = self._bits
-        pos = i if self._cr1() & LSBFIRST else n - 1 - i
+        pos = i if self._cr1() & LSBFIRST and not self.ti() else n - 1 - i
         if b:
             self._rx |= 1 << pos
 
@@ -360,7 +402,19 @@ class SPI(GatedBlock):
         self.busy = True
         self._tx = tx
         self._rx = 0
-        self._sr_mod(TXE | BSY)
+        self._bsy_hold = False
+        if self._master_bsy_low():
+            self._sr_mod(TXE)                               # BIDIMODE receive master: BSY kept low (28.3.7)
+        elif self.get("SR") & BSY:
+            self._sr_mod(TXE)                               # continuous: BSY stays high
+        else:
+            # discontinuous: BSY sets 2 APB clock periods after the DR write (RM0090 28.3.9 note)
+            self._sr_mod(TXE)
+            self._bsy_hold = True
+            r = self._rcc
+            ppre = r.ppre(self.apb) if r is not None else 1
+            self.chip.sched.cancel(self._bsy_ev)
+            self._bsy_ev = self.chip.sched.at_cycles(self.chip.now_cycles() + 2 * ppre, self._bsy_set)
         self._wire = self._muxed("SCK") and (self._muxed("MOSI") or self._rx_continuous())
         if not self._wire:
             self._warn_once("nowire", f"{self.name}: master frame with SCK/MOSI not muxed to a pin: nobody sees it")
@@ -370,14 +424,38 @@ class SPI(GatedBlock):
             self._resp_rx = (r & mask) if self._muxed("MISO") else 0
         half = self.half_cycles()
         t0 = self.chip.now_cycles()
-        self._t0 = t0
+        # TI mode: a frame not announced during the previous LSB starts with one extra SCK cycle carrying the NSS
+        # pulse (RM0090 Figures 251/252)
+        pre = 1 if self.ti() and not self._ti_pulsed else 0
+        self._ti_pulsed = False
+        self._t0 = t0 + 2 * pre * half
         self._half = half
         if not self._wire or self._out["SCK"] is None:
-            self._ev = self.chip.sched.at_cycles(t0 + 2 * self._bits * half, self._master_done)   # timing only
+            self._ev = self.chip.sched.at_cycles(self._t0 + 2 * self._bits * half, self._master_done)  # timing only
             return
-        if not cr1 & CPHA:
+        if pre:
+            self._ev = self.chip.sched.at_cycles(t0 + half, self._master_edge, -2)
+            return
+        if not self._cpol_cpha()[1]:
             self._drive_mosi(0)
         self._ev = self.chip.sched.at_cycles(t0 + half, self._master_edge, 0)
+
+    def _master_bsy_low(self) -> bool:
+        cr1 = self._cr1()
+        return bool(cr1 & MSTR and cr1 & BIDIMODE and not cr1 & BIDIOE)
+
+    def _bsy_set(self) -> None:
+        self._bsy_ev = None
+        if self._bsy_hold and self.busy:
+            self._bsy_hold = False
+            self._sr_mod(BSY)
+
+    def _ti_master_nss(self, i: int) -> None:
+        """TI master, rising edge of bit i: NSS low from the MSB on; high during the LSB when the next frame follows
+        at once (continuous transfer, Figure 252)."""
+        nxt = i == self._bits - 1 and (self.txbuf is not None or self._crc_after or self._rx_continuous())
+        self._drive("NSS", "H" if nxt else "L")
+        self._ti_pulsed = nxt
 
     def _drive_mosi(self, i: int) -> None:
         if self._out["MOSI"] is not None and not self._rx_continuous():
@@ -393,13 +471,19 @@ class SPI(GatedBlock):
 
     def _master_edge(self, k: int) -> None:
         self._ev = None
-        cr1 = self._cr1()
         leading = k % 2 == 0
         i = k // 2
-        cpol_h = bool(cr1 & CPOL)
+        cpol_h, cpha = self._cpol_cpha()
         self._drive("SCK", ("L" if cpol_h else "H") if leading else ("H" if cpol_h else "L"))
-        if cr1 & CPHA:
+        if k < 0:                                   # TI prefix clock: NSS pulse
             if leading:
+                self._drive("NSS", "H")
+            self._ev = self.chip.sched.at_cycles(self._t0 + (k + 2) * self._half, self._master_edge, k + 1)
+            return
+        if cpha:
+            if leading:
+                if self.ti():
+                    self._ti_master_nss(i)
                 self._drive_mosi(i)
             else:
                 self._sample_master(i)
@@ -421,6 +505,7 @@ class SPI(GatedBlock):
             self.frame_end(True, False)
         self._master_kick()
         if not self.busy:
+            self._bsy_hold = False
             self._sr_mod(clr_bits=BSY)
 
     # ------------------------------------------------------------------ frame completion (master and slave)
@@ -436,7 +521,7 @@ class SPI(GatedBlock):
             else:
                 self.set("TXCRCR", crc_update(self.get("TXCRCR"), tx, bits, poly))
                 self.set("RXCRCR", crc_update(self.get("RXCRCR"), rx, bits, poly))
-                if cr1 & CRCNEXT and self.is_master() and self.txbuf is None:
+                if cr1 & CRCNEXT and self.txbuf is None:
                     self.set("CR1", cr1 & ~CRCNEXT)
                     self._crc_after = True
         self._crc_frame = False
@@ -447,9 +532,12 @@ class SPI(GatedBlock):
         else:
             self.tx_bytes += (tx & 0xFFFF).to_bytes(2, "big")
         if receive:
-            if self.get("SR") & RXNE:
-                set_bits |= OVR                             # the new word is lost
-                self._ovr_dr_read = False
+            sr = self.get("SR")
+            if sr & (RXNE | OVR):
+                # RM0090 28.3.10: the RX buffer keeps the old word; while OVR is set every later word is lost too
+                if not sr & OVR:
+                    self._ovr_dr_read = False
+                set_bits |= OVR
             else:
                 self.rxbuf = rx
                 set_bits |= RXNE
@@ -463,28 +551,38 @@ class SPI(GatedBlock):
         return self._pin_level("NSS") == "L"
 
     def _slave_load(self) -> None:
-        if self.txbuf is not None:
+        self._crc_frame = False
+        resend = False
+        if self._crc_after:                         # CRCNEXT: this frame carries TXCRCR (28.3.6)
+            self._crc_after = False
+            self._crc_frame = True
+            self._tx = self.get("TXCRCR") & ((1 << self._bitsize()) - 1)
+        elif self.txbuf is not None:
             self._tx = self.txbuf & ((1 << self._bitsize()) - 1)
             self.txbuf = None
             self._sr_mod(TXE)
         else:
             self._tx = self._last_tx
+            resend = True
         self._bits = self._bitsize()
         self._rx = 0
         self._bit = 0
-        self._preloaded = True
+        # None: only the previous word is resent; a DR write before the next selection replaces it
+        self._preloaded = None if resend else True
 
     def _slave_out(self, i: int) -> None:
         if self._out["MISO"] is not None:
             self._drive("MISO", "H" if self._bit_of(self._tx, i) else "L")
 
     def _select_changed(self) -> None:
-        sel = self._compute_selected() and self.enabled() and not self.is_master()
+        sel = self._compute_selected() and self.enabled() and not self.is_master() and not self.ti()
         if sel == self._selected:
             return
         self._selected = sel
         if self._bit:
             self._preloaded = False                  # deselected mid-frame: the partial word is dropped
+        elif self._preloaded is None:
+            self._preloaded = False                  # only the previous word was preloaded: reload at selection
         self._bit = 0
         if sel:
             self._sck = self._pin_level("SCK")
@@ -494,7 +592,6 @@ class SPI(GatedBlock):
             self._apply_pins()
             if cpha0:
                 self._slave_out(0)
-            self._sr_mod(BSY)
         else:
             self._apply_pins()
             self._sr_mod(clr_bits=BSY)
@@ -509,11 +606,16 @@ class SPI(GatedBlock):
             self.i2s.pin_changed(pin)
             return
         if board.signal_matches(owner, self.sig["NSS"]):
+            if self.ti():
+                return                              # TI: NSS is sampled on the SCK edges (slave) or an output
             if cr1 & MSTR:
                 if (cr1 & SPE and not cr1 & SSM and not self.get("CR2") & SSOE and pin.level() == "L"):
                     self._mode_fault()
             elif not cr1 & SSM:
                 self._select_changed()
+            return
+        if self.ti() and not cr1 & MSTR and self.enabled() and board.signal_matches(owner, self.sig["SCK"]):
+            self._ti_slave_edge(pin.level())
             return
         if not board.signal_matches(owner, self.sig["SCK"]) or cr1 & MSTR or not self._selected:
             return
@@ -525,6 +627,8 @@ class SPI(GatedBlock):
         if lvl not in ("H", "L") or prev not in ("H", "L"):
             return                                  # floating SCK: no clock edge
         leading = (lvl == "H") != bool(cr1 & CPOL)
+        if self._bit == 0 and leading and not self.get("SR") & BSY:
+            self._sr_mod(BSY)                       # slave: a transfer starts at its first SCK edge (28.3.7)
         if cr1 & CPHA:
             if leading:
                 if self._bit == 0:
@@ -550,6 +654,62 @@ class SPI(GatedBlock):
             tx, rx = self._tx, self._rx
             self._rx = 0
             self._frame_complete(tx, rx)
+            self._sr_mod(clr_bits=BSY)              # low between two frames (one SCK cycle when continuous)
+
+    def _ti_slave_edge(self, lvl: str) -> None:
+        """TI slave (RM0090 28.3.2, Figures 249/250, 28.3.10): data change on rising SCK edges and are sampled on
+        falling edges; NSS is sampled on falling edges: high announces a frame starting at the next rising edge. A
+        pulse inside a frame (not during its LSB) sets FRE, is ignored and the slave waits for the next pulse (the
+        partial word is lost). MISO is driven from the pulse until t_release (BR half period + 5 PCLK) after the LSB."""
+        prev, self._sck = self._sck, lvl
+        if lvl == prev or lvl not in ("H", "L") or prev not in ("H", "L"):
+            return
+        if lvl == "H":                                  # trigger edge
+            if self._ti_state == 1:
+                self._ti_state = 2
+                self._bits = self._bitsize()
+                self._slave_load()
+                self._sr_mod(BSY)
+            if self._ti_state == 2:
+                self._slave_out(self._bit)
+            return
+        nss = self._pin_level("NSS") == "H"            # sampling edge
+        if self._ti_state == 2:
+            last = self._bit == self._bits - 1
+            if nss and not last:
+                self._ti_state = 0
+                self._bit = 0
+                self._rx = 0
+                self._preloaded = False
+                self._sr_mod(FRE, BSY)
+                self._ti_release_later()
+                return
+            self._slave_sample()
+            if last:
+                self._ti_state = 1 if nss else 0
+                if not nss:
+                    self._ti_release_later()
+            return
+        if nss:
+            self._ti_state = 1
+            self.chip.sched.cancel(self._ti_rel_ev)
+            self._ti_rel_ev = None
+            if not self._ti_miso:
+                self._ti_miso = True
+                self._apply_pins()
+
+    def _ti_release_later(self) -> None:
+        r = self._rcc
+        ppre = r.ppre(self.apb) if r is not None else 1
+        self.chip.sched.cancel(self._ti_rel_ev)
+        self._ti_rel_ev = self.chip.sched.at_cycles(self.chip.now_cycles() + self.half_cycles() + 5 * ppre,
+                                                    self._ti_release)
+
+    def _ti_release(self) -> None:
+        self._ti_rel_ev = None
+        if self._ti_state == 0 and self._ti_miso:
+            self._ti_miso = False
+            self._apply_pins()
 
     # ------------------------------------------------------------------ MODF
     def _mode_fault(self) -> None:
@@ -566,6 +726,14 @@ class SPI(GatedBlock):
             self._ev = None
         was = self.busy
         self.busy = False
+        self._ti_pulsed = False
+        self._ti_state = 0
+        self._ti_miso = False
+        self.chip.sched.cancel(self._ti_rel_ev)
+        self._ti_rel_ev = None
+        self._bsy_hold = False
+        self.chip.sched.cancel(self._bsy_ev)
+        self._bsy_ev = None
         self._crc_after = False
         self._selected = False
         self._apply_pins()
@@ -591,15 +759,18 @@ class SPI(GatedBlock):
         if (old ^ new) & CRCEN:
             self.set("TXCRCR", 0)
             self.set("RXCRCR", 0)
-        if new & SPE and new & MSTR and new & SSM and not new & SSI:
+        ti = self.ti()
+        if not ti and new & SPE and new & MSTR and new & SSM and not new & SSI:
             self._mode_fault()
             return self.get("CR1")
-        if new & MSTR and new & SPE and not new & SSM and not self.get("CR2") & SSOE \
+        if not ti and new & MSTR and new & SPE and not new & SSM and not self.get("CR2") & SSOE \
                 and self._pin_level("NSS") == "L":
             self._mode_fault()
             return self.get("CR1")
         if (old & SPE) and not (new & SPE):
             self._stop()
+        elif new & SPE and not old & SPE and self.ti() and not new & MSTR:
+            self._sck = self._pin_level("SCK")             # TI slave: listens to SCK from now on
         elif (old ^ new) & MSTR and self.busy:
             self._stop()
         self._select_changed()
@@ -609,9 +780,11 @@ class SPI(GatedBlock):
 
     def _cr2_write(self, blk, reg, old, new):
         self._store(reg, new)
-        if new & FRF:
-            self._warn_once("frf", f"{self.name}: TI frame format (CR2.FRF) is not modelled: Motorola timing used")
-        if (old ^ new) & SSOE:
+        if (old ^ new) & FRF and self.get("CR1") & SPE:
+            self._warn_once("frf", f"{self.name}: CR2.FRF changed while SPE = 1 (RM0090: configure with SPE = 0)")
+        if (old ^ new) & (SSOE | FRF):
+            if (old ^ new) & FRF:
+                self._select_changed()
             self._apply_pins()
         self._update()
         return None
@@ -629,7 +802,10 @@ class SPI(GatedBlock):
             self._warn_once("i2sspe", f"{self.name}: I2SMOD changed while SPI SPE = 1")
         if on_old and not on_new:
             eng.disable()
+            self._sr_mod(clr_bits=TXE)                      # TXE is reset when the I2S is disabled (28.4.7)
         elif on_new and not on_old:
+            if self.txbuf is None:
+                self._sr_mod(TXE)
             self._i2s_enable()
         elif on_new and (old ^ new) & 0x3BF:
             self._warn_once("i2scfg", f"{self.name}: I2SCFGR changed while I2SE = 1 (RM0090: configure with I2SE = "

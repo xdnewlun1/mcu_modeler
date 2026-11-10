@@ -19,8 +19,35 @@ Session/Chip are not thread-safe, so *every* chip access happens on one `Worker`
     re-muxes pins). The worker re-derives the wiring part of `/api/chip` whenever `Board.wiring` changes, and
     `state.board.wiring` tells clients to refetch it.
 
+Stream payload (SSE `state` frames; /api/state keeps the full pin rows plus `waves` for compatibility):
+  pins       dynamic pin fields only (SLIM_KEYS: chip, num, level, owner, direction, drive, pull, external, net,
+             cfg_by, cfg_t, cfg_what; the static ones are in /api/chip). `pins_full: true` = the complete set (first
+             frame of a stream, after a reset or session swap); otherwise only the rows that changed since this
+             stream's previous frame (merge by chip + num). No `pins` key = nothing changed.
+  waves      {"A:77": {edges, freq_hz, duty %}} of periodic pins, at most every WAVES_INTERVAL_S and only when changed;
+             not part of the pin change detection (edge counts change all the time).
+  adc        {chip: {channel: value}} analog inputs set through /api/adc / --adc (int raw code, float volts).
+  periph     [{chip, block, type: can|eth|usb|sd, ...}] bus peripheral status (periph_status), every PERIPH_INTERVAL_S.
+  board.buses [{name, type, stats}] live counters of /api/chip `buses`.
+
+Static description:
+  GET  /api/chip                   chips, pins (each with `adc`: the /api/adc channel of an analog input, or null),
+                                   board, nets, links (UART), parts and `buses` (CAN / Ethernet / USB host links:
+                                   {type, name, nodes, host, describe, stats}; YAML export unchanged)
+
+Control:
+  POST /api/step {n?, chip?}       n instructions on one chip (default the view chip; the others do not move)
+  POST /api/restart                rebuild the current setup with virtual time 0 (page reloads on the new boot id)
+  POST /api/stimulus {spec}        Session.apply_stimulus: "10ms:PTC6=0", "PTC6=H", "1ms:UART0=hi\\r\\n", "SW1=H";
+                                   "+5ms:B.PA0=H" = 5 ms from now. Returns {t_ns (absolute, null = applied now), spec}
+
 Data extraction:
-  GET  /api/events?since=&kinds=pin,uart&chip=A,board&q=text|re:regex&limit=&format=json|txt|csv
+  GET  /api/vcd?chip=A,B&pins=A.PTC6,B.PA0   VCD of the kept `pin` level events (attachment); dense PWM stored as
+                                   `wave` summaries is not expanded
+  GET  /api/uart/lines             transcript of every UART from the kept uart events {lines: [{uart, chip, t, text,
+                                   open}], after_cr, drops, last} (same line rules as app.js; continue the stream
+                                   from `last`)
+  GET  /api/events?since=&kinds=pin,uart&chip=A,board&q=text|re:regex&pin=A.PTC6&limit=&format=json|txt|csv
                                    filtered event log (txt/csv: attachments, limit 0 = all kept events).
                                    Every event carries `desc`, its text as the UI shows it (web/evfmt.py); `q`
                                    matches the row `time \t [chip \t] kind \t desc` exactly as the browser's
@@ -56,6 +83,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import mimetypes
 import uuid
 import queue
@@ -140,6 +168,12 @@ class Worker:
         self._seq = 0                       # our own event numbering (stable across that switch)
         self._had_board = _is_board(session)
         self.full_info: dict | None = None  # chip_info() re-derived when a lone chip became a one-chip board
+        self.pins_epoch = 0                 # bumped on reset / session swap: streams resend the full pin set
+        self._slim: dict = {}               # (chip, num) -> slim row (pins_version bumps when one changes)
+        self._waves: dict = {}              # "A:77" -> {edges, freq_hz, duty}
+        self.waves_version = 0
+        self._periph: list = []
+        self._periph_t = -1e9
         self._publish(force=True)
 
     # ---- lifecycle ---------------------------------------------------------------------------------------
@@ -325,9 +359,31 @@ class Worker:
             st["uart_out_len"] = {u: len(s.uart_output(u)) for u in self._uarts()}
         except Exception:
             pass
-        if pins != self._last_pins:
-            self._last_pins = pins
+        slim = {(r.get("chip"), r.get("num")): slim_row(r) for r in pins}
+        if slim != self._slim:
+            self._slim = slim
             self.pins_version += 1
+        self._last_pins = pins
+        waves = {f"{r.get('chip')}:{r.get('num')}": r["wave"] for r in pins if r.get("wave")}
+        if waves != self._waves:
+            self._waves = waves
+            self.waves_version += 1
+        try:
+            st["adc"] = jsonable(adc_values(s))
+        except Exception:
+            st["adc"] = {}
+        if now - self._periph_t >= PERIPH_INTERVAL_S or force:
+            self._periph_t = now
+            try:
+                self._periph = periph_status(s)
+            except Exception:
+                self._periph = []
+        st["periph"] = self._periph
+        if b is not None and isinstance(st.get("board"), dict):
+            try:
+                st["board"]["buses"] = jsonable(bus_stats(b))
+            except Exception:
+                st["board"]["buses"] = []
         with self.cond:
             for ev in new:
                 d = event_dict(ev)
@@ -338,7 +394,9 @@ class Worker:
             self.event_seq = self._seq
             self.version += 1
             self.snapshot = {"state": st, "pins": self._last_pins, "pins_version": self.pins_version,
-                             "version": self.version, "event_seq": self.event_seq}
+                             "version": self.version, "event_seq": self.event_seq, "slim": self._slim,
+                             "pins_epoch": self.pins_epoch, "waves": self._waves,
+                             "waves_version": self.waves_version}
             self.cond.notify_all()
 
     def _uarts(self) -> list[str]:
@@ -378,24 +436,27 @@ class Worker:
             return {"running": True, "until_ns": self.run_target_ns}
         return self.call(fn)
 
-    def cmd_step(self, n: int) -> dict:
+    def cmd_step(self, n: int, chip: str | None = None) -> dict:
+        """n instructions on chip `chip` (default: the view chip; the other board chips do not move)."""
         n = int(n)
         if not 1 <= n <= MAX_STEPS:
             raise ValueError(f"n must be 1..{MAX_STEPS} (use /api/run for longer)")
         gen = self._cmd_gen
 
         def fn():
+            ctx = _ctx(self.s, chip)                  # ValueError for an unknown chip id
+            cid = getattr(ctx, "id", None) or _chip_ids(self.s)[0]
             self.running = False
             self.run_target_ns = None
             r = None
             for _ in range(n):
                 if self._cmd_gen != gen:          # pause/reset requested meanwhile
                     break
-                r = self.s.step()
+                r = self.s.step(chip=cid) if chip is not None and hasattr(self.s, "ctxs") else self.s.step()
                 if getattr(r, "name", "") == "FAULT":
                     break
             self.last_stop = "STEP"
-            return {"stop": getattr(r, "name", str(r)), "pc": self.s.chip.core.pc}
+            return {"stop": getattr(r, "name", str(r)), "pc": ctx.chip.core.pc, "chip": cid}
         return self.call(fn)
 
     def replace_session(self, new: Any, on_swap: Callable[[], None] | None = None) -> Any:
@@ -415,6 +476,8 @@ class Worker:
             self._wiring_seen = None
             self.wiring_info = {}
             self._last_pins = []
+            self._slim = {}
+            self.pins_epoch += 1
             self.last_stop = "RESET"
             self.error = None
             with self.cond:
@@ -432,6 +495,7 @@ class Worker:
             self.s.reset()
             self.last_stop = "RESET"
             self.error = None
+            self.pins_epoch += 1
             return {"pc": self.s.chip.core.pc}
         return self.call(fn)
 
@@ -474,6 +538,177 @@ def events_csv(evs: list[dict]) -> str:
         w.writerow([e.get("seq", ""), e.get("t_ns", ""), e.get("chip", ""), e.get("kind", ""),
                     e.get("desc", ""), _event_detail(e)])
     return buf.getvalue()
+
+
+def _pin_keys(spec: str, board: bool, chip0: str) -> set[tuple[str, str]]:
+    """'A.PTC6,B.PA0' -> {("A", "PTC6"), ("B", "PA0")} (unqualified names: chip `chip0`)."""
+    out = set()
+    for item in (spec or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        cid, _, name = item.partition(".")
+        if not name:
+            cid, name = chip0, item
+        out.add((cid.upper(), name.upper()))
+    return out
+
+
+def pin_filter(spec: str, board: bool, chip0: str) -> Callable[[dict], bool] | None:
+    """Predicate for /api/events?pin=: events about exactly these pins (any field)."""
+    keys = _pin_keys(spec, board, chip0)
+    if not keys:
+        return None
+
+    def pred(e: dict) -> bool:
+        if e.get("kind") != "pin":
+            return False
+        cid = str(e.get("chip", chip0)).upper()
+        p = str(e.get("pin", "")).upper()
+        if p.startswith(cid + "."):
+            p = p[len(cid) + 1:]
+        return (cid, p) in keys
+    return pred
+
+
+def _and(*preds):
+    ps = [p for p in preds if p is not None]
+    if not ps:
+        return None
+    if len(ps) == 1:
+        return ps[0]
+    return lambda e: all(p(e) for p in ps)
+
+
+_VCD_VAL = {"H": "1", "L": "0", "Z": "z", True: "1", False: "0", 1: "1", 0: "0"}
+
+
+def events_vcd(evs: list[dict], name: str, board: bool, chip0: str, want: set | None = None) -> str:
+    """A VCD of the `pin` level events in `evs` (timescale 1 ns). Dense PWM edges that the event log keeps only as
+    `wave` summaries are not expanded (noted in the header); the initial value of a signal is the `old` level of its
+    first event."""
+    sig: dict[tuple[str, str], list] = {}
+    for e in evs:
+        if e.get("kind") != "pin" or (e.get("field") or "level") != "level":
+            continue
+        cid = str(e.get("chip", chip0))
+        p = str(e.get("pin", ""))
+        if p.upper().startswith(cid.upper() + "."):
+            p = p[len(cid) + 1:]
+        if want is not None and (cid.upper(), p.upper()) not in want:
+            continue
+        sig.setdefault((cid, p), []).append(e)
+    if want is not None:                       # requested pins without events still get a (constant x) trace
+        for cid, p in want:
+            if not any(k[0].upper() == cid and k[1].upper() == p for k in sig):
+                sig[(cid, p)] = []
+    ids = {}
+    for i, k in enumerate(sorted(sig, key=lambda k: (k[0], k[1]))):
+        code, n = "", i
+        while True:
+            code += chr(33 + n % 94)
+            n //= 94
+            if not n:
+                break
+        ids[k] = code
+    lines = ["$date chipem web export $end", "$version chipem $end", "$timescale 1ns $end",
+             "$comment level changes kept by the web server's event list; dense PWM stored as `wave` summaries "
+             "(chipem/log.py) is not expanded: use `chipem run --vcd` for every edge $end",
+             f"$scope module {re.sub(r'[^A-Za-z0-9_]', '_', name) or 'chipem'} $end"]
+    by_chip: dict[str, list] = {}
+    for k in ids:
+        by_chip.setdefault(k[0], []).append(k)
+    for cid, ks in by_chip.items():
+        if board:
+            lines.append(f"$scope module {cid} $end")
+        for k in ks:
+            lines.append(f"$var wire 1 {ids[k]} {re.sub(r'[^A-Za-z0-9_.]', '_', k[1])} $end")
+        if board:
+            lines.append("$upscope $end")
+    lines += ["$upscope $end", "$enddefinitions $end", "#0", "$dumpvars"]
+    for k, code in ids.items():
+        first = sig[k][0] if sig[k] else None
+        lines.append(f"{_VCD_VAL.get(first.get('old') if first else None, 'x')}{code}")
+    lines.append("$end")
+    changes = sorted(((float(e.get("t_ns") or 0), ids[k], _VCD_VAL.get(e.get("new"), "x"))
+                      for k, es in sig.items() for e in es), key=lambda x: x[0])
+    t_last = None
+    for t, code, v in changes:
+        ti = int(round(t))
+        if ti != t_last:
+            lines.append(f"#{ti}")
+            t_last = ti
+        lines.append(f"{v}{code}")
+    return "\n".join(lines) + "\n"
+
+
+MAX_LINE_CHARS = 2000      # = app.js: a line without a line ending is wrapped here
+MAX_LINES = 5000
+
+
+def uart_lines(evs: list[dict], board: bool, chip0: str) -> dict:
+    """The UART transcript from `uart` byte events, split like app.js uartEvent: LF, CR and CRLF end a line (the LF of
+    a CRLF adds no empty line), a line is wrapped at MAX_LINE_CHARS, non-printables as \\xNN; RX drops counted."""
+    lines: list[dict] = []
+    open_: dict[str, dict] = {}
+    after_cr: dict[str, bool] = {}
+    drops: dict[str, dict] = {}
+    for e in evs:
+        if e.get("kind") != "uart" or e.get("byte") is None:
+            continue
+        cid = str(e.get("chip", chip0))
+        u = e.get("uart") or e.get("name") or "UART"
+        u = f"{cid}.{u}" if board else str(u)
+        d = e.get("dir") or "tx"
+        if d == "drop":
+            x = drops.setdefault(u, {"n": 0, "reason": ""})
+            x["n"] += 1
+            x["reason"] = e.get("reason") or "?"
+            continue
+        if d != "tx":
+            continue
+        b = int(e["byte"])
+        if b == 10 and after_cr.get(u):          # the LF of a CRLF: the CR already ended the line
+            after_cr[u] = False
+            continue
+        ln = open_.get(u)
+        if ln is None:
+            ln = {"uart": u, "chip": cid, "t": e.get("t_ns"), "text": "", "open": True}
+            open_[u] = ln
+            lines.append(ln)
+        if b in (10, 13):
+            open_.pop(u, None)
+        else:
+            ln["text"] += chr(b) if 32 <= b < 127 else f"\\x{b:02x}"
+            if len(ln["text"]) >= MAX_LINE_CHARS:
+                open_.pop(u, None)
+        after_cr[u] = b == 13
+    for ln in lines:
+        ln["open"] = open_.get(ln["uart"]) is ln
+    return {"lines": lines[-MAX_LINES:], "after_cr": after_cr, "drops": drops}
+
+
+_REL_STIM = re.compile(r"^\s*\+\s*([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?\s*(?:ns|us|µs|ms|s)?)\s*:(.*)$", re.S)
+_ABS_STIM = re.compile(r"^\s*([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?\s*(?:ns|us|µs|ms|s)?)\s*:(.*)$", re.S)
+
+
+def apply_stimulus(session: Any, spec: str) -> dict:
+    """Session.apply_stimulus with a relative form: "+5ms:PIN=H" = 5 ms after the current virtual time. Runs on the
+    worker. Returns {t_ns (absolute; None = now), spec (as applied)}."""
+    from ..session import parse_time
+    b = getattr(session, "board", None)
+    now = b.now_ns() if b is not None else session.chip.clock.now_ns()
+    m = _REL_STIM.match(spec)
+    t_ns = None
+    if m:
+        t_ns = now + parse_time(m.group(1))
+        spec = f"{t_ns:.3f}ns:{m.group(2)}"
+    else:
+        m = _ABS_STIM.match(spec)
+        if m:
+            t_ns = parse_time(m.group(1))
+    session.apply_stimulus(spec)
+    return {"t_ns": t_ns if t_ns is None or t_ns > now else None, "spec": spec}
 
 
 def _is_board(session: Any) -> bool:
@@ -567,6 +802,143 @@ def all_pins(session: Any) -> list[dict]:
     return rows
 
 
+SLIM_KEYS = ("chip", "num", "level", "owner", "direction", "drive", "pull", "external", "net", "cfg_by", "cfg_t",
+             "cfg_what")
+WAVES_INTERVAL_S = 0.5     # stream: `waves` at most this often
+PERIPH_INTERVAL_S = 0.5    # worker: peripheral status (`periph`) recomputed at most this often
+
+_ADC_PATTERNS = (re.compile(r"^ADC\d*_SE\d+[a-z]?$", re.I), re.compile(r"^ADC\d+_IN\d+$", re.I),
+                 re.compile(r"^ADCIN[A-Z]\d+$", re.I), re.compile(r"^ADC\d*_D[PM]\d+$", re.I))
+
+
+def adc_channel(p: Any) -> str | None:
+    """The channel name /api/adc (Session.set_adc) takes for pin `p`: the first single-ended ADC input among its
+    functions (Kinetis ADC0_SE8, STM32 ADC123_IN0, C2000 ADCINA3), else a differential one; None without analog input."""
+    toks: list[str] = []
+    for v in list((p.functions or {}).values()) + ([p.name] if p.kind == "analog" else []):
+        toks += [t.strip() for t in str(v).split("/")]
+    for pat in _ADC_PATTERNS:
+        for t in toks:
+            if pat.match(t):
+                return t
+    return None
+
+
+def slim_row(r: dict) -> dict:
+    """The dynamic part of a pin row (what the stream sends; the static part is in /api/chip)."""
+    return {k: r.get(k) for k in SLIM_KEYS}
+
+
+def buses_info(b: Any) -> list[dict]:
+    """Non-UART links of board `b` (CAN buses, Ethernet segments, USB host links) with their live counters."""
+    if b is None:
+        return []
+    out: list[dict] = []
+    for cl in getattr(b, "can_links", []) or []:
+        out.append({"type": "can", "name": cl.name, "nodes": [f"{c}.{p}" for c, p in cl.nodes],
+                    "host": cl.host is not None, "describe": cl.describe(), "stats": _bus_stats(cl, "can")})
+    for el in getattr(b, "eth_links", []) or []:
+        host: Any = False
+        if el.host is not None:
+            from ..ethernet import ip_str, mac_str
+            host = {"ip": ip_str(el.host.ip), "mac": mac_str(el.host.mac)}
+        out.append({"type": "eth", "name": el.name, "nodes": [f"{c}.{p}" for c, p in el.nodes], "host": host,
+                    "describe": el.describe(), "stats": _bus_stats(el, "eth")})
+    for ul in getattr(b, "usb_links", []) or []:
+        dev = f"{ul.chip_id}.{ul.port}"
+        out.append({"type": "usb", "name": ul.name, "nodes": [dev], "device": dev, "host": True,
+                    "describe": ul.describe(), "stats": _bus_stats(ul, "usb")})
+    return out
+
+
+def _bus_stats(ln: Any, typ: str) -> dict:
+    try:
+        if typ == "can":
+            return {"frames": ln.bus.frames, "error_frames": ln.bus.error_frames, "bytes": ln.bus.bytes}
+        if typ == "eth":
+            d = {"frames": ln.segment.frames, "bytes": ln.segment.bytes}
+            if ln.host is not None:
+                hs = ln.host.state()
+                d["host"] = {k: hs.get(k) for k in ("sent", "received", "ping_replies")}
+            return d
+        h, bus = ln.host, ln.bus
+        dv = h.device
+        return {"host_state": h.state, "bus_state": bus.state, "device": dv.describe() if dv is not None else None,
+                "transactions": bus.transactions, "bytes_in": bus.bytes_in, "bytes_out": bus.bytes_out}
+    except Exception as e:                      # a half-built link must not break the snapshot
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def bus_stats(b: Any) -> list[dict]:
+    """Live counters of buses_info(b), same order: [{name, type, stats}]."""
+    return [{"name": x["name"], "type": x["type"], "stats": x["stats"]} for x in buses_info(b)]
+
+
+_CAN_IDLE = ("disabled", "sleep", "init", "freeze")
+
+
+def periph_status(session: Any) -> list[dict]:
+    """Status rows of the bus peripherals (CAN controllers, Ethernet MACs, USB device ports on a host link, SD cards):
+    [{chip, block, type, ...}]. Call on the worker thread."""
+    out: list[dict] = []
+    for cid in _chip_ids(session):
+        ctx = _ctx(session, cid)
+        chip = ctx.chip
+        cb = getattr(chip, "can_blocks", None)
+        for n, blk in (cb() if cb else {}).items():
+            fn = getattr(blk, "can_stats", None)
+            if fn is None:
+                continue
+            try:
+                st = fn()
+            except Exception:
+                continue
+            if st.get("state") in _CAN_IDLE and not (st.get("tx") or st.get("rx") or st.get("tec") or st.get("rec")):
+                continue
+            out.append({"chip": cid, "block": n, "type": "can", **st})
+        try:
+            from ..ethernet import eth_blocks
+            macs = eth_blocks(chip)
+        except Exception:
+            macs = {}
+        for n, blk in macs.items():
+            try:
+                st = dict(blk.eth_stats())
+            except Exception:
+                continue
+            if not (st.get("tx") or st.get("rx") or st.get("segment") or st.get("link") not in (None, "down")):
+                continue
+            out.append({"chip": cid, "block": n, "type": "eth", **st})
+        for dev in getattr(ctx, "devices", None) or []:
+            if hasattr(dev, "capacity") and hasattr(dev, "info") and hasattr(dev, "current_state"):
+                try:
+                    i = dev.info()
+                except Exception:
+                    continue
+                nm = str(i.get("name") or "SD")
+                out.append({"chip": cid, "block": nm[:-5] if nm.endswith("_card") else nm, "type": "sd", "card": nm,
+                            **{k: v for k, v in i.items() if k != "name"}})
+    for ul in (session.usb_links() if hasattr(session, "usb_links") else []):
+        try:
+            h, b = ul.host, ul.bus
+            dv = h.device
+            out.append({"chip": ul.chip_id, "block": ul.port, "type": "usb", "host_state": h.state,
+                        "bus_state": b.state, "address": dv.address if dv is not None else None,
+                        "device": dv.describe() if dv is not None else None,
+                        "strings": ({"manufacturer": dv.manufacturer, "product": dv.product, "serial": dv.serial}
+                                    if dv is not None else None),
+                        "transactions": b.transactions, "naks": b.naks, "stalls": b.stalls, "timeouts": b.timeouts,
+                        "bytes_in": b.bytes_in, "bytes_out": b.bytes_out, "cdc_rx": len(h.cdc_rx),
+                        "failures": list(h.failures)[-3:]})
+        except Exception:
+            continue
+    return jsonable(out)
+
+
+def adc_values(session: Any) -> dict:
+    return {cid: dict(getattr(_ctx(session, cid), "adc_values", None) or {}) for cid in _chip_ids(session)}
+
+
 def _one_chip_info(session: Any, cid: str) -> dict:
     c = _ctx(session, cid)
     chip, d = c.chip, c.desc
@@ -574,7 +946,7 @@ def _one_chip_info(session: Any, cid: str) -> dict:
     for p in (chip.pins.pins if chip.pins is not None else []):
         pins.append({"num": p.num, "name": p.name, "short": p.id, "qname": qualify(session, cid, p.id),
                      "gpio_name": getattr(p, "gpio_name", None), "kind": p.kind,
-                     "functions": dict(p.functions), "port": p.port, "bit": p.bit})
+                     "functions": dict(p.functions), "port": p.port, "bit": p.bit, "adc": adc_channel(p)})
     pins.sort(key=lambda x: x["num"])
     img = getattr(c, "image", None)
     uarts = _uart_blocks(chip, d)
@@ -593,7 +965,7 @@ def board_info(session: Any) -> dict:
     """The wiring part of /api/chip (and /api/board): {board, nets, links}. Call on the worker thread."""
     b = getattr(session, "board", None)
     if b is None:
-        return {"board": None, "nets": [], "links": [], "parts": []}
+        return {"board": None, "nets": [], "links": [], "parts": [], "buses": []}
     return jsonable({
         "board": {"name": b.name, "quantum_ns": b.quantum_ns, "wiring": getattr(b, "wiring", 0)},
         "nets": [_net_dict(n) for n in b.nets],
@@ -602,6 +974,7 @@ def board_info(session: Any) -> dict:
                    "bidir": ln.bidir, "describe": ln.describe(), "auto": getattr(ln, "auto", False),
                    "net": getattr(ln, "net", None),
                    "stats": {"a_to_b": ln.bytes_ab, "b_to_a": ln.bytes_ba}} for ln in b.links],
+        "buses": buses_info(b),
     })
 
 
@@ -684,7 +1057,7 @@ def chip_info(session: Any) -> dict:
     chips = [_one_chip_info(session, cid) for cid in ids]
     top = next((c for c in chips if c["id"] == view), chips[0])
     info: dict = {**{k: v for k, v in top.items() if k not in ("id", "uart_ids")}, "view": view, "chips": chips,
-                  "board": None, "nets": [], "links": [], "parts": []}
+                  "board": None, "nets": [], "links": [], "parts": [], "buses": []}
     info.update(board_info(session))
     return jsonable(info)
 
@@ -848,7 +1221,7 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/api/state":
                 snap = app.worker.snapshot
                 return self._json({**snap.get("state", {}), "pins": snap.get("pins", []),
-                                   "pins_version": snap.get("pins_version", 0),
+                                   "waves": snap.get("waves", {}), "pins_version": snap.get("pins_version", 0),
                                    "version": snap.get("version", 0), "event_seq": snap.get("event_seq", 0)})
             if path == "/api/hostserial":           # host serial bridges and real-time pacing (snapshot)
                 st = app.worker.snapshot.get("state", {})
@@ -861,7 +1234,8 @@ class _Handler(BaseHTTPRequestHandler):
                 limit = int(qs.get("limit", ["0" if fmt != "json" else "2000"])[0] or 0)
                 board = _is_board(app.session)
                 chip0 = _chip_ids(app.session)[0]
-                pred = event_filter(qs.get("chip", [""])[0], qs.get("q", [""])[0], board, chip0)
+                pred = _and(event_filter(qs.get("chip", [""])[0], qs.get("q", [""])[0], board, chip0),
+                            pin_filter(qs.get("pin", [""])[0], board, chip0))
                 evs, last = app.worker.events_page(since, ks, limit, pred)
                 if fmt in ("txt", "csv"):
                     body = events_text(evs, board, chip0) if fmt == "txt" else events_csv(evs)
@@ -871,6 +1245,26 @@ class _Handler(BaseHTTPRequestHandler):
                 if fmt != "json":
                     raise ValueError(f"format must be json, txt or csv, not {fmt!r}")
                 return self._json({"events": evs, "last": last})
+            if path == "/api/uart/lines":       # the transcript of every UART, from the kept uart events
+                board = _is_board(app.session)
+                chip0 = _chip_ids(app.session)[0]
+                with app.worker.cond:
+                    evs = [e for e in app.worker.events if e.get("kind") == "uart"]
+                    last = app.worker.event_seq
+                return self._json({**uart_lines(evs, board, chip0), "last": last})
+            if path == "/api/vcd":
+                board = _is_board(app.session)
+                chip0 = _chip_ids(app.session)[0]
+                want = _pin_keys(qs.get("pins", [""])[0], board, chip0) or None
+                pred = _and(event_filter(qs.get("chip", [""])[0], "", board, chip0),
+                            pin_filter(qs.get("pins", [""])[0], board, chip0))
+                evs, _ = app.worker.events_page(0, {"pin"}, 0, pred)
+                info = app.chip_info or {}
+                name = (info.get("board") or {}).get("name") or info.get("name") or "chipem"
+                fn = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(name))
+                return self._send(200, events_vcd(evs, str(name), board, chip0, want).encode(),
+                                  "text/plain; charset=utf-8",
+                                  {"Content-Disposition": f'attachment; filename="{fn}.vcd"'})
             if path == "/api/uart":
                 name = (qs.get("uart", ["UART0"])[0] or "UART0").upper()
                 since = max(0, int(qs.get("since", ["0"])[0] or 0))
@@ -954,6 +1348,10 @@ class _Handler(BaseHTTPRequestHandler):
         include_mmio = "mmio=1" in (urlparse(self.path).query or "")
         last_version = -1
         last_pins = -1
+        last_epoch = None
+        sent_slim: dict = {}                          # (chip, num) -> slim row as last sent on this stream
+        last_waves = -1
+        waves_t = 0.0
         last_seq = since if since else w.event_seq    # by default only new events; history via /api/events
         last_sent = 0.0
         out = self.wfile
@@ -979,13 +1377,30 @@ class _Handler(BaseHTTPRequestHandler):
             now = time.monotonic()
             due = (version != last_version and now - last_sent >= 0.05) or now - last_sent >= 1.0
             if due:
-                # pins only when they changed since the last frame of this stream (big boards: ~500 rows)
+                # pins: the dynamic fields only (static ones are in /api/chip); the full set on the first frame and
+                # after a reset / session swap (`pins_full`), else only the rows that changed since this stream's
+                # previous frame. `waves` (edge counts change all the time) at most every WAVES_INTERVAL_S.
                 pv = snap.get("pins_version", 0)
                 frame = {**snap.get("state", {}), "version": version, "pins_version": pv,
                          "event_seq": snap.get("event_seq", 0), "boot": app.boot}
-                if pv != last_pins:
-                    frame["pins"] = snap.get("pins", [])
+                if pv != last_pins or snap.get("pins_epoch") != last_epoch:
+                    cur = snap.get("slim", {})
+                    if snap.get("pins_epoch") != last_epoch or not sent_slim:
+                        frame["pins"] = list(cur.values())
+                        frame["pins_full"] = True
+                    else:
+                        frame["pins"] = [r for k, r in cur.items() if sent_slim.get(k) != r]
+                        frame["pins_full"] = False
+                    sent_slim = cur
                     last_pins = pv
+                    last_epoch = snap.get("pins_epoch")
+                    if not frame["pins"] and not frame["pins_full"]:
+                        del frame["pins"], frame["pins_full"]
+                wv = snap.get("waves_version", 0)
+                if wv != last_waves and (now - waves_t >= WAVES_INTERVAL_S or last_waves < 0):
+                    frame["waves"] = snap.get("waves", {})
+                    last_waves = wv
+                    waves_t = now
                 send("state", frame)
                 last_version = version
                 last_sent = now
@@ -1013,7 +1428,15 @@ class _Handler(BaseHTTPRequestHandler):
                 w.call(lambda: setattr(w, "last_stop", "PAUSED"))
                 return self._json({"ok": True})
             if path == "/api/step":
-                return self._json({"ok": True, **w.cmd_step(int(body.get("n", 1)))})
+                chip = body.get("chip")
+                return self._json({"ok": True, **w.cmd_step(int(body.get("n", 1)), str(chip) if chip else None)})
+            if path == "/api/restart":                # same setup, virtual time 0 (the page reloads on the new boot)
+                return self._json({"ok": True, **app.restart()})
+            if path == "/api/stimulus":
+                spec = str(body.get("spec") or "").strip()
+                if not spec:
+                    raise ValueError("missing 'spec' (e.g. 10ms:PTC6=0, +5ms:B.PA0=H, PTC6=H, 1ms:UART0=hi\\r\\n)")
+                return self._json({"ok": True, **w.call(lambda: apply_stimulus(w.s, spec))})
             if path == "/api/reset":
                 w.pause()                            # also ends a step loop the reset would wait behind
                 return self._json({"ok": True, **w.cmd_reset()})
@@ -1193,8 +1616,12 @@ class WebApp:
     """Session + Worker + HTTP server.  `start()` runs everything in background threads; `stop()` tears down."""
 
     def __init__(self, session: Any, host: str = "127.0.0.1", port: int = 8765, *, realtime: bool = False,
-                 chunk_ms: float = 5.0, verbose: bool = False):
+                 chunk_ms: float = 5.0, verbose: bool = False, factory: Callable[[], Any] | None = None):
         self.session = session
+        # restart (POST /api/restart): `factory` rebuilds the session as it was started (CLI options included) while
+        # it is still that session with its original wiring; afterwards the current setup is rebuilt (boardedit)
+        self.factory = factory
+        self._factory_wiring = (session, getattr(getattr(session, "board", None), "wiring", None))
         self.verbose = verbose
         self.boot = uuid.uuid4().hex[:12]        # changes on every server start: an open page reloads on a new one
         self.chip_info = chip_info(session)
@@ -1219,6 +1646,9 @@ class WebApp:
         links = b.get("links", [])
         info["links"] = [{**ln, "stats": {"a_to_b": links[i].get("a_to_b", 0), "b_to_a": links[i].get("b_to_a", 0)}}
                          if i < len(links) else ln for i, ln in enumerate(info["links"])]
+        live = {(x.get("type"), x.get("name")): x.get("stats") for x in b.get("buses", [])}
+        info["buses"] = [{**x, "stats": live.get((x.get("type"), x.get("name")), x.get("stats"))}
+                         for x in info.get("buses", [])]
         return info
 
     @property
@@ -1229,6 +1659,44 @@ class WebApp:
     def url(self) -> str:
         host = self.httpd.server_address[0]
         return f"http://{host}:{self.port}/"
+
+    def restart(self) -> dict:
+        """Rebuild the current setup with virtual time 0 (POST /api/restart): same chips, firmware, wiring and parts.
+        Host serial ports of the old session are closed first (a TCP port or PTY link can be reopened)."""
+        from .. import boardedit
+        w = self.worker
+        w.pause()
+        old = self.session
+        orig, wiring = self._factory_wiring
+        use_factory = self.factory is not None and old is orig and \
+            getattr(getattr(old, "board", None), "wiring", None) == wiring
+        d = None if use_factory else w.call(lambda: boardedit.board_dict(old))
+        view = getattr(old, "view", None)
+        rt = getattr(old, "pacer", None)
+        speed = getattr(rt, "speed", None) if rt is not None else None
+        w.call(lambda: old.close_hosts() if hasattr(old, "close_hosts") else None)
+        new = self.factory() if use_factory else boardedit.build_session(d, like=old)
+        if view is not None and getattr(new, "board", None) is not None and hasattr(new, "set_view"):
+            try:
+                new.set_view(view)
+            except Exception:
+                pass
+        if speed is not None and hasattr(new, "set_realtime") and getattr(new, "pacer", None) is None:
+            new.set_realtime(True, speed)
+
+        def on_swap():
+            self.session = new
+            self.chip_info = chip_info(new)
+            self.boot = uuid.uuid4().hex[:12]
+            if use_factory:
+                self._factory_wiring = (new, getattr(getattr(new, "board", None), "wiring", None))
+        w.replace_session(new, on_swap)
+        w.realtime = getattr(new, "pacer", None) is not None
+        try:
+            old.close()
+        except Exception:
+            pass
+        return {"boot": self.boot, "chips": _chip_ids(new)}
 
     def swap_session(self, d: dict) -> dict:
         """Build a Session from board mapping `d` (chipem.boardedit) and run it instead of the current one. On a

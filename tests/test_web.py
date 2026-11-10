@@ -451,7 +451,7 @@ def test_event_formatter():
 
 
 def test_fmt_time_matches_app_js(tmp_path):
-    """evfmt.fmt_time is the twin of app.js fmtTime (needs node; skipped otherwise)."""
+    """evfmt.fmt_time is the twin of fmtTime in static/fmt.js, the UI's shared formatter (needs node)."""
     import re
     import shutil
     import subprocess
@@ -459,7 +459,7 @@ def test_fmt_time_matches_app_js(tmp_path):
     node = shutil.which("node")
     if node is None:
         pytest.skip("node not installed")
-    src = (ROOT / "chipem" / "web" / "static" / "app.js").read_text()
+    src = (ROOT / "chipem" / "web" / "static" / "fmt.js").read_text()
     fn = re.search(r"export function fmtTime\(ns\) \{.*?\n\}", src, re.S).group(0).replace("export ", "")
     vals = [0, 0.4, 0.5, 1.5, 999.4, 999.5, 1000, 1062.5, 1234.5678, 999999.9, 1e6, 2.0625e6, 123456789, 1e9,
             1234567890123, 7.0000005e9]
@@ -488,8 +488,10 @@ def test_theme_and_tokens_static():
     lit = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(")
     rest = css.replace(dark, "").replace(light, "")
     assert not lit.findall(rest), lit.findall(rest)
-    for f in ("layout.css", "board.css", "app.js", "board.js", "package.js", "parts.js"):
-        assert not lit.findall((static / f).read_text()), f
+    for f in ("layout.css", "board.css", "app.js", "board.js", "package.js", "parts.js", "fmt.js", "logic.js",
+              "boarddlg.js"):
+        if (static / f).exists():
+            assert not lit.findall((static / f).read_text()), f
     assert not lit.findall(re.sub(r'id="[^"]*"', "", html))
     assert ".toast.toast-error" in css and ".owner-power { color: var(--fg-3); }" in css
     assert ".legend" not in css + (static / "layout.css").read_text()       # the old legend row is gone

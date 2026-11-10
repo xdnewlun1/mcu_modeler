@@ -6,10 +6,15 @@ overrides), taken from the RCC model consistent with the clock the core actually
 generator, flags update immediately.  Character time = (1 start + 8|9 data (M; parity included, PCE) + 0.5|1|1.5|2
 stop (CR2.STOP)) bits / baud.
 
-TX: writing DR with CR1.UE and CR1.TE set appends the byte to `self.output`, logs a `uart` event {uart, dir: 'tx',
-byte} and calls the board-link `tx_listeners` (cb(uart, byte)); SR.TXE and SR.TC clear and are set again one
-character time later (single-buffered, like kinetis.uart, so link timing is exact).  Writes with UE/TE off are
-ignored with one `warn`.
+TX (RM0090 30.3.2, 30.6.1): TDR + shift register. A character entering the shift register is appended to
+`self.output`, logged as a `uart` event {uart, dir: 'tx', byte} and passed to the board-link `tx_listeners`
+(cb(uart, byte)) at its start bit. A DR write while the shift register is idle goes straight to it and TXE stays 1
+("the data transmission starts, and the TXE bit is immediately set"); while a character (or the idle preamble, or a
+break) is shifting the write lands in TDR (TXE = 0) and moves to the shift register at the end of the frame (TXE = 1).
+TC is set at the end of a data frame when TXE = 1, and is cleared only by the SR-read-then-DR-write sequence or by
+writing 0 (a DR write without a preceding SR read leaves TC set). Setting TE (with UE) first sends an idle frame
+(one character time, "Idle characters"; a TE 0-1 pulse sends one after the current character). Writes with UE/TE
+off are ignored with one `warn`.
 RX (RM0090 sec. 30.3.3 "Character reception", 30.6.1 USART_SR ORE/IDLE; RCC APBxENR/APBxRSTR): no input queue,
 like silicon. A character arrives at its stop bit (host input through `feed()` is paced at this USART's character
 time, board links call `receive()` at the stop-bit time; see chipem/periph/uartwire.py) and is dropped (`uart` event
@@ -17,11 +22,12 @@ dir 'drop', reason) when the RCC clock enable is off (clock_gated), the RCC rese
 (reset), CR1.UE or CR1.RE is clear (rx_disabled) or no pin is in AF mode for USARTn_RX (pin_not_muxed). Otherwise it
 goes to RDR: SR.RXNE = 1, logged as dir 'rx'. If RXNE is still set, SR.ORE is set and the new character is lost ("the
 RDR content will not be lost ... the shift register will be overwritten"). SR.IDLE is set one character time after
-the last character received. PE/FE/NF/ORE/IDLE clear with the SR-read-then-DR-read sequence; RXNE/TC (and LBD/CTS)
-are rc_w0 (writing 0 clears them); reading DR clears RXNE.
+the last character received (once per RXNE; a new character does not clear it). PE/FE/NF/ORE/IDLE clear with the
+SR-read-then-DR-read sequence (PE also with SR read then DR write); RXNE/TC (and LBD/CTS) are rc_w0 (writing 0 clears
+them); reading DR clears RXNE.
 IRQ "<name>" (USART1, UART4 ...) line = (TXE & TXEIE) | (TC & TCIE) | (RXNE & RXNEIE) | (ORE & RXNEIE) | (IDLE &
 IDLEIE), level-sensitive.
-DMA (RM0090 sec. 30.3.13): CR3.DMAT asserts the DMA request "<name>_TX" (RM0090 Tables 42/43, e.g. USART1_TX on DMA2
+DMA (RM0090 sec. 30.3.13): CR3.DMAT asserts the DMA request "<name>_TX" (RM0090 Tables 43/44, e.g. USART1_TX on DMA2
 stream 7 channel 4) while TXE = 1, so the DMA's DR write (which clears TXE) deasserts it and the next TXE re-asserts it;
 CR3.DMAR asserts "<name>_RX" while RXNE = 1 (the DMA's DR read clears RXNE).  Requests go through
 `_util.dma_request` to both controllers (chipem/periph/stm32/dma.py).  The TC flag/interrupt path is unchanged (HAL
@@ -34,14 +40,18 @@ receiver can take a character and H while RXNE is set (deasserted at the stop bi
 Parity (CR1.PCE, PS): the parity bit takes the word's MSB, so 7 (M=0) or 8 (M=1) data bits go on the link; a received
 character gets its computed parity bit in the MSB of DR, as silicon returns it. PE is never set (links carry no
 parity errors). 9-bit words (M=1, PCE=0): board links and the host carry 8 bits, bit 8 is sent as 0 / received as 0.
-Break / LIN (30.3.11): CR1.SBK sends a break (data bits + 1 low bits, then the stop bits; SBK clears at its end, after
-the character in progress); it is logged as a `uart` event {dir: 'tx', brk: 1} but not carried by board links.
-`receive_break()` delivers a break to the receiver: FE + RXNE with 0x00, and SR.LBD (LBDIE interrupt) when
-CR2.LINEN = 1.
+Break / LIN (30.3.2, 30.3.8): CR1.SBK sends a break after the character in progress: 10 (M = 0) / 11 (M = 1) low
+bits, 13 with CR2.LINEN, then the stop bits; SBK is cleared during the stop bit of the break; CTS is not checked
+(30.3.14). It is logged as a `uart` event {dir: 'tx', brk: 1} but not carried by board links. `receive_break(bits)`
+delivers a break to the receiver: FE + RXNE with 0x00, and SR.LBD (LBDIE interrupt) when CR2.LINEN = 1 and the break
+is at least 10 (LBDL = 0) / 11 (LBDL = 1) bits long. OVER8 is forced to 0 while LINEN, SCEN or IREN is set (30.6.4).
 Half duplex (CR3.HDSEL): the receiver listens on the USARTn_TX pin and receives the characters it transmits (echo).
-Mute mode (CR1.RWU, 30.3.8): WAKE = 0 wakes on an idle line (at least one idle character time before the arriving
-character; IDLE is not set in mute mode), WAKE = 1 on an address mark (MSB of the word = 1 and low 4 bits = CR2.ADD:
-that character is received); an address mark that does not match puts the receiver back into mute mode. Muted
+Mute mode (CR1.RWU, 30.3.6): WAKE = 0 wakes on an idle line: an idle frame detected (one character time) after a
+received character, muted ones included, with RWU set before that detection (CR1.RWU note: a byte must have been
+received first); IDLE is not set and RWU is cleared when the next character arrives (on silicon at the idle
+detection itself). WAKE = 1 on an address mark (MSB of the word = 1 and low 4 bits = CR2.ADD: that character is
+received); an address mark that does not match puts the receiver back into mute mode; RWU writes are ignored while
+RXNE = 1 in this mode. Muted
 characters do not set RXNE. Smartcard (SCEN), IrDA (IREN) and synchronous mode (CR2.CLKEN) are not modelled (one
 `warn`; the USART behaves as asynchronous). Stop mode: `clock_stop()` freezes the transmitter and drops arriving
 characters (reason clock_stopped).
@@ -61,7 +71,7 @@ SR_ERR = SR_PE | SR_FE | SR_NF | SR_ORE | SR_IDLE
 CR1_SBK, CR1_RWU = 1 << 0, 1 << 1
 CR1_RE, CR1_TE, CR1_IDLEIE, CR1_RXNEIE, CR1_TCIE, CR1_TXEIE = 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7
 CR1_PEIE, CR1_PS, CR1_PCE, CR1_WAKE, CR1_M, CR1_UE, CR1_OVER8 = 1 << 8, 1 << 9, 1 << 10, 1 << 11, 1 << 12, 1 << 13, 1 << 15
-CR2_LBDIE, CR2_CLKEN, CR2_LINEN = 1 << 6, 1 << 11, 1 << 14
+CR2_LBDL, CR2_LBDIE, CR2_CLKEN, CR2_LINEN = 1 << 5, 1 << 6, 1 << 11, 1 << 14
 CR3_EIE, CR3_IREN, CR3_HDSEL, CR3_SCEN = 1 << 0, 1 << 1, 1 << 3, 1 << 5
 CR3_DMAR, CR3_DMAT, CR3_RTSE, CR3_CTSE, CR3_CTSIE = 1 << 6, 1 << 7, 1 << 8, 1 << 9, 1 << 10
 STOP_BITS = (1.0, 0.5, 2.0, 1.5)
@@ -116,6 +126,9 @@ class USART(UartRx, GatedBlock):
         self._tx_left_ns: float | None = None  # remaining shift time while the clock is stopped
         self._brk_pending = False
         self._brk_active = False
+        self._idle_pending = False             # idle preamble to send (TE set while busy)
+        self._tx_data = False                  # the shift register holds a data frame (TC at its end)
+        self._sr_seen_tx = False               # SR read since the last DR write (TC clear sequence)
         self._rts_on = False                   # RTS currently driven by us
         self._cts_last: str | None = None
         self._cts_noted = False
@@ -151,6 +164,7 @@ class USART(UartRx, GatedBlock):
         if getattr(self, "_line", False):
             self._set_line(False)
         self._sr_seen = False
+        self._sr_seen_tx = False
         super().reset()
         self._dma_bits = 0
         self._dma_update()
@@ -159,6 +173,7 @@ class USART(UartRx, GatedBlock):
         self._tx_hold = self._tx_cur = None
         self._tx_left_ns = None
         self._brk_pending = self._brk_active = False
+        self._idle_pending = self._tx_data = False
         self._stopped = False
         self._last_rx_ns = -1e30
         self.rx_signal = f"{self.name}_RX"
@@ -178,9 +193,14 @@ class USART(UartRx, GatedBlock):
     def module_hz(self) -> float:
         return apb_hz(self.chip, self.apb) if self.chip is not None else 0.0
 
+    def over8(self) -> bool:
+        """CR1.OVER8, forced to 0 by hardware when SCEN, IREN or LINEN is set (30.6.4)."""
+        return bool(self.get("CR1") & CR1_OVER8) and not (self._cr3 & (CR3_SCEN | CR3_IREN)
+                                                          or self.get("CR2") & CR2_LINEN)
+
     def usartdiv(self) -> float:
         brr = self.get("BRR") & 0xFFFF
-        if self.get("CR1") & CR1_OVER8:
+        if self.over8():
             return (brr >> 4) + (brr & 7) / 8.0
         return (brr >> 4) + (brr & 0xF) / 16.0
 
@@ -188,7 +208,7 @@ class USART(UartRx, GatedBlock):
         div = self.usartdiv()
         if div <= 0:
             return 0.0
-        over8 = 1 if self.get("CR1") & CR1_OVER8 else 0
+        over8 = 1 if self.over8() else 0
         return self.module_hz() / (8.0 * (2 - over8) * div)
 
     def data_bits(self) -> int:
@@ -357,6 +377,7 @@ class USART(UartRx, GatedBlock):
     # ------------------------------------------------------------------ TX
     def _tx_done(self) -> None:
         self._tx_ev = None
+        data, self._tx_data = self._tx_data, False
         if self._brk_active:
             self._brk_active = False
             self.set("CR1", self.get("CR1") & ~CR1_SBK)
@@ -366,12 +387,17 @@ class USART(UartRx, GatedBlock):
         if self._brk_pending:
             self._start_break()
             return
+        if self._idle_pending:
+            self._start_idle()
+            if self._tx_ev is not None:
+                return
         if self._tx_hold is not None:
             if self.cts_asserted() and not self._stopped:
                 h, self._tx_hold = self._tx_hold, None
                 self._start_tx(h)
-            return                                     # TXE/TC stay 0 while the character waits for CTS
-        self._sr_mod(SR_TXE | SR_TC)
+            return                                     # TXE = 0 (and no TC) while the character waits for CTS
+        if data and self.get("SR") & SR_TXE:
+            self._sr_mod(SR_TC)                        # frame containing data complete with TXE = 1
 
     def _dr_write(self, blk, reg, old, new):
         cr1 = self.get("CR1")
@@ -387,15 +413,26 @@ class USART(UartRx, GatedBlock):
             b = new & (0xFF if cr1 & CR1_M else 0x7F)          # the parity bit replaces the MSB
         else:
             b = new & (0x1FF if cr1 & CR1_M else 0xFF)
-        if self._tx_ev is not None or self._stopped or self._brk_pending or not self.cts_asserted():
-            # TDR: waits for the shift register (character or break in progress), CTS or the clock (Stop mode)
+        clr = SR_TC if self._sr_seen_tx else 0          # TC: SR read followed by a DR write (30.6.1)
+        if self._sr_seen and self.get("SR") & SR_PE:
+            clr |= SR_PE                                # PE: SR read followed by a DR read or write
+        self._sr_seen_tx = False
+        if self._tx_ev is not None or self._tx_hold is not None or self._stopped or self._brk_pending \
+                or not self.cts_asserted():
+            # TDR: waits for the shift register (character, idle preamble or break in progress), CTS or the clock
+            # (Stop mode); a second write before the transfer overwrites TDR
             self._tx_hold = b
-            self._sr_mod(clr_bits=SR_TXE | SR_TC)
+            self._sr_mod(clr_bits=SR_TXE | clr)
             return old
+        if clr:
+            self._sr_mod(clr_bits=clr)
         self._start_tx(b)
         return old
 
     def _start_tx(self, b: int) -> None:
+        """TDR (or a direct DR write while idle) -> shift register: TXE is set at once (30.3.2 "the data
+        transmission starts, and the TXE bit is immediately set"); TC is set at the end of the frame if TXE is still
+        set."""
         self.output.append(b & 0xFF)
         self.emit("uart", uart=self.name, dir="tx", byte=b & 0xFF)
         for cb in self.tx_listeners:
@@ -403,26 +440,60 @@ class USART(UartRx, GatedBlock):
         self._cancel("_tx_ev")
         t = self.char_ns()
         self._tx_cur = b & 0xFF
+        self._tx_data = True
+        txe_was = self.get("SR") & SR_TXE
         if t > 0:
-            self._sr_mod(clr_bits=SR_TXE | SR_TC)
             self._tx_end_ns = self.chip.now_ns() + t
             self._tx_ev = self.chip.sched.in_ns(t, self._tx_done)
+            if txe_was:
+                if self._dma_tx:                # TXE stays 1: the next DMA write goes to TDR
+                    dma_request(self.chip, self._dma_names[0], True)
+            else:
+                self._sr_mod(SR_TXE)
         else:
             self._tx_done()
-            if self._dma_tx:                    # no baud generator: TXE never dropped, the request stays
+            if txe_was and self._dma_tx:        # no baud generator: TXE never dropped, the request stays
                 dma_request(self.chip, self._dma_names[0], True)
 
+    def _start_idle(self) -> None:
+        """TE (with UE) set: an idle frame (preamble, one character time of 1s) is sent before the first data
+        (30.3.2 "Idle characters", CR1.TE note). TXE stays 1, TC is not affected."""
+        self._idle_pending = False
+        t = self.char_ns()
+        if t <= 0:
+            return
+        self._tx_cur = None
+        self._tx_data = False
+        self._tx_end_ns = self.chip.now_ns() + t
+        self._tx_ev = self.chip.sched.in_ns(t, self._tx_done)
+
+    def break_low_bits(self) -> int:
+        """Low bits of a transmitted break: 13 with CR2.LINEN (30.3.8), else 10 (M = 0) or 11 (M = 1) (30.3.2)."""
+        if self.get("CR2") & CR2_LINEN:
+            return 13
+        return 11 if self.get("CR1") & CR1_M else 10
+
     def _start_break(self) -> None:
+        """Break: break_low_bits() low bits, then the stop bits; SBK is cleared by hardware during the stop bit of
+        the break (CR1.SBK, 30.6.4). CTS is not checked for a break (30.3.14 note)."""
         self._brk_pending = False
         self._brk_active = True
+        self._tx_cur = None
+        self._tx_data = False
         self.emit("uart", uart=self.name, dir="tx", brk=1)
         b = self.baud()
-        t = (self.data_bits() + 1 + self.stop_bits()) * 1e9 / b if b > 0 else 0.0
-        if t > 0:
-            self._tx_end_ns = self.chip.now_ns() + t
-            self._tx_ev = self.chip.sched.in_ns(t, self._tx_done)
+        low = self.break_low_bits() * 1e9 / b if b > 0 else 0.0
+        if low > 0:
+            self._tx_end_ns = self.chip.now_ns() + low + self.stop_bits() * 1e9 / b
+            self._tx_ev = self.chip.sched.in_ns(low, self._break_stop)
         else:
+            self.set("CR1", self.get("CR1") & ~CR1_SBK)
             self._tx_done()
+
+    def _break_stop(self) -> None:
+        self.set("CR1", self.get("CR1") & ~CR1_SBK)
+        t = self._tx_end_ns - self.chip.now_ns()
+        self._tx_ev = self.chip.sched.in_ns(max(t, 0.0), self._tx_done)
 
     # ------------------------------------------------------------------ RX
     def rx_pending(self) -> int:
@@ -464,18 +535,25 @@ class USART(UartRx, GatedBlock):
         if not cr1 & CR1_RWU:
             return True
         ct = self.char_ns()
-        if ct > 0 and now - max(self._last_rx_ns, self._mute_since) >= 2 * ct - 1e-6:
+        last = self._last_rx_ns
+        # wake-up by idle line (30.3.6): an idle frame is detected one character time after a received character
+        # (muted ones count); RWU must have been set before that detection ("the USART must first receive a data
+        # byte" before RWU, CR1.RWU note)
+        if ct > 0 and last > -1e29 and self._mute_since <= last + ct + 1e-6 and now - last >= 2 * ct - 1e-6:
             self.set("CR1", cr1 & ~CR1_RWU)                   # an idle frame preceded this character: wake up
             return True
         return False
 
-    def receive_break(self) -> None:
-        """A break (all-zero character with a zero stop bit) arrives now: FE + RXNE with 0x00; LBD with LINEN."""
+    def receive_break(self, bits: int = 13) -> None:
+        """A break of `bits` low bit times (at least one frame) ends now: FE + RXNE with 0x00 (30.3.3 "Break
+        character"); with CR2.LINEN, LBD when bits >= 10 (LBDL = 0) or 11 (LBDL = 1) (30.3.8; set at the delimiter,
+        i.e. now)."""
         if self._rx_block_reason() is not None:
             return
         self.breaks_rx += 1
-        self.emit("uart", uart=self.name, dir="rx", brk=1)
-        if self.get("CR2") & CR2_LINEN:
+        self.emit("uart", uart=self.name, dir="rx", brk=1, bits=bits)
+        cr2 = self.get("CR2")
+        if cr2 & CR2_LINEN and bits >= (11 if cr2 & CR2_LBDL else 10):
             self._sr_mod(SR_LBD)
         self._rx_accept(0, framing=True)
 
@@ -499,13 +577,13 @@ class USART(UartRx, GatedBlock):
         self._last_rx_ns = self.chip.now_ns()
         if self.get("SR") & SR_RXNE:
             self._rx_drop(b, "overrun")
-            self._sr_mod(SR_ORE, SR_IDLE)
+            self._sr_mod(SR_ORE)
         else:
             self._rx_byte = b
             self.set("DR", b)
             if not framing:
                 self.emit("uart", uart=self.name, dir="rx", byte=b & 0xFF)
-            self._sr_mod(SR_RXNE | (SR_FE if framing else 0), SR_IDLE)
+            self._sr_mod(SR_RXNE | (SR_FE if framing else 0))
         t = self.char_ns()
         if t > 0:
             self._idle_ev = self.chip.sched.in_ns(t, self._idle)
@@ -529,6 +607,7 @@ class USART(UartRx, GatedBlock):
 
     def _sr_read(self, blk, reg):
         self._sr_seen = True
+        self._sr_seen_tx = True
         return None
 
     def _sr_write(self, blk, reg, old, new):
@@ -549,6 +628,8 @@ class USART(UartRx, GatedBlock):
         return None
 
     def _cr1_write(self, blk, reg, old, new):
+        if (old ^ new) & CR1_RWU and new & CR1_WAKE and self.get("SR") & SR_RXNE:
+            new = (new & ~CR1_RWU) | (old & CR1_RWU)   # address-mark mode: RWU not writable while RXNE = 1 (30.3.6)
         self._store(reg, new)
         if not (new & CR1_UE and new & CR1_RE):
             self._cancel("_idle_ev")
@@ -560,5 +641,11 @@ class USART(UartRx, GatedBlock):
                 self._start_break()
         if not (new & CR1_UE and new & CR1_TE):
             self._tx_hold = None
+        elif not (old & CR1_UE and old & CR1_TE) and self.chip is not None:
+            # transmitter enabled: an idle frame goes out before the first character (after the current one)
+            if self._tx_ev is None and not self._stopped:
+                self._start_idle()
+            else:
+                self._idle_pending = True
         self._update_line()
-        return None
+        return new

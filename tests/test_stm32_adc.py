@@ -541,3 +541,64 @@ def test_reserved_multi_mode_warns_once(desc):
     wr(chip, C_ADC + CCR, 0b00011 | (1 << 16))
     msgs = [e.fields.get("msg") for e in chip.log if e.kind == "warn" and "reserved multi-ADC" in str(e.fields)]
     assert len(msgs) == 1
+
+
+# ------------------------------------------------------------------------------------------------ DDS (RM0090 13.8.1)
+DMA2 = 0x40026400
+S0CR, S0NDTR, S0PAR, S0M0AR = DMA2 + 0x10, DMA2 + 0x14, DMA2 + 0x18, DMA2 + 0x1C
+DDS = 1 << 9
+
+
+def _adc_dma_stream(chip, buf, n, circ=False):
+    wr(chip, DMA2 + 0x08, 0x3D)                                    # LIFCR stream 0
+    wr(chip, S0PAR, ADC1 + DR)
+    wr(chip, S0M0AR, buf)
+    wr(chip, S0NDTR, n)
+    cr = 1 << 13 | 1 << 11 | 1 << 10 | (1 << 8 if circ else 0)     # ch0, halfword, MINC, P2M
+    wr(chip, S0CR, cr)
+    wr(chip, S0CR, cr | 1)
+
+
+@pytest.mark.parametrize("dds", [0, DDS])
+def test_dds_stops_requests_after_last_dma_transfer(desc, dds):
+    """DDS = 0: no DMA request after the stream's last transfer, even in circular mode, until CR2.DMA is rewritten;
+    DDS = 1: requests continue (circular DMA keeps running)."""
+    chip = _chip(desc)
+    wr(chip, RCC + 0x30, rd(chip, RCC + 0x30) | 1 << 22)          # DMA2EN
+    adc = chip.peripherals["ADC1"]
+    dma = chip.peripherals["DMA2"]
+    adc.set_channel("PA0", 1.65)
+    _adc_dma_stream(chip, 0x20001000, 3, circ=True)
+    _swstart(chip, cr2=CONT | DMA | dds)
+    chip.run_cycles(34 + 30 * 9 + 5)                               # 10 conversions
+    if dds:
+        assert dma.items == 10 and not rd(chip, ADC1 + SR) & OVR
+        return
+    assert dma.items == 3 and adc._dds_stop and not dma.request_active("ADC1")
+    assert rd(chip, ADC1 + SR) & OVR                               # DMA = 1 keeps overrun detection on (13.13.1)
+    wr(chip, ADC1 + SR, 0)
+    wr(chip, ADC1 + CR2, ADON | CONT | DMA)                        # DMA bit not toggled: still no request
+    wr(chip, ADC1 + CR2, ADON | CONT | DMA | SWSTART)
+    chip.run_cycles(40)
+    assert dma.items == 3
+    wr(chip, ADC1 + CR2, ADON)                                     # DMA 0 then 1 re-arms the requests
+    rd(chip, ADC1 + DR)
+    wr(chip, ADC1 + SR, 0)
+    wr(chip, ADC1 + CR2, ADON | DMA | SWSTART)
+    chip.run_cycles(40)
+    assert dma.items == 4
+
+
+def test_sqr_write_during_conversion_restarts_group(desc):
+    """RM0090 13.3.3: modifying SQRx during a conversion resets it and converts the newly chosen group."""
+    chip = _chip(desc)
+    adc = chip.peripherals["ADC1"]
+    adc.set_channel("IN0", 1.65)
+    adc.set_channel("IN1", 0.825)
+    t0 = _swstart(chip)
+    chip.run_cycles(10)
+    t1 = chip.now_cycles()
+    wr(chip, ADC1 + SQR3, 1)                                       # SQ1 = IN1 mid-conversion
+    chip.run_cycles(CONV12 + 20)
+    assert adc.conversions == 1 and rd(chip, ADC1 + DR) == 1024    # only the new channel was converted
+    assert t1 > t0

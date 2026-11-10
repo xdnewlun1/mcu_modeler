@@ -29,7 +29,8 @@ def main(args) -> int:
               file=sys.stderr)
     app = WebApp(session, getattr(args, "host", "127.0.0.1"), getattr(args, "port", 8765),
                  realtime=session.pacer is not None, chunk_ms=getattr(args, "chunk", 5.0),
-                 verbose=getattr(args, "verbose", False))
+                 verbose=getattr(args, "verbose", False),
+                 factory=lambda: Session.from_args(args))           # POST /api/restart: the same CLI setup at t=0
     d = session.desc
     print(f"chipem serve — {d.name}, firmware {getattr(session.image, 'source', '-')}\n"
           f"UI at {app.url}   (Ctrl-C to quit)", file=sys.stderr)

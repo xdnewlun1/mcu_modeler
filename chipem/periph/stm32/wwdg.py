@@ -1,8 +1,8 @@
-"""STM32F4 window watchdog (WWDG, RM0090 ch. 20).
+"""STM32F4 window watchdog (WWDG, RM0090 ch. 22).
 
 Registers from the SVD: CR (+0: T[6:0], WDGA bit 7; reset 0x7F), CFR (+4: W[6:0], WDGTB[1:0] bits 7-8, EWI bit 9;
 reset 0x7F), SR (+8: EWIF bit 0, rc_w0).
-* Counter: the 7-bit down-counter T[6:0] decrements once every 4096 x 2^WDGTB PCLK1 cycles (20.3: t_WWDG =
+* Counter: the 7-bit down-counter T[6:0] decrements once every 4096 x 2^WDGTB PCLK1 cycles (22.4: t_WWDG =
   t_PCLK1 x 4096 x 2^WDGTB), counted in core cycles (PPRE1 x 4096 x 2^WDGTB, `sched.at_cycles`). Reading CR returns
   the live counter. The prescaler phase starts at the last CR write (silicon's prescaler runs freely: up to one tick
   of difference). It counts while the APB1 clock (RCC_APB1ENR.WWDGEN) is on, also before WDGA is set (free-running,
@@ -10,8 +10,8 @@ reset 0x7F), SR (+8: EWIF bit 0, rc_w0).
 * WDGA (set by software, cleared only by a reset) activates the watchdog. A system reset ("wwdg": RCC_CSR.WWDGRSTF
   and PINRSTF are set on the next reset) is generated when the counter rolls over from 0x40 to 0x3F (T6 becomes 0),
   when CR is written with T6 = 0 while active, and when CR is written while the counter is still above the window
-  value W (refresh too early, 20.3 Figure 214).
-* Early wakeup (20.3): EWIF is set when the counter reaches 0x40; with CFR.EWI (set by software, cleared only by a
+  value W (refresh too early, 22.3, Figure 215).
+* Early wakeup (22.3): EWIF is set when the counter reaches 0x40; with CFR.EWI (set by software, cleared only by a
   reset) the level IRQ "WWDG" follows EWIF. EWIF is cleared by writing 0.
 WWDG is reset by a system reset and by RCC_APB1RSTR.WWDGRST. Debug freeze (DBGMCU_APB1_FZ) is not modelled.
 """

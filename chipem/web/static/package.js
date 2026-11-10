@@ -89,13 +89,15 @@ export function ensureDefs(svg) {
 
 export class PackageView {
   // parent: an SVG <g> (positioned by the caller); chip: one /api/chip `chips` entry
-  constructor(parent, chip, { onClick, onHover, onLeave, onBody, showId = false, labelChars = LABEL_CHARS } = {}) {
+  constructor(parent, chip, { onClick, onHover, onLeave, onBody, onFocus, onBlur, showId = false, labelChars = LABEL_CHARS } = {}) {
     this.root = el("g", { class: "package", "data-chip": chip.id }, parent);
     this.chip = chip;
     this.onClick = onClick;
     this.onHover = onHover;
     this.onLeave = onLeave;
     this.onBody = onBody;
+    this.onFocus = onFocus;
+    this.onBlur = onBlur;
     this.showId = showId;
     this.items = new Map();       // num -> {g, body, tip, arrow, label, ownerSpan, pin, p, row}
     this.timeText = "";
@@ -147,32 +149,68 @@ export class PackageView {
     el("circle", { cx: off + 18, cy: off + 18, r: 5, class: "pin1-dot" }, bodyG);
     if (this.onBody) bodyG.addEventListener("click", (e) => this.onBody(chip, e));
 
-    const cx = off + bodyLen / 2, cy = off + bodyLen / 2;
-    const txt = (y, cls, text, size) => {
-      const t = el("text", { x: cx, y: cy + y * s, class: cls }, bodyG);
-      if (size) t.style.fontSize = `${size * s}px`;
+    // body text lines, top to bottom: native size (world units, scaled with the body) and the smallest on-screen size;
+    // layoutBody() counter-scales them at small zoom and drops the least important ones that no longer fit
+    const cx = off + bodyLen / 2;
+    this.bodyLines = [];
+    const line = (cls, text, size, minPx, prio, gap = 0.35) => {
+      const t = el("text", { x: cx, y: off + bodyLen / 2, class: cls }, bodyG);
       t.textContent = text;
+      const L = { el: t, size: size * s, minPx, prio, gap, cw: /title|sub(?! mono)/.test(cls) && !/mono/.test(cls) ? 0.56 : 0.62,
+                  len: text.length, shown: true };
+      this.bodyLines.push(L);
       return t;
     };
-    let y = -34;
-    if (this.showId) {
-      txt(-88, "body-id", chip.id, 44);
-      y = -30;
-    }
-    txt(y, "body-title", chip.name);
-    txt(y + 26, "body-sub", `${chip.package} · ${chip.cpu}${chip.fpu ? " + FPU" : ""}`);
-    this.bodyFw = txt(y + 50, "body-sub", chip.firmware ? `firmware: ${chip.firmware}` : "no firmware");
-    this.bodyTime = txt(y + 86, "body-time", "0.000 ms");
-    this.bodyStatus = txt(y + 110, "body-sub dim", "paused");
-    this.bodyPc = txt(y + 132, "body-sub dim mono", "");
+    if (this.showId) line("body-id", chip.id, 44, 16, 0, 0.25);
+    line("body-title", chip.name, 20, 10, 3);
+    line("body-sub", `${chip.package} · ${chip.cpu}${chip.fpu ? " + FPU" : ""}`, 13, 9, 5);
+    this.bodyFw = line("body-sub", chip.firmware ? `firmware: ${chip.firmware}` : "no firmware", 13, 9, 6, 0.9);
+    this.bodyTime = line("body-time", "0.000 ms", 19, 10, 1);
+    this.bodyStatus = line("body-sub dim", "paused", 13, 9, 2);
+    this.bodyPc = line("body-sub dim mono", "", 13, 9, 4);
+    this._bodyScale = 1;
+    this.layoutBody(1);
 
     const pins = [...chip.pins].sort((a, b) => a.num - b.num);
-    pins.forEach((pin, i) => this.buildPin(pin, this.place(i)));
+    this.order = pins.map((p) => p.num);              // keyboard order (counter-clockwise)
+    pins.forEach((pin, i) => this.buildPin(pin, this.place(i), i === 0));
   }
 
-  buildPin(pin, p) {
+  // Body text at `scale` screen px per world unit: each line at max(native, minPx on screen), stacked around the body
+  // centre; lines too wide for the body, then the least important ones while the stack is too tall, are hidden.
+  layoutBody(scale) {
+    this._bodyScale = scale;
+    const { off, bodyLen } = this.geo;
+    const W = bodyLen * 0.9, Hmax = bodyLen * 0.86;
+    const lines = this.bodyLines;
+    for (const L of lines) {
+      L.fs = Math.max(L.size, L.minPx / Math.max(scale, 1e-6));
+      L.len = (L.el.textContent || "").length;
+      L.shown = L.len === 0 ? true : L.len * L.fs * L.cw <= W;
+    }
+    const h = () => lines.reduce((a, L) => a + (L.shown && L.len ? L.fs * (1 + L.gap) : 0), 0);
+    const byPrio = lines.filter((L) => L.shown).sort((a, b) => b.prio - a.prio);
+    while (h() > Hmax && byPrio.length) byPrio.shift().shown = false;
+    let y = off + bodyLen / 2 - h() / 2;
+    for (const L of lines) {
+      const vis = L.shown && L.len > 0;
+      if (vis) {
+        y += L.fs * (1 + L.gap / 2);
+        L.el.setAttribute("y", Math.round((y - L.fs * 0.18) * 10) / 10);
+        L.el.style.fontSize = `${Math.round(L.fs * 100) / 100}px`;
+        y += L.fs * (L.gap / 2);
+      }
+      if ((L.el.getAttribute("visibility") !== "hidden") !== (vis || L.len === 0)) {
+        L.el.setAttribute("visibility", vis || L.len === 0 ? "visible" : "hidden");
+      }
+    }
+  }
+
+  buildPin(pin, p, first = false) {
     const G = this.geo;
-    const grp = el("g", { class: "pin", "data-num": pin.num, tabindex: 0 }, this.root);
+    // roving tabindex: one tab stop per package (the last focused pin), arrow keys move between pins
+    const grp = el("g", { class: "pin", "data-num": pin.num, tabindex: first ? 0 : -1, role: "button",
+                          "aria-label": `${this.chip.id ? this.chip.id + "." : ""}${pin.short} pin ${pin.num} ${pin.name || ""}` }, this.root);
     const horiz = p.dx !== 0;
     const len = G.pinLen, w = G.pinW;
     let rx, ry, rw, rh;
@@ -226,10 +264,40 @@ export class PackageView {
     this.items.set(pin.num, it);
     grp.addEventListener("click", (e) => this.onClick && this.onClick(this.chip, pin, e));
     grp.addEventListener("keydown", (e) => {
-      if ((e.key === "Enter" || e.key === " ") && this.onClick) { e.preventDefault(); e.stopPropagation(); this.onClick(this.chip, pin, e); }
+      if ((e.key === "Enter" || e.key === " ") && this.onClick) { e.preventDefault(); e.stopPropagation(); this.onClick(this.chip, pin, e); return; }
+      const to = this.keyTarget(it, e.key);
+      if (to != null) { e.preventDefault(); e.stopPropagation(); this.focusPin(to); }
     });
+    grp.addEventListener("focus", (e) => this.onFocus && this.onFocus(this.chip, pin, e));
+    grp.addEventListener("blur", () => this.onBlur && this.onBlur(this.chip, pin));
     grp.addEventListener("mousemove", (e) => this.onHover && this.onHover(this.chip, pin, e));
     grp.addEventListener("mouseleave", () => this.onLeave && this.onLeave(this.chip, pin));
+  }
+
+  // pin number reached from pin `it` with key `key` (null: not a navigation key). Along a side the arrow that follows the
+  // counter-clockwise numbering moves to the next pin, the opposite one to the previous; PageUp/PageDown jump a side.
+  keyTarget(it, key) {
+    const order = this.order, i = order.indexOf(it.pin.num), n = order.length;
+    if (i < 0) return null;
+    const fwd = { L: "ArrowDown", B: "ArrowRight", R: "ArrowUp", T: "ArrowLeft" }[it.p.side];
+    const back = { L: "ArrowUp", B: "ArrowLeft", R: "ArrowDown", T: "ArrowRight" }[it.p.side];
+    if (key === fwd) return order[(i + 1) % n];
+    if (key === back) return order[(i - 1 + n) % n];
+    if (key === "Home") return order[0];
+    if (key === "End") return order[n - 1];
+    const per = this.geo.perSide;
+    if (key === "PageDown") return order[Math.min(n - 1, (Math.floor(i / per) + 1) * per) % n];
+    if (key === "PageUp") return order[Math.max(0, (Math.floor(i / per) - 1) * per)];
+    return null;
+  }
+
+  // move the package's tab stop to pin `num` and focus it
+  focusPin(num) {
+    const it = this.items.get(num);
+    if (!it) return;
+    for (const x of this.items.values()) if (x !== it && x.g.getAttribute("tabindex") === "0") x.g.setAttribute("tabindex", "-1");
+    it.g.setAttribute("tabindex", "0");
+    it.g.focus();
   }
 
   arrowPath(it, dir) {
@@ -309,10 +377,13 @@ export class PackageView {
 
   setStatus(timeText, statusText, running, pcText = "") {
     this.timeText = timeText;
+    const lens = [this.bodyTime, this.bodyStatus, this.bodyPc].map((e) => (e.textContent || "").length).join();
     if (this.bodyTime.textContent !== timeText) this.bodyTime.textContent = timeText;
     if (this.bodyStatus.textContent !== statusText) this.bodyStatus.textContent = statusText;
-    this.bodyStatus.setAttribute("class", "body-sub " + (running ? "run" : "dim"));
+    const sc = "body-sub " + (running ? "run" : "dim");
+    if (this.bodyStatus.getAttribute("class") !== sc) this.bodyStatus.setAttribute("class", sc);
     if (this.bodyPc.textContent !== pcText) this.bodyPc.textContent = pcText;
+    if ([this.bodyTime, this.bodyStatus, this.bodyPc].map((e) => (e.textContent || "").length).join() !== lens) this.layoutBody(this._bodyScale);
   }
 
   setSelected(on) {
@@ -327,6 +398,7 @@ export class PackageView {
     // names may use the full pitch: mono capitals are ~0.7 em tall, so 9 px names in a 8.7 px pitch keep a 2 px gap
     const px = Math.min(Math.max(G.font * scale, MIN_LABEL_PX), G.pitch * scale * 1.04);
     const lab = px >= HIDE_LABEL_PX, num = G.numFont * scale >= 4.5;
+    if (Math.abs(scale - (this._bodyScale || 0)) / scale > 0.02) this.layoutBody(scale);
     if (lab !== this._lab) { this.root.classList.toggle("lod-nolabel", !lab); this._lab = lab; }
     if (num !== this._num) { this.root.classList.toggle("lod-nonum", !num); this._num = num; }
     const fw = Math.round(Math.max(G.font, px / scale) * 20) / 20;

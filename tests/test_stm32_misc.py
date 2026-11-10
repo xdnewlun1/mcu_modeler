@@ -180,7 +180,7 @@ def test_dac_dhr_to_dor_one_apb1_cycle_and_voltage(desc):
     assert rd(chip, DAC + DOR1) == 0x800 and rd(chip, DAC + DHR12R1) == 0x800 and rd(chip, DAC + DHR8R1) == 0x80
     wr(chip, DAC + DHR12RD, 0x0FFF_0123)
     chip.run_cycles(8)
-    assert rd(chip, DAC + DOR1) == 0x123 and rd(chip, DAC + DOR2) == 0   # channel 2 off: DHR only
+    assert rd(chip, DAC + DOR1) == 0x123 and rd(chip, DAC + DOR2) == 0xFFF   # EN2 = 0: digital part still runs
     assert rd(chip, DAC + DHR12R2) == 0xFFF and rd(chip, DAC + DHR8RD) == (0x12 | 0xFF << 8)
     wr(chip, DAC + CR, 0)
     assert dac.voltage(1) is None and chip.pins.get("PA4").owner == "ADC12_IN4"
@@ -257,6 +257,53 @@ def test_dac_noise_wave_bounded_by_mamp(desc):
     assert len(vals) > 4 and max(vals) <= 15
 
 
+def test_dac_noise_sequence_starts_at_preload_rm_fig69(desc):
+    chip = _chip(desc)
+    wr(chip, DAC + CR, EN | TEN | 7 << 3 | 1 << 6 | 11 << 8)  # noise, MAMP >= 1011: all 12 bits
+    seq = []
+    for _ in range(3):
+        wr(chip, DAC + SWTRIGR, 1)
+        chip.run_cycles(2)
+        seq.append(rd(chip, DAC + DOR1))
+    assert seq[:2] == [0xAAA, 0xD55]                         # RM0090 Figure 69 (DHR = 0)
+
+
+def test_dac_wave_sum_saturates_without_overflow(desc):
+    chip = _chip(desc)
+    wr(chip, DAC + CR, EN | TEN | 7 << 3 | 2 << 6 | 3 << 8)   # triangle, amplitude 15
+    wr(chip, DAC + DHR12R1, 0xFFA)
+    for _ in range(10):
+        wr(chip, DAC + SWTRIGR, 1)
+        chip.run_cycles(2)
+    assert rd(chip, DAC + DOR1) == 0xFFF                     # 0xFFA + 10 clipped, not wrapped (14.3.9)
+
+
+def test_dac_digital_interface_works_with_en_clear(desc):
+    chip = _chip(desc)
+    dac = chip.peripherals["DAC"]
+    wr(chip, DAC + DHR12R1, 0x321)
+    chip.run_cycles(2)
+    assert rd(chip, DAC + DOR1) == 0x321 and dac.voltage(1) is None    # RM0090 14.3.1 note
+    wr(chip, DAC + CR, TEN | 7 << 3)
+    wr(chip, DAC + DHR12R1, 0x123)
+    chip.run_cycles(4)
+    assert rd(chip, DAC + DOR1) == 0x321
+    wr(chip, DAC + SWTRIGR, 1)
+    chip.run_cycles(2)
+    assert rd(chip, DAC + DOR1) == 0x123 and rd(chip, DAC + SWTRIGR) == 0
+
+
+def test_dac_tsel_mamp_locked_while_enabled(desc):
+    chip = _chip(desc)
+    wr(chip, DAC + CR, EN | TEN | 7 << 3 | 2 << 8)
+    wr(chip, DAC + CR, EN | TEN | 0 << 3 | 5 << 8 | 2 << 6)  # TSEL/MAMP changes ignored, WAVE taken
+    assert rd(chip, DAC + CR) == EN | TEN | 7 << 3 | 2 << 8 | 2 << 6
+    assert any("written while EN1" in m for m in _warns(chip))
+    wr(chip, DAC + CR, 0)
+    wr(chip, DAC + CR, EN | TEN | 4 << 3)                    # same write that sets EN: accepted
+    assert rd(chip, DAC + CR) == EN | TEN | 4 << 3
+
+
 def test_dac_dma_request_and_underrun(desc):
     chip = _chip(desc)
     seen = []
@@ -273,6 +320,9 @@ def test_dac_dma_request_and_underrun(desc):
         chip.run_cycles(100)                                 # next trigger: new request
         chip.run_cycles(100)                                 # and another one without ack: underrun
         assert rd(chip, DAC + DSR) & 1 << 13 and _irq(chip, TIM6_DAC)
+        n_req, conv = len(seen), chip.peripherals["DAC"].conversions[0]
+        chip.run_cycles(200)                                 # DMAUDR set: no new request, still converting (14.3.7)
+        assert len(seen) == n_req and chip.peripherals["DAC"].conversions[0] == conv + 2
         wr(chip, DAC + DSR, 1 << 13)                         # rc_w1
         assert not rd(chip, DAC + DSR) and not _irq(chip, TIM6_DAC)
     finally:
@@ -387,14 +437,17 @@ def _dr(yy, wd, mo, dd):
 
 
 def _set_time(chip, tr, dr, cr=0):
+    """Returns the time the calendar restarts: 4 RTCCLK after INIT is cleared (RM0090 26.3.5 step 5)."""
     wr(chip, RTC + ISR, INIT)
+    assert not rd(chip, RTC + ISR) & INITF                    # INITF follows after 1-2 RTCCLK
+    chip.run_for(2.5e9 / chip.peripherals["RTC"]._hz)
     assert rd(chip, RTC + ISR) & INITF
     if cr:
         wr(chip, RTC + RCR, cr)
     wr(chip, RTC + TR, tr)
     wr(chip, RTC + DR_, dr)
     wr(chip, RTC + ISR, 0)
-    return chip.now_ns()
+    return chip.now_ns() + 4e9 / chip.peripherals["RTC"]._hz
 
 
 def test_rtc_calendar_runs_from_lse_across_leap_day(desc):
@@ -402,7 +455,7 @@ def test_rtc_calendar_runs_from_lse_across_leap_day(desc):
     _rtc_on(chip)
     t0 = _set_time(chip, 0x235958, _dr(0x24, 3, 0x02, 0x28))                # Wed 2024-02-28 23:59:58
     assert rd(chip, RTC + ISR) & (INITS | INIT) == INITS
-    chip.run_for(500e6 + 1e3)
+    chip.run_for(t0 + 500e6 + 1e3 - chip.now_ns())
     assert rd(chip, RTC + SSR) == 255 - 128                   # 0.5 s of ck_apre (256 Hz)
     assert rd(chip, RTC + TR) == 0x235958 and rd(chip, RTC + DR_) == _dr(0x24, 3, 0x02, 0x28)
     chip.run_for(t0 + 3e9 + 1e3 - chip.now_ns())
@@ -412,7 +465,9 @@ def test_rtc_calendar_runs_from_lse_across_leap_day(desc):
 
 def test_rtc_write_protection_and_dbp(desc):
     chip = _sleepy(desc)
-    wr(chip, RCC + BDCR, 1 | 1 << 8 | 1 << 15)
+    wr(chip, PWR, 1 << 8)
+    wr(chip, RCC + BDCR, 1 | 1 << 8 | 1 << 15)                # BDCR needs DBP too (RM0090 7.3.20)
+    wr(chip, PWR, 0)
     wr(chip, RTC + BKP0R, 0x1234)                             # DBP = 0: ignored
     assert rd(chip, RTC + BKP0R) == 0 and any("DBP" in m for m in _warns(chip))
     wr(chip, PWR, 1 << 8)
@@ -432,6 +487,8 @@ def test_rtc_write_protection_and_dbp(desc):
     wr(chip, RTC + TR, 0x120000)                              # outside INIT: ignored
     assert rd(chip, RTC + TR) == 0
     wr(chip, RTC + ISR, INIT)
+    wr(chip, RTC + PRER, 0x7F00FF - 2)                        # INITF not yet set: ignored
+    chip.run_for(1e5)
     wr(chip, RTC + PRER, 0x7F00FF - 1)
     assert rd(chip, RTC + PRER) == 0x7F00FE
 
@@ -441,8 +498,8 @@ def test_rtc_shadow_lock_tr_then_dr_and_rsf(desc):
     _rtc_on(chip)
     t0 = _set_time(chip, 0x235959, _dr(0x24, 2, 0x12, 0x31))               # Tue 2024-12-31 23:59:59
     assert not rd(chip, RTC + ISR) & RSF
-    chip.run_for(2 / 32768 * 1e9 + 100)
-    assert rd(chip, RTC + ISR) & RSF                          # 2 RTCCLK after the restart
+    chip.run_for(t0 - chip.now_ns() + 100)
+    assert rd(chip, RTC + ISR) & RSF                          # with the counter load, 4 RTCCLK after INIT = 0
     chip.run_for(t0 + 0.999e9 - chip.now_ns())
     assert rd(chip, RTC + TR) == 0x235959                     # locks the date ...
     chip.run_for(0.01e9)
@@ -515,9 +572,13 @@ def test_rtc_backup_domain_survives_system_reset_bdrst_clears(desc):
     _rtc_on(chip)
     _set_time(chip, 0x080000, _dr(0x24, 1, 0x1, 0x01))
     wr(chip, RTC + BKP0R + 4 * 19, 0xCAFE)
-    chip.run_for(2e9)
+    chip.run_for(2.001e9)
     chip.reset("watchdog")
     assert rd(chip, RTC + BKP0R + 4 * 19) == 0xCAFE
+    assert not rd(chip, RTC + ISR) & RSF                      # 26.3.6 note: shadow registers reset ...
+    assert rd(chip, RTC + TR) == 0 and rd(chip, RTC + DR_) == 0x2101 and rd(chip, RTC + SSR) == 0
+    chip.run_for(2.5e9 / 32768)                                # ... until the next copy (RSF)
+    assert rd(chip, RTC + ISR) & RSF
     assert rd(chip, RTC + TR) == 0x080002 and rd(chip, RTC + RCR) == 0
     wr(chip, RTC + TR, 0)                                     # DBP is 0 again after the reset
     assert any("DBP" in m for m in _warns(chip))
@@ -535,6 +596,52 @@ def test_rtc_12h_format_and_lsi(desc):
     chip.run_for(t0 + 1.01e9 * (32768 / 32000) - chip.now_ns())      # PREDIV 128 x 256 = 32768 LSI ticks
     assert rd(chip, RTC + TR) == 0x120000                             # 12:00:00 AM (midnight)
     rd(chip, RTC + DR_)
+
+
+def test_rtc_bypshad_clears_rsf_and_ssr_locks_tr(desc):
+    chip = _sleepy(desc)
+    _rtc_on(chip)
+    t0 = _set_time(chip, 0x105959, _dr(0x24, 1, 0x1, 0x01))
+    chip.run_for(t0 + 0.9999e9 - chip.now_ns())
+    rd(chip, RTC + SSR)                                       # SSR locks TR and DR (26.3.6) ...
+    chip.run_for(0.01e9)
+    assert rd(chip, RTC + TR) == 0x105959 and rd(chip, RTC + DR_) == _dr(0x24, 1, 0x1, 0x01)
+    assert rd(chip, RTC + TR) == 0x110000                     # ... until DR is read
+    rd(chip, RTC + DR_)
+    assert rd(chip, RTC + ISR) & RSF
+    wr(chip, RTC + RCR, BYPSHAD)
+    assert not rd(chip, RTC + ISR) & RSF                      # cleared by hardware in bypass mode (26.6.4)
+    wr(chip, RTC + RCR, 0)
+    chip.run_for(2.5e9 / 32768)
+    assert rd(chip, RTC + ISR) & RSF
+
+
+def test_rtc_write_flags_follow_rtcclk_and_init_clears_alrawf(desc):
+    chip = _sleepy(desc)
+    _rtc_on(chip)
+    assert rd(chip, RTC + ISR) & 7 == 7                       # backup-domain reset value 0x0000 0007
+    wr(chip, RTC + RCR, ALRAE | WUTE)
+    assert rd(chip, RTC + ISR) & 7 == 2
+    wr(chip, RTC + RCR, 0)
+    assert rd(chip, RTC + ISR) & 7 == 2                       # ALRAWF / WUTWF: 1-2 RTCCLK later (26.3.5)
+    wr(chip, RTC + WUTR, 7)                                   # WUTWF = 0: ignored
+    assert rd(chip, RTC + WUTR) == 0xFFFF
+    chip.run_for(2.5e9 / 32768)
+    assert rd(chip, RTC + ISR) & 7 == 7
+    wr(chip, RTC + WUTR, 7)
+    assert rd(chip, RTC + WUTR) == 7
+    wr(chip, RTC + ISR, INIT)
+    assert rd(chip, RTC + ISR) & 3 == 0                       # ALRxWF cleared in initialisation mode
+
+
+def test_rtc_system_reset_clears_init(desc):
+    chip = _sleepy(desc)
+    _rtc_on(chip)
+    wr(chip, RTC + ISR, INIT)
+    chip.run_for(1e5)
+    assert rd(chip, RTC + ISR) & (INIT | INITF) == INIT | INITF
+    chip.reset("watchdog")
+    assert rd(chip, RTC + ISR) & (INIT | INITF | RSF) == 0    # 26.6.4 system reset value
 
 
 def test_rtc_no_clock_no_count(desc):

@@ -137,16 +137,59 @@ def describe_event(e: dict) -> str:
         if data is None:
             data = ""
         return f"{e.get('name') or e.get('uart') or ''} {d} {js_json(data)}"
+    if kind == "can" and e.get("id") is not None:
+        return can_text(e)
     msg = e.get("msg")
+    if msg and kind == "usb":                 # chipem/usbbus.py: the message says it all
+        dev = e.get("dev")
+        return f"{dev} {msg}" if dev and dev != "?" and not str(msg).startswith(str(dev)) else str(msg)
+    if msg and kind in ("eth", "i2s"):        # ethernet.py / i2s models: the message summarises the frame / block
+        return str(msg)
     s = str(msg) if msg else ""
     for k, v in e.items():
         if k in _SKIP or k == "msg":
             continue
-        if msg and k in _MSG_SKIP:
+        if msg and (k in _MSG_SKIP or _in_msg(k, v, str(msg))):
             continue
-        num = isinstance(v, (int, float)) and not isinstance(v, bool)
-        s += f" {k}={_hex32(v) if num and k in _HEX_KEYS else js_json(v)}"
+        s += f" {k}={field_text(k, v)}"
     return s.strip()
+
+
+def _in_msg(k: str, v: Any, msg: str) -> bool:
+    """A field whose value the message already shows (chipem.log.field_in_msg, shared with the CLI printer)."""
+    from ..log import field_in_msg
+    return field_in_msg(k, v, msg)
+
+
+def field_text(k: str, v: Any) -> str:
+    """One `key=value` value: addresses / pc / register values in hex, *_ns as times, long arrays summarised."""
+    num = isinstance(v, (int, float)) and not isinstance(v, bool)
+    if num and k in _HEX_KEYS:
+        return _hex32(v)
+    if num and k.endswith("_ns"):
+        return fmt_time(v)
+    if isinstance(v, (list, tuple)) and len(v) > 8:
+        return f"[{len(v)} items]"
+    return js_json(v)
+
+
+def can_text(e: dict) -> str:
+    """`CAN0 tx 0x100 [4] 00 CA 4B 32` (extended ids with 8 digits, `rtr` for remote frames, `ERROR ack` for a failed
+    attempt)."""
+    ident = int(e.get("id") or 0)
+    ext = bool(e.get("ext"))
+    who = e.get("node") or e.get("link") or "CAN"
+    data = str(e.get("data") or "")
+    body = " ".join(data[i:i + 2] for i in range(0, len(data), 2))
+    s = f"{who} {e.get('dir') or 'tx'} 0x{ident:08X}" if ext else f"{who} {e.get('dir') or 'tx'} 0x{ident:03X}"
+    s += f" [{e.get('dlc', len(data) // 2)}]"
+    if e.get("rtr"):
+        s += " rtr"
+    elif body:
+        s += f" {body}"
+    if e.get("err"):
+        s += f" ERROR {e['err']}"
+    return s
 
 
 def event_line(e: dict, board: bool, default_chip: str = "A") -> str:

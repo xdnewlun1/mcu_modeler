@@ -34,12 +34,13 @@ Registers (SVD table): CR1, CR2, OAR1, OAR2, DR, SR1, SR2, CCR, TRISE.
   ADDR (TRA = master reads, DUALF, GENCALL) with SCL stretched until ADDR is cleared (unless NOSTRETCH).  Slave
   transmitter: TxE; a byte needed while DR is empty sets BTF and stretches SCL until DR is written; the master's NACK
   of the last byte sets AF.  Slave receiver: RxNE; a byte received while RxNE is set sets BTF (stretched until DR is
-  read; with NOSTRETCH it is lost with OVR).  STOP after an acknowledged transfer sets STOPF.
+  read; with NOSTRETCH it is lost with OVR; a slave transmitter with NOSTRETCH and an empty DR sends the DR
+  byte again with OVR, 27.3.4).  STOP after an acknowledged transfer sets STOPF.
 * IRQs (§27.4): "I2Cx_EV" = ITEVTEN & (SB | ADDR | ADD10 | STOPF | BTF | ITBUFEN & (TxE | RxNE)); "I2Cx_ER" =
   ITERREN & (BERR | ARLO | AF | OVR | PECERR | TIMEOUT | SMBALERT); level lines.
-* DMA (§27.3.7): CR2.DMAEN asserts "I2Cx_TX" while TxE (transmitting) and "I2Cx_RX" while RxNE (RM0090 Table 42).
+* DMA (§27.3.8): CR2.DMAEN asserts "I2Cx_TX" while TxE (transmitting) and "I2Cx_RX" while RxNE (RM0090 Table 43).
 Not modelled: 10-bit slave addressing (OAR1.ADDMODE = 1 never matches), SMBus (SMBUS, PEC, ALERT, ARP, timeouts),
-bus errors (BERR), analog/digital filters, OTYPER push-pull on I2C pins (always open-drain), the rise time.
+bus errors (BERR), the fixed analog spike filter (the programmable FLTR filters are F42x/F43x only, §27.3.5), OTYPER push-pull on I2C pins (always open-drain), the rise time.
 """
 from __future__ import annotations
 
@@ -571,8 +572,10 @@ class I2C(GatedBlock):
             self._sr1(TXE)
             return b
         if self.get("CR1") & NOSTRETCH:
-            self._sr1(OVR)
-            return 0xFF
+            self._sr1(OVR)                                 # underrun: the byte in DR is sent again (RM0090 27.3.4)
+            b = self.get("DR") & 0xFF
+            self.transfers.append(("sr", b, True))
+            return b
         self._sr1(BTF | TXE)
         return None
 

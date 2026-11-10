@@ -17,7 +17,7 @@ Timing (pixel clock period P): a frame starts with VSYNC leaving its blanking le
 from (i x line + hblank) x P for width x samples-per-pixel (+8 code samples when embedded) clocks; VSYNC returns to
 blanking half a pixel clock after the last line ends and stays there for `vblank` lines.  HSYNC/VSYNC are real net
 levels (a VCD shows them; the event log summarises them as dense pins).  PIXCLK is driven low and NOT toggled per
-edge: one stored `pin` event with `field="wave"` (freq_hz = pixclk, duty 0.5, edges) is logged per chip pin on the pixclk net per >= 100 ms of
+edge: one stored `pin` event with `field="wave"` (freq_hz = pixclk, duty 50.0 %, edges) is logged per chip pin on the pixclk net per >= 100 ms of
 running clock and when the part stops/resets (like chipem/periph/sdbus.py ClockWave).  Data pins stay low.
 
 Receivers (DVP hook, duck-typed): at the start of every active line the part looks at the chip pins on its `pixclk`
@@ -322,7 +322,7 @@ class Camera(Part):
         for cid, _chip, pin in (net.members if net is not None else ()):
             b.log.event("pin", self._wave_t if t is None else t, chip=cid, pin=pin.id, field="wave", old=None,
                         new="L", edges=int(self._wave_edges), since_ns=self._wave_since, freq_hz=self.pixclk,
-                        duty=0.5)
+                        duty=50.0)
         self._wave_since = t
         self._wave_edges = 0.0
 

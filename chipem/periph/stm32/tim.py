@@ -2,8 +2,8 @@
 
 One model for all of them; the features follow from the SVD register set of each timer: channels = the CCRx
 registers present (TIM9/12: 2, TIM10/11/13/14: 1), BDTR = advanced (complementary outputs, dead time, break), RCR =
-repetition counter, CR1 bits the SVD does not define (DIR/CMS on TIM9-14, OPM on TIM10/11/13/14) read 0 and ignore
-writes, the encoder interface needs SMCR and 4 channels (TIM1-5, TIM8).  TIM9-14 count up only, 16 bits.
+repetition counter, CR1 bits the SVD does not define (DIR/CMS on TIM9-14) read 0 and ignore writes (OPM on
+TIM10/11/13/14, missing from the SVD, is implemented: RM0090 19.5.1, Rev 22), the encoder interface needs SMCR and 4 channels (TIM1-5, TIM8).  TIM9-14 count up only, 16 bits.
 
 Registers from the SVD; behaviour (RM0090 ch. 17-20):
 * Counter clock = timer kernel clock / (PSC + 1); kernel clock = RCC timer clock of the timer's APB bus (APB2 for
@@ -14,7 +14,7 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
 * CR1: CEN starts/stops, DIR down-counting, CMS (center-aligned: 0 -> ARR -> 0, period 2 x ARR, DIR is read-only
   and reads the current direction), OPM (CEN clears at the update event, the outputs follow the stopped counter),
   ARPE (ARR preload), UDIS (no update events: shadows keep their value; UG only re-initialises the counter), URS
-  (UG sets no UIF).
+  (UG / slave reset set no UIF and raise no TIMx_UP DMA request: only over/underflow does, 17.4.1/18.4.1).
 * PSC is always preloaded and ARR when ARPE=1: the active values load at each update event (and on EGR.UG).  A
   non-preloaded ARR write takes effect immediately; a counter already above the new ARR runs on to the wrap-around.
   Writes that re-anchor the running counter (ARR without preload, CNT, DIR/CMS) keep the prescaler phase: the counter
@@ -40,7 +40,7 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   takes the value of CCRx: a restart or a CCRx write while the counter already equals CCRx does not match again
   (toggle mode toggles once per period, CCxIF is set once).  Each edge is a scheduler event at its exact counter
   tick, and pins muxed to TIMx_CHy/TIMx_CHyN follow it (PinBoard.drive_signal).
-* Output enables (RM0090 table 81 on TIM1/8): CCxE drives TIMx_CHn = OCxREF ^ CCxP; general-purpose timers release
+* Output enables (RM0090 Table 95 on TIM1/8): CCxE drives TIMx_CHn = OCxREF ^ CCxP; general-purpose timers release
   the signal when CCxE=0.  TIM1/8: with MOE=1, CCxNE drives TIMx_CHnN = ~OCxREF ^ CCxNP (OCxREF ^ CCxNP with
   CCxE=0); with OSSR=1 an output whose enable is 0 while the other one is set is driven at its inactive level
   (CCxP / CCxNP).  With MOE=0 and OSSI=1 an enabled channel drives its idle levels CR2.OISx / OISxN; with OSSI=0
@@ -71,7 +71,7 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   for an input channel.  A watched channel gets exact match events like one with an enabled output.  TRGO and the
   slave reaction happen at the same core cycle (no resynchronisation delay; MSM has no effect).
 * Slave mode controller (SMCR.SMS, trigger input TRGI selected by SMCR.TS): ITR0-3 = another timer's TRGO per
-  RM0090 Tables 86/93/97 (`ITR` below; TIM9/12 ITR2/3 = OC1REF of TIM10/11 or TIM13/14), TI1F_ED (a pulse per TI1
+  RM0090 Tables 94/98/101 (`ITR` below; TIM9/12 ITR2/3 = OC1REF of TIM10/11 or TIM13/14), TI1F_ED (a pulse per TI1
   edge), TI1FP1 / TI2FP2 (TIx inverted with CCxP; CCxNP:CCxP = 11 makes both edges active, except in gated mode),
   ETRF (TIMx_ETR pin, including bundled "TIM2_CH1_ETR" functions: ETP inverts, ETPS divides the rising edges by
   1/2/4/8, a divided ETRP is a pulse per Nth edge; ETF filter not modelled).  SMS=100 reset (rising TRGI: captures on
@@ -84,7 +84,7 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   combinable with reset/gated/trigger mode on another TS.  Center-aligned counting is not applied to external clocks
   (they count edge-aligned).  EGR.TG sets TIF.  DMA requests (`_util.dma_request`, when the DMA model provides it):
   TIMx_UP on update events (UDE), TIMx_CHn when CCxIF is set (CCxDE; on update events with CR2.CCDS), TIMx_TRIG with
-  TIF (TDE).  Encoder interface (SMS=001/010/011, TIM1-5/8, RM0090 table 95): the internal clock stops driving the
+  TIF (TDE).  Encoder interface (SMS=001/010/011, TIM1-5/8, RM0090 Tables 93/97): the internal clock stops driving the
   counter; each TI1FP1 (001), TI2FP2 (010) or either (011) edge counts up or down by the level of the other input
   (TIxFPx = TIx inverted with CCxP), between 0 and ARR, DIR reflects the direction (read-only), wrapping is an
   overflow (repetition counter, update event, UIF).  PWM/forced OCxREF follow the count, compare matches set no
@@ -94,13 +94,15 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   (32 + DTG[4:0]) x 8 tDTS, 111xxxxx: (32 + DTG[4:0]) x 16 tDTS; tDTS = CK_INT x 1/2/4 by CR1.CKD), then the
   polarity CCxP/CCxNP applies.  A pulse shorter than the dead time is not generated.  The delayed edges are scheduler
   events (cancelled on reset and when the pair leaves the dead-time configuration).  With only one output enabled
-  (or OSSR off-state on the other) there is no dead time (RM0090 table 81).
+  (or OSSR off-state on the other) there is no dead time (RM0090 Table 95).
 * Break (TIM1/8): BKE=1 and the pin muxed to TIMx_BKIN at the BKP level (BKP=0: low; floating reads low; no pin muxed:
   inactive), or EGR.BG: MOE is cleared, the outputs take the off-state OSSI selects (CR2.OISx/OISxN idle levels with
   OSSI=1, released with OSSI=0; immediately, without the dead time), BIF is set (BIE: TIMx_BRK vector).  While the
   break input stays active MOE cannot be set and BIF cannot be cleared.  AOE=1 sets MOE again at the next update
-  event (counter, UG, slave reset) once the break input is inactive.  BDTR.LOCK is stored only (no write
-  protection).
+  event (counter, UG, slave reset) once the break input is inactive.  BDTR.LOCK (17.4.18) is writable once after
+  reset; level 1 freezes BDTR.DTG/BKE/BKP/AOE and CR2.OISx/OISxN, level 2 also OSSR/OSSI and CCxP/CCxNP of output
+  channels, level 3 also OCxM/OCxPE of output channels (frozen bits keep their value, the rest of the write
+  applies).
 * OCxFE (fast enable) is a no-op: trigger reactions are already immediate.  Not modelled: OCxCE (OCxREF clear on
   ETRF), CR2 CCPC/COM preload (COMG), the ETF / ICxF digital filters, TIM2_OR / TIM5_OR / TIM11_OR input remaps, the
   DMA burst registers DCR/DMAR (stored only).
@@ -123,6 +125,7 @@ IRQ_NAMES = {"TIM1": "TIM1_UP_TIM10", "TIM8": "TIM8_UP_TIM13", "TIM6": "TIM6_DAC
 BRK_IRQ = {"TIM1": "TIM1_BRK_TIM9", "TIM8": "TIM8_BRK_TIM12"}
 TRG_IRQ = {"TIM1": "TIM1_TRG_COM_TIM11", "TIM8": "TIM8_TRG_COM_TIM14"}
 WIDE = ("TIM2", "TIM5")
+ONE_CH_TIMERS = ("TIM10", "TIM11", "TIM13", "TIM14")
 OCPE = 1 << 3                    # CCMRx output preload enable (per channel byte)
 MOE, AOE, BKP, BKE, OSSR, OSSI = 1 << 15, 1 << 14, 1 << 13, 1 << 12, 1 << 11, 1 << 10      # BDTR (TIM1/8)
 TIF, BIF = 1 << 6, 1 << 7        # SR (DIER: TIE, BIE; EGR: TG, BG)
@@ -130,8 +133,8 @@ CKD_DIV = (1, 2, 4, 4)           # CR1.CKD -> tDTS / tCK_INT (11 is reserved: tr
 # output source codes (_Chan.o / _Chan.on): None released, 0/1 fixed level, REF follows OCxREF, NREF its inverse
 REF, NREF = 2, 3
 _PARTNER = {1: 2, 2: 1, 3: 4, 4: 3}      # CCxS=10: the input of the other channel of the pair
-# SMCR.TS = 000-011: internal trigger ITR0-ITR3 -> (master timer, its trigger signal).  RM0090 Table 86 (TIM1/8),
-# Table 93 (TIM2-5), Table 97 (TIM9/12: ITR2/ITR3 are the OC1 outputs of TIM10/11 and TIM13/14).  TIM2 ITR1 is
+# SMCR.TS = 000-011: internal trigger ITR0-ITR3 -> (master timer, its trigger signal).  RM0090 Table 94 (TIM1/8),
+# Table 98 (TIM2-5), Table 101 (TIM9/12: ITR2/ITR3 are the OC1 outputs of TIM10/11 and TIM13/14).  TIM2 ITR1 is
 # TIM8_TRGO with TIM2_OR.ITR1_RMP = 00 (the OTG FS/HS SOF remaps are not modelled).
 ITR: dict[str, tuple[tuple[str, str], ...]] = {
     "TIM1": (("TIM5", "TRGO"), ("TIM2", "TRGO"), ("TIM3", "TRGO"), ("TIM4", "TRGO")),
@@ -150,7 +153,7 @@ UDE, TDE = 1 << 8, 1 << 14       # DIER DMA request enables (CCxDE: bits 9-12)
 
 
 def _dma_request(chip: Any, name: str, level: bool = True) -> None:
-    """Assert (pulse: the DMA acknowledges it by one transfer) or deassert DMA request `name` (RM0090 Table 42/43,
+    """Assert (pulse: the DMA acknowledges it by one transfer) or deassert DMA request `name` (RM0090 Table 43/44,
     e.g. "TIM3_UP", "TIM2_CH1", "ADC1") through `_util.dma_request` (stm32.dma); nothing without a DMA model."""
     from . import _util
     fn = getattr(_util, "dma_request", None)
@@ -225,6 +228,8 @@ class TIM(GatedBlock):
         }
         for n in range(1, 5):
             ov[f"CCR{n}"] = {"on_write": self._ccr_write(n), "on_read": self._ccr_read(n)}
+        if name in ONE_CH_TIMERS:      # RM0090 19.5.1 (Rev 22): CR1.OPM exists; the SVD marks bit 3 reserved
+            ov["CR1"]["ro_mask"] = 0xFFFFFC70
         r = build_regs((name, "TIM2" if name in WIDE else "TIM3"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self._ev = None
@@ -273,6 +278,7 @@ class TIM(GatedBlock):
         self._ece = False                            # SMCR.ECE: external clock mode 2 (ETRF)
         self._xpsc = 0                               # external clock: prescaler count
         self._ti1x = False                           # TI1 with CR2.TI1S (CH1 xor CH2 xor CH3)
+        self._bdtr_written = False                   # BDTR.LOCK is writable once after reset
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -322,6 +328,7 @@ class TIM(GatedBlock):
                     pins.release_signal(sig)
             c.out = c.outn = None
         super().reset()
+        self._bdtr_written = False
         self.psc = self.get("PSC")
         self.arr = self.get("ARR") & self.cmask
         self.rep = 0
@@ -736,13 +743,13 @@ class TIM(GatedBlock):
                 if not c.ccs:
                     c.ccr = self.get(f"CCR{c.n}") & self.cmask
             self.rep = self.get("RCR") & 0xFF if "RCR" in self.regs else 0
-            if not cr1 & URS:
+            if not cr1 & URS:                  # URS: only over/underflow raises UIF and the UP DMA request
                 self.set("SR", self.get("SR") | UIF)
                 self._update_line()
+                if self._dma_on:
+                    self._dma_update()
             if self._advanced:
                 self._aoe()
-            if self._dma_on:
-                self._dma_update()
         self._xpsc = 0
         if self.trgo_listeners and (self._mms == 0 or (self._mms == 2 and not cr1 & UDIS)):
             self._trgo_pulse()                         # MMS=000: UG / slave reset; MMS=010: update event
@@ -772,6 +779,11 @@ class TIM(GatedBlock):
         return v
 
     def _ccer_write(self, blk, reg, old, new):
+        if self._lock() >= 2:            # LOCK level 2: CCxP / CCxNP of output channels are frozen (17.4.18)
+            for c in self.ch:
+                if not c.ccs:
+                    m = 0xA << (4 * (c.n - 1))
+                    new = (new & ~m) | (old & m)
         self._store(reg, new)
         self._oc_config_changed()
         return None
@@ -782,7 +794,7 @@ class TIM(GatedBlock):
         return (self.get(name) >> (8 * ((n - 1) % 2))) & 0xFF if name else 0
 
     def _chan_cfg(self) -> None:
-        """Refresh the cached channel configuration from CCMRx, CCER, BDTR, CR2 and DIER (RM0090 table 81)."""
+        """Refresh the cached channel configuration from CCMRx, CCER, BDTR, CR2 and DIER (RM0090 Table 95)."""
         if not self.ch:                                  # basic timers (TIM6/7) have no channels
             return
         ccer = self.get("CCER")
@@ -875,7 +887,16 @@ class TIM(GatedBlock):
         kc = max(1, round(self.chip.clock.hz / kh))        # core cycles per CK_INT cycle (whole, see _calc_tick)
         return n * CKD_DIV[self.get("CR1") >> 8 & 3] * kc
 
+    def _lock(self) -> int:
+        """BDTR.LOCK level (TIM1/8; 0 elsewhere)."""
+        return (self.get("BDTR") >> 8) & 3 if self._advanced else 0
+
     def _oc_cfg_write(self, blk, reg, old, new):
+        if self._lock() == 3:            # LOCK level 3: OCxM / OCxPE of output channels (CCxS = 00) are frozen
+            for sh in (0, 8):
+                if not (old >> sh) & 3:
+                    m = 0x78 << sh
+                    new = (new & ~m) | (old & m)
         self._store(reg, new)
         self._oc_config_changed()
         return None
@@ -1572,6 +1593,8 @@ class TIM(GatedBlock):
                     _dma_request(self.chip, f"{self.name}_CH{c.n}")
 
     def _cr2_write(self, blk, reg, old, new):
+        if self._lock() >= 1:            # LOCK level 1: OISx / OISxN are frozen (17.4.18)
+            new = (new & ~0x7F00) | (old & 0x7F00)
         self._store(reg, new)
         self._mms = new >> 4 & 7
         if self.ch:
@@ -1651,6 +1674,18 @@ class TIM(GatedBlock):
         self._oc_config_changed()
 
     def _bdtr_write(self, blk, reg, old, new):
+        # LOCK (17.4.18): writable once after reset; level 1 freezes DTG, BKE, BKP, AOE, level 2 also OSSR, OSSI
+        req = new
+        frozen = 0x300 if self._bdtr_written else 0
+        lvl = (old >> 8) & 3
+        if lvl >= 1:
+            frozen |= 0xFF | BKE | BKP | AOE
+        if lvl >= 2:
+            frozen |= OSSR | OSSI
+        new = (new & ~frozen) | (old & frozen)
+        self._bdtr_written = True
+        if (req ^ new) & frozen:
+            self._warn_once("lock", f"{self.name}: write to BDTR bits frozen by LOCK (level {lvl}) ignored")
         was = self._brk_active(old)
         if self._brk_active(new):
             new &= ~MOE                                  # MOE cannot be set while the break input is active

@@ -4,25 +4,30 @@ Registers from the SVD: CR, SWTRIGR, DHR12R1/DHR12L1/DHR8R1, DHR12R2/DHR12L2/DHR
 DOR2, SR.
 * Data holding: the 12/8-bit right/left aligned and dual registers all write the channel's DHR (14.3.4); DHR12Rx
   reads back the DHR, the aligned views read their own encoding of it.
-* Conversion (14.3.5): with TENx = 0 DHRx moves to DORx one APB1 clock cycle after the write; with TENx = 1 three
-  APB1 cycles after the trigger (`sched.at_cycles`, APB1 = HCLK / PPRE1, exact core cycles). Triggers (CR.TSELx,
-  Table 60): 000 TIM6_TRGO, 001 TIM8_TRGO, 010 TIM7_TRGO, 011 TIM5_TRGO, 100 TIM2_TRGO, 101 TIM4_TRGO (rising edges,
+* Conversion (14.3.4): with TENx = 0 DHRx moves to DORx one APB1 clock cycle after the write; with TENx = 1 three
+  APB1 cycles after the trigger (`sched.at_cycles`, APB1 = HCLK / PPRE1, exact core cycles). The digital interface
+  (DHR, DOR, triggers, DMA) works whatever ENx is (14.3.1 note); ENx only powers the analog output. TSELx and MAMPx
+  cannot be changed while ENx = 1 (14.3.6 / 14.3.9 notes: such a write keeps the old field, one `warn`). Triggers
+  (CR.TSELx, Table 75): 000 TIM6_TRGO, 001 TIM8_TRGO, 010 TIM7_TRGO, 011 TIM5_TRGO, 100 TIM2_TRGO, 101 TIM4_TRGO (rising edges,
   through the timer's `add_trigger_listener("TRGO")`), 110 EXTI line 9 (not modelled: one `warn`), 111 software
   (SWTRIGR.SWTRIGx, cleared one APB1 cycle later when the DHR has moved).
-* Output: Vout = VREF+ x DOR / 4096 (VREF+ = `params.vref`, 3.3 V; 14.3.6) while ENx = 1; `voltage(ch)` (ch 1/2)
+* Output: Vout = VREF+ x DOR / 4096 (VREF+ = `params.vref`, 3.3 V; 14.3.5) while ENx = 1; `voltage(ch)` (ch 1/2)
   returns it, None while the channel is off. Every change is one `info` event ("DAC_OUT1 = 1.6500 V", fields
   `signal`, `volts`, `code`) and is passed to `listeners` (cb(dac, ch)). The output buffer (BOFFx) and settling time
   are not modelled (BOFF is stored). The DAC pins PA4 (DAC_OUT1) / PA5 (DAC_OUT2) show owner DAC_OUTx when the pin
   is in analog mode and the channel is enabled (the RM's recommended configuration; otherwise one `warn`), and the
   voltage is put on the pin's analog value, so ADC1/ADC2 channel 4/5 on the same pin convert the DAC output (the
   STM32F4 ADC has no internal DAC channel: only this pin path exists, as on silicon).
-* Wave generation (14.4/14.5, needs TENx = 1): WAVEx = 01 noise: a 12-bit LFSR (preset 0xAAA, taps of
-  X^12+X^6+X^4+X+1, a zero register is reloaded) masked by MAMPx is added to DHR on every trigger; WAVEx = 1x
-  triangle: a counter steps up to 2^(MAMPx+1) - 1 and back down, added to DHR on every trigger. Sums wrap at 12 bits.
-* DMA (14.3.8): with DMAENx a hardware trigger (not SWTRIG) issues the request "DAC1"/"DAC2" (RM0090 Table 42:
+* Wave generation (14.3.8/14.3.9, needs TENx = 1): WAVEx = 01 noise: a 12-bit LFSR (preset 0xAAA, Figure 68 taps
+  X^12+X^6+X^4+X+1, a NOR of all bits injects a '1' into a zero register) masked by MAMPx is added to DHR, then the
+  LFSR shifts (Figure 69: DHR = 0 gives DOR 0xAAA, then 0xD55); WAVEx = 1x triangle: a counter steps up to
+  2^(MAMPx+1) - 1 and back down to 0, incremented before it is added to DHR. Sums are added "without overflow": they
+  saturate at 0xFFF (the literal reading; not checked on silicon).
+* DMA (14.3.8): with DMAENx a hardware trigger (not SWTRIG) issues the request "DAC1"/"DAC2" (RM0090 Table 43:
   DMA1 stream 5/6 channel 7). The DMA's write to a DHR register of the channel acknowledges it. A second trigger
-  while the request is not yet acknowledged sets SR.DMAUDRx (rc_w1), no new request is issued and, with
-  CR.DMAUDRIEx, raises IRQ "TIM6_DAC" (shared with TIM6, OR'd).
+  while the request is not yet acknowledged sets SR.DMAUDRx (rc_w1), no new request is issued while DMAUDRx is set
+  (the channel keeps converting old data, 14.3.7) and, with CR.DMAUDRIEx, raises IRQ "TIM6_DAC" (shared with TIM6,
+  OR'd).
 Clock gate RCC_APB1ENR.DACEN (a gated-off access logs one `warn`); RCC_APB1RSTR resets the block.
 """
 from __future__ import annotations
@@ -211,10 +216,10 @@ class DAC(GatedBlock):
             mask = (1 << (min(mamp, 11) + 1)) - 1
             if wave == 1:
                 lf = c.lfsr
-                fb = (lf ^ (lf >> 1) ^ (lf >> 4) ^ (lf >> 6)) & 1    # X^12 + X^6 + X^4 + X + 1
-                lf = (lf >> 1) | (fb << 11)
-                c.lfsr = lf if lf else 0xAAA
-                val = (val + (c.lfsr & mask)) & 0xFFF
+                val = min(val + (lf & mask), 0xFFF)          # Figure 69: the first DOR is the preload 0xAAA
+                fb = (lf ^ (lf >> 1) ^ (lf >> 4) ^ (lf >> 6)) & 1    # X^12 + X^6 + X^4 + X + 1 (Figure 68)
+                fb ^= int(lf == 0)                           # NOR of all bits: a '1' is injected (anti lock-up)
+                c.lfsr = (lf >> 1) | (fb << 11)
             else:
                 if c.tri_up:
                     if c.tri >= mask:
@@ -228,7 +233,7 @@ class DAC(GatedBlock):
                         c.tri += 1
                     else:
                         c.tri -= 1
-                val = (val + c.tri) & 0xFFF
+                val = min(val + c.tri, 0xFFF)            # "added ... without overflow" (14.3.9)
         c.dor = val
         self.conversions[c.n - 1] += 1
         self.set("SWTRIGR", self.get("SWTRIGR") & ~(1 << (c.n - 1)))
@@ -236,18 +241,19 @@ class DAC(GatedBlock):
 
     def _trigger(self, c: _Chan, hw: bool) -> None:
         cr = self._cr(c)
-        if not cr & EN or not cr & TEN:
+        if not cr & TEN:                         # 14.3.1: the digital interface works even with ENx = 0
             return
         if hw and cr & DMAEN:
-            if c.req:
-                self.set("SR", self.get("SR") | SR_DMAUDR[c.n - 1])
+            udr = SR_DMAUDR[c.n - 1]
+            if c.req and not self.get("SR") & udr:
+                self.set("SR", self.get("SR") | udr)
                 self.emit("warn", block=self.name, msg=f"{self.name}: channel {c.n} DMA underrun (trigger before the "
                           f"DMA served the previous request)")
                 self._update_irq()
-                return
-            c.req = True
-            dma_request(self.chip, f"DAC{c.n}", True)
-        self._transfer_in(c, 3 if hw else 1)
+            elif not self.get("SR") & udr:       # 14.3.7: no request is treated while DMAUDRx is set
+                c.req = True
+                dma_request(self.chip, f"DAC{c.n}", True)
+        self._transfer_in(c, 3 if hw else 1)     # the channel keeps converting (old data after an underrun)
 
     def _ext_trig(self, c: _Chan, t: int, level: bool) -> None:
         if level and not c.trig:
@@ -259,7 +265,7 @@ class DAC(GatedBlock):
     def _subscribe(self, c: _Chan) -> None:
         cr = self._cr(c)
         want = None
-        if cr & EN and cr & TEN:
+        if cr & TEN:
             tsel = (cr >> 3) & 7
             if tsel < 6:
                 blk = find_model(self.chip, "stm32.tim", TSEL_TIMERS[tsel])
@@ -283,6 +289,13 @@ class DAC(GatedBlock):
         MMIOBlock.write(self, offset, size, value)
 
     def _cr_write(self, blk, reg, old, new):
+        for c in self.ch:                        # 14.3.6 / 14.3.9: TSELx and MAMPx cannot change while ENx = 1
+            sh = 16 * (c.n - 1)
+            lock = (0x38 | 0xF00) << sh
+            if old >> sh & EN and (old ^ new) & lock:
+                new = (new & ~lock) | (old & lock)
+                self._warn_once(f"lock{c.n}", f"{self.name}: TSEL{c.n}/MAMP{c.n} written while EN{c.n} = 1: "
+                                f"ignored (RM0090 14.3.6, 14.3.9)")
         self._store(reg, new)
         for c in self.ch:
             sh = 16 * (c.n - 1)
@@ -291,8 +304,6 @@ class DAC(GatedBlock):
                 c.lfsr, c.tri, c.tri_up = 0xAAA, 0, True
             self._subscribe(c)
             if (o ^ n) & EN:
-                if n & EN and not n & TEN:
-                    self._transfer_in(c, 1)
                 self._output(c)
             if not n & DMAEN and c.req:
                 c.req = False
@@ -305,7 +316,7 @@ class DAC(GatedBlock):
         for c in self.ch:
             if new >> (c.n - 1) & 1:
                 cr = self._cr(c)
-                if cr & EN and cr & TEN and (cr >> 3) & 7 == 7:
+                if cr & TEN and (cr >> 3) & 7 == 7:
                     self._trigger(c, False)
                 else:
                     self.set("SWTRIGR", self.get("SWTRIGR") & ~(1 << (c.n - 1)))
@@ -339,8 +350,7 @@ class DAC(GatedBlock):
             if c.req:                                # the DMA's write acknowledges the request
                 c.req = False
                 dma_request(self.chip, f"DAC{c.n}", False)
-            cr = self._cr(c)
-            if cr & EN and not cr & TEN:
+            if not self._cr(c) & TEN:
                 self._transfer_in(c, 1)
         return 0
 

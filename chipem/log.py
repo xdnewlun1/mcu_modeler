@@ -226,6 +226,21 @@ def format_can(f: dict) -> str:
     return s
 
 
+def field_in_msg(key: str, value: Any, msg: str) -> bool:
+    """True when an event's message already shows this field's value (`pin=PA9` after "PA9 -> USART1_TX", a
+    `*_hz` field after a message giving the frequency): the event printers (format_event, chipem/web/evfmt.py) leave it
+    out."""
+    import re
+    if isinstance(value, str):
+        return len(value) >= 2 and value in msg
+    if isinstance(value, bool) or value is None or not isinstance(value, (int, float)):
+        return False
+    if key.endswith("_hz") and "Hz" in msg:
+        return True
+    t = str(int(value)) if float(value).is_integer() else repr(value)
+    return len(t) >= 3 and re.search(rf"(?<![\w.]){re.escape(t)}(?![\w.])", msg) is not None
+
+
 def format_event(ev: LogEvent) -> str:
     f = dict(ev.fields)
     head = f"{format_time(ev.t_ns)} {ev.kind}"
@@ -254,8 +269,13 @@ def format_event(ev: LogEvent) -> str:
     elif ev.kind == "usb" and "msg" in f:
         s = f"{head} {f.get('dev', '')} {f['msg']}"           # chipem/usbbus.py: the message says it all
         f = {k: f[k] for k in ("chip",) if k in f}
+    elif ev.kind in ("eth", "i2s") and "msg" in f:
+        s = f"{head} {f['msg']}"                                 # frame / sample block summary
+        f = {k: f[k] for k in ("chip",) if k in f}
     elif "msg" in f:
-        s = f"{head} {f.pop('msg')}"
+        msg = str(f.pop("msg"))
+        s = f"{head} {msg}"
+        f = {k: v for k, v in f.items() if not field_in_msg(k, v, msg)}
     else:
         s = head
     for k, v in f.items():

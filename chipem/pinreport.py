@@ -329,7 +329,8 @@ def fmt_wave(w: dict | None) -> str:
         return ""
     f = w["freq_hz"]
     fs = f"{f / 1e6:.4g} MHz" if f >= 1e6 else f"{f / 1e3:.4g} kHz" if f >= 1e3 else f"{f:.4g} Hz"
-    return f"periodic {fs}, duty {w['duty']:.1f} %"
+    d = w.get("duty")
+    return f"periodic {fs}, duty " + (f"{d:.1f} %" if d is not None else "?")
 
 
 def pin_waves(chip: Any) -> dict[str, dict]:

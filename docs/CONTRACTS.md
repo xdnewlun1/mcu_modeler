@@ -259,7 +259,7 @@ class Session:
     def reset(self)                            # every chip
     def run_for(self, ns: float) -> StopReason # honours stop(); a board runs in lockstep (Board.run_for)
     def run_cycles(self, n: int) -> StopReason # board: n cycles of the view chip, converted to time
-    def step(self) -> StopReason               # one instruction of the view chip (other board chips do not move)
+    def step(self, chip: str | None = None) -> StopReason   # one instruction of chip `chip` (default: the view chip; other board chips do not move)
     def stop(self)                             # thread-safe request to end the current run early
     # all names below may be qualified with a chip id: "B.PTC6", "B.UART0", "B.ADC0_SE14"
     def set_pin(self, name: str, level: "H"|"L"|"X"|None)              # external stimulus now (a net pin drives its net)

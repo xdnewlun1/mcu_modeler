@@ -4,6 +4,7 @@
 // each with a short lead whose outer end is the wire anchor) and placed with translate + scale by the BoardView.
 // Generic: knows part *types* (the standard library of docs/CONTRACTS.md), never chip vendors.
 import { el } from "./package.js";
+import { fmtFreq } from "./fmt.js";
 
 export const PORT_P = 26;         // port pitch
 export const LEAD = 16;           // lead length outside the body
@@ -14,10 +15,29 @@ export const SOURCE_TYPES = new Set(["switch", "button", "const", "vcc", "gnd", 
 export const SINK_TYPES = new Set(["led", "probe", "counter"]);
 export const GATE_TYPES = new Set(["and", "nand", "or", "nor", "xor", "xnor", "not", "buf"]);
 
+// peripheral-like parts (chipem/parts: sensors, memories, codecs, adapters) and pure wiring (connectors, cables)
+export const DEVICE_TYPES = new Set(["quadrature_encoder", "i2c_eeprom", "i2c_register_device", "i2s_codec", "camera",
+  "usb_serial_adapter", "rs232_transceiver"]);
+export const CONNECTOR_TYPES = new Set(["connector", "db9", "rj50", "cable"]);
+// devices that only drive signals into the board sit with the sources (left of the chips)
+const SOURCE_DEVICES = new Set(["quadrature_encoder", "camera"]);
+
+// layout column: "src" (left of the chips), "logic" (right), "sink" (indicators, far right)
 export function partCategory(type) {
-  if (SOURCE_TYPES.has(type)) return "src";
+  if (SOURCE_TYPES.has(type) || SOURCE_DEVICES.has(type)) return "src";
   if (SINK_TYPES.has(type)) return "sink";
   return "logic";
+}
+
+// add-part dialog group / parts list order: inputs, indicators, logic, devices, connectors
+export const PART_GROUPS = ["inputs", "indicators", "logic", "devices", "connectors"];
+export function partGroup(type) {
+  if (SOURCE_TYPES.has(type)) return "inputs";
+  if (SINK_TYPES.has(type)) return "indicators";
+  if (DEVICE_TYPES.has(type)) return "devices";
+  if (CONNECTOR_TYPES.has(type)) return "connectors";
+  if (GATE_TYPES.has(type) || ["mux2", "dff", "latch"].includes(type)) return "logic";
+  return "devices";                       // unknown (newer) part types are peripherals more often than gates
 }
 
 // LED colour (params.color): a named colour maps to its theme token (--led-red, ... in style.css, one value per
@@ -38,17 +58,32 @@ export function portList(part) {
     const dir = dirs[n] || (n === "out" || n === "q" || n === "qn" ? "out" : "in");
     return { name: n, dir, side: dir === "in" ? "L" : "R" };
   });
+  // bidirectional ports only (I2C devices, cables): the first half on the left, the rest on the right
+  const io = out.filter((p) => p.dir === "inout");
+  if (io.length > 1 && !out.some((p) => p.dir === "in")) {
+    const sorted = io.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    sorted.slice(0, Math.ceil(sorted.length / 2)).forEach((p) => { p.side = "L"; });
+  }
   const key = (p) => (order[p.name] ?? (/^in(\d+)$/.test(p.name) ? +p.name.slice(2) : 50));
-  out.sort((a, b) => key(a) - key(b) || a.name.localeCompare(b.name));
+  out.sort((a, b) => key(a) - key(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
   return out;
 }
 
 // body size (units) of a part
+const PORT_CH = 6.2;              // port label (10 px mono) advance
+const TYPE_CH = 6.9;              // type name (11 px 600 mono) advance
+const TYPE_HEAD = 16;             // header row for the type name of a crowded box
+const STATE_CH = 6.7;             // state line (11 px mono) advance
+const SYMBOL_TYPES = new Set(["led", "const", "vcc", "gnd", "switch", "button", "pulse", "pattern", "probe", "counter",
+  "not", "buf", "and", "nand", "or", "nor", "xor", "xnor", "mux2", "dff", "latch"]);
+const PORT_TEXT = { qn: "Q̅", q: "Q", d: "D", en: "EN", rst: "R", sel: "S", a: "0", b: "1" };
+const portText = (name) => PORT_TEXT[name] ?? name;
+
 export function partGeom(part) {
   const ports = portList(part);
   const nL = ports.filter((p) => p.side === "L").length, nR = ports.filter((p) => p.side === "R").length;
   const t = part.type;
-  let bw = 56, bh = Math.max(nL, nR, 1) * PORT_P + 10;
+  let bw = 56, bh = Math.max(nL, nR, 1) * PORT_P + 10, head = 0;
   if (t === "led") { bw = 34; bh = 34; }
   else if (["const", "vcc", "gnd"].includes(t)) { bw = 40; bh = 40; }
   else if (t === "switch") { bw = 60; bh = 36; }
@@ -60,14 +95,22 @@ export function partGeom(part) {
   else if (GATE_TYPES.has(t)) { bw = 58; bh = Math.max(36, nL * PORT_P + 6); }
   else if (t === "mux2") { bw = 46; bh = Math.max(bh, 3 * PORT_P + 8); }
   else if (t === "dff" || t === "latch") { bw = 58; bh = Math.max(bh, 2 * PORT_P + 12); }
+  else if (!SYMBOL_TYPES.has(t)) {
+    // generic box: port labels inside along both edges, the type name between them (or in a header row when the
+    // columns leave no room)
+    const lw = (side) => Math.max(0, ...ports.filter((p) => p.side === side).map((p) => portText(p.name).length));
+    const cl = lw("L") * PORT_CH, cr = lw("R") * PORT_CH, tn = String(t).length * TYPE_CH;
+    const inline = cl + cr + tn + 30;
+    bw = Math.max(56, Math.min(inline, Math.max(cl + cr + 24, tn + 16)));
+    if (inline > bw) { bh += TYPE_HEAD; head = TYPE_HEAD; }     // the type name gets its own row above the ports
+  }
   bh = Math.max(bh, 34);
   const idW = String(part.id).length * 8.4 + 8;
   const w = Math.max(bw + 2 * LEAD, idW, 96);
-  return { bw, bh, ports, w, h: LABEL_H + bh + STATE_H, nL, nR };
+  return { bw, bh, ports, w, h: LABEL_H + bh + STATE_H, nL, nR, head };
 }
 
-const fmtHzShort = (hz) => (hz >= 1e6 ? `${+(hz / 1e6).toFixed(2)} MHz` : hz >= 1e3 ? `${+(hz / 1e3).toFixed(2)} kHz`
-  : `${+hz.toFixed(hz >= 100 ? 0 : 2)} Hz`);
+const fmtHzShort = (hz) => fmtFreq(hz, true);
 
 // one-line state text under the symbol
 export function stateText(part, st) {
@@ -133,7 +176,8 @@ export class PartView {
     const body = el("g", { class: "part-body" }, g);
     this.body = body;
     const L = ports.filter((p) => p.side === "L"), R = ports.filter((p) => p.side === "R");
-    const ys = (n) => Array.from({ length: n }, (_, i) => bh / 2 + (i - (n - 1) / 2) * PORT_P);
+    const hd = this.geo.head || 0;
+    const ys = (n) => Array.from({ length: n }, (_, i) => hd + (bh - hd) / 2 + (i - (n - 1) / 2) * PORT_P);
     const placeSide = (list, side) => {
       const yy = ys(list.length);
       list.forEach((p, i) => {
@@ -186,7 +230,13 @@ export class PartView {
     }
     if (this.refresh) this.refresh(this.st, netLv);
     const txt = stateText(this.part, this.st);
-    if (this.stateEl.textContent !== txt) this.stateEl.textContent = txt;
+    if (this._stateFull !== txt) {
+      this._stateFull = txt;
+      const max = Math.max(6, Math.floor(this.geo.w / STATE_CH));
+      const short = txt.length > max ? `${txt.slice(0, max - 1)}…` : txt;
+      this.stateEl.textContent = short;
+      if (short !== txt) el("title", {}, this.stateEl).textContent = txt;
+    }
   }
 
   setClass(cls, on) { this.root.classList.toggle(cls, !!on); }
@@ -234,7 +284,21 @@ function gateSymbol(body, bw, bh) {
 function boxSymbol(body, bw, bh) {
   this.shape = el("rect", { x: 0, y: 0, width: bw, height: bh, rx: 4, class: "part-box" }, body);
   const t = this.part.type;
-  const title = el("text", { x: bw / 2, y: bh / 2 + 4, class: "gate-name", "text-anchor": "middle" }, body);
+  const hd = this.geo.head || 0;
+  // the type name: in the header row of a crowded box, else centred between the label columns where no port label is
+  let ty = hd ? hd - 4 : bh / 2 + 4;
+  if (!hd) {
+    const ly = [...this.portEls.values()].map((p) => p.ly);
+    const free = (y) => ly.every((v) => Math.abs(v - (y - 4)) >= 11);
+    if (!free(ty)) {
+      for (let d = 6; d < bh / 2; d += 3) {
+        if (free(bh / 2 + 4 + d) && bh / 2 + 4 + d < bh - 3) { ty = bh / 2 + 4 + d; break; }
+        if (free(bh / 2 + 4 - d) && bh / 2 + 4 - d > 11) { ty = bh / 2 + 4 - d; break; }
+      }
+    }
+  }
+  if (hd) el("line", { x1: 0, y1: hd, x2: bw, y2: hd, class: "part-sep" }, body);
+  const title = el("text", { x: bw / 2, y: ty, class: "gate-name", "text-anchor": "middle" }, body);
   title.textContent = t === "dff" ? "" : t === "latch" ? "" : t;
   // port labels inside the box
   for (const [name, p] of this.portEls) {
@@ -245,7 +309,7 @@ function boxSymbol(body, bw, bh) {
       continue;
     }
     const txt = el("text", { x: left ? 6 : bw - 6, y: ly + 4, class: "port-label", "text-anchor": left ? "start" : "end" }, body);
-    txt.textContent = { qn: "Q̅", q: "Q", d: "D", en: "EN", rst: "R", sel: "S", a: "0", b: "1" }[name] ?? name;
+    txt.textContent = portText(name);
   }
   if (t === "dff") title.textContent = "FF";
   else if (t === "latch") title.textContent = "L";

@@ -311,7 +311,7 @@ def test_absent_on_f405():
 
 def test_reset_values(d407):
     chip, mac, _ = eth_chip(d407, segment=False)
-    assert er(chip, MACCR) == 0x8000 and er(chip, DMABMR) == 0x2101
+    assert er(chip, MACCR) == 0x8000 and er(chip, DMABMR) == 0x00020101          # RM0090 33.8.4
     assert er(chip, MACA0HR) == 0x8000FFFF and er(chip, MACA0LR) == 0xFFFFFFFF
     assert mac.eth_stats()["iface"] == "rmii"
 
@@ -364,7 +364,7 @@ def test_software_reset_completes(d407):
     ew(chip, DMABMR, er(chip, DMABMR) | 1)
     assert er(chip, DMABMR) & 1
     chip.run_cycles(100)
-    assert er(chip, DMABMR) == 0x2100
+    assert er(chip, DMABMR) == 0x00020100
 
 
 def test_pmc_change_after_clock_warns(d407):

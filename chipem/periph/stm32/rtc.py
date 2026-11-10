@@ -13,27 +13,34 @@ CALR, TAFCR, ALRMASSR, ALRMBSSR, BKP0R-BKP19R); behaviour hand-written.
   clock runs and INIT = 0, with leap years (year % 4 == 0), 28-31 day months and a weekday that steps once a day.
   CR.FMT = 1 reads hours 1-12 with TR.PM. CR.ADD1H / SUB1H (write-only) move the time by one hour.
 * Shadow registers (26.3.6): with CR.BYPSHAD = 0 a read of SSR or TR freezes the calendar values seen by the next
-  DR read (the "read TR then DR" rule), and ISR.RSF (rc_w0) is set again 2 RTCCLK periods after software clears
-  it (HAL_RTC_WaitForSynchro). BYPSHAD = 1 reads the live counters.
-* Write protection (26.3.8): after a reset all registers except ISR[13:8], TAFCR and BKPxR are protected until WPR
-  receives 0xCA then 0x53 (any other value locks again); protected writes are ignored with one `warn` per register.
+  TR/DR reads until DR is read (the "read TR then DR" rule), and ISR.RSF (rc_w0) is set again 2 RTCCLK periods
+  after software clears it (HAL_RTC_WaitForSynchro). BYPSHAD = 1 reads the live counters and RSF reads 0 (cleared by
+  hardware, 26.6.4); clearing BYPSHAD sets RSF 2 RTCCLK later. A system reset clears ISR.INIT/INITF/RSF and resets
+  the shadow registers (TR 0, DR 0x2101, SSR 0 while BYPSHAD = 0, 26.3.7 / 26.6.1-2): they read those values until
+  the first copy, which sets RSF 2 RTCCLK after the reset (an INIT in progress is left as if INIT were cleared).
+* Write protection (26.3.5): after a backup-domain reset all registers except ISR[13:8], TAFCR and BKPxR are protected until WPR
+  receives 0xCA then 0x53 (any other value locks again; a system reset does not relock); protected writes are
+  ignored with one `warn` per register.
   The whole backup domain also needs PWR_CR.DBP = 1 (26.3.1; RM0090 5.1.2): without it every RTC write is ignored
   with one `warn`. RCC_BDCR itself is written without the DBP check (stm32.rcc).
-* Initialisation (26.3.7): ISR.INIT = 1 stops the calendar (INITF reads 1 at once; silicon needs ~2 RTCCLK); TR, DR
-  and PRER are writable only then (otherwise ignored, one `warn`); clearing INIT restarts the counters from TR/DR
-  with SSR = PREDIV_S. ISR.INITS = 1 when the year is not 0.
+* Initialisation (26.3.5): ISR.INIT = 1 stops the calendar; INITF reads 1 two RTCCLK periods later (never without
+  RTCCLK, so HAL_RTC_Init times out like on silicon); TR, DR, PRER and CR.FMT are writable only while INITF = 1
+  (otherwise ignored, one `warn`); clearing INIT loads TR/DR and the counters restart 4 RTCCLK later with
+  SSR = PREDIV_S (RSF set at that load). ISR.INITS = 1 when the year is not 0.
 * Alarms A/B (26.3.9): ALRMxR with MSK1-MSK4 (seconds, minutes, hours/PM, date or weekday per WDSEL); when the
-  calendar's second increments to a matching time ALRxF is set. ALRMxR is writable while ALRxE = 0 (ALRxWF reads 1
-  immediately). ALRMASSR/ALRMBSSR.MASKSS other than 0 (sub-second compare) are treated as 0 with one `warn`.
+  calendar's second increments to a matching time ALRxF is set. ALRMxR is writable while ALRxWF = 1: it is set 2
+  RTCCLK after ALRxE is cleared (26.3.5), cleared at once when ALRxE is set and in initialisation mode. ALRMASSR/ALRMBSSR.MASKSS other than 0 (sub-second compare) are treated as 0 with one `warn`.
   (ALRAF & ALRAIE) | (ALRBF & ALRBIE) drives EXTI line 17 (RTC_Alarm vector via EXTI_IMR/RTSR); flags are rc_w0.
 * Wakeup timer (26.3.4): CR.WUTE starts a down-counter reloaded with WUTR; ck_wut = RTCCLK / 16, 8, 4, 2
-  (WUCKSEL 0xx) or ck_spre (10x; 11x adds 2^16 to WUTR); WUTF is set every WUTR + 1 ck_wut periods. WUTR is writable
-  while WUTE = 0 (WUTWF reads 1). WUTF & WUTIE drives EXTI line 22 (RTC_WKUP).
+  (WUCKSEL 0xx) or ck_spre (10x; 11x adds 2^16 to WUTR); WUTF is set every WUTR + 1 ck_wut periods. WUTR and
+  CR.WUCKSEL are writable while WUTWF = 1 (set 2 RTCCLK after WUTE is cleared, cleared when WUTE is set). WUTF & WUTIE drives EXTI line 22 (RTC_WKUP).
 * Backup domain: all RTC registers, the calendar and BKP0R-BKP19R survive system resets (watchdog, SYSRESETREQ, NRST);
   only the first reset (power-on) and RCC_BDCR.BDRST clear them.
-Not modelled: timestamp (TSE, TSTR/TSDR/TSSSR), tamper (TAFCR TAMPxE; TAMP1F/TAMP2F never set), coarse/smooth
-calibration (CALIBR, CALR: stored), SHIFTR (stored, one `warn`), the RTC_AF1 outputs (COE, OSEL: stored), the
-reference clock detection (REFCKON).
+The SVD lacks CR.BYPSHAD (bit 5) and CR.COSEL (bit 19): CR keeps all bits 23:0 (26.6.3).
+Not modelled: timestamp (26.3.12: TSE, TSTR/TSDR/TSSSR), tamper (26.3.13: TAFCR TAMPxE; TAMP1F/TAMP2F never set),
+coarse/smooth calibration (26.3.10/26.3.11: CALIBR, CALR stored, RECALPF never set), SHIFTR (26.3.8: stored, one
+`warn`, SHPF never set), the RTC_AF1 outputs (26.3.14/26.3.15: COE, OSEL stored), the reference clock detection
+(26.3.9: REFCKON), the 2-APB-cycle delay of rc_w0 flag clears, the APB1 >= 7 x RTCCLK read rule (26.3.6).
 """
 from __future__ import annotations
 
@@ -102,7 +109,8 @@ class RTC(GatedBlock):
             "TR": {"on_read": self._tr_read, "on_write": self._cal_write},
             "DR": {"on_read": self._dr_read, "on_write": self._cal_write},
             "SSR": {"ro_mask": 0xFFFFFFFF, "on_read": self._ssr_read},
-            "CR": {"on_write": self._cr_write},
+            # The SVD lacks CR.BYPSHAD (bit 5) and COSEL (bit 19); RM0090 26.6.3 reserves only bits 31:24
+            "CR": {"on_write": self._cr_write, "ro_mask": 0xFF000000},
             "ISR": {"ro_mask": 0, "on_read": self._isr_read, "on_write": self._isr_write},
             "PRER": {"on_write": self._prer_write},
             "WUTR": {"on_write": self._wutr_write},
@@ -126,6 +134,9 @@ class RTC(GatedBlock):
         self._shadow: tuple[Cal, int] | None = None
         self._unlock = 0                # WPR key state: 0 locked, 1 got 0xCA, 2 unlocked
         self._rsf_due: float | None = None
+        self._initf_due = 0.0           # INITF reads 1 from this time on while INIT = 1
+        self._wf_due = {ALRAWF: 0.0, ALRBWF: 0.0, WUTWF: 0.0}   # xWF reads 1 from this time on (None: enabled)
+        self._shadow_rst = False        # shadow TR/DR/SSR hold their system-reset values until the next copy
         self._sec_ev = None
         self._wut_ev = None
         self._warned: set[str] = set()
@@ -137,9 +148,26 @@ class RTC(GatedBlock):
     # ------------------------------------------------------------------ reset (backup domain)
     def reset(self) -> None:
         if self._powered:
-            return                       # system reset: backup domain retained (calendar, events, BKPxR)
+            self._system_reset()         # backup domain retained (calendar, events, BKPxR, WPR key state)
+            return
         self._powered = True
         self._full_reset()
+
+    def _system_reset(self) -> None:
+        """26.3.7 / 26.6.4: a system reset clears ISR.INIT, INITF and RSF and resets the calendar shadow registers
+        (TR 0, DR 0x2101, SSR 0 while BYPSHAD = 0) until the next shadow copy (1-2 RTCCLK later)."""
+        if self.chip is None:
+            return
+        self._sync()
+        isr = self.get("ISR")
+        if isr & INIT:
+            self._exit_init()
+        self.set("ISR", self.get("ISR") & ~(INIT | INITF | RSF))
+        self._shadow = None
+        self._shadow_rst = True
+        self._rsf_due = self._after_rtcclk(2)
+        self._reschedule()
+        self._start_wut()
 
     def _full_reset(self) -> None:
         for attr in ("_sec_ev", "_wut_ev"):
@@ -184,6 +212,13 @@ class RTC(GatedBlock):
     def _running(self) -> bool:
         return self._hz > 0 and not self.get("ISR") & INIT
 
+    def _after_rtcclk(self, n: int) -> float:
+        """Time n RTCCLK periods from now (inf without a clock: the synchronisation never completes)."""
+        return self._now() + n * 1e9 / self._hz if self._hz > 0 else float("inf")
+
+    def _due(self, t: float | None) -> bool:
+        return t is not None and self._now() >= t
+
     def _sync(self) -> None:
         """Pick up RCC_BDCR changes (clock source, enable, backup-domain reset)."""
         r = self._rcc
@@ -200,6 +235,15 @@ class RTC(GatedBlock):
         if hz != self._hz:
             self._rebase()
             self._hz = hz
+            if hz > 0:                           # pending synchronisations complete now that RTCCLK runs
+                now = self._now()
+                for k, t in self._wf_due.items():
+                    if t == float("inf"):
+                        self._wf_due[k] = now + 2e9 / hz
+                if self._initf_due == float("inf"):
+                    self._initf_due = now + 2e9 / hz
+                if self._rsf_due == float("inf"):
+                    self._rsf_due = now + 2e9 / hz
             self._reschedule()
             self._start_wut()
 
@@ -404,17 +448,30 @@ class RTC(GatedBlock):
             self._unlock = 0
         return 0
 
+    def _stale_shadow(self) -> bool:
+        """After a system reset the shadow registers read their reset values until the first copy (RSF)."""
+        if not self._shadow_rst or self.get("CR") & BYPSHAD:
+            return False
+        if self._due(self._rsf_due):
+            self._isr_read(None, None)               # sets RSF, ends the stale period
+        return self._shadow_rst
+
     def _tr_read(self, blk, reg):
         if self.get("ISR") & INIT:
             return None
-        c, ss = self.snapshot()
-        if not self.get("CR") & BYPSHAD:
-            self._shadow = (c, ss)                  # TR read locks the date until DR is read
-        return self._enc_tr(c)
+        if self._stale_shadow():
+            return 0
+        if self.get("CR") & BYPSHAD:
+            return self._enc_tr(self.snapshot()[0])
+        if self._shadow is None:
+            self._shadow = self.snapshot()          # TR read locks the date until DR is read
+        return self._enc_tr(self._shadow[0])
 
     def _dr_read(self, blk, reg):
         if self.get("ISR") & INIT:
             return None
+        if self._stale_shadow():
+            return 0x2101
         if self._shadow is not None and not self.get("CR") & BYPSHAD:
             c = self._shadow[0]
             self._shadow = None
@@ -423,33 +480,41 @@ class RTC(GatedBlock):
         return self._enc_dr(c)
 
     def _ssr_read(self, blk, reg):
+        if self._stale_shadow():
+            return 0
         c, ss = self.snapshot()
         if not self.get("CR") & BYPSHAD:
-            self._shadow = (c, ss)
+            self._shadow = (c, ss)                  # SSR read locks TR and DR until DR is read (26.3.6)
         return ss
 
+    def _initf(self) -> bool:
+        return bool(self.get("ISR") & INIT) and self._due(self._initf_due)
+
+    def _wf(self, flag: int) -> bool:
+        return self._due(self._wf_due[flag])
+
     def _cal_write(self, blk, reg, old, new):
-        if not self.get("ISR") & INIT:
+        if not self._initf():
             self._warn_once(f"init{reg.name}", f"{self.name}: RTC_{reg.name} written outside initialisation mode "
-                            f"(ISR.INIT = 0): ignored")
+                            f"(ISR.INITF = 0): ignored")
             return old
         return None
 
     def _prer_write(self, blk, reg, old, new):
-        if not self.get("ISR") & INIT:
+        if not self._initf():
             self._warn_once("initPRER", f"{self.name}: RTC_PRER written outside initialisation mode: ignored")
             return old
         return None
 
     def _wutr_write(self, blk, reg, old, new):
-        if self.get("CR") & WUTE:
+        if not self._wf(WUTWF):
             self._warn_once("wutr", f"{self.name}: RTC_WUTR written while WUTE = 1 (WUTWF = 0): ignored")
             return old
         return None
 
     def _alrm_write(self, blk, reg, old, new):
-        en = ALRAE if reg.name in ("ALRMAR", "ALRMASSR") else ALRBE
-        if self.get("CR") & en:
+        wf = ALRAWF if reg.name in ("ALRMAR", "ALRMASSR") else ALRBWF
+        if not self._wf(wf) or self.get("ISR") & INIT:
             self._warn_once(f"alrm{reg.name}", f"{self.name}: RTC_{reg.name} written while the alarm is enabled "
                             f"(ALRxWF = 0): ignored")
             return old
@@ -465,9 +530,19 @@ class RTC(GatedBlock):
     def _cr_write(self, blk, reg, old, new):
         adj = 3600 if new & ADD1H else (-3600 if new & SUB1H else 0)
         new &= ~(ADD1H | SUB1H)
-        if (old ^ new) & FMT and not self.get("ISR") & INIT:
+        if (old ^ new) & FMT and not self._initf():
             self._warn_once("fmt", f"{self.name}: CR.FMT changed outside initialisation mode: ignored")
             new = (new & ~FMT) | (old & FMT)
+        if (old ^ new) & 7 and not self._wf(WUTWF):
+            self._warn_once("wucksel", f"{self.name}: CR.WUCKSEL changed while WUTWF = 0: ignored")
+            new = (new & ~7) | (old & 7)
+        for en, wf in ((ALRAE, ALRAWF), (ALRBE, ALRBWF), (WUTE, WUTWF)):
+            if new & en and not old & en:
+                self._wf_due[wf] = None
+            elif old & en and not new & en:
+                self._wf_due[wf] = self._after_rtcclk(2)      # xWF set 1-2 RTCCLK later (26.3.5)
+        if old & BYPSHAD and not new & BYPSHAD:
+            self._rsf_due = self._after_rtcclk(2)
         if adj:
             self._rebase()
             self.cal = self.cal.add_seconds(adj)
@@ -485,23 +560,39 @@ class RTC(GatedBlock):
     def _isr_read(self, blk, reg):
         isr = self.get("ISR")
         cr = self.get("CR")
-        if not isr & RSF and self._rsf_due is not None and self._running() and self._now() >= self._rsf_due:
+        if cr & BYPSHAD:                             # RSF is cleared by hardware in bypass mode (26.6.4)
+            if isr & RSF:
+                isr &= ~RSF
+                self.set("ISR", isr)
+        elif not isr & RSF and self._rsf_due is not None and self._running() and self._now() >= self._rsf_due:
             isr |= RSF
             self._rsf_due = None
+            self._shadow_rst = False
             self.set("ISR", isr)
         v = isr & (INIT | RSF | ISR_FLAGS)
-        if isr & INIT:
+        if isr & INIT and self._due(self._initf_due):
             v |= INITF
-        if not cr & ALRAE:
-            v |= ALRAWF
-        if not cr & ALRBE:
-            v |= ALRBWF
-        if not cr & WUTE:
+        if not isr & INIT:                          # ALRxWF are cleared in initialisation mode
+            if self._wf(ALRAWF):
+                v |= ALRAWF
+            if self._wf(ALRBWF):
+                v |= ALRBWF
+        if self._wf(WUTWF):
             v |= WUTWF
         c = self._dec(self.get("TR"), self.get("DR")) if isr & INIT else self.snapshot()[0]
         if c.yy:
             v |= INITS
         return v
+
+    def _exit_init(self) -> None:
+        """Leave initialisation mode: the counters load TR/DR and restart 4 RTCCLK later (26.3.5 step 5); the shadow
+        registers are synchronised (RSF) with that load."""
+        _, s = self._prediv()
+        self.cal = self._dec(self.get("TR"), self.get("DR"))
+        self._ss_ref = s
+        self._t_ref = self._now() + (4e9 / self._hz if self._hz > 0 else 0.0)
+        self._rsf_due = self._after_rtcclk(4)
+        self.emit("info", block=self.name, msg=f"RTC calendar set to {self.cal!r}")
 
     def _isr_write(self, blk, reg, old, new):
         v = old
@@ -510,19 +601,16 @@ class RTC(GatedBlock):
                 self._rebase()
                 self.set("TR", self._enc_tr(self.cal))
                 self.set("DR", self._enc_dr(self.cal))
+                self._initf_due = self._after_rtcclk(2)       # INITF after 1-2 RTCCLK (26.3.5)
+                self._shadow_rst = False
                 v |= INIT
                 v &= ~RSF
             elif not new & INIT and old & INIT:
-                _, s = self._prediv()
-                self.cal = self._dec(self.get("TR"), self.get("DR"))
-                self._ss_ref = s
-                self._t_ref = self._now()
+                self._exit_init()
                 v &= ~(INIT | RSF)
-                self._rsf_due = self._now() + (2e9 / self._hz if self._hz else 0.0)
-                self.emit("info", block=self.name, msg=f"RTC calendar set to {self.cal!r}")
             if old & RSF and not new & RSF:
                 v &= ~RSF
-                self._rsf_due = self._now() + (2e9 / self._hz if self._hz else 0.0)
+                self._rsf_due = self._after_rtcclk(2)
         elif (new ^ old) & INIT:
             self._warn_once("wpISR", f"{self.name}: write to RTC_ISR[7:0] ignored: registers are write protected "
                             f"(write 0xCA then 0x53 to RTC_WPR)")

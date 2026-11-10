@@ -1,43 +1,50 @@
 """STM32F4 I2S mode of SPI2/SPI3 (I2SCFGR.I2SMOD = 1) and the full-duplex extensions I2S2ext/I2S3ext.
 
-References: RM0090 ch. 28.4 (I2S functional description) and 7.3.23 (RCC_PLLI2SCFGR) as remembered (the manual could
-not be fetched for this work), cross-checked against the register fields of STM32F405.svd (chips/stm32f405_regs.yaml)
-and ST's HAL (stm32f4xx_hal_i2s.c / _i2s_ex.c / stm32f4xx_hal_rcc_ex.c, firmware/vendor/STM32CubeF4).  `I2SEngine` is
+References: RM0090 Rev 22 ch. 28.4 (I2S functional description), 28.5.8/28.5.9 (I2SCFGR, I2SPR) and 7.3.23
+(RCC_PLLI2SCFGR), the register fields of STM32F405.svd (chips/stm32f405_regs.yaml) and ST's HAL
+(stm32f4xx_hal_i2s.c / _i2s_ex.c / stm32f4xx_hal_rcc_ex.c, firmware/vendor/STM32CubeF4).  `I2SEngine` is
 used by stm32.spi (chipem/periph/stm32/spi.py) for SPI2/SPI3; `I2SExt` (`stm32.i2s_ext`) is the I2SxEXT block.
 
 Clock (28.4.4).  I2SxCLK = RCC `i2s_clk_hz()`: PLLI2S (PLL input / PLLM x PLLI2SN / PLLI2SR, needs PLLI2SON) or the
 I2S_CKIN pin (CFGR.I2SSRC = 1, frequency from the RCC param `i2s_ckin_hz`; 0 = no clock: one `warn`, idle).
-d = 2 x I2SDIV + ODD (I2SDIV 0 or 1 is forbidden: one `warn`, 2 is used).  MCKOE = 0: CK = I2SxCLK / d, so
-Fs = I2SxCLK / (32 d) (16-bit channels) or / (64 d) (32-bit channels).  MCKOE = 1: MCK = I2SxCLK / d = 256 Fs and
-CK = MCK / 8 (16-bit channels) or MCK / 4 (32-bit channels).  MCK is output while I2SMOD = 1, master mode and MCKOE = 1
-(I2SE not required, so a codec gets its master clock before the stream starts); up to `params.mck_edges_max_hz`
+d = 2 x I2SDIV + ODD (28.5.9: I2SDIV 0 or 1 is forbidden: one `warn`, 2 is used).  28.4.4 formulas: MCKOE = 0:
+CK = I2SxCLK / d, so Fs = I2SxCLK / (32 d) (16-bit channels) or / (64 d) (32-bit channels).  MCKOE = 1: MCK =
+I2SxCLK / d = 256 Fs and CK = MCK / 8 (16-bit channels) or MCK / 4 (32-bit channels).  MCK is output while I2SMOD = 1,
+master mode and MCKOE = 1 (28.4.1; that I2SE is not required, so a codec gets its master clock before the stream
+starts, is this model's reading: RM0090 does not say); up to `params.mck_edges_max_hz`
 (1 MHz) it toggles edge by edge, faster it stays low and is summarised as `pin` `wave` events (chipem/periph/sdbus.py
 ClockWave).  Bit edges are scheduled in the wall-clock domain (sched.at_ns): PLLI2S does not follow HCLK.
 
-Frame (28.4.3).  Channel length L = 16 (CHLEN = 0, DATLEN = 16 bit) or 32 (CHLEN = 1, or DATLEN 24/32 bit, which force
-32).  Stereo standards: a frame is a left and a right channel slot (2 L bits); PCM: one slot (L bits, mono).  Data are
-MSB first.  Philips: WS low = left, WS changes one CK before the MSB; MSB justified: WS high = left (this model's
-choice, also the i2s_codec part's "left_justified" convention), WS changes with the MSB, data left aligned; LSB
-justified: like MSB but data right aligned in the slot; PCM: frame sync on WS, short (PCMSYNC = 0: WS high for one CK
-before the MSB) or long (WS high for 13 CK from the MSB).  CKPOL = 0: CK idles low, data change on falling edges and
-are sampled on rising edges; CKPOL = 1 the opposite.  A master transmitter sends zeros until a half-word has been
-written, then starts with it at the next left slot (RM0090: the first half-word written is the left channel).  A
-master starts clocking at I2SE = 1 with two lead-in bit clocks (no data) in which WS shows the previous channel
-(Philips: high, others low; PCM short: the second one carries the frame sync pulse), so that a receiver sees a WS edge
-before the first frame (not documented by RM0090; chosen so that codecs synchronise on frame 0).  Clearing I2SE stops a
-master at the end of the current channel slot (I2SE reads 0 at once); a slave stops at once.
+Frame (28.4.3, Figures 264-280).  Channel length L = 16 (CHLEN = 0, DATLEN = 16 bit) or 32 (CHLEN = 1, or DATLEN
+24/32 bit, which force 32).  Stereo standards: a frame is a left and a right channel slot (2 L bits); PCM: one slot (L
+bits, mono).  Data are MSB first.  Philips: WS low = left, WS changes one CK before the MSB (Figure 264); MSB justified:
+WS high = left, WS changes with the MSB, data left aligned (Figure 270); LSB justified: like MSB but data right
+aligned in the slot (Figures 273-277); PCM: frame sync on WS, short (PCMSYNC = 0: WS high for one CK before the MSB)
+or long (WS high for 13 CK from the MSB, Figures 279/280).  CKPOL = 0: CK idles low, data and WS change on falling
+edges and are sampled on rising edges; CKPOL = 1 the opposite.  A master transmitter sends zeros until a half-word
+has been written, then starts with it at the next left slot (28.4.5: "the first data written into the Tx buffer
+correspond to the channel Left data"; no partial frame).  A master starts clocking at I2SE = 1 with two lead-in bit
+clocks (no data) in which WS shows the previous channel (Philips: high, others low; PCM short: the second one carries
+the frame sync pulse), so that a receiver sees a WS edge before the first frame (not documented by RM0090; chosen so
+that codecs synchronise on frame 0; the idle levels are those 28.4.8 gives for re-enabling a slave).  Clearing I2SE
+stops a master at the end of the current 16-bit half-word (I2SE reads 0 at once; this is what the receiver switch-off
+sequences of 28.4.5 imply, e.g. "wait 17 I2S clock cycles" for 16-bit data in a 32-bit LSB-justified channel); a
+slave stops at once.  TXE reads 0 while the I2S is disabled (28.4.7) and is set again by I2SE = 1 with an empty TX
+buffer.
 DR is 16 bits wide.  16-bit data: one DR access per channel (16-bit data in a 32-bit channel: followed by 16 zero bits,
 or preceded by them in LSB justified).  24/32-bit data: two accesses per channel, D[31:16] then D[15:0] (24-bit
 Philips / MSB / PCM: D[23:8] then D[7:0] in bits 15:8 of the second access; 24-bit LSB justified: D[23:16] in bits 7:0
 of the first access, then D[15:0]).  The TX buffer is moved to the shift register when its 16 bits start (TXE = 1,
 CHSIDE = channel of the next half-word to write); received half-words go to the RX buffer after their 16th bit
-(RXNE = 1, CHSIDE = channel just received; RXNE still set -> OVR, the half-word is lost; cleared by a DR read then an
-SR read).  Empty TX buffer: a slave transmitter sets UDR (cleared by an SR read) and sends zeros; a master sends zeros
-(no flag; UDR is a slave flag).
+(RXNE = 1, CHSIDE = channel just received; RXNE or OVR still set -> OVR, the half-word is lost, and so is every
+later one until OVR is cleared by a DR read then an SR read, 28.4.8).  Empty TX buffer: a slave transmitter sets UDR
+(28.4.8: cleared by an SR read) and sends zeros; a master sends zeros (no flag; UDR is a slave-transmitter flag).
 Slave: CK and WS come from the pins muxed to I2Sx_CK / I2Sx_WS; the slave synchronises on the first WS edge (the
 data side starts with the next left slot) and checks WS at every bit: a WS level that does not match the expected
-frame position sets FRE (bit 8, cleared by an SR read) and re-synchronises.  BSY = 1 while a master clock runs or a
-slave is synchronised.
+frame position sets FRE (bit 8, cleared by an SR read) and the slave stays desynchronised until I2SE is cleared and
+set again (28.4.8 recovery procedure).  BSY (28.4.7): master transmitter: 1 while the clock runs; master receiver:
+kept 0; slave (and I2SxEXT): 1 while a half-word is transferred, 0 for one CK cycle between half-words (from the
+sampling edge of a half-word's last bit to the next sampling edge).
 IRQ (SPIx line, shared with I2SxEXT through `_util.shared_irq`): (TXE & TXEIE) | (RXNE & RXNEIE) |
 ((OVR | UDR | FRE) & ERRIE).  DMA: SPIx_TX / SPIx_RX (I2Sx_EXT_TX / _RX for the extension) while TXE & TXDMAEN /
 RXNE & RXDMAEN.
@@ -52,8 +59,9 @@ is muxed to a pin, a master runs one event per channel slot with the same timing
 Observation: `tx_frames` / `rx_frames` (deques of (left, right) sample values: 16/24/32 bit as in DATLEN, PCM: (v,
 None)) and an `i2s` event per `params.event_frames` (64) frames and direction: {block, dir, frames, words (left
 samples, at most 64), bits, msg} like kinetis.sai.
-Not modelled: the I2S clock jitter / ODD duty cycle (average frequency exact), DMA double-data-length details beyond
-the two DR accesses, slave-mode start conditions beyond WS synchronisation, SPI-mode use of I2SxEXT (one `warn`).
+Not modelled: the I2S clock jitter / ODD duty cycle of the "reshaping stage" (Figure 282; average frequency exact),
+slave-mode start conditions beyond WS synchronisation (28.4.6: I2SE at least two PCLK before the first CK), SPI-mode
+use of I2SxEXT (one `warn`).
 """
 from __future__ import annotations
 
@@ -165,6 +173,7 @@ class I2SEngine:
         self.p = 0
         self.geo: Geo | None = None
         self.synced = False
+        self.fre_lock = False          # slave: FRE seen, no resynchronisation until I2SE is toggled
         self.active = False            # data side started (at a left slot)
         self.cur = 0
         self.acc = [0, 0]
@@ -372,8 +381,9 @@ class I2SEngine:
             self._out("WS", "H" if geo.ws_idle() else "L")    # WS before CK: no receiver sees a WS change at the
             self._out("CK", idle)                              # first (idle) CK level
             self.p = geo.first_p()
-            self._sr(BSY)
-            self._drive_bit()
+            if self.tx_dir:
+                self._sr(BSY)                      # master TX: BSY high during all transfers; master RX: kept low
+            self._drive_bit()                      # (RM0090 28.4.7)
             self.t_next = chip.now_ns()
             if self.word_mode:
                 self._schedule_word()
@@ -383,6 +393,7 @@ class I2SEngine:
         else:
             self.running = True
             self.synced = False
+            self.fre_lock = False
             self.ws_prev = None
             self.ck_prev = self._level(self.sig["CK"])
         if self.tx_dir:
@@ -428,9 +439,10 @@ class I2SEngine:
             self.running = False
             self.active = False
             self._release("SD")
+            self._sr(clr_bits=BSY)
             return
         if self.is_master() and not self.word_mode:
-            self.stop_pending = True               # finish the current channel slot
+            self.stop_pending = True               # finish the current 16-bit half-word (28.4.5)
         else:
             self.stop()
 
@@ -444,14 +456,23 @@ class I2SEngine:
 
     def _sample_bit(self) -> None:
         geo = self.geo
+        p = self.p
         for sd in self.sides():
-            sd.side_sample(self.p, geo)
+            sd.side_sample(p, geo)
+            if p >= 0 and (sd.ext or not sd.is_master()):
+                # slave BSY (RM0090 28.4.7): set while a half-word is transferred, low for one CK cycle between two
+                # half-words (from the sampling edge of a half-word's last bit to the next sampling edge)
+                if p % 16 == 15:
+                    sd._sr(clr_bits=BSY)
+                elif not sd.blk.get("SR") & BSY:
+                    sd._sr(BSY)
 
     def _advance(self) -> bool:
-        """Next bit; False when a pending stop ends the stream here (slot boundary)."""
+        """Next bit; False when a pending stop ends the stream here (end of the current 16-bit half-word: RM0090
+        28.4.5, the receiver switch-off sequences)."""
         geo = self.geo
         self.p = self.p + 1 if self.p < 0 else (self.p + 1) % geo.F
-        if self.stop_pending and self.p % geo.L == 0:
+        if self.stop_pending and self.p % 16 == 0:
             self.stop()
             return False
         return True
@@ -516,12 +537,19 @@ class I2SEngine:
     def _slave_sample(self, ws: bool) -> None:
         geo = self.geo
         prev, self.ws_prev = self.ws_prev, ws
+        if self.fre_lock:
+            return
         if self.synced and geo.ws(self.p) != ws:
+            # RM0090 28.4.8: FRE; the slave stays out of synchronisation until software disables and re-enables it
             self.synced = False
-            self._sr(FRE)
-            self.blk._warn_once("fre", f"{self.blk.name}: I2S slave frame error (WS changed at an unexpected bit)")
+            self.fre_lock = True
             for sd in self.sides():
                 sd.active = False
+                sd._sr(clr_bits=BSY)
+            self._sr(FRE)
+            self.blk._warn_once("fre", f"{self.blk.name}: I2S slave frame error (WS changed at an unexpected bit): "
+                                f"desynchronised until I2SE is cleared and set again")
+            return
         if not self.synced:
             if prev is None or prev == ws:
                 return
@@ -530,7 +558,6 @@ class I2SEngine:
                 return
             self.p = pos
             self.synced = True
-            self._sr(BSY)
         self._sample_bit()
 
     # ------------------------------------------------------------------ data side (main and extension)
@@ -591,9 +618,11 @@ class I2SEngine:
                 val = self.cur & _MASK[kind]
                 self.acc[slot] = (self.acc[slot] << 16) | val
                 blk = self.blk
-                if blk.get("SR") & RXNE:
+                if blk.get("SR") & (RXNE | OVR):
+                    # RM0090 28.4.8: RX buffer not updated; while OVR is set every later half-word is lost too
+                    if not blk.get("SR") & OVR:
+                        blk._ovr_dr_read = False
                     self._sr(OVR)
-                    blk._ovr_dr_read = False
                 else:
                     blk.rxbuf = val
                     self._sr(RXNE | (CHSIDE if slot else 0), 0 if slot else CHSIDE)

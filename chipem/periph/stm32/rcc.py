@@ -2,8 +2,9 @@
 
 Status mirrors control immediately (no start-up/lock delays), so HAL/LL polling loops terminate:
 CR.HSIRDY = HSION, HSERDY = HSEON, PLLRDY = PLLON, PLLI2SRDY = PLLI2SON; CSR.LSIRDY = LSION; BDCR.LSERDY = LSEON;
-CFGR.SWS follows CFGR.SW when the selected source is ready (otherwise SWS keeps the old source and one `warn`
-is logged; silicon also refuses the switch).
+CFGR.SWS follows CFGR.SW when the selected source is ready; otherwise SWS keeps the old source (one `warn`) and the
+switch happens when the source becomes ready (RM0090 7.2.6). A clock that drives SYSCLK, directly or through the PLL,
+cannot be stopped (7.2.6): HSION/HSEON/PLLON writes that would stop it are ignored.
 
 Clock tree:
   HSI    = 16 MHz;  HSE = params `ext_hz` (default 8 MHz)
@@ -19,6 +20,15 @@ Other models subscribe to clock-tree changes with `rcc.listeners.append(cb)` (cb
 only PLL48CLK = PLLQ output or I2SCLK (`i2s_clk_hz()`: PLLI2S = PLL input / PLLM x PLLI2SN / PLLI2SR, or the
 I2S_CKIN pin frequency `params.i2s_ckin_hz` when CFGR.I2SSRC = 1) starts, stops or changes) and to clock
 gate changes with `rcc.gate_listeners.append(cb)` (cb(enr_name, old, new) after a write that changes an xxxENR).
+
+Reset flags (7.3.21): the first reset (power-on) sets PORRSTF | PINRSTF | BORRSTF; SYSRESETREQ sets SFTRSTF | PINRSTF;
+IWDG / WWDG resets set IWDGRSTF / WWDGRSTF | PINRSTF (`pending_reset_flags`, set by those models); any other system
+reset (NRST: Session/shell reset) sets PINRSTF. The flags survive system resets until CSR.RMVF. LSIRDY reads 1 while
+the IWDG runs (the LSI is forced on, 7.2.9).
+Backup domain (7.3.20, 7.1.3): BDCR is write-protected until PWR_CR.DBP = 1 (writes ignored with one `warn`); it
+survives system resets; BDCR.BDRST (with DBP) resets the backup domain: BDCR, the RTC (all registers, backup registers)
+and PWR_CSR.BRE (the backup SRAM is not affected). RTCSEL cannot be changed once non-zero until a backup domain reset;
+LSEBYP is writable only while LSEON = 0.
 
 Clock gates: AHB1ENR/AHB2ENR/AHB3ENR/APB1ENR/APB2ENR; `clock_enabled(name)` / `check_gate(name, block)` (one
 `warn` per peripheral when a gated-off block is accessed; silicon ignores such accesses).  Writing 1 to a bit of
@@ -39,7 +49,7 @@ HSION, HSIRDY, HSEON, HSERDY, PLLON, PLLRDY, PLLI2SON, PLLI2SRDY = (1 << 0, 1 <<
 # CSR
 LSION, LSIRDY, RMVF = 1 << 0, 1 << 1, 1 << 24
 BORRSTF, PINRSTF, PORRSTF, SFTRSTF, IWDGRSTF, WWDGRSTF, LPWRRSTF = (1 << b for b in range(25, 32))
-LSEON, LSERDY = 1 << 0, 1 << 1
+LSEON, LSERDY, LSEBYP, BDRST = 1 << 0, 1 << 1, 1 << 2, 1 << 16
 HPRE_DIV = {8: 2, 9: 4, 10: 8, 11: 16, 12: 64, 13: 128, 14: 256, 15: 512}
 PPRE_DIV = {4: 2, 5: 4, 6: 8, 7: 16}
 SRC_NAMES = ("HSI", "HSE", "PLL", "?")
@@ -112,7 +122,14 @@ class RCC(MMIOBlock):
         keep = {"CSR": self.get("CSR"), "BDCR": self.get("BDCR")} if self._powered else {}
         super().reset()
         if self._powered:
-            csr = (keep.get("CSR", 0) & 0xFE000000) | self.pending_reset_flags
+            flags = self.pending_reset_flags
+            why = getattr(getattr(self.chip, "arch", None), "reset_requested", None)
+            if not flags:
+                if why == "SYSRESETREQ":
+                    flags = SFTRSTF | PINRSTF
+                elif why != "standby_wakeup":
+                    flags = PINRSTF                     # external reset (NRST)
+            csr = (keep.get("CSR", 0) & 0xFE000000) | flags
             self.set("CSR", (self.get("CSR") & ~0xFE000000) | csr)
             self.set("BDCR", keep.get("BDCR", 0))
         self._powered = True
@@ -178,14 +195,24 @@ class RCC(MMIOBlock):
 
     def plli2s_hz(self) -> float:
         """PLLI2S output PLLI2SCLK = PLL input / PLLM x PLLI2SN / PLLI2SR (RM0090 7.3.23; 0 while PLLI2S is off or the
-        dividers are invalid: N < 2, R < 2, M < 2)."""
+        dividers are invalid: N < 2, R < 2, M < 2).  7.3.23 calls PLLI2SN outside 50..432, a VCO outside 100..432 MHz
+        and an I2S clock above 192 MHz wrong configurations: one `warn` each, the nominal frequency is still used."""
         if not self.get("CR") & PLLI2SRDY:
             return 0.0
         m = self._f("PLLCFGR", 0, 6)
         n, r = self._f("PLLI2SCFGR", 6, 9), self._f("PLLI2SCFGR", 28, 3)
         if m < 2 or n < 2 or r < 2:
             return 0.0
-        return self.pll_in_hz() / m * n / r
+        vco = self.pll_in_hz() / m * n
+        out = vco / r
+        for key, bad, what in (("plli2sn", not 50 <= n <= 432, f"PLLI2SN = {n} (allowed 50..432)"),
+                               ("plli2svco", not 100e6 <= vco <= 432e6, f"PLLI2S VCO {vco / 1e6:g} MHz (allowed "
+                                                                         f"100..432 MHz)"),
+                               ("plli2sout", out > 192e6, f"I2S clock {out / 1e6:g} MHz (at most 192 MHz)")):
+            if bad and key not in self._warned:
+                self._warned.add(key)
+                self.emit("warn", block=self.name, msg=f"RCC: {what} is a wrong configuration (RM0090 7.3.23)")
+        return out
 
     def i2s_clk_hz(self) -> float:
         """I2SCLK of SPI2/SPI3 in I2S mode: PLLI2SCLK (CFGR.I2SSRC = 0) or the I2S_CKIN pin (`i2s_ckin_hz`)."""
@@ -224,9 +251,14 @@ class RCC(MMIOBlock):
             if new & PLLI2SON:
                 rdy |= PLLI2SRDY
             sws = self._f("CFGR", 2, 2)
-            if sws == 0 and not new & HSION:            # HSI cannot be stopped while it clocks the system
+            pll_hse = bool(self._f("PLLCFGR", 22, 1))
+            # a clock used as SYSCLK, directly or through the PLL, cannot be stopped (7.2.6)
+            if (sws == 0 or (sws == 2 and not pll_hse)) and not new & HSION:
                 new |= HSION
                 rdy |= HSIRDY
+            if (sws == 1 or (sws == 2 and pll_hse)) and not new & HSEON:
+                new |= HSEON
+                rdy |= HSERDY
             if sws == 2 and not new & PLLON:
                 new |= PLLON
                 rdy |= PLLRDY
@@ -236,14 +268,58 @@ class RCC(MMIOBlock):
             self.update()
         return None
 
+    def _iwdg_running(self) -> bool:
+        from ._util import find_model
+        iw = find_model(self.chip, "stm32.iwdg", "IWDG") if self.chip is not None else None
+        return bool(iw is not None and getattr(iw, "running", False))
+
     def _csr_write(self, blk, reg, old, new):
-        v = (new & ~LSIRDY) | (LSIRDY if new & LSION else 0)
+        v = (new & ~LSIRDY) | (LSIRDY if new & LSION or self._iwdg_running() else 0)
         if new & RMVF:
             v &= ~(0xFE000000 | RMVF)
         return v
 
+    def _dbp(self) -> bool:
+        from ._util import find_model
+        pwr = find_model(self.chip, "stm32.pwr", "PWR") if self.chip is not None else None
+        return pwr is None or bool(pwr.get("CR") & (1 << 8))
+
     def _bdcr_write(self, blk, reg, old, new):
+        if not self._dbp():
+            if "bdcr_dbp" not in self._warned:
+                self._warned.add("bdcr_dbp")
+                self.emit("warn", block=self.name, msg="RCC_BDCR write ignored: backup domain write protection "
+                          "(PWR_CR.DBP = 0; RM0090 7.3.20)")
+            return old
+        if new & BDRST and not old & BDRST:
+            self._backup_domain_reset()
+            old = 0
+        if old & LSEON or new & LSEON:
+            new = (new & ~LSEBYP) | (old & LSEBYP)          # LSEBYP: writable only while the LSE is off
+        sel_old = (old >> 8) & 3
+        if sel_old and ((new >> 8) & 3) != sel_old:
+            new = (new & ~(3 << 8)) | (sel_old << 8)          # RTCSEL: fixed until a backup domain reset
+            if "rtcsel" not in self._warned:
+                self._warned.add("rtcsel")
+                self.emit("warn", block=self.name, msg="RCC_BDCR.RTCSEL change ignored: the RTC clock source can only "
+                          "be changed after a backup domain reset (BDRST)")
         return (new & ~LSERDY) | (LSERDY if new & LSEON else 0)
+
+    def _backup_domain_reset(self) -> None:
+        """BDCR.BDRST rising (7.1.3): RTC registers, backup registers, BDCR and PWR_CSR.BRE to their reset values."""
+        from ._util import find_model
+        chip = self.chip
+        if chip is None:
+            return
+        rtc = find_model(chip, "stm32.rtc", "RTC")
+        fn = getattr(rtc, "_full_reset", None)
+        if fn is not None:
+            fn()
+        pwr = find_model(chip, "stm32.pwr", "PWR")
+        fn = getattr(pwr, "backup_domain_reset", None)
+        if fn is not None:
+            fn()
+        self.emit("info", block=self.name, msg="backup domain reset (RCC_BDCR.BDRST)")
 
     def _enr_write(self, blk, reg, old, new):
         if old != new:

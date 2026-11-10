@@ -3,7 +3,7 @@
 `ClockWave`: an SD card clock runs at up to 50 MHz, far too fast to toggle a pin per edge in an instruction-level
 emulator. The models keep the clock pin at its idle level (L) and summarise the clock in the event log the same way
 EventLog does for dense pins (docs/CONTRACTS.md "Events / logging"): one stored `pin` event with `field="wave"`,
-`new="L"`, `edges`, `since_ns`, `freq_hz`, `duty` = 0.5, per `window_ns` (100 ms) of running clock, when the frequency
+`new="L"`, `edges`, `since_ns`, `freq_hz`, `duty` = 50.0 (percent, as EventLog `wave` events), per `window_ns` (100 ms) of running clock, when the frequency
 changes and when the clock stops. A continuously running clock counts edges from elapsed time; a clock gated to bus
 activity (STM32 PWRSAV, Kinetis automatic gating) counts the clocks of each command/data token (`active(clocks)`).
 
@@ -90,7 +90,7 @@ class ClockWave:
             for p in board.signal_pins(self.signal):
                 if board.signal_matches(p.owner, self.signal):
                     self.block.emit("pin", pin=p.id, field="wave", old=None, new="L", edges=n,
-                                    since_ns=self._since, freq_hz=self.hz, duty=0.5)
+                                    since_ns=self._since, freq_hz=self.hz, duty=50.0)
         self._edges = 0.0
         self._since = None if stop else self._now()
 

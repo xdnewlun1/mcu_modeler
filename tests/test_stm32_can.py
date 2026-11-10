@@ -104,7 +104,7 @@ def test_reset_state_and_init_sleep_handshakes(desc):
     assert r(c, CAN1 + MCR) == 0x00010002 and r(c, CAN1 + MSR) == 0xC02 and r(c, CAN1 + TSR) == 0x1C000000
     assert r(c, CAN1 + FMR) == 0x2A1C0E01                 # FINIT, CAN2SB = 14
     w(c, CAN1 + BTR, BTR_500K)                            # not in init mode: ignored
-    assert r(c, CAN1 + BTR) == 0 and any("BTR written outside" in m for m in warns(c))
+    assert r(c, CAN1 + BTR) == 0x01230000 and any("BTR written outside" in m for m in warns(c))   # RM0090 32.9.2
     w(c, CAN1 + MCR, INRQ | SLEEP)                        # HAL: INRQ first, SLEEP still set
     assert r(c, CAN1 + MSR) & (INAK | SLAK) == INAK | SLAK
     w(c, CAN1 + MCR, INRQ)
@@ -596,3 +596,17 @@ def test_cli_summary_shows_bxcan(capsys):
     out = capsys.readouterr().out
     assert "B|   CAN1: 500 kbit/s, 1 tx, 1 rx, TEC 0 REC 0, active" in out and "CAN2" not in out
     assert "can CANBUS: A.CAN0, B.CAN1: 2 frames" in out
+
+
+def test_txrq_clears_rqcp_and_status_bits(desc):
+    """RM0090 32.9.2 CAN_TSR: RQCPx is cleared by hardware when TXRQ is set again (and with it TXOK/ALST/TERR)."""
+    c, blk, h = setup(desc)
+    w(c, CAN1 + IER, 1)                                   # TMEIE
+    start(c)
+    send(c, 0, 0x123, b"\x01")
+    c.run_for(1e6)
+    assert r(c, CAN1 + TSR) & 3 == 3 and irq(c, "CAN1_TX")
+    send(c, 0, 0x124, b"\x02")                            # new request without clearing RQCP0 first
+    assert r(c, CAN1 + TSR) & 0xF == 0 and not irq(c, "CAN1_TX")
+    c.run_for(1e6)
+    assert r(c, CAN1 + TSR) & 3 == 3 and len(h.received) == 2

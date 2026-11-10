@@ -488,3 +488,77 @@ def test_hal_sd_sample_empty_socket():
     s = Session("chips/stm32f405zg.yaml", fw, quiet=True)
     s.run_for(30e6)
     assert s.uart_output("USART1").decode() == "SD HAL\r\nINIT error 00000004\r\n"     # CMD_RSP_TIMEOUT
+
+
+# ------------------------------------------------------------------------------------------------ DMA PFCTRL
+DMA2 = 0x40026400
+S3CR, S3NDTR, S3PAR, S3M0AR, S3FCR = (DMA2 + 0x58 + o for o in (0, 4, 8, 12, 0x14))
+TCIF3 = 1 << 27
+
+
+def _pfctrl_stream(chip, buf, direction):
+    wr(chip, DMA2 + 0x08, 0x3D << 22)                      # LIFCR: stream 3 flags
+    wr(chip, S3PAR, SDIO + FIFO)
+    wr(chip, S3M0AR, buf)
+    wr(chip, S3NDTR, 7)                                    # ignored with PFCTRL
+    wr(chip, S3FCR, 4 | 3)                                 # FIFO mode, full threshold
+    cr = 4 << 25 | 1 << 23 | 1 << 21 | 2 << 13 | 2 << 11 | 1 << 10 | direction << 6 | 1 << 5 | 1 << 8   # + CIRC
+    wr(chip, S3CR, cr)
+    wr(chip, S3CR, cr | 1)
+    assert rd(chip, S3NDTR) == 0xFFFF and not rd(chip, S3CR) & 1 << 8   # RM0090 10.3.15 / 10.5.5
+
+
+def test_dma_peripheral_flow_control_read_and_write(desc):
+    """RM0090 10.3.15: with PFCTRL the SDIO ends the DMA transfer (TCIF, EN cleared); NDTR = 0xFFFF - items."""
+    card = SDCard("64M")
+    card.write_bytes(512 * 3, bytes(range(256)) * 2)
+    chip = _sdio_chip(desc, card)
+    _identify(chip)
+    wr(chip, SDIO + DTIMER, 0xFFFFFF)
+    buf = 0x20001000
+    _pfctrl_stream(chip, buf, 0)
+    wr(chip, SDIO + DLEN, 512)
+    wr(chip, SDIO + DCTRL, 1 | 2 | 8 | 9 << 4)             # DTEN, card->host, DMAEN, 512-byte blocks
+    _cmd(chip, 17, 3)
+    for _ in range(400):
+        if rd(chip, DMA2) & TCIF3:
+            break
+        chip.run_for(100_000)
+    assert rd(chip, DMA2) & TCIF3 and not rd(chip, S3CR) & 1
+    assert rd(chip, S3NDTR) == 0xFFFF - 128
+    assert b"".join(rd(chip, buf + i).to_bytes(4, "little") for i in range(0, 512, 4)) == bytes(range(256)) * 2
+    # write direction
+    _cmd(chip, 24, 4)
+    blk = bytes((i * 7) & 0xFF for i in range(512))
+    for i in range(0, 512, 4):
+        wr(chip, buf + i, int.from_bytes(blk[i:i + 4], "little"))
+    wr(chip, SDIO + ICR, 0x7FF)
+    _pfctrl_stream(chip, buf, 1)
+    wr(chip, SDIO + DLEN, 512)
+    wr(chip, SDIO + DCTRL, 1 | 8 | 9 << 4)
+    for _ in range(400):
+        if rd(chip, SDIO + STA) & (DATAEND | TXUNDERR | DCRCFAIL | DTIMEOUT):
+            break
+        chip.run_for(100_000)
+    assert rd(chip, SDIO + STA) & DATAEND
+    assert rd(chip, DMA2) & TCIF3 and not rd(chip, S3CR) & 1 and rd(chip, S3NDTR) == 0xFFFF - 128
+    assert card.read_bytes(4 * 512, 512) == blk
+
+
+def test_sta_reset_value_and_hwfc_flag_levels(desc):
+    """RM0090 31.9.11: STA resets to 0; with HWFC_EN, TXFIFOE is active at 2 words in the FIFO."""
+    card = SDCard("64M")
+    chip = _sdio_chip(desc, card)
+    assert rd(chip, SDIO + STA) == 0
+    _identify(chip)
+    _cmd(chip, 24, 4)
+    wr(chip, SDIO + CLKCR, rd(chip, SDIO + CLKCR) | 1 << 14)            # HWFC_EN
+    wr(chip, SDIO + DLEN, 512)
+    wr(chip, SDIO + DTIMER, 0xFFFFFF)
+    wr(chip, SDIO + DCTRL, 1 | 9 << 4)
+    sdio = chip.peripherals["SDIO"]
+    sdio.fifo.extend([0, 0])
+    sdio._fifocnt -= 2
+    assert rd(chip, SDIO + STA) & TXFIFOE
+    sdio.fifo.append(0)
+    assert not rd(chip, SDIO + STA) & TXFIFOE

@@ -361,3 +361,31 @@ def test_dma_transmit_and_receive_with_last():
     rig.stop()
     assert bytes(b.read(mem + 0x40 + i, 1) for i in range(4)) == b"dmaX"
     assert [a for _d, _b, a in list(rig.i2c.transfers)[-4:]] == [True, True, True, False]
+
+
+def test_nostretch_slave_transmitter_underrun_resends_dr():
+    """RM0090 27.3.4: a slave transmitter with NOSTRETCH whose DR was not refilled sends the DR byte again (OVR)."""
+    rig = Rig(two=True, eeprom=False)
+    rig.setup()                                                        # I2C1 = master
+    rig.setup(base=I2C2)
+    NOSTRETCH, OVR = 1 << 7, 1 << 11
+    rig.w(OAR1, (1 << 14) | (0x42 << 1), I2C2)
+    rig.w(CR1, PE | ACK | NOSTRETCH, I2C2)
+    rig.w(DR, 0x77, I2C2)                                              # DR holds 0x77, never refilled
+    rig.w(CR1, rig.r(CR1) | START | ACK)
+    rig.wait(SB)
+    rig.w(DR, (0x42 << 1) | 1)
+    rig.wait(ADDR)
+    rig.r(SR1)
+    rig.r(SR2)
+    out = [None]
+    rig.wait(RXNE)
+    rig.wait(BTF)
+    rig.w(CR1, rig.r(CR1) & ~ACK)
+    out[0] = rig.r(DR)
+    rig.wait(BTF)
+    rig.w(CR1, rig.r(CR1) | STOP)
+    out += [rig.r(DR), rig.r(DR)]
+    for _ in range(200):
+        rig.step()
+    assert out == [0x77, 0x77, 0x77] and rig.r(SR1, I2C2) & OVR

@@ -335,12 +335,19 @@ def test_cryp_dma(chip):
 
 
 # ================================================================================================ HASH helpers
+def start_digest(chip, nblw: int):
+    """HAL order: __HAL_HASH_SET_NBVALIDBITS, then __HAL_HASH_START_DIGEST (RM0090 25.4.4: NBLW cannot be written
+    together with DCAL)."""
+    wr(chip, HASH + H_STR, nblw)
+    wr(chip, HASH + H_STR, nblw | DCAL)
+
+
 def hash_regs(chip, algo_bits, data: bytes, *, dt=2, nbits=None):
     """Write `data` as little-endian words with byte swapping (HAL HASH_DATATYPE_8B) and set NBLW."""
     wr(chip, HASH + H_CR, algo_bits | (dt << 4) | INIT)
     feed(chip, data, nbits)
     nb = (nbits if nbits is not None else 8 * len(data)) % 32
-    wr(chip, HASH + H_STR, nb | DCAL)
+    start_digest(chip, nb)
     chip.run_cycles(66 * ((len(data) // 64) + 3))
     return digest_of(chip)
 
@@ -368,7 +375,7 @@ def test_hash_vs_hashlib(chip, name, bits, n):
 def test_hash_abc_32bit_datatype(chip):
     wr(chip, HASH + H_CR, INIT)                                    # DATATYPE 00: big-endian words
     wr(chip, HASH + H_DIN, 0x61626300)
-    wr(chip, HASH + H_STR, 24 | DCAL)
+    start_digest(chip, 24)
     chip.run_cycles(100)
     assert digest_of(chip).hex() == "a9993e364706816aba3e25717850c26c9cd0d89d"
 
@@ -377,7 +384,7 @@ def test_hash_nblw_bit_lengths(chip):
     """NBLW counts bits: a 5-bit message (no whole byte) is padded at the bit level."""
     wr(chip, HASH + H_CR, INIT)
     wr(chip, HASH + H_DIN, 0xA8000000)                              # bits 10101
-    wr(chip, HASH + H_STR, 5 | DCAL)
+    start_digest(chip, 5)
     chip.run_cycles(100)
     st, _ = ca.finish(ca.HASHES["sha1"], ca.HASHES["sha1"].iv, 0, 0b10101, 5)
     assert digest_of(chip) == ca.HASHES["sha1"].state_bytes(st)
@@ -429,7 +436,7 @@ def hmac_regs(chip, name, key, msg, *, extra=0):
     wr(chip, HASH + H_CR, bits | MODE | (LKEY if len(key) > 64 else 0) | 2 << 4 | INIT)
     for data in (key, msg, key):                                    # HAL HMAC_Processing steps 1-3
         feed(chip, data)
-        wr(chip, HASH + H_STR, (8 * len(data)) % 32 | DCAL)
+        start_digest(chip, (8 * len(data)) % 32)
         chip.run_cycles(66 * 6)
         assert not rd(chip, HASH + H_SR) & H_BUSY
     return digest_of(chip)
@@ -462,17 +469,17 @@ def test_context_swap(chip):
     wr(chip, HASH + H_CR, ALGO_MD5 | 2 << 4 | INIT)
     feed(chip, a[:100])                                             # interrupted after 25 words
     chip.run_cycles(200)
-    saved = [rd(chip, HASH + H_IMR), rd(chip, HASH + H_STR), rd(chip, HASH + H_CR) & 0x500F0]
-    saved += [rd(chip, HASH + H_CSR + 4 * i) for i in range(54)]
+    saved = [rd(chip, HASH + H_IMR), rd(chip, HASH + H_STR), rd(chip, HASH + H_CR) & 0x100F0]
+    saved += [rd(chip, HASH + H_CSR + 4 * i) for i in range(51)]
     assert hash_regs(chip, 0, b) == hashlib.sha1(b).digest()          # another message meanwhile
     wr(chip, HASH + H_IMR, saved[0])                                # HAL_HASH_ContextRestoring order
     wr(chip, HASH + H_STR, saved[1])
     wr(chip, HASH + H_CR, saved[2])
     wr(chip, HASH + H_CR, saved[2] | INIT)
-    for i in range(54):
+    for i in range(51):
         wr(chip, HASH + H_CSR + 4 * i, saved[3 + i])
     feed(chip, a[100:])
-    wr(chip, HASH + H_STR, (8 * len(a)) % 32 | DCAL)
+    start_digest(chip, (8 * len(a)) % 32)
     chip.run_cycles(400)
     assert digest_of(chip, 4) == hashlib.md5(a).digest()
 
@@ -481,19 +488,19 @@ def test_hmac_context_swap_between_phases(chip):
     key, msg = b"Jefe", b"what do ya want for nothing?"
     wr(chip, HASH + H_CR, MODE | 2 << 4 | INIT)
     feed(chip, key)
-    wr(chip, HASH + H_STR, 0 | DCAL)
+    start_digest(chip, 0)
     chip.run_cycles(300)
     feed(chip, msg[:12])
-    saved = [rd(chip, HASH + H_CR) & 0x500F0] + [rd(chip, HASH + H_CSR + 4 * i) for i in range(54)]
+    saved = [rd(chip, HASH + H_CR) & 0x100F0] + [rd(chip, HASH + H_CSR + 4 * i) for i in range(51)]
     hash_regs(chip, ALGO_MD5, b"other")
     wr(chip, HASH + H_CR, saved[0] | INIT)
-    for i in range(54):
+    for i in range(51):
         wr(chip, HASH + H_CSR + 4 * i, saved[1 + i])
     feed(chip, msg[12:])
-    wr(chip, HASH + H_STR, 0 | DCAL)
+    start_digest(chip, 0)
     chip.run_cycles(300)
     feed(chip, key)
-    wr(chip, HASH + H_STR, 0 | DCAL)
+    start_digest(chip, 0)
     chip.run_cycles(300)
     assert digest_of(chip).hex() == "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"
 
@@ -531,3 +538,167 @@ def test_rcc_reset_and_gate(chip):
     wr(chip, RCC + 0x34, 0)                                       # gate off: one warn
     wr(chip, CRYP + C_CR, 0)
     assert any("clock is disabled" in e.get("msg", "") for e in chip.log.filter("warn"))
+
+
+# ================================================================================================ RM0090 ch. 23 rules
+def test_cryp_fflush_no_effect_while_enabled(chip):
+    """RM0090 23.6.1: FFLUSH flushes the FIFOs only while CRYPEN = 0."""
+    set_key(chip, K38A)
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB) | CRYPEN)
+    for w in range(3):
+        wr(chip, CRYP + C_DIN, w)
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB) | CRYPEN | FFLUSH)
+    assert not rd(chip, CRYP + C_SR) & IFEM                           # 3 words still there
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB))
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB) | FFLUSH)
+    assert rd(chip, CRYP + C_SR) & IFEM
+
+
+def test_cryp_writes_ignored_while_busy(chip):
+    """RM0090 23.3.5 / 23.6.10 / 23.6.11: key, IV and CR[9:2] writes are ignored while BUSY = 1; CRYPEN can be
+    cleared and the block in progress completes."""
+    set_key(chip, K38A)
+    set_iv(chip, IV38A)
+    wr(chip, CRYP + C_CR, cr_val(AES_CBC) | CRYPEN)
+    for w in be_words(P38A[:16]):
+        wr(chip, CRYP + C_DIN, w)
+    assert rd(chip, CRYP + C_SR) & BUSY
+    wr(chip, CRYP + K0LR + 28, 0xDEADBEEF)                            # K3RR
+    wr(chip, CRYP + IV0LR, 0x12345678)
+    wr(chip, CRYP + C_CR, cr_val(DES_ECB, dec=True))                # config ignored, CRYPEN cleared
+    assert rd(chip, CRYP + C_CR) == cr_val(AES_CBC)
+    chip.run_cycles(20)
+    out = b"".join(rd(chip, CRYP + C_DOUT).to_bytes(4, "big") for _ in range(4))
+    assert out.hex() == CBC38A[:32]                                  # old key and IV used, block completed
+    assert chip.peripherals["CRYP"].get("K3RR") == be_words(K38A)[3]
+    wr(chip, CRYP + C_CR, cr_val(DES_ECB))                          # BUSY = 0: accepted
+    assert rd(chip, CRYP + C_CR) == cr_val(DES_ECB)
+
+
+def test_cryp_din_read_pops_in_fifo_when_disabled(chip):
+    """RM0090 23.6.4: with CRYPEN = 0 a DIN read pops the IN FIFO (oldest first, as written)."""
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB, dt=2))
+    for w in (0x11223344, 0x55667788, 0x99AABBCC):
+        wr(chip, CRYP + C_DIN, w)
+    assert [rd(chip, CRYP + C_DIN) for _ in range(3)] == [0x11223344, 0x55667788, 0x99AABBCC]
+    assert rd(chip, CRYP + C_SR) & IFEM
+
+
+def test_cryp_inmis_and_dma_need_crypen(chip):
+    """RM0090 23.4: INMIS is enabled with CRYPEN (OUTMIS is not); 23.5: DMA requests are deasserted while the CRYP
+    is disabled."""
+    c = chip.peripherals["CRYP"]
+    wr(chip, CRYP + C_IMSCR, 3)
+    wr(chip, CRYP + C_DMACR, 3)
+    assert rd(chip, CRYP + C_RISR) == 1 and rd(chip, CRYP + C_MISR) == 0 and not asserted(chip, CRYP_IRQ)
+    assert c._dma == [False, False]
+    set_key(chip, K38A)
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB) | CRYPEN)
+    assert rd(chip, CRYP + C_MISR) == 1 and asserted(chip, CRYP_IRQ) and c._dma[0]
+    wr(chip, CRYP + C_IMSCR, 2)
+    for w in range(4):
+        wr(chip, CRYP + C_DIN, w)
+    chip.run_cycles(20)
+    wr(chip, CRYP + C_CR, cr_val(AES_ECB))                          # disabled: OUTMIS stays (23.4)
+    assert rd(chip, CRYP + C_MISR) == 2 and asserted(chip, CRYP_IRQ) and c._dma == [False, False]
+
+
+def test_des_block_popped_when_out_full_busy_until_room(chip):
+    """RM0090 23.3.5 note: in DES/TDES a new block is popped off a full-OUT CRYP and BUSY stays high until there is
+    room for it."""
+    wr(chip, CRYP + K0LR + 8, 0x13345779)
+    wr(chip, CRYP + K0LR + 12, 0x9BBCDFF1)
+    wr(chip, CRYP + C_CR, cr_val(DES_ECB) | CRYPEN)
+    for i in range(10):                                             # 5 blocks: OUT holds 4
+        wr(chip, CRYP + C_DIN, 0x01234567 if i % 2 == 0 else 0x89ABCDEF)
+        chip.run_cycles(20)
+    sr = rd(chip, CRYP + C_SR)
+    assert sr & OFFU and sr & IFEM and sr & BUSY                     # 5th block popped, waiting for OUT room
+    rd(chip, CRYP + C_DOUT)
+    assert rd(chip, CRYP + C_SR) & BUSY                              # 1 free word: not enough
+    rd(chip, CRYP + C_DOUT)
+    sr = rd(chip, CRYP + C_SR)
+    assert not sr & BUSY and sr & OFFU
+    assert [rd(chip, CRYP + C_DOUT) for _ in range(8)][-2:] == [0x85E81354, 0x0F0AB405]
+
+
+def test_cryp_gcm_bits_and_context_regs_reserved_on_f415(chip):
+    """RM0090 23.6.1 / 23.6.12: ALGOMODE[3], GCM_CCMPH and CSGCM*R are STM32F42x/F43x only."""
+    wr(chip, CRYP + C_CR, 1 << 19 | 3 << 16 | cr_val(AES_ECB) | 3)  # + reserved bits 1:0
+    assert rd(chip, CRYP + C_CR) == cr_val(AES_ECB)
+    assert any("F43x" in e.get("msg", "") for e in chip.log.filter("warn"))
+    wr(chip, CRYP + 0x50, 0x1234)
+    assert rd(chip, CRYP + 0x50) == 0 and rd(chip, CRYP + 0x70) == 0
+    assert run_cipher(chip, AES_ECB, P38A[:16], K38A).hex() == ECB38A[:32]
+
+
+# ================================================================================================ RM0090 ch. 25 rules
+def test_hash_csr_count_and_reset_values(chip):
+    """RM0090 25.4.8: CSR0..CSR50 on the F415/F417 (reset CSR0 = 0x2, others 0); CSR51..53 are F43x only."""
+    assert rd(chip, HASH + H_CSR) == 2 and rd(chip, HASH + H_CSR + 8) == 0
+    wr(chip, HASH + H_CR, INIT)
+    assert rd(chip, HASH + H_CSR) != 2
+    for i in (51, 52, 53):
+        wr(chip, HASH + H_CSR + 4 * i, 0xFFFFFFFF)
+        assert rd(chip, HASH + H_CSR + 4 * i) == 0
+
+
+def test_hash_context_groups_skippable(chip):
+    """RM0090 25.3.7 note: between blocks (NBW = 0) CSR22..37 need not be saved, and for a plain hash CSR38..50 need
+    not be saved; for HMAC CSR38..50 carry the state."""
+    rnd = random.Random(7)
+    a = bytes(rnd.getrandbits(8) for _ in range(150))
+    wr(chip, HASH + H_CR, ALGO_MD5 | 2 << 4 | INIT)
+    feed(chip, a[:68])                                              # one block + the first word of the next
+    chip.run_cycles(200)
+    assert rd(chip, HASH + H_CR) & 0x1F00 == 0x1000                  # DINNE, NBW = 0
+    saved = [rd(chip, HASH + H_CSR + 4 * i) for i in range(22)]
+    assert hash_regs(chip, 0, b"xyz") == hashlib.sha1(b"xyz").digest()
+    for i in range(22, 51):                                         # clobber the groups that are not restored
+        wr(chip, HASH + H_CSR + 4 * i, 0xA5A5A5A5)
+    wr(chip, HASH + H_CR, ALGO_MD5 | 2 << 4 | INIT)
+    for i in range(22):
+        wr(chip, HASH + H_CSR + 4 * i, saved[i])
+    feed(chip, a[68:])
+    start_digest(chip, (8 * len(a)) % 32)
+    chip.run_cycles(400)
+    assert digest_of(chip, 4) == hashlib.md5(a).digest()
+    # HMAC between phases with an empty FIFO: CSR0..21 + CSR38..50
+    key, msg = b"Jefe", b"what do ya want for nothing?"
+    wr(chip, HASH + H_CR, MODE | 2 << 4 | INIT)
+    feed(chip, key)
+    start_digest(chip, 0)
+    chip.run_cycles(300)
+    feed(chip, msg)
+    start_digest(chip, 0)
+    chip.run_cycles(300)                                            # inner hash done, waiting for the outer key
+    keep = list(range(22)) + list(range(38, 51))
+    saved = {i: rd(chip, HASH + H_CSR + 4 * i) for i in keep}
+    hash_regs(chip, ALGO_MD5, b"other")
+    wr(chip, HASH + H_CR, MODE | 2 << 4 | INIT)
+    for i in keep:
+        wr(chip, HASH + H_CSR + 4 * i, saved[i])
+    feed(chip, key)
+    start_digest(chip, 0)
+    chip.run_cycles(300)
+    assert digest_of(chip).hex() == "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"
+
+
+def test_hash_registers_per_rm(chip):
+    """RM0090 25.4.3 (DIN reads back the last word written), 25.4.4 (NBLW unchanged by a write with DCAL = 1),
+    25.4.5 (HR read during the final computation returns the digest; INIT resets HR0..4), 25.4.1 (reserved bits)."""
+    wr(chip, HASH + H_CR, 0xFFFFFFFF & ~INIT)
+    assert rd(chip, HASH + H_CR) == LKEY | ALGO_MD5 | MODE | 3 << 4 | DMAE
+    wr(chip, HASH + H_CR, 0)
+    wr(chip, HASH + H_CR, INIT)
+    wr(chip, HASH + H_DIN, 0x61626300)
+    assert rd(chip, HASH + H_DIN) == 0x61626300
+    wr(chip, HASH + H_STR, 24)
+    wr(chip, HASH + H_STR, 8 | DCAL)                                # NBLW stays 24
+    assert rd(chip, HASH + H_STR) == 24
+    assert rd(chip, HASH + H_SR) & H_BUSY and not rd(chip, HASH + H_SR) & DCIS
+    assert digest_of(chip).hex() == "a9993e364706816aba3e25717850c26c9cd0d89d"   # stalled read: the final value
+    chip.run_cycles(200)
+    assert rd(chip, HASH + H_SR) & DCIS
+    wr(chip, HASH + H_CR, INIT)
+    assert digest_of(chip) == bytes(20)

@@ -4,7 +4,9 @@ Regular group (registers from the SVD; behaviour hand-written):
 * CR2.ADON powers the ADC (clearing it aborts a conversion).  SWSTART (ADON=1) or an external trigger starts the
   regular group; SWSTART reads 0 again at once (cleared when the conversion starts); SR.STRT is set.  A trigger while
   a conversion runs, while ADON=0, while SR.OVR is set or with the RCC clock (APB2ENR.ADCxEN) off is ignored.
-* Sequence: SQR1.L + 1 channels SQ1..SQ16 with CR1.SCAN=1, SQ1 alone with SCAN=0.  CR2.CONT restarts the sequence
+* Sequence: SQR1.L + 1 channels SQ1..SQ16 with CR1.SCAN=1, SQ1 alone with SCAN=0.  Writing a different value to
+  SQR1-3 during a regular conversion resets it and starts the new group from SQ1 (RM0090 13.3.3; with the regular
+  trigger latency; JSQR writes during an injected conversion do not restart it).  CR2.CONT restarts the sequence
   at its end (back to back, no trigger latency).  CR1.DISCEN: each trigger converts DISCNUM + 1 channels of the
   sequence, continuing where the previous subgroup stopped (the last subgroup ends at the end of the sequence).
 * Timing (ADCCLK = PCLK2 / CCR.ADCPRE (2, 4, 6, 8), counted in core cycles; one scheduler event per conversion,
@@ -20,13 +22,15 @@ Regular group (registers from the SVD; behaviour hand-written):
   read sets SR.OVR (DR takes the new value), aborts the sequence (CONT stops) and further regular triggers are ignored
   until OVR is cleared.
 * DMA (CR2.DMA): a request "ADCn" after every regular conversion via `_util.dma_request` (when the DMA model provides
-  it); the DMA reads DR (clearing EOC).  CR2.DDS is stored only: after the DMA's last transfer nobody reads DR any
-  more, so with DDS=0 the next conversion ends in OVR, as on silicon.
+  it); the DMA reads DR (clearing EOC).  CR2.DDS (RM0090 13.8.1, 13.13.3): with DDS = 0 the ADC issues no request
+  after the DMA stream's last transfer (NDTR reached 0, also in circular mode) until CR2.DMA is written 0 then 1;
+  DDS = 1 keeps requesting (circular / double-buffer DMA).  Overrun detection stays on while DMA = 1 (SR.OVR, RM0090
+  13.13.1), so with DDS = 0 and CONT the next unread conversion still sets OVR.
 * Analog watchdog (CR1.AWDEN, regular channels; AWDSGL + AWDCH for a single channel): the 12-bit-scaled code
   outside [LTR, HTR] sets SR.AWD.  JAWDEN (injected) is not modelled.
 * Interrupt: one NVIC line "ADC" shared by ADC1-3 (the OR of all three): EOC & EOCIE, AWD & AWDIE, OVR & OVRIE,
   JEOC & JEOCIE.  Level, re-evaluated on every flag change.
-* External triggers (CR2.EXTEN 01 rising / 10 falling / 11 both, EXTSEL per RM0090 Table 51): TIM1_CC1, TIM1_CC2,
+* External triggers (CR2.EXTEN 01 rising / 10 falling / 11 both, EXTSEL per RM0090 Table 68): TIM1_CC1, TIM1_CC2,
   TIM1_CC3, TIM2_CC2, TIM2_CC3, TIM2_CC4, TIM2_TRGO, TIM3_CC1, TIM3_TRGO, TIM4_CC4, TIM5_CC1, TIM5_CC2, TIM5_CC3,
   TIM8_CC1, TIM8_TRGO, EXTI line 11.  The ADC subscribes to the timer's trigger signal (tim.py
   `add_trigger_listener`) while ADON=1 and EXTEN != 0: TIMx_CCy is OCyREF of an output channel (so PWM/toggle modes
@@ -44,7 +48,7 @@ Regular group (registers from the SVD; behaviour hand-written):
 Injected group (RM0090 §13.3.3, §13.3.9, §13.3.10, §13.13.9-13.13.13):
 * JSQR.JL + 1 channels; the sequence is the last JL + 1 of JSQ1..JSQ4 (JL = 0: JSQ4 alone, JL = 3: JSQ1..JSQ4), the
   i-th converted channel goes to JDR(i).  With CR1.SCAN = 0 only the first one is converted (JDR1).
-* Triggers: CR2.JSWSTART (ADON = 1; reads 0 again at once) or JEXTEN/JEXTSEL (RM0090 Table 52, same timer hooks as the
+* Triggers: CR2.JSWSTART (ADON = 1; reads 0 again at once) or JEXTEN/JEXTSEL (RM0090 Table 69, same timer hooks as the
   regular triggers): TIM1_CC4, TIM1_TRGO, TIM2_CC1, TIM2_TRGO, TIM3_CC2, TIM3_CC4, TIM4_CC1, TIM4_CC2, TIM4_CC3,
   TIM4_TRGO, TIM5_CC4, TIM5_TRGO, TIM8_CC2, TIM8_CC3, TIM8_CC4, EXTI line 15 (not modelled: one `warn`).  Injection
   trigger latency 3 ADCCLK (DS8626 Table 67 tlatrinj), plus 1 PCLK2 for an external trigger.  SR.JSTRT is set; a
@@ -77,7 +81,8 @@ Multi-ADC mode (C_ADC CCR.MULTI, §13.9): ADC1 is the master; its triggers start
   is available the DMA request "ADC1" is asserted and reading CDR returns (and removes) the oldest one (the DMA stream
   of ADC1 reads CDR).  A new result while a whole round of items is still unread (dual mode 2/3: one item; mode 1: one
   item per ADC) sets the ADCs' OVR and stops their regular conversions (as for the single-ADC DMA overrun).  CCR.DMA = 0: CDR = ADC2 DR : ADC1 DR (no request).  With CCR.DMA != 0
-  the individual ADCs' CR2.DMA requests are not used.  CCR.DDS is stored only (see the single-ADC DDS note).
+  the individual ADCs' CR2.DMA requests are not used.  CCR.DDS = 0: after the DMA's last transfer no item is queued and
+  no request issued until CCR.DMA is cleared and set again (RM0090 13.13.16).
 * Other MULTI values are reserved: one `warn`, the ADCs convert independently.  The RM's requirement that
   simultaneous groups have equal conversion times is not checked.
 Not modelled: CCR.DELAY in modes other than interleaved, the sampling capacitor / source impedance, ADCCLK phase.
@@ -108,11 +113,11 @@ TSVREFE, VBATE = 1 << 23, 1 << 22
 
 SMP_CYCLES = (3, 15, 28, 56, 84, 112, 144, 480)
 RES_BITS = (12, 10, 8, 6)
-# RM0090 Table 51: EXTSEL -> (block, trigger signal)
+# RM0090 Rev 22 Table 68: EXTSEL -> (block, trigger signal)
 TRIGGERS = (("TIM1", "CC1"), ("TIM1", "CC2"), ("TIM1", "CC3"), ("TIM2", "CC2"), ("TIM2", "CC3"), ("TIM2", "CC4"),
             ("TIM2", "TRGO"), ("TIM3", "CC1"), ("TIM3", "TRGO"), ("TIM4", "CC4"), ("TIM5", "CC1"), ("TIM5", "CC2"),
             ("TIM5", "CC3"), ("TIM8", "CC1"), ("TIM8", "TRGO"), ("EXTI", "11"))
-# RM0090 Table 52: JEXTSEL -> (block, trigger signal)
+# RM0090 Rev 22 Table 69: JEXTSEL -> (block, trigger signal)
 JTRIGGERS = (("TIM1", "CC4"), ("TIM1", "TRGO"), ("TIM2", "CC1"), ("TIM2", "TRGO"), ("TIM3", "CC2"), ("TIM3", "CC4"),
              ("TIM4", "CC1"), ("TIM4", "CC2"), ("TIM4", "CC3"), ("TIM4", "TRGO"), ("TIM5", "CC4"), ("TIM5", "TRGO"),
              ("TIM8", "CC2"), ("TIM8", "CC3"), ("TIM8", "CC4"), ("EXTI", "15"))
@@ -155,6 +160,8 @@ class ADC(GatedBlock):
             "SR": {"on_write": self._sr_write},
             "CR1": {"on_write": self._cr1_write},
             "CR2": {"on_write": self._cr2_write},
+            "SQR1": {"on_write": self._sqr_write}, "SQR2": {"on_write": self._sqr_write},
+            "SQR3": {"on_write": self._sqr_write},
             "DR": {"on_read": self._dr_read, "ro_mask": 0xFFFFFFFF},
         }
         for k in range(1, 5):
@@ -179,6 +186,7 @@ class ADC(GatedBlock):
         self.conversions = 0
         self.vals: dict = {}
         self._dma_req = False
+        self._dds_stop = False       # DDS = 0 and the DMA did its last transfer: no more requests (RM0090 13.8.1)
         self._jev = None             # injected conversion in progress
         self._jpos = 0               # next position in the injected sequence (JDISCEN)
         self._jsub: tuple | None = None
@@ -220,6 +228,7 @@ class ADC(GatedBlock):
         if getattr(self, "_dma_req", False):
             _dma_request(self.chip, f"ADC{self.index}", False)
         self._dma_req = False
+        self._dds_stop = False
         super().reset()
         if self.chip is not None:
             self._update_irq()
@@ -427,7 +436,7 @@ class ADC(GatedBlock):
         com = self._com()
         if com is not None and com.multi_dma(self):
             com.push(self, val)
-        elif cr2 & DMA:
+        elif cr2 & DMA and not self._dds_stop:
             self._dma_req = True
             _dma_request(chip, f"ADC{self.index}")
         if self.get("SR") & OVR:                     # multi-mode DMA overrun (set by the common block)
@@ -662,6 +671,8 @@ class ADC(GatedBlock):
     def _cr2_write(self, blk, reg, old, new):
         v = new & ~(SWSTART | JSWSTART)
         self._store(reg, v)
+        if not new & DMA:
+            self._dds_stop = False                   # DMA written to 0 (then 1): requests re-armed (RM0090 13.8.1)
         if (old ^ new) & ADON and not new & ADON:     # power down: the running conversions are lost
             for attr in ("_ev", "_jev"):
                 ev = getattr(self, attr)
@@ -676,6 +687,26 @@ class ADC(GatedBlock):
         if new & SWSTART and new & ADON and self.chip is not None:
             self._start_regular(self.chip.now_cycles(), external=False)
         return v
+
+    def _sqr_write(self, blk, reg, old, new):
+        """RM0090 13.3.3: modifying ADC_SQRx during a (regular) conversion resets it and restarts the new group."""
+        self._store(reg, new)
+        if new != old and self._ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._ev)
+            self._ev = None
+            self._pos, self._burst = 0, None
+            self._trigger(self.chip.now_cycles(), external=False)
+        return None
+
+    def dma_transfer_complete(self, names: tuple) -> None:
+        """Called by stm32.dma when a stream serving `names` reaches NDTR = 0 (its last transfer).  CR2.DDS = 0: the ADC
+        issues no further DMA request until CR2.DMA is written to 0 and back to 1 (RM0090 13.8.1, 13.13.3)."""
+        cr2 = self.get("CR2")
+        if f"ADC{self.index}" in names and cr2 & DMA and not cr2 & DDS:
+            self._dds_stop = True
+            if self._dma_req:
+                self._dma_req = False
+                _dma_request(self.chip, f"ADC{self.index}", False)
 
     def _dr_read(self, blk, reg):
         self._unread = False
@@ -705,6 +736,7 @@ class ADCCommon(MMIOBlock):
         self._half: list[tuple[int, int]] = []       # (ADC index, data) not yet packed into an item
         self._items: list[int] = []                  # CDR items waiting for the DMA
         self._req = False
+        self._dds_stop = False                       # CCR.DDS = 0 after the DMA's last transfer (RM0090 13.13.16)
         self._alt = 0                                # alternate trigger: next ADC (0-based)
 
     def reset(self) -> None:
@@ -713,6 +745,7 @@ class ADCCommon(MMIOBlock):
         if getattr(self, "_req", False) and self.chip is not None:
             _dma_request(self.chip, "ADC1", False)
         self._req = False
+        self._dds_stop = False
 
     def _adc(self, i: int) -> Any:
         a = self.chip.peripherals.get(f"ADC{i}") if self.chip is not None else None
@@ -771,6 +804,8 @@ class ADCCommon(MMIOBlock):
         """A regular conversion result of `adc` for the multi-mode DMA (CCR.DMA modes 1-3)."""
         m = self.mode()
         dma = self.get("CCR") >> 14 & 3
+        if self._dds_stop:                           # no DMA request after the last transfer: nothing is queued
+            return
         if len(self._items) >= -(-m[0] // (1 if dma == 1 else 2)):     # a whole round still unread: overrun
             for a in self._members(m[0]):
                 if not a.get("SR") & OVR:
@@ -794,6 +829,17 @@ class ADCCommon(MMIOBlock):
             self._req = True
             _dma_request(self.chip, "ADC1")
 
+    def dma_transfer_complete(self, names: tuple) -> None:
+        """stm32.dma: the stream serving "ADC1" did its last transfer.  CCR.DDS = 0 (bit 13): no new request until
+        CCR.DMA is cleared and set again (RM0090 13.13.16)."""
+        ccr = self.get("CCR")
+        if "ADC1" in names and ccr >> 14 & 3 and not ccr & 1 << 13 and self.mode():
+            self._dds_stop = True
+            self._half, self._items = [], []
+            if self._req:
+                self._req = False
+                _dma_request(self.chip, "ADC1", False)
+
     def _cdr_read(self, blk, reg):
         if self._items:
             v = self._items.pop(0)
@@ -810,6 +856,8 @@ class ADCCommon(MMIOBlock):
             self._warned.add(multi)
             self.emit("warn", block=self.name, msg=f"{self.name}: CCR.MULTI={multi:#07b} is a reserved multi-ADC mode: "
                                                    "each ADC converts independently")
+        if not new >> 14 & 3:
+            self._dds_stop = False
         if (old ^ new) & 0x1F:
             self._half, self._items, self._alt = [], [], 0
         if (old ^ new) & 0x1F or (old ^ new) & (3 << 14):

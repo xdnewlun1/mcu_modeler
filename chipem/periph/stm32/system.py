@@ -1,10 +1,12 @@
 """STM32F4 system blocks: IWDG, FLASH interface, PWR, DBGMCU (the window watchdog is in wwdg.py).
 
-IWDG (RM0090 ch. 21): KR keys 0xCCCC start (cannot be stopped again), 0xAAAA reload, 0x5555 unlock PR/RLR (any
-other key or a reload locks them again; locked writes are ignored with one `warn`).  Counter clock = LSI
-(params `lsi_hz`, default 32 kHz) / (4 << PR) (PR >= 6: /256); timeout = (RLR + 1) ticks from start/reload.
-SR.PVU/RVU read 0 (updates are immediate).  Timeout: `warn`, RCC_CSR.IWDGRSTF on the next reset, then
-chip.reset("watchdog").  Scheduled with Scheduler.at_ns (LSI does not depend on the core clock).
+IWDG (RM0090 ch. 21): KR keys 0xCCCC start (cannot be stopped again; the counter starts from its reset value
+0xFFF, 21.3, and the LSI is forced on: RCC_CSR.LSIRDY = 1, 7.2.9), 0xAAAA reload (counter = RLR), 0x5555 unlock
+PR/RLR (any other key or a reload locks them again; locked writes are ignored with one `warn`).  Counter clock = LSI
+(params `lsi_hz`, default 32 kHz) / (4 << PR) (PR >= 6: /256); reset (count + 1) ticks after start/reload. A PR/RLR
+write sets SR.PVU/RVU for 5 LSI cycles (21.4.4, "up to 5 RC 40 kHz cycles"); a write while the bit is set is ignored
+(one `warn`). Timeout: `warn`, RCC_CSR.IWDGRSTF on the next reset, then chip.reset("watchdog").  Scheduled with
+Scheduler.at_ns (LSI does not depend on the core clock).
 
 FLASH (RM0090 ch. 3): ACR is storage (LATENCY, PRFTEN, ICEN, DCEN read back; wait states have no timing effect).
 KEYR 0x45670123 then 0xCDEF89AB clears CR.LOCK (a wrong key locks until reset); writing CR.LOCK=1 locks.  SR.BSY
@@ -12,12 +14,15 @@ always 0; EOP and the error flags are write-1-to-clear.  CR.STRT with SER (secto
 memory to 0xFF immediately (sectors 0-3 16 KB, 4 64 KB, 5-11 128 KB from the FLASH memory region) and sets EOP when
 EOPIE is set.  Programming (PG) needs nothing: the CPU can write the flash region directly.
 
-PWR (RM0090 ch. 5): CR (VOS made writable, the SVD has it read-only; DBP, FPDS, PLS stored); CSR.VOSRDY reads 1
-(regulator always ready); CSR.BRR mirrors BRE. CR.CWUF / CR.CSBF (write 1) clear CSR.WUF / CSR.SBF and read 0.
+PWR (RM0090 ch. 5): CR resets to 0x4000 (VOS = 1, scale 1; VOS made writable, the SVD has it read-only; DBP, FPDS
+stored); CSR.VOSRDY reads 1 (regulator always ready); CSR.BRR mirrors BRE; BRE is writable only with CR.DBP = 1
+(5.4.2). CR.CWUF / CR.CSBF (write 1) clear CSR.WUF / CSR.SBF and read 0. PVD (5.2.3): CSR.PVDO = PVDE and VDD (params
+`vdd`, default 3.3 V; `set_vdd()`) below the PLS level (2.0 ... 2.9 V); PVDO drives EXTI line 16.
 Low-power modes (RM0090 5.3), entered when the core stops in WFI/WFE (the PWR is a `chip.power_hooks` entry):
 * Sleep (SCR.SLEEPDEEP = 0): the core stops, everything else runs; any enabled interrupt wakes it (generic).
-* Stop (SLEEPDEEP = 1, CR.PDDS = 0; LPDS / FPDS only change the wake-up latency on silicon, not modelled): if an
-  EXTI pending bit (PR & IMR) is already set the entry is ignored and execution continues. On entry the RCC's
+* Stop (SLEEPDEEP = 1, CR.PDDS = 0; LPDS / FPDS only change the wake-up latency on silicon, Table 27, not
+  modelled): if an EXTI pending bit or an RTC alarm / wakeup / tamper / time-stamp flag (RTC_ISR) is already set the
+  entry is ignored and execution continues (5.3.4 Table 28). On entry the RCC's
   HSEON/PLLON/PLLI2SON (and their RDY bits) are cleared and SYSCLK is switched to HSI (SW = SWS = 0, prescalers kept),
   as the RM says for the Stop exit: firmware must re-initialise its clocks after waking. Peripheral models with
   `clock_stop()` (stm32.usart) freeze; others keep counting (approximation, see docs/LIMITATIONS.md). Only an EXTI
@@ -35,8 +40,10 @@ Low-power modes (RM0090 5.3), entered when the core stops in WFI/WFE (the PWR is
   event line (EMR) and, with SCR.SEVONPEND, an EXTI interrupt line becoming pending. A WFE with the event register
   set clears it and continues; HAL_PWR_EnterSTOPMode(..., PWR_STOPENTRY_WFE) (`SEV; WFE; WFE`) therefore sleeps in the
   second WFE.
-* CSR.WUF is also set by those wake-up events in Run/Sleep/Stop (RM 5.4.2). PWR_CR resets with every system reset;
-  PWR_CSR (WUF, SBF, EWUP, BRE) survives system resets and Standby (only the first reset / power-on clears it).
+* CSR.WUF is also set by those wake-up events in Run/Sleep/Stop (RM 5.4.2). PWR_CR resets with every system reset
+  and Standby exit. PWR_CSR (5.4.2) is not reset by a wake-up from Standby (WKUP / RTC event); otherwise a system reset
+  clears WUF and EWUP, SBF survives every reset but power-on, BRE survives every reset but power-on and a backup
+  domain reset (RCC_BDCR.BDRST, `backup_domain_reset()`).
 
 DBGMCU: IDCODE reads 0x10076413 (DEV_ID 0x413 STM32F405/407, REV_ID 0x1007; the SVD's 0x411 is wrong for this
 part); CR / APB1_FZ / APB2_FZ are storage.
@@ -63,7 +70,7 @@ class IWDG(MMIOBlock):
         params = dict(params or {})
         ov = {"KR": {"on_write": self._kr_write, "on_read": lambda b, r: 0},
               "PR": {"on_write": self._cfg_write}, "RLR": {"on_write": self._cfg_write},
-              "SR": {"ro_mask": 0xFFFFFFFF, "on_read": lambda b, r: 0}}
+              "SR": {"ro_mask": 0xFFFFFFFF, "on_read": self._sr_read}}
         r = build_regs((name, "IWDG"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.lsi_hz = float(params.get("lsi_hz", 32000.0))
@@ -71,7 +78,10 @@ class IWDG(MMIOBlock):
         self.unlocked = False
         self._ev = None
         self._start_ns = 0.0
+        self._count0 = 0xFFF                # counter value at _start_ns
+        self._busy_until = {"PR": -1.0, "RLR": -1.0}     # SR.PVU / SR.RVU: update in the VDD domain in progress
         self._warned_locked = False
+        self._warned_busy = False
         self.timeouts = 0
 
     def reset(self) -> None:
@@ -79,7 +89,10 @@ class IWDG(MMIOBlock):
         super().reset()
         self.running = False
         self.unlocked = False
+        self._count0 = 0xFFF
+        self._busy_until = {"PR": -1.0, "RLR": -1.0}
         self._warned_locked = False
+        self._warned_busy = False
 
     def _cancel(self) -> None:
         if self._ev is not None and self.chip is not None:
@@ -92,20 +105,33 @@ class IWDG(MMIOBlock):
 
     @property
     def timeout_ns(self) -> float:
+        """Time from a reload (0xAAAA) to the reset: (RLR + 1) counter ticks."""
         return ((self.get("RLR") & 0xFFF) + 1) * self.prescaler * 1e9 / self.lsi_hz
 
     def counter(self) -> int:
         if not self.running or self.chip is None:
-            return self.get("RLR") & 0xFFF
+            return self._count0
         el = int((self.chip.now_ns() - self._start_ns) * self.lsi_hz / self.prescaler / 1e9)
-        return max((self.get("RLR") & 0xFFF) - el, 0)
+        return max(self._count0 - el, 0)
 
-    def _reload(self) -> None:
+    def _arm(self, count: int) -> None:
+        """Count down from `count` now; the reset comes (count + 1) ticks later."""
         self._cancel()
         if not self.running or self.chip is None:
             return
+        self._count0 = count
         self._start_ns = self.chip.now_ns()
-        self._ev = self.chip.sched.at_ns(self._start_ns + self.timeout_ns, self._timeout)
+        self._ev = self.chip.sched.at_ns(self._start_ns + (count + 1) * self.prescaler * 1e9 / self.lsi_hz,
+                                         self._timeout)
+
+    def _reload(self) -> None:
+        self._arm(self.get("RLR") & 0xFFF)
+
+    def _busy(self, reg: str) -> bool:
+        return self.chip is not None and self.chip.now_ns() < self._busy_until[reg]
+
+    def _sr_read(self, blk, reg):
+        return (1 if self._busy("PR") else 0) | (2 if self._busy("RLR") else 0)
 
     def _timeout(self) -> None:
         self._ev = None
@@ -120,13 +146,19 @@ class IWDG(MMIOBlock):
     def _kr_write(self, blk, reg, old, new):
         key = new & 0xFFFF
         if key == KR_START:
-            if not self.running:
-                self.running = True
-                self.emit("info", block=self.name, msg=f"IWDG started: timeout {self.timeout_ns / 1e6:.3f} ms "
-                          f"(LSI {self.lsi_hz / 1e3:.0f} kHz / {self.prescaler}, RLR={self.get('RLR') & 0xFFF}); "
-                          f"reload with 0xAAAA", timeout_ns=self.timeout_ns)
             self.unlocked = False
-            self._reload()
+            if not self.running:
+                # RM0090 21.3: the counter starts counting down from its reset value 0xFFF (not from RLR; the
+                # first 0xAAAA loads RLR); the LSI is forced on (7.2.9)
+                self.running = True
+                self._arm(0xFFF)
+                first = (0xFFF + 1) * self.prescaler / self.lsi_hz * 1e3
+                self.emit("info", block=self.name, msg=f"IWDG started: first timeout {first:.3f} ms (counter 0xFFF, "
+                          f"LSI {self.lsi_hz / 1e3:.0f} kHz / {self.prescaler}), then {self.timeout_ns / 1e6:.3f} ms "
+                          f"after each 0xAAAA reload (RLR={self.get('RLR') & 0xFFF})", timeout_ns=self.timeout_ns)
+                r = rcc(self.chip)
+                if r is not None:
+                    r.set("CSR", r.get("CSR") | 2)                      # LSIRDY
         elif key == KR_RELOAD:
             self.unlocked = False
             self._reload()
@@ -142,6 +174,20 @@ class IWDG(MMIOBlock):
                 self._warned_locked = True
                 self.emit("warn", block=self.name, msg=f"IWDG_{reg.name} write without the 0x5555 unlock key: ignored")
             return old
+        if self._busy(reg.name):
+            if not self._warned_busy:
+                self._warned_busy = True
+                self.emit("warn", block=self.name, msg=f"IWDG_{reg.name} write while SR.{'PVU' if reg.name == 'PR' else 'RVU'}"
+                          f" = 1 (previous update still in progress): ignored")
+            return old
+        if self.chip is not None:
+            # the update crosses into the VDD domain: PVU/RVU for up to 5 LSI (40 kHz RC) cycles (21.4.4)
+            self._busy_until[reg.name] = self.chip.now_ns() + 5e9 / self.lsi_hz
+        if reg.name == "PR" and self.running and self.chip is not None and (old ^ new) & 7:
+            cnt = self.counter()                    # the running count goes on at the new prescaler rate
+            self._store(reg, new)
+            self._arm(cnt)
+            return new
         return None
 
 
@@ -221,8 +267,11 @@ class FLASH(MMIOBlock):
         return new
 
 
-PWR_LPDS, PWR_PDDS, PWR_CWUF, PWR_CSBF = 1 << 0, 1 << 1, 1 << 2, 1 << 3
-CSR_WUF, CSR_SBF, CSR_EWUP, CSR_BRE, CSR_BRR, CSR_VOSRDY = 1 << 0, 1 << 1, 1 << 8, 1 << 9, 1 << 3, 1 << 14
+PWR_LPDS, PWR_PDDS, PWR_CWUF, PWR_CSBF, PWR_PVDE, PWR_DBP, PWR_VOS = 1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 8, 1 << 14
+CSR_WUF, CSR_SBF, CSR_PVDO, CSR_EWUP, CSR_BRE, CSR_BRR, CSR_VOSRDY = (1 << 0, 1 << 1, 1 << 2, 1 << 8, 1 << 9, 1 << 3,
+                                                                     1 << 14)
+PVD_LEVELS = (2.0, 2.1, 2.3, 2.5, 2.6, 2.7, 2.8, 2.9)          # PWR_CR.PLS (RM0090 5.4.1)
+RTC_WAKE_FLAGS = 0x6F00         # RTC_ISR ALRAF ALRBF WUTF TSF TAMP1F TAMP2F (Stop entry ignored while one is set)
 _ALWAYS_ON = ("stm32.rtc", "stm32.iwdg", "stm32.rcc", "stm32.pwr", "stm32.dbgmcu")
 
 
@@ -232,7 +281,7 @@ class PWR(GatedBlock):
         params = dict(params or {})
         self.gate = "PWR"
         # the SVD marks PWR_CR.VOS (bit 14) read-only; on the F405/F407 it is read-write (RM0090 5.4.1)
-        ov = {"CR": {"ro_mask": 0xFFFFBC00, "on_write": self._cr_write},
+        ov = {"CR": {"reset": PWR_VOS, "ro_mask": 0xFFFFBC00, "on_write": self._cr_write},
               "CSR": {"reset": CSR_VOSRDY, "ro_mask": 0xFFFFFFFF & ~(CSR_EWUP | CSR_BRE), "on_read": self._csr_read,
                       "on_write": self._csr_write}}
         r = build_regs((name, "PWR"), size, ov, params.get("regs_file"))
@@ -246,7 +295,11 @@ class PWR(GatedBlock):
         self._event = False                 # WFE event register
         self._exc_seen = 0                  # arch.entries at the last WFE
         self._exti: Any = None
+        self._rtc: Any = None
         self._notes: set[str] = set()
+        self.vdd = float(params.get("vdd", 3.3))          # supply voltage seen by the PVD
+        self._pvdo = False
+        self._standby_wake = False          # the next reset ends Standby (WKUP / RTC event): PWR_CSR is kept
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -255,6 +308,7 @@ class PWR(GatedBlock):
             hooks.append(self)
         from ._util import find_model
         self._exti = find_model(chip, "stm32.exti", "EXTI")
+        self._rtc = find_model(chip, "stm32.rtc", "RTC")
         board = getattr(chip, "pins", None)
         pin = board.gpio("A", 0) if board is not None else None
         if pin is not None:
@@ -262,11 +316,18 @@ class PWR(GatedBlock):
             board.input_listeners[pin.id].append(self._wkup_edge)
 
     def reset(self) -> None:
+        # PWR_CSR (5.4.2): SBF is cleared only by a power-on reset; BRE only by a backup domain reset; WUF and EWUP by
+        # a system reset, but the register is not reset by a wake-up from Standby (WKUP pin / RTC event).
         keep = self.get("CSR") if self._powered else 0
+        mask = CSR_SBF | CSR_BRE
+        if self._standby_wake:
+            mask |= CSR_WUF | CSR_EWUP
+        self._standby_wake = False
         super().reset()
         if self._powered:
-            self.set("CSR", (keep & (CSR_WUF | CSR_SBF | CSR_EWUP | CSR_BRE)) | CSR_VOSRDY)
+            self.set("CSR", (keep & mask) | CSR_VOSRDY)
         self._powered = True
+        self._pvd_update()
         self.mode = "run"
         self._wfe = False
         self._event = False
@@ -286,6 +347,12 @@ class PWR(GatedBlock):
         return v
 
     def _csr_write(self, blk, reg, old, new):
+        if (old ^ new) & CSR_BRE and not self.get("CR") & PWR_DBP:
+            new = (new & ~CSR_BRE) | (old & CSR_BRE)            # BRE is in the backup domain: needs CR.DBP (5.4.2)
+            if "bre_dbp" not in self._notes:
+                self._notes.add("bre_dbp")
+                self.emit("warn", block=self.name, msg="PWR_CSR.BRE write ignored: backup domain write protection "
+                          "(set PWR_CR.DBP first)")
         if new & ~old & CSR_EWUP and self._wkup_level:
             new |= CSR_WUF          # "an additional wakeup event is detected if WKUP is enabled while it is high"
         return new
@@ -294,7 +361,35 @@ class PWR(GatedBlock):
         clr = (CSR_WUF if new & PWR_CWUF else 0) | (CSR_SBF if new & PWR_CSBF else 0)
         if clr:
             self.set("CSR", self.get("CSR") & ~clr)
-        return new & ~(PWR_CWUF | PWR_CSBF)
+        new &= ~(PWR_CWUF | PWR_CSBF)
+        self._store(reg, new)
+        if (old ^ new) & (PWR_PVDE | 0xE0):
+            self._pvd_update()
+        return new
+
+    def backup_domain_reset(self) -> None:
+        """RCC_BDCR.BDRST (RM0090 7.1.3): resets PWR_CSR.BRE (and BRR)."""
+        self.set("CSR", self.get("CSR") & ~CSR_BRE)
+
+    # ------------------------------------------------------------ PVD (5.2.3)
+    def pvd_threshold(self) -> float:
+        return PVD_LEVELS[(self.get("CR") >> 5) & 7]
+
+    def set_vdd(self, volts: float) -> None:
+        """Change the supply voltage seen by the PVD (board / test stimulus)."""
+        self.vdd = float(volts)
+        self._pvd_update()
+
+    def _pvd_update(self) -> None:
+        """CSR.PVDO = 1 while PVDE = 1 and VDD is below the PLS threshold (0 while the PVD is off, 5.4.2); PVDO
+        drives EXTI line 16 (rising edge = VDD dropped below the threshold). The 100 mV hysteresis is ignored."""
+        lvl = bool(self.get("CR") & PWR_PVDE) and self.vdd < self.pvd_threshold()
+        self.set("CSR", (self.get("CSR") & ~CSR_PVDO) | (CSR_PVDO if lvl else 0))
+        if lvl != self._pvdo:
+            self._pvdo = lvl
+            if self.chip is not None:
+                from ._util import exti_input
+                exti_input(self.chip, 16, lvl)
 
     # ------------------------------------------------------------ wake-up sources
     def _wkup_edge(self, pin: Any) -> None:
@@ -309,6 +404,7 @@ class PWR(GatedBlock):
         if self.mode == "standby" and self.chip is not None:
             self.emit("info", block=self.name, msg=f"wake-up from Standby by {what}: reset", source=what)
             self.mode = "run"
+            self._standby_wake = True
             self.chip.arch.request_reset("standby_wakeup")
 
     def exti_event(self) -> None:
@@ -369,11 +465,18 @@ class PWR(GatedBlock):
         self.mode = "run"
 
     def _enter_stop(self, chip: Any) -> None:
-        if self._exti is not None and self._exti.get("PR") & self._exti.get("IMR"):
-            if "stop_pending" not in self._notes:
-                self._notes.add("stop_pending")
-                self.emit("info", block=self.name, msg="Stop mode entry ignored: an EXTI pending bit is set "
-                          "(RM0090 5.3.5); execution continues")
+        # RM0090 5.3.4 Table 28: all EXTI pending bits and the RTC alarm / wakeup / tamper / time-stamp flags must be
+        # clear, otherwise the Stop entry is ignored and execution continues
+        why = None
+        if self._exti is not None and self._exti.get("PR"):
+            why = "an EXTI pending bit is set"
+        elif self._rtc is not None and self._rtc.get("ISR") & RTC_WAKE_FLAGS:
+            why = "an RTC alarm/wakeup/tamper/time-stamp flag is set"
+        if why is not None:
+            if why not in self._notes:
+                self._notes.add(why)
+                self.emit("info", block=self.name, msg=f"Stop mode entry ignored: {why} (RM0090 5.3.4); execution "
+                          "continues")
             chip.wake()
             return
         self.mode = "stop"
@@ -399,6 +502,7 @@ class PWR(GatedBlock):
         self.set("CSR", csr | CSR_SBF)
         if csr & CSR_WUF:
             self.emit("info", block=self.name, msg="Standby entered with CSR.WUF set: immediate wake-up (reset)")
+            self._standby_wake = True
             chip.arch.request_reset("standby_wakeup")
             return
         self.emit("info", block=self.name, msg="enter Standby mode: 1.2 V domain off, wake-up by WKUP / RTC / NRST "

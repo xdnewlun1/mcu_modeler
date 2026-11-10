@@ -2,9 +2,11 @@
 (SVD tables Ethernet_MAC +0x0, Ethernet_MMC +0x100, Ethernet_PTP +0x700, Ethernet_DMA +0x1000), descriptor rings in
 RAM, an MDIO-managed PHY (chipem/ethernet.py `EthPhy`) and frames on an `EthSegment` (board `eth` link).
 
-Written without the RM0090 PDF at hand (fetching it was not possible): register and descriptor semantics follow the
-SVD field layout, ST's STM32CubeF4 HAL ETH driver (vendored) and the Synopsys MAC 10/100 behaviour that RM0090 33
-documents; deviations are listed in docs/LIMITATIONS.md.
+Checked against RM0090 Rev 22 ch. 33 (register descriptions 33.8, reset values Table 195, descriptors 33.6.7/33.6.8,
+DMA interrupts 33.6.9, MMC 33.5.7, filtering 33.5.5, SMI 33.4.1); ST's STM32CubeF4 HAL ETH driver (vendored) runs
+on it.  Deviations are listed in docs/LIMITATIONS.md.  Where the manual's wording and the HAL disagree, silicon
+behaviour proven by the HAL wins: TDES0 control bits (TCH/TER/IC/CIC...) are kept when the DMA closes a descriptor
+(33.6.7 says it "resets all the control bits"; the HAL sets TCH once and reuses the ring).
 
 Presence: the block exists on STM32F407/F417 only.  The shared base YAML gives it `params.only: [STM32F407,
 STM32F417]`; on other parts the model behaves like the `stub` (`_util.make_absent`).
@@ -16,6 +18,8 @@ STM32F417]`; on other parts the model behaves like the `stub` (`_util.make_absen
   change that is not followed by a reset logs one `warn` and is ignored.  DMABMR.SR (software reset) resets every MAC/MMC/PTP/DMA register and clears
   itself after a few clocks - only while the PHY supplies the interface clock (RMII: a pin muxed to
   ETH_RMII_REF_CLK; MII: ETH_MII_TX_CLK and ETH_MII_RX_CLK), otherwise it stays set (one `warn`), as on silicon.
+  DMABMR resets to 0x0002 0101 (SR = 1 until the reset completes).  HCLK below 25 MHz with TE/RE set: one `warn`
+  (RM0090 33.2 note).
 * Pins (signals table + mux checks): MII needs TX_CLK, RX_CLK, TX_EN, TXD0-3, RXD0-3, RX_DV (CRS/COL/RX_ER are
   optional); RMII needs REF_CLK, TX_EN, TXD0-1, RXD0-1, CRS_DV.  Missing pins: one `warn`, frames are lost in that
   direction.  The data pins are not toggled; the PHY's interface clocks (50 MHz REF_CLK, 25/2.5 MHz TX_CLK/RX_CLK)
@@ -28,38 +32,44 @@ STM32F417]`; on other parts the model behaves like the `stub` (`_util.make_absen
 * MAC (MACCR): RE / TE enable reception / transmission; FES (100 / 10 Mbit/s) and DM (duplex) must match the PHY's
   link (a speed mismatch loses frames, one `warn`); LM loops frames back inside the MAC; IFG (96 - 8 x IFG bit
   times); IPCO receive checksum offload; CSTF / APCS strip the FCS (and pad, APCS) of type / length frames; ROD stops
-  receiving the own frames in half duplex.  Frame filter (MACFFR, RM0090 33.5.x): perfect DA filter on MACA0..A3 (AE,
-  SA, MBC byte masks), 64-bit hash filter (MACHTHR/HTLR, index = upper 6 bits of the bit-reversed CRC-32 of the DA)
+  receiving the own frames in half duplex.  Frame filter (MACFFR, RM0090 33.5.5, Tables 191/192): perfect DA filter
+  on MACA0..A3 for unicast, MACA1..A3 only for multicast (AE, SA, MBC byte masks), 64-bit hash filter (MACHTHR/HTLR, index = upper 6 bits of the bit-reversed CRC-32 of the DA)
   for unicast (HU) and multicast (HM), HPF (hash or perfect), DAIF, PAM, BFD, SA filter (SAF/SAIF with MACAx.SA),
   PM promiscuous, RA receive all (failures then only flagged: RDES0 AFM/SAF).  Pause frames (MACFCR): FCB sends a
   pause frame (PT quanta) in full duplex; RFCE honours received pause frames (transmitter waits PT x 512 bit times);
   PCF decides whether control frames reach memory.  VLAN tag register is storage (frames with tag 0x8100 get RDES0
   VLAN).  PMT: PD drops every frame; with MPE a magic packet (6 x FF + 16 x MAC address) sets MPR, clears PD, sets
-  MACSR.PMTS (unless MACIMR.PMTIM) and pulses EXTI line 19 (ETH_WKUP); remote wake-up frames (WFE) are not detected
+  MACSR.PMTS (MACIMR.PMTIM masks only DMASR.PMTS / the interrupt, Figure 370) and pulses EXTI line 19 (ETH_WKUP); remote wake-up frames (WFE) are not detected
   (one `warn`).  Reading MACPMTCSR clears MPR/WFR.
-* MMC: TGFCR (good frames sent), RGUFCR (good unicast received), RFCECR (CRC errors), RFAECR (alignment errors, never
-  counted), TGFSCCR/TGFMSCCR (collisions: never); MMCCR CR (reset, self-clearing), CSR (stop at the maximum), ROR
+* MMC (33.5.7): TGFCR (good frames sent: every frame not aborted by no carrier / loss of carrier, IP checksum
+  error frames and pause frames included), RGUFCR (good unicast received: filter passed, no CRC error, not a runt),
+  RFCECR (CRC errors), RFAECR (alignment errors, never counted), TGFSCCR/TGFMSCCR (collisions: never); MMCCR CR (reset, self-clearing), CSR (stop at the maximum), ROR
   (reset on read), MCF (freeze), MCP/MCFHP (preset to half / almost full); MMCRIR/MMCTIR flags when a counter reaches
   half or full scale, cleared when the counter is read; MACSR.MMCRS/MMCTS/MMCS follow (masks MMCRIMR/MMCTIMR).
-* PTP registers are storage; setting PTPTSCR.TSE logs one `warn` (time stamps are written as 0).
+* PTP registers are storage; setting PTPTSCR.TSE logs one `warn` (time stamps are written as 0; without TSE the
+  RDES6/7 words are left unchanged, 33.6.8).
 * DMA (DMABMR, DMAOMR, DMASR, DMAIER): DMAOMR.ST / SR start/stop the transmit / receive process (TPS / RPS states 0
   stopped, 1 fetching, 2 waiting for status, 3 waiting for a frame, 4/6 suspended, 7 transferring); DMATDLAR /
   DMARDLAR set the list start (current descriptor = list start whenever written while stopped); DMATPDR / DMARPDR
   poll demands resume a suspended process; FTF flushes the TX FIFO (self-clearing).  Descriptors: normal (16 bytes) or
   enhanced (DMABMR.EDFE: 32 bytes, RDES4 extended status, RDES6/7 and TDES6/7 time stamps), ring mode (TER/RER end of
-  ring, buffer 2 = TDES3/RDES3, next descriptor = this + size + DSL words) or chained (TCH/RCH: TDES3/RDES3 = next).
-  TX: OWN, FS/LS spanning several descriptors, IC, DC (CRC appended unless set), DP (padding to 60 bytes unless set),
+  ring, buffer 2 = TDES3/RDES3, next descriptor = this + size + DSL words) or chained (TCH/RCH: TDES3/RDES3 = next;
+  TER/RER take precedence).
+  TX: OWN, FS/LS spanning several descriptors, IC, DC (CRC appended unless set), DP (padding to 60 bytes unless set;
+  a padded frame always gets its CRC),
   CIC checksum insertion (01 IPv4 header, 10 + TCP/UDP/ICMP payload with the pseudo-header sum provided in the
   checksum field, 11 + pseudo-header computed; IPv4 and IPv6; IHE / IPE errors), status (ES, IHE, IPE, NC/LCA in
   half duplex without carrier) in the last descriptor, OWN cleared in all of them, TS when IC.  A host-owned
   descriptor suspends the transmit process (TBUS).  RX: frames fill RBS1/RBS2 buffers of as many descriptors as
   needed (FS, LS, FL = cumulative byte count, the frame length in the last one), status AFM, ES, DE, SAF, LE, OE,
-  VLAN, FT, RE, CE, IPHCE/PCE (IPCO, normal descriptors) or ESA + RDES4 (IPPT, IPHE, IPPE, IPCB, IPV4PR, IPV6PR;
-  enhanced descriptors), RS unless DIC.  A frame that finds no DMA-owned descriptor sets RBUS (once, when the previous
-  one was DMA-owned), suspends the process and is flushed (MFC counts it) unless DMAOMR.DFRF holds it in the 2 KB RX
-  FIFO (overflow: MFA, ROS); a suspended receive process resumes on DMARPDR or when the next frame arrives.  With
-  IPCO, RSF and DTCEFD = 0 frames with an IP header / TCP/UDP/ICMP checksum error are dropped.  CRC errors are dropped
-  unless FEF, runts unless FUGF.  DMAMFBOCR (missed frames) clears when read.  Bus errors (unmapped addresses, the CCM
+  VLAN, FT, RE, CE, IPHCE/PCE (IPCO, normal descriptors, Table 193) or ESA + RDES4 (IPPT, IPHE, IPPE, IPCB, IPV4PR,
+  IPV6PR; enhanced descriptors: ESA for IPv4/IPv6 frames only, FT keeps its plain meaning), RS unless DIC.  After
+  closing a frame the engine looks at the next descriptor at once (33.6.8 step 8): host-owned -> RBUS and Suspended.
+  A frame that finds no DMA-owned descriptor sets RBUS (once, when the previous one was DMA-owned), suspends the
+  process and is flushed (MFC counts it) unless DMAOMR.DFRF holds it in the 2 KB RX FIFO (overflow: MFA, ROS); a
+  suspended receive process resumes on DMARPDR or when the next frame arrives.  With IPCO, RSF and DTCEFD = 0 frames
+  with an IP header / TCP/UDP/ICMP checksum error are dropped.  CRC errors are dropped unless FEF, runts unless FUGF
+  (dropped runts count in DMAMFBOCR.MFA).  DMAMFBOCR (missed frames) clears when read.  Bus errors (unmapped addresses, the CCM
   RAM which the Ethernet DMA cannot reach) set FBES and stop both processes.
   DMASR: bits 0-16 are write-1-to-clear; NIS / AIS are sticky summaries of the enabled normal (TS, TBUS, RS, ERS) /
   abnormal (TPSS, TJTS, ROS, TUS, RBUS, RPSS, PWTS, ETS, FBES) bits; MMCS/PMTS/TSTS mirror MACSR.  IRQ "ETH" =
@@ -69,8 +79,11 @@ STM32F417]`; on other parts the model behaves like the `stub` (`_util.make_absen
   written to memory (zero bus time) when their last bit arrives.  Frames go through `EthPhy.transmit` (loopback, link
   down -> lost: no carrier / loss of carrier status in half duplex), one `eth` event per frame (chipem/ethernet.py).
 Not modelled: collisions / back-off / half-duplex deferral (frames never collide), jabber / receive watchdog timers,
-early transmit/receive interrupts, TX/RX FIFO thresholds (store-and-forward behaviour always), the TX FIFO holding
-several frames, remote wake-up frame filters, PTP time stamping and the PPS output, VLAN tag filtering.
+the receive status watchdog (DMARSWTR: with DIC no RS is raised later), early transmit/receive interrupts, TX/RX FIFO
+thresholds (store-and-forward behaviour always), the TX FIFO holding several frames, remote wake-up frame filters,
+PTP time stamping and the PPS output, VLAN tag filtering, the SA filter status with SAF = 0 (RDES0 SAF is only
+reported when MACFFR.SAF is set), DFRF keeping a truncated frame for the next descriptor (a frame that runs out of
+descriptors is always closed with DE and LS).
 """
 from __future__ import annotations
 
@@ -294,12 +307,16 @@ class ETH(GatedBlock):
             "MACPMTCSR": {"ro_mask": MPR | WFR, "on_read": self._pmt_read, "on_write": self._pmt_write},
             "MACDBGR": ro, "MACSR": {"ro_mask": 0xFFFFFFFF, "on_read": self._macsr_read},
             "MACIMR": {"on_write": self._update_w},
-            "MACA0HR": {"reset": 0x8000FFFF, "ro_mask": 1 << 31},
+            # RM0090 33.8.1: MO (bit 31) always 1, bits 30:16 reserved; MACA2LR is a plain 32-bit address (the SVD
+            # marks bit 31 read-only)
+            "MACA0HR": {"reset": 0x8000FFFF, "ro_mask": 0xFFFF0000},
+            "MACA2LR": {"ro_mask": 0},
             "MMCCR": {"on_write": self._mmccr_write},
             "MMCRIR": ro, "MMCTIR": ro,
             "MMCRIMR": {"on_write": self._update_w}, "MMCTIMR": {"on_write": self._update_w},
             "PTPTSCR": {"on_write": self._ptp_write},
-            "DMABMR": {"on_write": self._dmabmr_write, "on_read": self._dmabmr_read},
+            # RM0090 33.8.4: reset 0x0002 0101 (RDP = 1, PBL = 1, SR = 1); the SVD gives 0x2101 (PBL = 33, invalid)
+            "DMABMR": {"reset": 0x00020101, "on_write": self._dmabmr_write, "on_read": self._dmabmr_read},
             "DMATPDR": {"on_write": self._tpdr_write, "on_read": lambda b, r: 0},
             "DMARPDR": {"on_write": self._rpdr_write, "on_read": lambda b, r: 0},
             "DMARDLAR": {"on_write": self._rdlar_write}, "DMATDLAR": {"on_write": self._tdlar_write},
@@ -519,7 +536,7 @@ class ETH(GatedBlock):
         sr &= ~(MMCS_S | PMTS_S | TSTS_S)
         if macsr & MMCS_M:
             sr |= MMCS_S
-        if macsr & PMTS_M:
+        if macsr & PMTS_M and not self.get("MACIMR") & PMTS_M:     # PMTI = PMTS & !PMTIM (RM0090 Figure 370)
             sr |= PMTS_S
         sr = (sr & ~(0x3F << 17 | 7 << 20)) | (self._rps << 17) | (self._tps << 20)
         self.set("DMASR", sr)
@@ -545,9 +562,7 @@ class ETH(GatedBlock):
             v |= MMCRS_M | MMCS_M
         if tx:
             v |= MMCTS_M | MMCS_M
-        if v & PMTS_M and self.get("MACIMR") & PMTS_M:
-            v &= ~PMTS_M
-        return v
+        return v                        # PMTS stays visible when masked: MACIMR.PMTIM only masks the interrupt
 
     def _macsr_read(self, blk, reg):
         return self._macsr_value()
@@ -600,6 +615,9 @@ class ETH(GatedBlock):
     # ------------------------------------------------------------------ MAC registers
     def _maccr_write(self, blk, reg, old, new):
         self._store(reg, new)
+        if new & (TE | RE) and self.chip is not None and self._hclk() < 25e6:
+            self._warn_once("hclk", f"{self.name}: HCLK {self._hclk() / 1e6:.2f} MHz is below the 25 MHz the Ethernet "
+                            f"MAC needs (RM0090 33.2)")
         if (new & ~old) & TE:
             self._tx_resume()
         return None
@@ -900,10 +918,10 @@ class ETH(GatedBlock):
             data += self._rdb(d2, d1 & 0x1FFF)
             if not d0 & T_TCH:
                 data += self._rdb(d3, (d1 >> 16) & 0x1FFF)
-            if d0 & T_TCH:
-                nxt = d3 & ~3
-            elif d0 & T_TER:
+            if d0 & T_TER:                                      # TER takes precedence over TCH (RM0090 TDES0)
                 nxt = self.get("DMATDLAR")
+            elif d0 & T_TCH:
+                nxt = d3 & ~3
             else:
                 nxt = cur + step
             self.set("DMACHTDR", cur)
@@ -933,9 +951,11 @@ class ETH(GatedBlock):
         cic = (d0f >> 22) & 3
         if cic:
             err = checksum_insert(frame, cic)
+        crc = not d0f & T_DC
         if not d0f & T_DP and len(frame) < 60:
             frame += bytes(60 - len(frame))
-        wire = bytes(frame) + (fcs(frame) if not d0f & T_DC else b"")
+            crc = True                                          # RM0090 TDES0 DP: padding adds the CRC despite DC
+        wire = bytes(frame) + (fcs(frame) if crc else b"")
         self._tx_cur = nxt
         self._tps = TPS_WAIT
         self._start_wire(wire, (descs, d0l, err))
@@ -984,6 +1004,8 @@ class ETH(GatedBlock):
         self._next_tx_t = t_end + ifg * 1e9 / rate
         if close is None:                                      # pause frame
             self.set("MACFCR", self.get("MACFCR") & ~FCB)
+            if not status & (T_LCA | T_NC):
+                self._mmc_inc("MMCTGFCR", True, 1 << 21)
         else:
             descs, d0l, err = close
             status |= err
@@ -997,8 +1019,8 @@ class ETH(GatedBlock):
             except _Fault as e:
                 self._bus_error(e, True)
                 return
-            if not status & T_ES:
-                self._mmc_inc("MMCTGFCR", True, 1 << 21)
+            if not status & (T_LCA | T_NC):                     # RM0090 33.5.7: only aborts make a frame bad
+                self._mmc_inc("MMCTGFCR", True, 1 << 21)        # (IHE / IPE frames are still sent)
             if d0l & T_IC:
                 self.set("DMASR", self.get("DMASR") | TS)
         if not self.get("DMAOMR") & ST_TX:
@@ -1022,7 +1044,7 @@ class ETH(GatedBlock):
         """(pass, DA filter fail, SA filter fail) per MACFFR (RM0090 33.5.x)."""
         ffr = self.get("MACFFR")
         da, sa = f[0:6], f[6:12]
-        perfect, sa_hit = False, False
+        perfect, perfect_mc, sa_hit = False, False, False
         for i in range(4):
             hi = self.get(f"MACA{i}HR")
             if i and not hi >> 31 & 1:
@@ -1036,6 +1058,7 @@ class ETH(GatedBlock):
                     sa_hit = True
                 else:
                     perfect = True
+                    perfect_mc = perfect_mc or i > 0    # multicast: MAC address registers 1-3 only (RM0090 33.5.5)
         bcast = da == BROADCAST
         mcast = bool(da[0] & 1) and not bcast
         hidx = hash_index(da)
@@ -1047,9 +1070,9 @@ class ETH(GatedBlock):
             if ffr & PAM:
                 da_ok = True
             elif ffr & HM:
-                da_ok = hash_hit or (bool(ffr & HPF) and perfect)
+                da_ok = hash_hit or (bool(ffr & HPF) and perfect_mc)
             else:
-                da_ok = perfect
+                da_ok = perfect_mc
             if ffr & DAIF and not ffr & PAM:
                 da_ok = not da_ok
         else:
@@ -1120,9 +1143,12 @@ class ETH(GatedBlock):
             self._mmc_inc("MMCRFCECR", False, 1 << 5)
             if not self.get("DMAOMR") & FEF:
                 return
-        if len(wire) < 64 and not self.get("DMAOMR") & FUGF:
+        runt = len(wire) < 64
+        if runt and not self.get("DMAOMR") & FUGF:
+            if crc_ok:
+                self._missed(False)                             # DMAMFBOCR.MFA counts dropped runt frames
             return
-        if crc_ok and not f[0] & 1:
+        if crc_ok and not runt and not f[0] & 1:                # good unicast: no CRC error, not a runt (33.5.7)
             self._mmc_inc("MMCRGUFCR", False, 1 << 17)
         # status
         st = 0
@@ -1148,12 +1174,12 @@ class ETH(GatedBlock):
             ptype, ipv, herr, perr, checked = checksum_verify(bytes(f))
             enh = bool(self.get("DMABMR") & EDFE)
             if enh:
-                ext = ptype | (8 if herr else 0) | (16 if perr else 0) | (0 if (checked or herr) else 32)
-                ext |= 64 if ipv == 4 else 128 if ipv == 6 else 0
-                st |= 1                                         # ESA: RDES4 valid
-                st &= ~R_FT if not ipv else ~0
+                # RDES0 FT keeps its plain meaning (Table 193 applies to normal descriptors only); ESA says RDES4
+                # holds IP checksum status, so it is set for IPv4/IPv6 frames only (RM0090 33.6.8 RDES4)
                 if ipv:
-                    st |= R_FT
+                    ext = ptype | (8 if herr else 0) | (16 if perr else 0) | (0 if (checked or herr) else 32)
+                    ext |= 64 if ipv == 4 else 128
+                    st |= 1                                     # ESA: RDES4 valid
             else:
                 if ipv:
                     if not checked and not herr:
@@ -1257,14 +1283,15 @@ class ETH(GatedBlock):
                     v |= R_LS | st
                     if enh:
                         self._wr32(cur + 16, ext)
-                        self._wr32(cur + 24, 0)
-                        self._wr32(cur + 28, 0)
+                        if self.get("PTPTSCR") & 1:             # time stamps only with TSE; else RDES6/7 unchanged
+                            self._wr32(cur + 24, 0)
+                            self._wr32(cur + 28, 0)
                 self._wr32(cur, v)
                 self.set("DMACHRDR", cur)
-                if d1 & R_RCH:
-                    nxt = d3 & ~3
-                elif d1 & R_RER:
+                if d1 & R_RER:                                  # RER takes precedence over RCH (RM0090 RDES1)
                     nxt = self.get("DMARDLAR")
+                elif d1 & R_RCH:
+                    nxt = d3 & ~3
                 else:
                     nxt = cur + step
                 prev = cur
@@ -1277,7 +1304,12 @@ class ETH(GatedBlock):
                     self.rx_frames.append((self.chip.now_ns(), bytes(data)))
                     if not d1 & R_DIC:
                         self.set("DMASR", self.get("DMASR") | RS)
-                    self._rps = RPS_WAIT
+                    # RM0090 33.6.8 step 8: the engine checks the next descriptor at once; host-owned -> RBUS and
+                    # Suspended (the previous descriptor was DMA-owned, so RBUS is reported)
+                    if self._rd32(cur) & R_OWN:
+                        self._rps = RPS_WAIT
+                    else:
+                        self._rx_unavailable()
                     self._update()
                     return True
         except _Fault as e:

@@ -792,9 +792,9 @@ class Session:
             return self._run(self.board.run_for, int(n) * 1e9 / self.chip.clock.hz)
         return self._run(self.chip.run_cycles, int(n))
 
-    def step(self) -> StopReason:
-        """One instruction on the view chip (other board chips do not move)."""
-        return self._run(self.chip.step)
+    def step(self, chip: str | None = None) -> StopReason:
+        """One instruction on chip `chip` (default: the view chip); other board chips do not move."""
+        return self._run((self._ctx(chip).chip if chip is not None else self.chip).step)
 
     def stop(self) -> None:
         """Thread-safe: ask a running run_for/run_cycles to return early (StopReason.USER)."""

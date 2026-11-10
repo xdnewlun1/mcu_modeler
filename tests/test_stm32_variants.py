@@ -301,10 +301,12 @@ def test_board_rg_ig_request_response():
     req = [e.t_ns for e in s.events(kinds={"uart"}, chip="A") if e.fields.get("dir") == "tx" and e.byte == ord("R")]
     assert len(req) == 10 and all(b - a == pytest.approx(2e6, rel=1e-3) for a, b in zip(req, req[1:]))
     # B toggles PI1 right after handing the last reply byte to USART6: the 7-byte request arrives (stop bit of
-    # '\n'), then TXE paces the 9-byte reply, one character per write, so the 9th write is 8 characters later
+    # '\n'), then TXE paces the 9-byte reply: the first byte goes straight to the shift register and the second to
+    # TDR (TXE is set as soon as a byte moves to the shift register, RM0090 30.3.2), so the 9th write is 7 characters
+    # later
     t = led_b[1] - req[0]
     char_a, char_b = 10 / ua.baud() * 1e9, 10 / ub.baud() * 1e9
-    lo = 7 * char_a + 8 * char_b
+    lo = 7 * char_a + 7 * char_b
     assert lo < t < lo + char_b                                            # + B's ISR/parse time (a few us)
     assert a.pins.get("PC13").level() == "H" and a.pins.get("PB1").level() == "L"
     assert not [e for e in s.events(kinds={"warn", "fault"})]              # bauds within tolerance, no faults

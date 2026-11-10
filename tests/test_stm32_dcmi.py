@@ -195,29 +195,36 @@ def test_continuous_fcrc_every_other_frame():
 
 
 def test_continuous_stops_after_current_frame():
-    chip, board, cam = rig(height=8)
+    chip, board, cam = rig(height=8, width=4)          # one word per line: the 4-word FIFO never overruns
     wr(chip, DCMI + CR, HW | ENABLE | CAPTURE)
     d = chip.peripherals["DCMI"]
-    board.run_for(24e3 + 30e3)                        # inside frame 0
+    board.run_for(24e3 + 14e3)                        # inside frame 0 (line 1)
     assert d._capturing
     wr(chip, DCMI + CR, HW | ENABLE)                  # clear CAPTURE mid-frame
     assert rd(chip, DCMI + CR) & CAPTURE              # still capturing until the frame ends
-    for _ in range(6):
-        board.run_for(30e3)
+    for _ in range(18):
+        board.run_for(10e3)
         drain(chip)
-    assert not rd(chip, DCMI + CR) & CAPTURE
+    assert not rd(chip, DCMI + CR) & CAPTURE and not rd(chip, DCMI + RIS) & OVR
     assert d.frames_captured == 1
 
 
-def test_overrun_loses_words():
+def test_overrun_resets_fifo_and_loses_frame():
+    """RM0090 15.5.7: 4-word FIFO; on overrun the FIFO is reset and the DCMI waits for a new frame start;
+    15.5.4: in snapshot mode the frame is lost and CAPTURE is cleared (no FRAME flag)."""
     chip, board, cam = rig(width=40, height=1, pattern="counter")
+    d = chip.peripherals["DCMI"]
+    seen = []
+    orig = d._push_word
+    d._push_word = lambda w: (seen.append(len(d.fifo)), orig(w))
     wr(chip, DCMI + IER, OVR)
     wr(chip, DCMI + CR, HW | CM | ENABLE | CAPTURE)
     board.run_for(200e3)
-    assert rd(chip, DCMI + RIS) & OVR and rd(chip, DCMI + MIS) == OVR
+    assert seen[:5] == [0, 1, 2, 3, 4]                # the 5th word finds the 4-word FIFO full
+    assert rd(chip, DCMI + RIS) & (OVR | FRAME) == OVR and rd(chip, DCMI + MIS) == OVR
     assert (16 + DCMI_IRQ) in chip.arch.asserted
-    got = drain(chip)
-    assert got == words_of(cam.line_samples(0, 0))[:8]   # 10 words, FIFO of 8
+    assert not rd(chip, DCMI + CR) & CAPTURE           # snapshot: frame lost, CAPTURE cleared
+    assert drain(chip) == [] and d.frames_captured == 0
     wr(chip, DCMI + ICR, OVR)
     assert not rd(chip, DCMI + RIS) & OVR and (16 + DCMI_IRQ) not in chip.arch.asserted
 
@@ -247,7 +254,7 @@ def test_hspol_vspol_follow_camera_levels():
 
 
 def test_edm_10bit_two_samples_per_word():
-    chip, board, cam = rig(bits=10, pattern="gradient")
+    chip, board, cam = rig(bits=10, pattern="gradient", width=4)
     wr(chip, DCMI + CR, HW | (1 << 10) | CM | ENABLE | CAPTURE)
     board.run_for(200e3)
     s = cam.line_samples(0) + cam.line_samples(1)
@@ -296,7 +303,7 @@ def _ess(chip, escr=0xB69D80AB, esur=0xFFFFFFFF):
 
 
 def test_embedded_sync_snapshot():
-    chip, board, cam = rig(sync="embedded", pattern="bars", height=3)
+    chip, board, cam = rig(sync="embedded", pattern="bars", height=3, width=4)
     _ess(chip)
     wr(chip, DCMI + IER, ERR)
     wr(chip, DCMI + CR, PCKPOL | ESS | CM | ENABLE | CAPTURE)
@@ -317,7 +324,7 @@ def test_embedded_unknown_code_sets_err():
 
 
 def test_embedded_unmask_matches_partial_code():
-    chip, board, cam = rig(sync="embedded", height=3)
+    chip, board, cam = rig(sync="embedded", height=3, width=4)
     _ess(chip, escr=0xB69D81AB, esur=0xFFFFFEFF)      # LSU ignores bit 0: 0x81 matches 0x80
     wr(chip, DCMI + CR, PCKPOL | ESS | CM | ENABLE | CAPTURE)
     board.run_for(300e3)
@@ -392,3 +399,75 @@ def test_sample_board_end_to_end():
     assert f"DCMI frame 80x60 sum={full:08X}" in out
     assert f"DCMI crop 40x30 sum={crop:08X}" in out
     assert "DCMI continuous frames=3 ovr=0" in out and "done" in out
+
+
+# ------------------------------------------------------------------------------------------------ RM0090 ch. 15 rules
+def run_frames(board, cam, n):
+    """Run until the camera has finished `n` frames (VSYNC back in blanking)."""
+    while cam.frames < n:
+        board.run_for(1e3)
+
+
+def test_continuous_overrun_resumes_at_next_frame():
+    """RM0090 15.5.7: after an overrun the FIFO is reset and capture waits for a new frame start; continuous mode
+    keeps CAPTURE set."""
+    chip, board, cam = rig(width=40, height=1, pattern="counter")
+    d = chip.peripherals["DCMI"]
+    wr(chip, DCMI + CR, HW | ENABLE | CAPTURE)
+    run_frames(board, cam, 1)
+    assert rd(chip, DCMI + RIS) & OVR and d.frames_captured == 0 and not d.fifo
+    assert rd(chip, DCMI + CR) & CAPTURE
+    wr(chip, DCMI + ICR, OVR)
+    d._push_word = lambda w, _o=d._push_word: (drain(chip), _o(w))   # a fast reader: no overrun this time
+    run_frames(board, cam, 2)
+    assert d.frames_captured == 1 and not rd(chip, DCMI + RIS) & OVR
+
+
+def test_embedded_capture_waits_for_fe_then_fs():
+    """RM0090 15.5.3 mode 2: once enabled, capture starts after the first FE followed by an FS."""
+    chip, board, cam = rig(sync="embedded", pattern="counter", height=2, width=4)
+    _ess(chip)
+    d = chip.peripherals["DCMI"]
+    wr(chip, DCMI + CR, PCKPOL | ESS | CM | ENABLE | CAPTURE)
+    run_frames(board, cam, 1)                         # frame 0: FS seen without a preceding FE
+    assert d.frames_captured == 0 and drain(chip) == []
+    assert rd(chip, DCMI + CR) & CAPTURE
+    run_frames(board, cam, 2)
+    assert d.frames_captured == 1 and not rd(chip, DCMI + CR) & CAPTURE
+    assert drain(chip) == words_of(cam.line_samples(0, 1) + cam.line_samples(1, 1))
+
+
+def test_embedded_line_vsync_flags_need_capture():
+    """RM0090 15.8.3: with embedded sync LINE_RIS / VSYNC_RIS are set only while CAPTURE = 1; with hardware sync
+    VSYNC_RIS is set even when CAPTURE = 0 (15.5.4 note)."""
+    chip, board, cam = rig(sync="embedded", height=2, width=4)
+    _ess(chip)
+    wr(chip, DCMI + CR, PCKPOL | ESS | ENABLE)
+    board.run_for(300e3)
+    assert rd(chip, DCMI + RIS) & (LINE | VSYNC_F) == 0
+    chip, board, cam = rig(height=2, width=4)
+    wr(chip, DCMI + CR, HW | ENABLE)
+    board.run_for(300e3)
+    assert rd(chip, DCMI + RIS) & (LINE | VSYNC_F) == LINE | VSYNC_F and not rd(chip, DCMI + RIS) & FRAME
+
+
+def test_crop_frame_flag_at_last_window_line():
+    """RM0090 15.8.3: with CROP, FRAME_RIS is set at the end of the last line of the window, before VSYNC."""
+    chip, board, cam = rig(width=4, height=6, pattern="counter")
+    wr(chip, DCMI + CWSTRT, (1 << 16) | 0)            # line 1
+    wr(chip, DCMI + CWSIZE, (0 << 16) | 7)            # 1 line x 8 clocks
+    wr(chip, DCMI + CR, HW | CM | CROP | ENABLE | CAPTURE)
+    line_ns = cam.frame_ns / (cam.height + 2)         # height + vblank lines
+    board.run_for(cam.start_ns + 2 * line_ns + 2 * line_ns + 1e3)   # vblank, lines 0 and 1 done
+    assert cam.in_frame                                # VSYNC still active-frame
+    assert rd(chip, DCMI + RIS) & FRAME and not rd(chip, DCMI + CR) & CAPTURE
+    assert drain(chip) == words_of(cam.line_samples(1, 0)[:8])
+
+
+def test_jpeg_ignores_ess():
+    """RM0090 15.8.1: ESS is disabled in JPEG mode (hardware sync: VSYNC frame, HSYNC data valid)."""
+    chip, board, cam = rig(width=4, height=2, pattern="counter")
+    wr(chip, DCMI + CR, HW | ESS | JPEG | CM | ENABLE | CAPTURE)
+    board.run_for(200e3)
+    assert chip.peripherals["DCMI"].frames_captured == 1
+    assert drain(chip) == words_of(cam.line_samples(0) + cam.line_samples(1))

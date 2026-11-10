@@ -247,3 +247,31 @@ Not done / left:
 Light theme (header toggle, saved; default from the system), info vs error toasts, highlighted event matches, one
 event formatter for view / filter / download, and the board layout planner: see docs/UI_REVIEW_BOARD.md, "Phase 3",
 for the screenshots (both themes), the contrast table and the measurements.
+
+## Phase 4 (2026-11-10): second review, implemented
+
+A headless-Firefox review (1920x1080, 1366x768, 900 px, both themes; CAN, RS-232, 3-way PWM, Ethernet, SD, camera, USB
+boards and blinky) listed bugs B1-B18 and findings on layout, consistency, feedback, discoverability, accessibility,
+performance and polish. All were implemented:
+
+* Bugs: wave duty in percent from every producer (sdbus.ClockWave, camera; tests/test_wave_percent.py); Discovery no
+  longer crashes on a wave without duty; hidden event kinds no longer evict visible rows (no DOM rows for hidden
+  kinds, refetched when enabled) and the empty log explains why; Esc / shortcuts / Space / case handling fixed and
+  scoped while dialogs are open; the console follows the UART that prints; CAN / Ethernet / USB buses in `/api/chip`
+  (`buses`), the Links pane and on the canvas; OFFLINE state with reconnect; part row and box-part overlaps; `part` /
+  `eth` kind colours; no stray transcript line after CRLF; host serial errors / queued / modem lines (Status pane);
+  UART clear resets every drop counter; add-part dialog groups (inputs, indicators, logic, devices, connectors).
+* Additions: Restart (t=0), Step N on the selected chip, CPU register popover, timed stimulus field, VCD download,
+  Logic tab (logic-analyser strip of traced pins), analog value column and pin-card field, Status pane (CAN / USB /
+  Ethernet / SD / host serial / real time), undo toast for net / link / part deletion, inline net rename, event
+  folding (×N), compact Events header, maximise a sidebar pane, keyboard-resizable splitters, roving tabindex on pins,
+  `<dialog>` Board setup, solid focus ring, one formatter module (static/fmt.js) and shared compact CAN / ETH / USB /
+  I2S event text (evfmt.py, log.format_event).
+* Stream: slim pin rows (dynamic fields, per-stream deltas, `pins_full` on the first frame), `waves` at <= 2 Hz.
+  boards/pwm_capture_3way.yaml, 10 s of `/api/stream`: 18.0 MB (state frames 16.9 MB, every one with all pins) before,
+  1.6 MB (state frames 0.54 MB) after.
+* Earlier "only partly closed" items: empty states (item 20), the old .logo / .panel / .layout cards and 999 px pills
+  (items 11, 12, 14) and the hidden-kinds cap (S1.3) are closed; the dead CSS and legacy tokens are deleted.
+
+Not done: the LED on chip B of boards/three_chip_demo.yaml (board content, see UI_REVIEW_BOARD.md); 144/176-pin names
+at fit on three-chip boards at 1366x768.
