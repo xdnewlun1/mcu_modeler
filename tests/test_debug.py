@@ -227,7 +227,7 @@ def test_peek_has_no_read_side_effects():
             r.on_read = (lambda o: lambda b, reg: calls.append(reg.name) or o(b, reg))(orig)
     data, exact = d.read_memory(uart.base, 0x20)
     assert len(data) == 0x20 and not calls                 # no read hook ran
-    assert not all(exact)                                  # hooked registers are flagged (stored value shown)
+    assert all(exact)                                      # every UART register has a side-effect-free peek (D: FIFO head)
     with pytest.raises(DebugError):
         d.read_memory(0x2F000000, 4)                       # unmapped
 
@@ -291,3 +291,26 @@ def test_board_stop_reports_chip_and_skew():
     assert 0 <= ls["skew_ns"] <= s.board.quantum_ns + 1     # the other chip is at most one quantum ahead
     D.do("next", "B")
     assert D.last_stop["chip"] == "B"
+
+
+def test_mcs51_register_locations_use_their_address_space():
+    """Memory view `sp` on an 8051 shows IDATA (the stack), `dptr` XDATA; as values they stay plain numbers."""
+    from pathlib import Path
+    from chipem.core.mcs51.core import IDATA_BASE, XDATA_BASE
+    from chipem.session import Session
+    fw = Path(__file__).resolve().parents[1] / "firmware/samples_mcs51/build/uart_hello.hex"
+    if not fw.exists():
+        pytest.skip("sample not built")
+    s = Session("p89cv51rd2", fw, quiet=True)
+    try:
+        s.run_for(1e6)
+        d = s.debug.dbg()
+        sp = s.chip.core.read_reg("sp")
+        assert d.eval_expr("sp") == sp
+        assert d.eval_expr("sp", values=False) == IDATA_BASE + sp
+        assert d.eval_expr("sp+1", values=False) == IDATA_BASE + sp + 1
+        assert d.eval_expr("dptr", values=False) == XDATA_BASE + s.chip.core.read_reg("dptr")
+        data, _ = d.read_memory(d.eval_expr("sp", values=False) - 1, 2)
+        assert data == bytes(s.chip.core.iram[sp - 1:sp + 1])
+    finally:
+        s.close()

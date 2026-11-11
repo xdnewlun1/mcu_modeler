@@ -1,8 +1,0 @@
-unicorn
-capstone
-pyelftools
-pyyaml
-
-[test]
-pytest
-keystone-engine

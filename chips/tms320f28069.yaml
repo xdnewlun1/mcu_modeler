@@ -1,0 +1,294 @@
+# TI TMS320F28069 (Piccolo F2806x: C28x + FPU32 + VCU, 90 MHz), 100-pin LQFP "PZ".  The LAUNCHXL-F28069M part is the
+# F28069M (InstaSPIN-MOTION ROM, USB): chips/tms320f28069m.yaml.
+# Sources: data sheet docs/datasheets/ti/tms320f28069.pdf = SPRS698J (Sep 2021): Table 5-1 (device comparison: 128K-word
+# flash, 50K-word SARAM = M0/M1 + L0-L8, 1K OTP, 32K boot ROM, CLA, 6-channel DMA, ePWM1-8 (HRPWM on 1A-4A, 8 HR
+# channels), eCAP1-3, HRCAP1-4, eQEP1/2, 16 ADC channels, COMP1-3, SPI-A/B, SCI-A/B, I2C-A, McBSP-A, eCAN-A, 54 GPIOs + 6
+# AIOs; USB only on the U/M/F parts), Figure 8-1 (memory map), Table 8-3 (flash sectors), Tables 8-6..8-9 (peripheral
+# frames), Table 8-10 (PARTID 0x009E at 0x3D7E80), PIE table, Table 8-1 (boot modes).  Behaviour: SPRUH18I (TMS320x2806x
+# TRM, svd/c28x-docs/dl19), chips/README.md.  Register table chips/tms320f2806x_regs.yaml (tools/gen_piccolo_regs.py;
+# --check-ds: 798 data sheet addresses, 0 mismatches).  Pin table: SPRS698 terminal functions / pin assignment / GPIO
+# mux tables, cross-checked against SPRUH18 (0 differences).  Address units are 16-bit words.
+# LAUNCHXL-F28069M (SPRUI11B): LEDs D9/D10 on GPIO34 / GPIO39, the XDS100 UART on SCI-A GPIO28/29 (JP6 on, JP7 off),
+# CAN transceiver (SN65HVD234) on GPIO30 (CANRXA) / GPIO31 (CANTXA), boot switch S1 = GPIO34 / GPIO37 / TRST, no crystal.
+name: TMS320F28069
+package: LQFP100 (PZ)
+family: ti_c2000
+regs_file: tms320f2806x_regs.yaml
+gpio_name_format: "GPIO{num}"          # port A = GPIO0-31, port B = GPIO32-58
+core: {arch: c28x, backend: c28x, cpu: c28x, fpu: true, clock_hz: 10000000, addr_unit_bits: 16, num_irqs: 0}
+
+# Reset: boot ROM stand-in chips/tms320f2806x_bootrom.asm (same flow as the F2802x one; InitBoot at 0x3FF3B0) unless the
+# image has an entry point.
+boot:
+  entry: 0x3FF3B0
+  sp: 0x0400
+  rom_words:                           # tools/gen_piccolo_regs.py --bootrom-words chips/tms320f2806x_bootrom.asm
+    0x3D7C80: [
+      0x7622, 0x761F, 0x01C5, 0x2B00, 0x2B01, 0x761F, 0x01C0, 0x2B14, 0x2B16, 0x761A, 0x0006,
+    ]
+    0x3D7CC0: [
+      0x8F3D, 0x7BFE, 0x9284, 0x1BA9, 0x55AA, 0x600A, 0x92C4, 0x5201, 0x6108, 0x5204, 0x6106, 0x5205,
+      0x6104, 0x5206, 0x6102, 0x9A0B, 0x0006,
+    ]
+    0x3FF3B0: [
+      0x8D7F, 0x7FF8, 0x9281, 0x9281, 0x9281, 0x9281, 0x9281, 0x9281, 0x9281, 0x9281, 0x7622, 0x761F,
+      0x01C0, 0x1A1C, 0x0008, 0x767D, 0x7C80, 0x7622, 0x761F, 0x01C0, 0x181C, 0xFFF7, 0x1A11, 0x0180,
+      0x761F, 0x0034, 0x2800, 0x55AA, 0x761F, 0x01BF, 0x4508, 0x6C13, 0x4208, 0x6C0C, 0x761F, 0x0034,
+      0x2801, 0x0003, 0x767D, 0x7CC0, 0x5206, 0x6114, 0x520B, 0x6115, 0x6F17, 0x761F, 0x0034, 0x2801,
+      0x0002, 0x6F12, 0x4208, 0x6C06, 0x761F, 0x0034, 0x2801, 0x0001, 0x6F0B, 0x761F, 0x0034, 0x2B01,
+      0x6F07, 0x76FD, 0x7800, 0x6F0B, 0x76FF, 0x7FF6, 0x6F08, 0x7622, 0x761F, 0x01C0, 0x2829, 0x0068,
+      0x761A, 0x6F00, 0x0200, 0x8D00, 0x0000, 0x8D40, 0x0000, 0x8D80, 0x0000, 0x8DC0, 0x0000, 0x8F00,
+      0x0000, 0x8F40, 0x0000, 0x7680, 0x0000, 0x761F, 0x0000, 0x761A, 0x7620, 0x7622, 0x761F, 0x01C0,
+      0x2829, 0x0028, 0x761A, 0x6F00,
+    ]
+    0x3FFFC0: [
+      0xF3B0, 0x003F, 0x0042, 0x0000, 0x0044, 0x0000, 0x0046, 0x0000, 0x0048, 0x0000, 0x004A, 0x0000,
+      0x004C, 0x0000, 0x004E, 0x0000, 0x0050, 0x0000, 0x0052, 0x0000, 0x0054, 0x0000, 0x0056, 0x0000,
+      0x0058, 0x0000, 0x005A, 0x0000, 0x005C, 0x0000, 0x005E, 0x0000, 0x0060, 0x0000, 0x0062, 0x0000,
+      0x0064, 0x0000, 0xF40D, 0x003F, 0x0068, 0x0000, 0x006A, 0x0000, 0x006C, 0x0000, 0x006E, 0x0000,
+      0x0070, 0x0000, 0x0072, 0x0000, 0x0074, 0x0000, 0x0076, 0x0000, 0x0078, 0x0000, 0x007A, 0x0000,
+      0x007C, 0x0000, 0x007E, 0x0000,
+    ]
+auto_stub_ranges: [[0x0800, 0x0FFF], [0x1000, 0x5FFF], [0x6000, 0x7FFF]]   # unmodelled PF0-PF3 registers: RAM-like stubs
+
+memory:
+  - {name: M0, base: 0x000000, size: 0x0400, kind: ram}
+  - {name: M1, base: 0x000400, size: 0x0400, kind: ram}
+  - {name: CLAMSGRAM, base: 0x001480, size: 0x0100, kind: ram}  # CLA-to-CPU / CPU-to-CLA message RAMs (CLA not run)
+  - {name: L0L8, base: 0x008000, size: 0xC000, kind: ram}      # L0 2K, L1 1K, L2 1K, L3 4K (CLA RAMs), L4 8K, L5-L8 8K each
+  - {name: OTP, base: 0x3D7800, size: 0x0680, kind: rom, fill: 0xFF}     # user OTP + TI calibration (Device_cal, Get_mode)
+  - {name: OTP2, base: 0x3D7EC0, size: 0x0140, kind: rom, fill: 0xFF}    # TI calibration data (0x3D7E80-0x3D7EBF: PARTID block)
+  - {name: FLASH, base: 0x3D8000, size: 0x20000, kind: flash, fill: 0xFF}  # sectors H..A (16K each, Table 8-3)
+  - {name: BOOTROM, base: 0x3F8000, size: 0x8000, kind: rom, fill: 0xFF}   # boot ROM 32K; CPU vectors at 0x3FFFC0
+
+peripherals:
+  - {name: PARTID, model: ti_c2000.partid, base: 0x3D7E80, size: 0x40, params: {partid_offset: 0, value: 0x009E, words: {2: 0xFF20, 3: 0x170A, 4: 0x0006, 5: 0xFF20, 6: 0x06D6, 7: 0x0006}}}   # SPRS698 Table 8-10: F28069PZ; words: getTempSlope/Offset (bootrom asm)
+  # Peripheral Frame 0
+  - {name: DEV_EMU, model: ti_c2000.storage, base: 0x0880, size: 0x105}   # DEVICECNF, CLASSID 0x009F, REVID
+  - {name: BORCFG, model: ti_c2000.storage, base: 0x0985, size: 0x3}
+  - {name: FLASHREGS, model: ti_c2000.flash, base: 0x0A80, size: 0x60, params: {regs: FLASH}}
+  - {name: CSM, model: ti_c2000.csm, base: 0x0AE0, size: 0x10,
+     params: {pwl_base: 0x3F7FF8, secure_ranges: [[0x8000, 0xC000], [0x3D7800, 0x3D7C00], [0x3D8000, 0x3F8000]]}}   # L0-L4, OTP, flash
+  - {name: ADCRESULT, model: ti_c2000.adc_soc_result, base: 0x0B00, size: 0x10}
+  - {name: CPUTIMER0, model: ti_c2000.cputimer, base: 0x0C00, size: 0x8, params: {index: 0}}
+  - {name: CPUTIMER1, model: ti_c2000.cputimer, base: 0x0C08, size: 0x8, params: {index: 1}}
+  - {name: CPUTIMER2, model: ti_c2000.cputimer, base: 0x0C10, size: 0x8, params: {index: 2}}
+  - {name: PIE, model: ti_c2000.pie, base: 0x0CE0, size: 0x120}
+  - {name: DMA, model: ti_c2000.dma, base: 0x1000, size: 0x200, params: {gate: DMAENCLK, epwm_first: 2, epwm_last: 7}}
+  - {name: CLA1, model: ti_c2000.cla, base: 0x1400, size: 0x80}   # storage: the CLA is not emulated
+  # Peripheral Frame 3
+  - {name: MCBSPA, model: ti_c2000.mcbsp, base: 0x5000, size: 0x40, params: {gate: MCBSPAENCLK}}
+  - {name: COMP1, model: ti_c2000.comp, base: 0x6400, size: 0x20, params: {index: 1, ramp: true}}
+  - {name: COMP2, model: ti_c2000.comp, base: 0x6420, size: 0x20, params: {index: 2, ramp: true}}
+  - {name: COMP3, model: ti_c2000.comp, base: 0x6440, size: 0x20, params: {index: 3, ramp: true}}
+  - {name: EPWM1, model: ti_c2000.epwm_dc, base: 0x6800, size: 0x40, params: {gate: EPWM1ENCLK, index: 1, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM2]}}
+  - {name: EPWM2, model: ti_c2000.epwm_dc, base: 0x6840, size: 0x40, params: {gate: EPWM2ENCLK, index: 2, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM3]}}
+  - {name: EPWM3, model: ti_c2000.epwm_dc, base: 0x6880, size: 0x40, params: {gate: EPWM3ENCLK, index: 3, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM4]}}
+  - {name: EPWM4, model: ti_c2000.epwm_dc, base: 0x68C0, size: 0x40, params: {gate: EPWM4ENCLK, index: 4, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM5]}}
+  - {name: EPWM5, model: ti_c2000.epwm_dc, base: 0x6900, size: 0x40, params: {gate: EPWM5ENCLK, index: 5, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM6]}}
+  - {name: EPWM6, model: ti_c2000.epwm_dc, base: 0x6940, size: 0x40, params: {gate: EPWM6ENCLK, index: 6, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM7]}}
+  - {name: EPWM7, model: ti_c2000.epwm_dc, base: 0x6980, size: 0x40, params: {gate: EPWM7ENCLK, index: 7, hrpwm: true, mep_step_ps: 150, sync_next: [EPWM8]}}
+  - {name: EPWM8, model: ti_c2000.epwm_dc, base: 0x69C0, size: 0x40, params: {gate: EPWM8ENCLK, index: 8, hrpwm: true, mep_step_ps: 150, sync_next: []}}
+  - {name: ECAP1, model: ti_c2000.ecap, base: 0x6A00, size: 0x20, params: {gate: ECAP1ENCLK, index: 1}}
+  - {name: ECAP2, model: ti_c2000.ecap, base: 0x6A20, size: 0x20, params: {gate: ECAP2ENCLK, index: 2}}
+  - {name: ECAP3, model: ti_c2000.ecap, base: 0x6A40, size: 0x20, params: {gate: ECAP3ENCLK, index: 3}}
+  - {name: EQEP1, model: ti_c2000.eqep, base: 0x6B00, size: 0x40, params: {gate: EQEP1ENCLK, index: 1}}
+  - {name: EQEP2, model: ti_c2000.eqep, base: 0x6B40, size: 0x40, params: {gate: EQEP2ENCLK, index: 2}}
+  # Peripheral Frame 1
+  - {name: ECANA, model: ti_c2000.ecan, base: 0x6000, size: 0x200, params: {gate: ECANAENCLK, clock_div: 2}}   # SPRUH18 Table 1-15: eCAN-A clocked at SYSCLKOUT/2
+  - {name: HRCAP1, model: ti_c2000.storage, base: 0x6AC0, size: 0x20, params: {gate: HRCAP1ENCLK}}   # HRCAP: register storage only
+  - {name: HRCAP2, model: ti_c2000.storage, base: 0x6AE0, size: 0x20, params: {gate: HRCAP2ENCLK}}
+  - {name: HRCAP3, model: ti_c2000.storage, base: 0x6C80, size: 0x20, params: {gate: HRCAP3ENCLK}}
+  - {name: HRCAP4, model: ti_c2000.storage, base: 0x6CA0, size: 0x20, params: {gate: HRCAP4ENCLK}}
+  - {name: GPIO, model: ti_c2000.piccolo_gpio, base: 0x6F80, size: 0x80}
+  # Peripheral Frame 2
+  - {name: SYSCTRL, model: ti_c2000.piccolo_sysctrl, base: 0x7010, size: 0x30, params: {intosc1_hz: 10000000, intosc2_hz: 10000000, xtal_hz: 0, max_div: 18}}   # incl. PLL2/EPWMCFG (storage)
+  - {name: SPIA, model: ti_c2000.spi, base: 0x7040, size: 0x10, params: {gate: SPIAENCLK, fifo_depth: 4}}
+  - {name: SCIA, model: ti_c2000.sci, base: 0x7050, size: 0x10, params: {fifo_depth: 4}}
+  - {name: NMIINT, model: ti_c2000.nmiwd, base: 0x7060, size: 0x10}
+  - {name: XINT, model: ti_c2000.xint, base: 0x7070, size: 0x10}
+  - {name: ADC, model: ti_c2000.adc_soc, base: 0x7100, size: 0x80, params: {triggers: 20, vrefhi_pin: VREFHI}}
+  - {name: SPIB, model: ti_c2000.spi, base: 0x7740, size: 0x10, params: {gate: SPIBENCLK, fifo_depth: 4}}
+  - {name: SCIB, model: ti_c2000.sci, base: 0x7750, size: 0x10, params: {fifo_depth: 4}}
+  - {name: I2CA, model: ti_c2000.i2c, base: 0x7900, size: 0x40, params: {gate: I2CAENCLK, fifo_depth: 4}}
+
+# Interrupts by vector number, SPRS698 PIE table (group-10 ADCINT1/2 copies named ADCINT1_10 / ADCINT2_10).
+irqs:
+  13: INT13
+  14: INT14
+  18: NMI
+  19: ILLEGAL
+  32: ADCINT1        # 1.1
+  33: ADCINT2        # 1.2
+  35: XINT1          # 1.4
+  36: XINT2          # 1.5
+  37: ADCINT9        # 1.6
+  38: TINT0          # 1.7
+  39: WAKEINT        # 1.8
+  40: EPWM1_TZINT    # 2.1
+  41: EPWM2_TZINT    # 2.2
+  42: EPWM3_TZINT    # 2.3
+  43: EPWM4_TZINT    # 2.4
+  44: EPWM5_TZINT    # 2.5
+  45: EPWM6_TZINT    # 2.6
+  46: EPWM7_TZINT    # 2.7
+  47: EPWM8_TZINT    # 2.8
+  48: EPWM1_INT      # 3.1
+  49: EPWM2_INT      # 3.2
+  50: EPWM3_INT      # 3.3
+  51: EPWM4_INT      # 3.4
+  52: EPWM5_INT      # 3.5
+  53: EPWM6_INT      # 3.6
+  54: EPWM7_INT      # 3.7
+  55: EPWM8_INT      # 3.8
+  56: ECAP1_INT      # 4.1
+  57: ECAP2_INT      # 4.2
+  58: ECAP3_INT      # 4.3
+  62: HRCAP1_INT     # 4.7
+  63: HRCAP2_INT     # 4.8
+  64: EQEP1_INT      # 5.1
+  65: EQEP2_INT      # 5.2
+  67: HRCAP3_INT     # 5.4
+  68: HRCAP4_INT     # 5.5
+  71: USB0_INT       # 5.8
+  72: SPIRXINTA      # 6.1
+  73: SPITXINTA      # 6.2
+  74: SPIRXINTB      # 6.3
+  75: SPITXINTB      # 6.4
+  76: MRINTA         # 6.5
+  77: MXINTA         # 6.6
+  80: DINTCH1        # 7.1
+  81: DINTCH2        # 7.2
+  82: DINTCH3        # 7.3
+  83: DINTCH4        # 7.4
+  84: DINTCH5        # 7.5
+  85: DINTCH6        # 7.6
+  88: I2CINT1A       # 8.1
+  89: I2CINT2A       # 8.2
+  96: SCIRXINTA      # 9.1
+  97: SCITXINTA      # 9.2
+  98: SCIRXINTB      # 9.3
+  99: SCITXINTB      # 9.4
+  100: ECAN0_INTA     # 9.5
+  101: ECAN1_INTA     # 9.6
+  104: ADCINT1_10     # 10.1
+  105: ADCINT2_10     # 10.2
+  106: ADCINT3        # 10.3
+  107: ADCINT4        # 10.4
+  108: ADCINT5        # 10.5
+  109: ADCINT6        # 10.6
+  110: ADCINT7        # 10.7
+  111: ADCINT8        # 10.8
+  112: CLA1_INT1      # 11.1
+  113: CLA1_INT2      # 11.2
+  114: CLA1_INT3      # 11.3
+  115: CLA1_INT4      # 11.4
+  116: CLA1_INT5      # 11.5
+  117: CLA1_INT6      # 11.6
+  118: CLA1_INT7      # 11.7
+  119: CLA1_INT8      # 11.8
+  120: XINT3          # 12.1
+  126: LVF            # 12.7
+  127: LUF            # 12.8
+
+pins:
+  - {num: 1, name: "GPIO42/EPWM8A/TZ1/COMP1OUT", kind: gpio, port: B, bit: 10, default: GPIO, functions: {GPIO: "GPIO42", MUX1: "EPWM8A", MUX2: "TZ1", MUX3: "COMP1OUT"}}
+  - {num: 2, name: "GPIO23/EQEP1I/MFSXA/SCIRXDB", kind: gpio, port: A, bit: 23, default: GPIO, functions: {GPIO: "GPIO23", MUX1: "EQEP1I", MUX2: "MFSXA", MUX3: "SCIRXDB"}}
+  - {num: 3, name: "VDD", kind: power}
+  - {num: 4, name: "VSS", kind: power}
+  - {num: 5, name: "VDDIO", kind: power}
+  - {num: 6, name: "GPIO20/EQEP1A/MDXA/COMP1OUT", kind: gpio, port: A, bit: 20, default: GPIO, functions: {GPIO: "GPIO20", MUX1: "EQEP1A", MUX2: "MDXA", MUX3: "COMP1OUT"}}
+  - {num: 7, name: "GPIO21/EQEP1B/MDRA/COMP2OUT", kind: gpio, port: A, bit: 21, default: GPIO, functions: {GPIO: "GPIO21", MUX1: "EQEP1B", MUX2: "MDRA", MUX3: "COMP2OUT"}}
+  - {num: 8, name: "GPIO43/EPWM8B/TZ2/COMP2OUT", kind: gpio, port: B, bit: 11, default: GPIO, functions: {GPIO: "GPIO43", MUX1: "EPWM8B", MUX2: "TZ2", MUX3: "COMP2OUT"}}
+  - {num: 9, name: "GPIO4/EPWM3A", kind: gpio, port: A, bit: 4, default: GPIO, functions: {GPIO: "GPIO4", MUX1: "EPWM3A"}}
+  - {num: 10, name: "GPIO5/EPWM3B/SPISIMOA/ECAP1", kind: gpio, port: A, bit: 5, default: GPIO, functions: {GPIO: "GPIO5", MUX1: "EPWM3B", MUX2: "SPISIMOA", MUX3: "ECAP1"}}
+  - {num: 11, name: "XRS", kind: special}
+  - {num: 12, name: "TRST", kind: special}
+  - {num: 13, name: "VDDIO", kind: power}
+  - {num: 14, name: "VDD", kind: power}
+  - {num: 15, name: "VSS", kind: power}
+  - {num: 16, name: "ADCINA7", kind: analog, functions: {ANALOG: "ADCINA7"}}
+  - {num: 17, name: "ADCINA6/COMP3A/AIO6", kind: analog, functions: {ANALOG: "ADCINA6/COMP3A", AIO: "AIO6"}}
+  - {num: 18, name: "ADCINA5", kind: analog, functions: {ANALOG: "ADCINA5"}}
+  - {num: 19, name: "ADCINA4/COMP2A/AIO4", kind: analog, functions: {ANALOG: "ADCINA4/COMP2A", AIO: "AIO4"}}
+  - {num: 20, name: "ADCINA3", kind: analog, functions: {ANALOG: "ADCINA3"}}
+  - {num: 21, name: "ADCINA2/COMP1A/AIO2", kind: analog, functions: {ANALOG: "ADCINA2/COMP1A", AIO: "AIO2"}}
+  - {num: 22, name: "ADCINA1", kind: analog, functions: {ANALOG: "ADCINA1"}}
+  - {num: 23, name: "ADCINA0", kind: analog, functions: {ANALOG: "ADCINA0"}}
+  - {num: 24, name: "VREFHI", kind: special}
+  - {num: 25, name: "VDDA", kind: power}
+  - {num: 26, name: "VSSA", kind: power}
+  - {num: 27, name: "VREFLO", kind: special}
+  - {num: 28, name: "ADCINB0", kind: analog, functions: {ANALOG: "ADCINB0"}}
+  - {num: 29, name: "ADCINB1", kind: analog, functions: {ANALOG: "ADCINB1"}}
+  - {num: 30, name: "ADCINB2/COMP1B/AIO10", kind: analog, functions: {ANALOG: "ADCINB2/COMP1B", AIO: "AIO10"}}
+  - {num: 31, name: "ADCINB3", kind: analog, functions: {ANALOG: "ADCINB3"}}
+  - {num: 32, name: "ADCINB4/COMP2B/AIO12", kind: analog, functions: {ANALOG: "ADCINB4/COMP2B", AIO: "AIO12"}}
+  - {num: 33, name: "ADCINB5", kind: analog, functions: {ANALOG: "ADCINB5"}}
+  - {num: 34, name: "ADCINB6/COMP3B/AIO14", kind: analog, functions: {ANALOG: "ADCINB6/COMP3B", AIO: "AIO14"}}
+  - {num: 35, name: "ADCINB7", kind: analog, functions: {ANALOG: "ADCINB7"}}
+  - {num: 36, name: "VSS", kind: power}
+  - {num: 37, name: "VDD", kind: power}
+  - {num: 38, name: "VDDIO", kind: power}
+  - {num: 39, name: "GPIO25/ECAP2/EQEP2B/SPISOMIB", kind: gpio, port: A, bit: 25, default: GPIO, functions: {GPIO: "GPIO25", MUX1: "ECAP2", MUX2: "EQEP2B", MUX3: "SPISOMIB"}}
+  - {num: 40, name: "GPIO31/CANTXA/EQEP2S/EPWM8A", kind: gpio, port: A, bit: 31, default: GPIO, functions: {GPIO: "GPIO31", MUX1: "CANTXA", MUX2: "EQEP2S", MUX3: "EPWM8A"}}
+  - {num: 41, name: "GPIO30/CANRXA/EQEP2I/EPWM7A", kind: gpio, port: A, bit: 30, default: GPIO, functions: {GPIO: "GPIO30", MUX1: "CANRXA", MUX2: "EQEP2I", MUX3: "EPWM7A"}}
+  - {num: 42, name: "GPIO50/EQEP1A/MDXA/TZ1", kind: gpio, port: B, bit: 18, default: GPIO, functions: {GPIO: "GPIO50", MUX1: "EQEP1A", MUX2: "MDXA", MUX3: "TZ1"}}
+  - {num: 43, name: "GPIO29/SCITXDA/SCLA/TZ3", kind: gpio, port: A, bit: 29, default: GPIO, functions: {GPIO: "GPIO29", MUX1: "SCITXDA", MUX2: "SCLA", MUX3: "TZ3"}}
+  - {num: 44, name: "GPIO12/TZ1/SCITXDA/SPISIMOB", kind: gpio, port: A, bit: 12, default: GPIO, functions: {GPIO: "GPIO12", MUX1: "TZ1", MUX2: "SCITXDA", MUX3: "SPISIMOB"}}
+  - {num: 45, name: "TEST2", kind: special}
+  - {num: 46, name: "VDD3VFL", kind: power}
+  - {num: 47, name: "VSS", kind: power}
+  - {num: 48, name: "GPIO51/EQEP1B/MDRA/TZ2", kind: gpio, port: B, bit: 19, default: GPIO, functions: {GPIO: "GPIO51", MUX1: "EQEP1B", MUX2: "MDRA", MUX3: "TZ2"}}
+  - {num: 49, name: "GPIO9/EPWM5B/SCITXDB/ECAP3", kind: gpio, port: A, bit: 9, default: GPIO, functions: {GPIO: "GPIO9", MUX1: "EPWM5B", MUX2: "SCITXDB", MUX3: "ECAP3"}}
+  - {num: 50, name: "GPIO28/SCIRXDA/SDAA/TZ2", kind: gpio, port: A, bit: 28, default: GPIO, functions: {GPIO: "GPIO28", MUX1: "SCIRXDA", MUX2: "SDAA", MUX3: "TZ2"}}
+  - {num: 51, name: "GPIO18/SPICLKA/SCITXDB/XCLKOUT", kind: gpio, port: A, bit: 18, default: GPIO, functions: {GPIO: "GPIO18", MUX1: "SPICLKA", MUX2: "SCITXDB", MUX3: "XCLKOUT"}}
+  - {num: 52, name: "GPIO17/SPISOMIA/TZ3", kind: gpio, port: A, bit: 17, default: GPIO, functions: {GPIO: "GPIO17", MUX1: "SPISOMIA", MUX3: "TZ3"}}
+  - {num: 53, name: "GPIO52/EQEP1S/MCLKXA/TZ3", kind: gpio, port: B, bit: 20, default: GPIO, functions: {GPIO: "GPIO52", MUX1: "EQEP1S", MUX2: "MCLKXA", MUX3: "TZ3"}}
+  - {num: 54, name: "GPIO8/EPWM5A/ADCSOCAO", kind: gpio, port: A, bit: 8, default: GPIO, functions: {GPIO: "GPIO8", MUX1: "EPWM5A", MUX3: "ADCSOCAO"}}
+  - {num: 55, name: "GPIO16/SPISIMOA/TZ2", kind: gpio, port: A, bit: 16, default: GPIO, functions: {GPIO: "GPIO16", MUX1: "SPISIMOA", MUX3: "TZ2"}}
+  - {num: 56, name: "GPIO44/MFSRA/SCIRXDB/EPWM7B", kind: gpio, port: B, bit: 12, default: GPIO, functions: {GPIO: "GPIO44", MUX1: "MFSRA", MUX2: "SCIRXDB", MUX3: "EPWM7B"}}
+  - {num: 57, name: "GPIO7/EPWM4B/SCIRXDA/ECAP2", kind: gpio, port: A, bit: 7, default: GPIO, functions: {GPIO: "GPIO7", MUX1: "EPWM4B", MUX2: "SCIRXDA", MUX3: "ECAP2"}}
+  - {num: 58, name: "GPIO6/EPWM4A/EPWMSYNCI/EPWMSYNCO", kind: gpio, port: A, bit: 6, default: GPIO, functions: {GPIO: "GPIO6", MUX1: "EPWM4A", MUX2: "EPWMSYNCI", MUX3: "EPWMSYNCO"}}
+  - {num: 59, name: "X2", kind: special}
+  - {num: 60, name: "X1", kind: special}
+  - {num: 61, name: "VDDIO", kind: power}
+  - {num: 62, name: "VSS", kind: power}
+  - {num: 63, name: "VDD", kind: power}
+  - {num: 64, name: "GPIO19/XCLKIN/SPISTEA/SCIRXDB/ECAP1", kind: gpio, port: A, bit: 19, default: GPIO, functions: {GPIO: "GPIO19", MUX1: "SPISTEA", MUX2: "SCIRXDB", MUX3: "ECAP1"}}
+  - {num: 65, name: "GPIO53/EQEP1I/MFSXA", kind: gpio, port: B, bit: 21, default: GPIO, functions: {GPIO: "GPIO53", MUX1: "EQEP1I", MUX2: "MFSXA"}}
+  - {num: 66, name: "GPIO39", kind: gpio, port: B, bit: 7, default: GPIO, functions: {GPIO: "GPIO39"}}
+  - {num: 67, name: "GPIO38/XCLKIN/TCK", kind: gpio, port: B, bit: 6, default: GPIO, functions: {GPIO: "GPIO38"}}
+  - {num: 68, name: "GPIO34/COMP2OUT/COMP3OUT", kind: gpio, port: B, bit: 2, default: GPIO, functions: {GPIO: "GPIO34", MUX1: "COMP2OUT", MUX3: "COMP3OUT"}}
+  - {num: 69, name: "GPIO54/SPISIMOA/EQEP2A/HRCAP1", kind: gpio, port: B, bit: 22, default: GPIO, functions: {GPIO: "GPIO54", MUX1: "SPISIMOA", MUX2: "EQEP2A", MUX3: "HRCAP1"}}
+  - {num: 70, name: "GPIO37/TDO", kind: gpio, port: B, bit: 5, default: GPIO, functions: {GPIO: "GPIO37"}}
+  - {num: 71, name: "GPIO35/TDI", kind: gpio, port: B, bit: 3, default: GPIO, functions: {GPIO: "GPIO35"}}
+  - {num: 72, name: "GPIO36/TMS", kind: gpio, port: B, bit: 4, default: GPIO, functions: {GPIO: "GPIO36"}}
+  - {num: 73, name: "GPIO11/EPWM6B/SCIRXDB/ECAP1", kind: gpio, port: A, bit: 11, default: GPIO, functions: {GPIO: "GPIO11", MUX1: "EPWM6B", MUX2: "SCIRXDB", MUX3: "ECAP1"}}
+  - {num: 74, name: "GPIO10/EPWM6A/ADCSOCBO", kind: gpio, port: A, bit: 10, default: GPIO, functions: {GPIO: "GPIO10", MUX1: "EPWM6A", MUX3: "ADCSOCBO"}}
+  - {num: 75, name: "GPIO55/SPISOMIA/EQEP2B/HRCAP2", kind: gpio, port: B, bit: 23, default: GPIO, functions: {GPIO: "GPIO55", MUX1: "SPISOMIA", MUX2: "EQEP2B", MUX3: "HRCAP2"}}
+  - {num: 76, name: "GPIO41/EPWM7B/SCIRXDB", kind: gpio, port: B, bit: 9, default: GPIO, functions: {GPIO: "GPIO41", MUX1: "EPWM7B", MUX2: "SCIRXDB"}}
+  - {num: 77, name: "GPIO27/HRCAP2/EQEP2S/SPISTEB/USB0DM", kind: gpio, port: A, bit: 27, default: GPIO, functions: {GPIO: "GPIO27", MUX1: "HRCAP2", MUX2: "EQEP2S", MUX3: "SPISTEB"}}
+  - {num: 78, name: "GPIO26/ECAP3/EQEP2I/SPICLKB/USB0DP", kind: gpio, port: A, bit: 26, default: GPIO, functions: {GPIO: "GPIO26", MUX1: "ECAP3", MUX2: "EQEP2I", MUX3: "SPICLKB"}}
+  - {num: 79, name: "VDDIO", kind: power}
+  - {num: 80, name: "VSS", kind: power}
+  - {num: 81, name: "VDD", kind: power}
+  - {num: 82, name: "GPIO40/EPWM7A/SCITXDB", kind: gpio, port: B, bit: 8, default: GPIO, functions: {GPIO: "GPIO40", MUX1: "EPWM7A", MUX2: "SCITXDB"}}
+  - {num: 83, name: "GPIO3/EPWM2B/SPISOMIA/COMP2OUT", kind: gpio, port: A, bit: 3, default: GPIO, functions: {GPIO: "GPIO3", MUX1: "EPWM2B", MUX2: "SPISOMIA", MUX3: "COMP2OUT"}}
+  - {num: 84, name: "GPIO2/EPWM2A", kind: gpio, port: A, bit: 2, default: GPIO, functions: {GPIO: "GPIO2", MUX1: "EPWM2A"}}
+  - {num: 85, name: "GPIO56/SPICLKA/EQEP2I/HRCAP3", kind: gpio, port: B, bit: 24, default: GPIO, functions: {GPIO: "GPIO56", MUX1: "SPICLKA", MUX2: "EQEP2I", MUX3: "HRCAP3"}}
+  - {num: 86, name: "GPIO1/EPWM1B/COMP1OUT", kind: gpio, port: A, bit: 1, default: GPIO, functions: {GPIO: "GPIO1", MUX1: "EPWM1B", MUX3: "COMP1OUT"}}
+  - {num: 87, name: "GPIO0/EPWM1A", kind: gpio, port: A, bit: 0, default: GPIO, functions: {GPIO: "GPIO0", MUX1: "EPWM1A"}}
+  - {num: 88, name: "GPIO15/ECAP2/SCIRXDB/SPISTEB", kind: gpio, port: A, bit: 15, default: GPIO, functions: {GPIO: "GPIO15", MUX1: "ECAP2", MUX2: "SCIRXDB", MUX3: "SPISTEB"}}
+  - {num: 89, name: "GPIO57/SPISTEA/EQEP2S/HRCAP4", kind: gpio, port: B, bit: 25, default: GPIO, functions: {GPIO: "GPIO57", MUX1: "SPISTEA", MUX2: "EQEP2S", MUX3: "HRCAP4"}}
+  - {num: 90, name: "VREGENZ", kind: special}
+  - {num: 91, name: "VDD", kind: power}
+  - {num: 92, name: "VSS", kind: power}
+  - {num: 93, name: "VDDIO", kind: power}
+  - {num: 94, name: "GPIO58/MCLKRA/SCITXDB/EPWM7A", kind: gpio, port: B, bit: 26, default: GPIO, functions: {GPIO: "GPIO58", MUX1: "MCLKRA", MUX2: "SCITXDB", MUX3: "EPWM7A"}}
+  - {num: 95, name: "GPIO13/TZ2/SPISOMIB", kind: gpio, port: A, bit: 13, default: GPIO, functions: {GPIO: "GPIO13", MUX1: "TZ2", MUX3: "SPISOMIB"}}
+  - {num: 96, name: "GPIO14/TZ3/SCITXDB/SPICLKB", kind: gpio, port: A, bit: 14, default: GPIO, functions: {GPIO: "GPIO14", MUX1: "TZ3", MUX2: "SCITXDB", MUX3: "SPICLKB"}}
+  - {num: 97, name: "GPIO24/ECAP1/EQEP2A/SPISIMOB", kind: gpio, port: A, bit: 24, default: GPIO, functions: {GPIO: "GPIO24", MUX1: "ECAP1", MUX2: "EQEP2A", MUX3: "SPISIMOB"}}
+  - {num: 98, name: "GPIO22/EQEP1S/MCLKXA/SCITXDB", kind: gpio, port: A, bit: 22, default: GPIO, functions: {GPIO: "GPIO22", MUX1: "EQEP1S", MUX2: "MCLKXA", MUX3: "SCITXDB"}}
+  - {num: 99, name: "GPIO32/SDAA/EPWMSYNCI/ADCSOCAO", kind: gpio, port: B, bit: 0, default: GPIO, functions: {GPIO: "GPIO32", MUX1: "SDAA", MUX2: "EPWMSYNCI", MUX3: "ADCSOCAO"}}
+  - {num: 100, name: "GPIO33/SCLA/EPWMSYNCO/ADCSOCBO", kind: gpio, port: B, bit: 1, default: GPIO, functions: {GPIO: "GPIO33", MUX1: "SCLA", MUX2: "EPWMSYNCO", MUX3: "ADCSOCBO"}}

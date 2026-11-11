@@ -1,0 +1,1220 @@
+ASxxxx Linker V03.00/V05.40 + sdld,  page 1.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CABS                                00000000    00000000 =           0. bytes (ABS,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000000  l_BIT_BANK                      
+C:   00000000  l_BSEG                          
+C:   00000000  l_BSEG_BYTES                    
+C:   00000000  l_CABS                          
+C:   00000000  l_GSINIT1                       
+C:   00000000  l_GSINIT5                       
+C:   00000000  l_IABS                          
+C:   00000000  l_REG_BANK_1                    
+C:   00000000  l_REG_BANK_2                    
+C:   00000000  l_REG_BANK_3                    
+C:   00000000  l_RSEG                          
+C:   00000000  l_RSEG0                         
+C:   00000000  l_RSEG1                         
+C:   00000000  l_XABS                          
+C:   00000000  l_XSEG                          
+C:   00000000  l__CODE                         
+C:   00000000  s_BSEG                          
+C:   00000000  s_CABS                          
+C:   00000000  s_DSEG                          
+C:   00000000  s_HOME                          
+C:   00000000  s_IABS                          
+C:   00000000  s_REG_BANK_0                    
+C:   00000000  s_RSEG                          
+C:   00000000  s_RSEG0                         
+C:   00000000  s_RSEG1                         
+C:   00000000  s_XABS                          
+C:   00000001  l_ISEG                          
+C:   00000001  l_XINIT                         
+C:   00000001  l_XISEG                         
+C:   00000001  s_PSEG                          
+C:   00000001  s_XSEG                          
+C:   00000003  l_GSFINAL                       
+C:   00000003  l_GSINIT0                       
+C:   00000005  l_OSEG                          
+C:   00000007  l_GSINIT                        
+C:   00000008  l_REG_BANK_0                    
+C:   00000008  s_REG_BANK_1                    
+C:   0000000A  l_GSINIT2                       
+C:   0000000A  s_OSEG                          
+C:   0000000F  s_ISEG                          
+C:   00000010  s_REG_BANK_2                    
+C:   00000010  s_SSEG                          
+C:   00000011  l_CONST                         
+C:   00000018  s_BIT_BANK                      
+C:   00000018  s_REG_BANK_3                    
+C:   00000020  s_BSEG_BYTES                    
+C:   00000020  s__CODE                         
+C:   00000022  l_GSINIT3                       
+C:   0000002A  l_GSINIT4                       
+C:   0000004C  l_HOME                          
+ASxxxx Linker V03.00/V05.40 + sdld,  page 2.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CABS                                00000000    00000000 =           0. bytes (ABS,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000004C  s_GSINIT0                       
+C:   0000004F  s_GSINIT1                       
+C:   0000004F  s_GSINIT2                       
+C:   00000059  s_GSINIT3                       
+C:   00000061  l_PSEG                          
+C:   00000062  s_XISEG                         
+C:   0000007B  s_GSINIT4                       
+C:   00000080  l_DSEG                          
+C:   000000A5  s_GSINIT                        
+C:   000000A5  s_GSINIT5                       
+C:   000000AC  s_GSFINAL                       
+C:   000000AF  s_CSEG                          
+C:   000000F0  l_SSEG                          
+C:   00000100  l_IRAM                          
+C:   000005CE  l_CSEG                          
+C:   0000067D  s_CONST                         
+C:   0000068E  s_XINIT                         
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 3.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000000  .__.ABS.                           _startup
+     000000A0  __XPAGE                            
+     000000F5  _B_5                               _gptrget
+     000000F6  _B_6                               _gptrget
+     000000F7  _B_7                               _gptrget
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 4.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+REG_BANK_0                          00000000    00000008 =           8. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 5.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+DSEG                                00000000    00000080 =         128. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000008  G$d1$0_0$0                         models
+     00000008  _d1                                models
+     00000009  _bp                                _bp
+ASxxxx Linker V03.00/V05.40 + sdld,  page 6.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+OSEG                                0000000A    00000005 =           5. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     0000000A  Lmodels.crc16$sloc0$0_1$0          models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 7.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+ISEG                                0000000F    00000001 =           1. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     0000000F  G$i2$0_0$0                         models
+     0000000F  _i2                                models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 8.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+SSEG                                00000010    000000F0 =         240. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000010  __start__stack                     models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 9.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+PSEG                                00000001    00000061 =          97. bytes (REL,CON,PAG,XDATA)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+D:   00000001  G$res$0_0$0                        models
+D:   00000001  _res                               models
+D:   0000000F  G$done$0_0$0                       models
+D:   0000000F  _done                              models
+D:   00000010  Lmodels.dot$a$1_0$31               models
+D:   00000015  Lmodels.dot$b$1_0$31               models
+D:   0000001A  Lmodels.crc16$n$1_0$33             models
+D:   0000001B  Lmodels.crc16$crc$1_0$34           models
+D:   0000001D  Fmodels$arr$0_0$0                  models
+D:   00000035  Lmodels.main$a$1_0$48              models
+D:   0000003A  Lmodels.main$b$1_0$48              models
+D:   0000003F  Lmodels.main$gp$1_0$48             models
+D:   0000004B  ___memcpy_PARM_2                   __memcpy
+D:   0000004E  ___memcpy_PARM_3                   __memcpy
+D:   00000053  __gptrput_PARM_2                   _gptrput
+D:   00000054  __mulint_PARM_2                    _mulint
+D:   00000056  __mullong_PARM_2                   _mullong
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 10.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+XISEG                               00000062    00000001 =           1. bytes (REL,CON,XDATA)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+D:   00000062  G$x3$0_0$0                         models
+D:   00000062  _x3                                models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 11.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+HOME                                00000000    0000004C =          76. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000000  A$models$135                       models
+C:   00000008  A$models$139                       models
+C:   00000008  sdcc_atomic_exchange_rollback_st   models
+C:   00000009  A$models$140                       models
+C:   0000000A  A$models$142                       models
+C:   0000000B  A$models$143                       models
+C:   0000000C  A$models$144                       models
+C:   0000000D  A$models$145                       models
+C:   0000000E  A$models$146                       models
+C:   00000010  A$models$147                       models
+C:   00000011  A$models$148                       models
+C:   00000012  A$models$150                       models
+C:   00000013  A$models$151                       models
+C:   00000014  A$models$152                       models
+C:   00000015  A$models$153                       models
+C:   00000016  A$models$154                       models
+C:   00000018  A$models$156                       models
+C:   00000019  A$models$157                       models
+C:   0000001C  A$models$158                       models
+C:   0000001D  A$models$159                       models
+C:   0000001E  A$models$160                       models
+C:   0000001F  A$models$161                       models
+C:   00000020  A$models$163                       models
+C:   00000021  A$models$164                       models
+C:   00000024  A$models$165                       models
+C:   00000025  A$models$166                       models
+C:   00000026  A$models$167                       models
+C:   00000027  A$models$168                       models
+C:   00000028  A$models$170                       models
+C:   00000029  A$models$171                       models
+C:   0000002C  A$models$172                       models
+C:   0000002D  A$models$173                       models
+C:   0000002E  A$models$174                       models
+C:   0000002F  A$models$178                       models
+C:   0000002F  sdcc_atomic_exchange_gptr_impl     models
+C:   0000002F  sdcc_atomic_exchange_rollback_en   models
+C:   00000032  A$models$179                       models
+C:   00000034  A$models$180                       models
+C:   00000037  A$models$182                       models
+C:   00000038  A$models$183                       models
+C:   00000039  A$models$184                       models
+C:   0000003B  A$models$185                       models
+C:   0000003C  A$models$187                       models
+C:   0000003E  A$models$188                       models
+C:   0000003F  A$models$190                       models
+C:   0000003F  sdcc_atomic_compare_exchange_gpt   models
+C:   00000042  A$models$191                       models
+C:   00000044  A$models$192                       models
+C:   00000047  A$models$193                       models
+C:   00000049  A$models$222                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 12.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+HOME                                00000000    0000004C =          76. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000049  __sdcc_program_startup             models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 13.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT0                             0000004C    00000003 =           3. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000004C  __sdcc_gsinit_startup              
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 14.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT2                             0000004F    0000000A =          10. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 15.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT3                             00000059    00000022 =          34. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000059  __mcs51_genXINIT                   
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 16.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT4                             0000007B    0000002A =          42. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000007B  __mcs51_genRAMCLEAR                
+C:   00000081  __mcs51_genXRAMCLEAR               
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 17.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT                              000000A5    00000007 =           7. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000A5  A$models$209                       models
+C:   000000A5  C$models.c$54$1_0$48               models
+C:   000000A8  A$models$212                       models
+C:   000000A8  C$models.c$55$1_0$48               models
+C:   000000AA  A$models$213                       models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 18.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSFINAL                             000000AC    00000003 =           3. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000AC  A$models$215                       models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 19.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000AF  A$models$248                       models
+C:   000000AF  C$models.c$21$0_0$28               models
+C:   000000AF  Fmodels$fib$0$0                    models
+C:   000000B1  A$models$251                       models
+C:   000000B1  C$models.c$23$1_0$28               models
+C:   000000B4  A$models$253                       models
+C:   000000B6  A$models$254                       models
+C:   000000B8  A$models$255                       models
+C:   000000BA  A$models$256                       models
+C:   000000BC  A$models$258                       models
+C:   000000BD  A$models$259                       models
+C:   000000BE  A$models$260                       models
+C:   000000C0  A$models$261                       models
+C:   000000C2  A$models$262                       models
+C:   000000C5  A$models$263                       models
+C:   000000C7  A$models$264                       models
+C:   000000C9  A$models$265                       models
+C:   000000CB  A$models$266                       models
+C:   000000CC  A$models$267                       models
+C:   000000CE  A$models$268                       models
+C:   000000D0  A$models$269                       models
+C:   000000D2  A$models$270                       models
+C:   000000D4  A$models$271                       models
+C:   000000D7  A$models$272                       models
+C:   000000D9  A$models$273                       models
+C:   000000DB  A$models$274                       models
+C:   000000DD  A$models$275                       models
+C:   000000DF  A$models$276                       models
+C:   000000E0  A$models$277                       models
+C:   000000E1  A$models$278                       models
+C:   000000E2  A$models$279                       models
+C:   000000E3  A$models$280                       models
+C:   000000E4  A$models$281                       models
+C:   000000E5  A$models$283                       models
+C:   000000E7  A$models$284                       models
+C:   000000E9  A$models$289                       models
+C:   000000E9  C$models.c$24$1_0$28               models
+C:   000000E9  XFmodels$fib$0$0                   models
+C:   000000EA  A$models$303                       models
+C:   000000EA  C$models.c$26$1_0$30               models
+C:   000000EA  Fmodels$fact$0$0                   models
+C:   000000EC  A$models$304                       models
+C:   000000EE  A$models$305                       models
+C:   000000F0  A$models$306                       models
+C:   000000F2  A$models$307                       models
+C:   000000F4  A$models$310                       models
+C:   000000F4  C$models.c$28$1_0$30               models
+C:   000000F6  A$models$311                       models
+C:   000000F7  A$models$312                       models
+C:   000000F9  A$models$313                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 20.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000FB  A$models$314                       models
+C:   000000FC  A$models$315                       models
+C:   000000FD  A$models$316                       models
+C:   000000FF  A$models$317                       models
+C:   00000101  A$models$318                       models
+C:   00000104  A$models$319                       models
+C:   00000106  A$models$320                       models
+C:   00000107  A$models$321                       models
+C:   00000109  A$models$322                       models
+C:   0000010A  A$models$323                       models
+C:   0000010C  A$models$324                       models
+C:   0000010D  A$models$325                       models
+C:   0000010F  A$models$326                       models
+C:   00000110  A$models$327                       models
+C:   00000111  A$models$328                       models
+C:   00000113  A$models$329                       models
+C:   00000115  A$models$330                       models
+C:   00000117  A$models$331                       models
+C:   00000119  A$models$332                       models
+C:   0000011B  A$models$333                       models
+C:   0000011D  A$models$334                       models
+C:   0000011E  A$models$335                       models
+C:   00000120  A$models$336                       models
+C:   00000121  A$models$337                       models
+C:   00000122  A$models$338                       models
+C:   00000123  A$models$339                       models
+C:   00000124  A$models$340                       models
+C:   00000125  A$models$341                       models
+C:   00000126  A$models$342                       models
+C:   00000127  A$models$343                       models
+C:   00000128  A$models$344                       models
+C:   00000129  A$models$345                       models
+C:   0000012A  A$models$346                       models
+C:   0000012B  A$models$347                       models
+C:   0000012C  A$models$348                       models
+C:   0000012D  A$models$349                       models
+C:   0000012E  A$models$350                       models
+C:   00000130  A$models$351                       models
+C:   00000132  A$models$352                       models
+C:   00000134  A$models$353                       models
+C:   00000135  A$models$354                       models
+C:   00000138  A$models$355                       models
+C:   0000013A  A$models$356                       models
+C:   0000013C  A$models$357                       models
+C:   0000013E  A$models$358                       models
+C:   0000013F  A$models$359                       models
+C:   00000141  A$models$361                       models
+C:   00000143  A$models$362                       models
+C:   00000145  A$models$363                       models
+C:   00000147  A$models$364                       models
+C:   00000149  A$models$366                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 21.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000014B  A$models$367                       models
+C:   0000014D  A$models$368                       models
+C:   0000014F  A$models$369                       models
+C:   00000150  A$models$372                       models
+C:   00000153  A$models$373                       models
+C:   00000155  A$models$376                       models
+C:   00000155  C$models.c$29$1_0$30               models
+C:   00000155  XFmodels$fact$0$0                  models
+C:   00000156  A$models$389                       models
+C:   00000156  C$models.c$31$1_0$32               models
+C:   00000156  C$models.c$33$1_0$32               models
+C:   00000156  Fmodels$dot$0$0                    models
+C:   00000158  A$models$390                       models
+C:   00000159  A$models$391                       models
+C:   0000015A  A$models$392                       models
+C:   0000015B  A$models$393                       models
+C:   0000015C  A$models$394                       models
+C:   0000015D  A$models$395                       models
+C:   0000015F  A$models$396                       models
+C:   00000161  A$models$397                       models
+C:   00000162  A$models$398                       models
+C:   00000163  A$models$399                       models
+C:   00000164  A$models$400                       models
+C:   00000165  A$models$401                       models
+C:   00000166  A$models$402                       models
+C:   00000167  A$models$403                       models
+C:   00000169  A$models$404                       models
+C:   0000016B  A$models$405                       models
+C:   0000016E  A$models$406                       models
+C:   00000170  A$models$407                       models
+C:   00000172  A$models$408                       models
+C:   00000174  A$models$409                       models
+C:   00000175  A$models$410                       models
+C:   00000176  A$models$411                       models
+C:   00000177  A$models$412                       models
+C:   00000178  A$models$413                       models
+C:   00000179  A$models$414                       models
+C:   0000017B  A$models$415                       models
+C:   0000017D  A$models$416                       models
+C:   0000017E  A$models$417                       models
+C:   0000017F  A$models$418                       models
+C:   00000180  A$models$419                       models
+C:   00000181  A$models$420                       models
+C:   00000182  A$models$421                       models
+C:   00000183  A$models$422                       models
+C:   00000185  A$models$423                       models
+C:   00000187  A$models$424                       models
+C:   00000189  A$models$425                       models
+C:   0000018B  A$models$426                       models
+C:   0000018E  A$models$427                       models
+C:   00000190  A$models$428                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 22.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000192  A$models$429                       models
+C:   00000194  A$models$430                       models
+C:   00000196  A$models$431                       models
+C:   00000197  A$models$432                       models
+C:   00000198  A$models$433                       models
+C:   0000019A  A$models$434                       models
+C:   0000019B  A$models$435                       models
+C:   0000019C  A$models$436                       models
+C:   0000019E  A$models$441                       models
+C:   0000019E  C$models.c$34$1_0$32               models
+C:   0000019E  XFmodels$dot$0$0                   models
+C:   0000019F  A$models$454                       models
+C:   0000019F  C$models.c$36$1_0$34               models
+C:   0000019F  Fmodels$crc16$0$0                  models
+C:   000001A1  A$models$455                       models
+C:   000001A3  A$models$456                       models
+C:   000001A5  A$models$459                       models
+C:   000001A5  C$models.c$38$2_0$34               models
+C:   000001A7  A$models$460                       models
+C:   000001A9  A$models$461                       models
+C:   000001AA  A$models$462                       models
+C:   000001AB  A$models$463                       models
+C:   000001AC  A$models$466                       models
+C:   000001AC  C$models.c$40$1_0$34               models
+C:   000001AE  A$models$467                       models
+C:   000001AF  A$models$468                       models
+C:   000001B0  A$models$470                       models
+C:   000001B2  A$models$471                       models
+C:   000001B3  A$models$472                       models
+C:   000001B4  A$models$473                       models
+C:   000001B6  A$models$476                       models
+C:   000001B6  C$models.c$41$2_0$35               models
+C:   000001B8  A$models$477                       models
+C:   000001BA  A$models$478                       models
+C:   000001BC  A$models$479                       models
+C:   000001BF  A$models$480                       models
+C:   000001C0  A$models$481                       models
+C:   000001C1  A$models$482                       models
+C:   000001C3  A$models$483                       models
+C:   000001C5  A$models$484                       models
+C:   000001C7  A$models$485                       models
+C:   000001C9  A$models$486                       models
+C:   000001CB  A$models$487                       models
+C:   000001CD  A$models$488                       models
+C:   000001CE  A$models$489                       models
+C:   000001CF  A$models$490                       models
+C:   000001D0  A$models$491                       models
+C:   000001D1  A$models$492                       models
+C:   000001D2  A$models$493                       models
+C:   000001D3  A$models$494                       models
+C:   000001D4  A$models$497                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 23.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000001D4  C$models.c$42$1_0$34               models
+C:   000001D6  A$models$501                       models
+C:   000001D6  C$models.c$43$3_0$36               models
+C:   000001D8  A$models$502                       models
+C:   000001D9  A$models$503                       models
+C:   000001DB  A$models$504                       models
+C:   000001DD  A$models$505                       models
+C:   000001DE  A$models$506                       models
+C:   000001DF  A$models$507                       models
+C:   000001E1  A$models$508                       models
+C:   000001E3  A$models$510                       models
+C:   000001E5  A$models$511                       models
+C:   000001E7  A$models$512                       models
+C:   000001E8  A$models$513                       models
+C:   000001EA  A$models$514                       models
+C:   000001EB  A$models$515                       models
+C:   000001EC  A$models$516                       models
+C:   000001ED  A$models$517                       models
+C:   000001EE  A$models$518                       models
+C:   000001EF  A$models$519                       models
+C:   000001F1  A$models$520                       models
+C:   000001F2  A$models$521                       models
+C:   000001F4  A$models$522                       models
+C:   000001F6  A$models$523                       models
+C:   000001F7  A$models$524                       models
+C:   000001F9  A$models$525                       models
+C:   000001FB  A$models$526                       models
+C:   000001FD  A$models$528                       models
+C:   000001FF  A$models$529                       models
+C:   00000200  A$models$530                       models
+C:   00000202  A$models$531                       models
+C:   00000204  A$models$532                       models
+C:   00000205  A$models$533                       models
+C:   00000206  A$models$534                       models
+C:   00000207  A$models$535                       models
+C:   00000209  A$models$537                       models
+C:   0000020B  A$models$538                       models
+C:   0000020D  A$models$539                       models
+C:   0000020E  A$models$540                       models
+C:   00000210  A$models$541                       models
+C:   00000211  A$models$542                       models
+C:   00000212  A$models$545                       models
+C:   00000212  C$models.c$42$3_0$36               models
+C:   00000214  A$models$546                       models
+C:   00000216  A$models$550                       models
+C:   00000216  C$models.c$45$1_0$34               models
+C:   00000218  A$models$551                       models
+C:   00000219  A$models$552                       models
+C:   0000021B  A$models$553                       models
+C:   0000021C  A$models$554                       models
+C:   0000021D  A$models$555                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 24.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000021F  A$models$560                       models
+C:   0000021F  C$models.c$46$1_0$34               models
+C:   0000021F  XFmodels$crc16$0$0                 models
+C:   00000220  A$models$571                       models
+C:   00000220  Fmodels$f_add$0$0                  models
+C:   00000222  A$models$572                       models
+C:   00000224  A$models$573                       models
+C:   00000226  A$models$574                       models
+C:   00000227  A$models$575                       models
+C:   00000229  A$models$576                       models
+C:   0000022A  A$models$577                       models
+C:   0000022B  A$models$578                       models
+C:   0000022D  A$models$581                       models
+C:   0000022D  C$models.c$48$1_0$38               models
+C:   0000022D  XFmodels$f_add$0$0                 models
+C:   0000022E  A$models$592                       models
+C:   0000022E  Fmodels$f_mul$0$0                  models
+C:   00000230  A$models$593                       models
+C:   00000232  A$models$594                       models
+C:   00000234  A$models$595                       models
+C:   00000235  A$models$596                       models
+C:   00000236  A$models$597                       models
+C:   00000237  A$models$598                       models
+C:   00000238  A$models$599                       models
+C:   00000239  A$models$600                       models
+C:   0000023C  A$models$601                       models
+C:   0000023F  A$models$604                       models
+C:   0000023F  C$models.c$49$1_0$40               models
+C:   0000023F  XFmodels$f_mul$0$0                 models
+C:   00000240  A$models$615                       models
+C:   00000240  Fmodels$f_neg$0$0                  models
+C:   00000242  A$models$616                       models
+C:   00000244  A$models$617                       models
+C:   00000245  A$models$618                       models
+C:   00000246  A$models$619                       models
+C:   00000248  A$models$620                       models
+C:   00000249  A$models$621                       models
+C:   0000024A  A$models$622                       models
+C:   0000024C  A$models$625                       models
+C:   0000024C  C$models.c$50$1_0$42               models
+C:   0000024C  XFmodels$f_neg$0$0                 models
+C:   0000024D  A$models$637                       models
+C:   0000024D  C$models.c$59$1_0$46               models
+C:   0000024D  G$finish$0$0                       models
+C:   0000024D  _finish                            models
+C:   0000024F  A$models$642                       models
+C:   0000024F  C$models.c$63$2_0$46               models
+C:   0000024F  XG$finish$0$0                      models
+C:   00000250  A$models$655                       models
+C:   00000250  C$models.c$65$2_0$48               models
+C:   00000250  C$models.c$67$2_0$48               models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 25.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000250  G$main$0$0                         models
+C:   00000250  _main                              models
+C:   00000252  A$models$656                       models
+C:   00000254  A$models$657                       models
+C:   00000255  A$models$658                       models
+C:   00000256  A$models$659                       models
+C:   00000257  A$models$660                       models
+C:   00000258  A$models$661                       models
+C:   0000025A  A$models$662                       models
+C:   0000025C  A$models$663                       models
+C:   0000025D  A$models$664                       models
+C:   0000025E  A$models$665                       models
+C:   00000260  A$models$666                       models
+C:   00000261  A$models$667                       models
+C:   00000263  A$models$668                       models
+C:   00000265  A$models$669                       models
+C:   00000266  A$models$672                       models
+C:   00000266  C$models.c$72$1_0$48               models
+C:   00000269  A$models$673                       models
+C:   0000026C  A$models$674                       models
+C:   0000026E  A$models$675                       models
+C:   00000270  A$models$676                       models
+C:   00000272  A$models$677                       models
+C:   00000273  A$models$678                       models
+C:   00000274  A$models$679                       models
+C:   00000275  A$models$680                       models
+C:   00000276  A$models$681                       models
+C:   00000277  A$models$684                       models
+C:   00000277  C$models.c$73$1_0$48               models
+C:   0000027A  A$models$685                       models
+C:   0000027D  A$models$686                       models
+C:   0000027F  A$models$687                       models
+C:   00000281  A$models$688                       models
+C:   00000283  A$models$689                       models
+C:   00000284  A$models$690                       models
+C:   00000286  A$models$691                       models
+C:   00000287  A$models$692                       models
+C:   00000288  A$models$693                       models
+C:   00000289  A$models$694                       models
+C:   0000028A  A$models$695                       models
+C:   0000028B  A$models$696                       models
+C:   0000028C  A$models$697                       models
+C:   0000028D  A$models$698                       models
+C:   0000028E  A$models$699                       models
+C:   0000028F  A$models$700                       models
+C:   00000290  A$models$701                       models
+C:   00000291  A$models$704                       models
+C:   00000291  C$models.c$74$1_0$48               models
+C:   00000293  A$models$705                       models
+C:   00000295  A$models$706                       models
+C:   00000296  A$models$707                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 26.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000297  A$models$708                       models
+C:   00000298  A$models$709                       models
+C:   00000299  A$models$710                       models
+C:   0000029B  A$models$711                       models
+C:   0000029C  A$models$712                       models
+C:   0000029D  A$models$713                       models
+C:   0000029F  A$models$714                       models
+C:   000002A1  A$models$715                       models
+C:   000002A2  A$models$716                       models
+C:   000002A3  A$models$717                       models
+C:   000002A4  A$models$718                       models
+C:   000002A5  A$models$719                       models
+C:   000002A8  A$models$720                       models
+C:   000002AB  A$models$721                       models
+C:   000002AE  A$models$724                       models
+C:   000002AE  C$models.c$75$1_0$48               models
+C:   000002B0  A$models$725                       models
+C:   000002B2  A$models$726                       models
+C:   000002B3  A$models$727                       models
+C:   000002B4  A$models$728                       models
+C:   000002B5  A$models$729                       models
+C:   000002B6  A$models$732                       models
+C:   000002B6  C$models.c$76$1_0$48               models
+C:   000002B8  A$models$733                       models
+C:   000002BA  A$models$734                       models
+C:   000002BB  A$models$735                       models
+C:   000002BC  A$models$736                       models
+C:   000002BD  A$models$737                       models
+C:   000002BE  A$models$738                       models
+C:   000002C0  A$models$739                       models
+C:   000002C1  A$models$740                       models
+C:   000002C2  A$models$741                       models
+C:   000002C4  A$models$742                       models
+C:   000002C6  A$models$743                       models
+C:   000002C7  A$models$744                       models
+C:   000002C8  A$models$745                       models
+C:   000002C9  A$models$746                       models
+C:   000002CA  A$models$747                       models
+C:   000002CD  A$models$748                       models
+C:   000002D0  A$models$749                       models
+C:   000002D3  A$models$750                       models
+C:   000002D5  A$models$751                       models
+C:   000002D7  A$models$752                       models
+C:   000002D8  A$models$753                       models
+C:   000002D9  A$models$754                       models
+C:   000002DA  A$models$755                       models
+C:   000002DB  A$models$756                       models
+C:   000002DD  A$models$757                       models
+C:   000002DE  A$models$758                       models
+C:   000002DF  A$models$759                       models
+C:   000002E1  A$models$760                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 27.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000002E3  A$models$761                       models
+C:   000002E4  A$models$762                       models
+C:   000002E5  A$models$763                       models
+C:   000002E6  A$models$764                       models
+C:   000002E7  A$models$765                       models
+C:   000002EA  A$models$766                       models
+C:   000002ED  A$models$767                       models
+C:   000002F0  A$models$768                       models
+C:   000002F3  A$models$769                       models
+C:   000002F5  A$models$770                       models
+C:   000002F7  A$models$771                       models
+C:   000002F9  A$models$772                       models
+C:   000002FA  A$models$773                       models
+C:   000002FB  A$models$774                       models
+C:   000002FC  A$models$775                       models
+C:   000002FD  A$models$776                       models
+C:   000002FE  A$models$779                       models
+C:   000002FE  C$models.c$77$1_0$48               models
+C:   00000300  A$models$780                       models
+C:   00000302  A$models$781                       models
+C:   00000303  A$models$782                       models
+C:   00000306  A$models$783                       models
+C:   00000309  A$models$784                       models
+C:   0000030C  A$models$785                       models
+C:   0000030E  A$models$786                       models
+C:   00000310  A$models$787                       models
+C:   00000312  A$models$788                       models
+C:   00000313  A$models$789                       models
+C:   00000314  A$models$790                       models
+C:   00000315  A$models$791                       models
+C:   00000316  A$models$792                       models
+C:   00000317  A$models$795                       models
+C:   00000319  A$models$799                       models
+C:   00000319  C$models.c$79$2_0$49               models
+C:   0000031A  A$models$800                       models
+C:   0000031C  A$models$801                       models
+C:   0000031D  A$models$802                       models
+C:   0000031F  A$models$803                       models
+C:   00000320  A$models$804                       models
+C:   00000323  A$models$805                       models
+C:   00000324  A$models$806                       models
+C:   00000326  A$models$807                       models
+C:   00000327  A$models$810                       models
+C:   00000327  C$models.c$78$2_0$49               models
+C:   00000328  A$models$811                       models
+C:   0000032B  A$models$813                       models
+C:   0000032D  A$models$816                       models
+C:   0000032D  C$models.c$80$1_0$48               models
+C:   0000032F  A$models$820                       models
+C:   0000032F  C$models.c$81$1_0$48               models
+C:   00000331  A$models$822                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 28.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000333  A$models$823                       models
+C:   00000335  A$models$824                       models
+C:   00000336  A$models$825                       models
+C:   00000339  A$models$826                       models
+C:   0000033A  A$models$828                       models
+C:   0000033C  A$models$829                       models
+C:   0000033E  A$models$830                       models
+C:   00000340  A$models$831                       models
+C:   00000341  A$models$832                       models
+C:   00000342  A$models$833                       models
+C:   00000343  A$models$834                       models
+C:   00000344  A$models$835                       models
+C:   00000345  A$models$836                       models
+C:   00000346  A$models$837                       models
+C:   00000347  A$models$838                       models
+C:   00000348  A$models$839                       models
+C:   00000349  A$models$840                       models
+C:   0000034A  A$models$841                       models
+C:   0000034C  A$models$842                       models
+C:   0000034E  A$models$843                       models
+C:   00000351  A$models$844                       models
+C:   00000353  A$models$845                       models
+C:   00000355  A$models$848                       models
+C:   00000355  C$models.c$82$3_0$51               models
+C:   00000356  A$models$849                       models
+C:   00000358  A$models$850                       models
+C:   00000359  A$models$851                       models
+C:   0000035A  A$models$852                       models
+C:   0000035B  A$models$853                       models
+C:   0000035D  A$models$854                       models
+C:   0000035E  A$models$855                       models
+C:   0000035F  A$models$856                       models
+C:   00000361  A$models$857                       models
+C:   00000362  A$models$858                       models
+C:   00000363  A$models$859                       models
+C:   00000364  A$models$860                       models
+C:   00000365  A$models$861                       models
+C:   00000367  A$models$866                       models
+C:   00000367  C$models.c$83$4_0$52               models
+C:   00000367  C$models.c$84$4_0$52               models
+C:   00000368  A$models$867                       models
+C:   00000369  A$models$868                       models
+C:   0000036B  A$models$869                       models
+C:   0000036C  A$models$870                       models
+C:   0000036D  A$models$871                       models
+C:   0000036E  A$models$874                       models
+C:   0000036E  C$models.c$85$4_0$52               models
+C:   0000036F  A$models$875                       models
+C:   00000370  A$models$879                       models
+C:   00000370  C$models.c$81$3_0$51               models
+C:   00000371  A$models$880                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 29.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000373  A$models$884                       models
+C:   00000373  C$models.c$80$2_0$50               models
+C:   00000374  A$models$885                       models
+C:   00000377  A$models$887                       models
+C:   00000379  A$models$890                       models
+C:   00000379  C$models.c$87$1_0$48               models
+C:   0000037B  A$models$891                       models
+C:   0000037D  A$models$892                       models
+C:   0000037E  A$models$895                       models
+C:   0000037E  C$models.c$88$1_0$48               models
+C:   00000380  A$models$899                       models
+C:   00000380  C$models.c$89$2_0$53               models
+C:   00000381  A$models$900                       models
+C:   00000383  A$models$901                       models
+C:   00000384  A$models$902                       models
+C:   00000385  A$models$903                       models
+C:   00000386  A$models$904                       models
+C:   00000388  A$models$905                       models
+C:   00000389  A$models$906                       models
+C:   0000038A  A$models$907                       models
+C:   0000038C  A$models$908                       models
+C:   0000038D  A$models$909                       models
+C:   0000038E  A$models$910                       models
+C:   0000038F  A$models$911                       models
+C:   00000390  A$models$912                       models
+C:   00000392  A$models$915                       models
+C:   00000392  C$models.c$90$2_0$53               models
+C:   00000394  A$models$916                       models
+C:   00000395  A$models$917                       models
+C:   00000396  A$models$921                       models
+C:   00000396  C$models.c$88$2_0$53               models
+C:   00000397  A$models$922                       models
+C:   00000399  A$models$923                       models
+C:   0000039B  A$models$924                       models
+C:   0000039C  A$models$925                       models
+C:   0000039F  A$models$926                       models
+C:   000003A0  A$models$928                       models
+C:   000003A1  A$models$929                       models
+C:   000003A2  A$models$930                       models
+C:   000003A4  A$models$931                       models
+C:   000003A5  A$models$932                       models
+C:   000003A7  A$models$933                       models
+C:   000003A9  A$models$934                       models
+C:   000003AB  A$models$937                       models
+C:   000003AB  C$models.c$91$1_0$48               models
+C:   000003AD  A$models$938                       models
+C:   000003AF  A$models$939                       models
+C:   000003B0  A$models$940                       models
+C:   000003B1  A$models$941                       models
+C:   000003B3  A$models$942                       models
+C:   000003B4  A$models$943                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 30.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000003B5  A$models$944                       models
+C:   000003B7  A$models$945                       models
+C:   000003B8  A$models$948                       models
+C:   000003B8  C$models.c$92$1_0$48               models
+C:   000003BA  A$models$949                       models
+C:   000003BC  A$models$950                       models
+C:   000003BD  A$models$951                       models
+C:   000003BE  A$models$952                       models
+C:   000003C0  A$models$953                       models
+C:   000003C1  A$models$954                       models
+C:   000003C2  A$models$955                       models
+C:   000003C4  A$models$956                       models
+C:   000003C5  A$models$959                       models
+C:   000003C5  C$models.c$93$1_0$48               models
+C:   000003C7  A$models$960                       models
+C:   000003C9  A$models$961                       models
+C:   000003CA  A$models$962                       models
+C:   000003CB  A$models$963                       models
+C:   000003CD  A$models$964                       models
+C:   000003CE  A$models$965                       models
+C:   000003CF  A$models$966                       models
+C:   000003D0  A$models$967                       models
+C:   000003D1  A$models$970                       models
+C:   000003D1  C$models.c$94$1_0$48               models
+C:   000003D3  A$models$971                       models
+C:   000003D5  A$models$972                       models
+C:   000003D6  A$models$973                       models
+C:   000003D7  A$models$974                       models
+C:   000003D9  A$models$975                       models
+C:   000003DA  A$models$976                       models
+C:   000003DB  A$models$977                       models
+C:   000003DD  A$models$978                       models
+C:   000003DE  A$models$981                       models
+C:   000003DE  C$models.c$95$1_0$48               models
+C:   000003E0  A$models$982                       models
+C:   000003E1  A$models$983                       models
+C:   000003E2  A$models$984                       models
+C:   000003E3  A$models$985                       models
+C:   000003E4  A$models$986                       models
+C:   000003E5  A$models$987                       models
+C:   000003E6  A$models$988                       models
+C:   000003E7  A$models$989                       models
+C:   000003E8  A$models$990                       models
+C:   000003EA  A$models$991                       models
+C:   000003EC  A$models$992                       models
+C:   000003EE  A$models$993                       models
+C:   000003F1  A$models$994                       models
+C:   000003F2  A$models$995                       models
+C:   000003F4  A$models$996                       models
+C:   000003F5  A$models$997                       models
+C:   000003F6  A$models$998                       models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 31.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000003F7  A$models$999                       models
+C:   000003F8  A$models$1000                      models
+C:   000003F9  A$models$1001                      models
+C:   000003FA  A$models$1002                      models
+C:   000003FB  A$models$1003                      models
+C:   000003FC  A$models$1004                      models
+C:   000003FE  A$models$1005                      models
+C:   00000400  A$models$1006                      models
+C:   00000402  A$models$1007                      models
+C:   00000405  A$models$1008                      models
+C:   00000406  A$models$1009                      models
+C:   00000407  A$models$1010                      models
+C:   00000409  A$models$1011                      models
+C:   0000040A  A$models$1012                      models
+C:   0000040B  A$models$1013                      models
+C:   0000040C  A$models$1014                      models
+C:   0000040D  A$models$1015                      models
+C:   0000040E  A$models$1016                      models
+C:   0000040F  A$models$1017                      models
+C:   00000410  A$models$1018                      models
+C:   00000411  A$models$1019                      models
+C:   00000413  A$models$1020                      models
+C:   00000415  A$models$1021                      models
+C:   00000417  A$models$1022                      models
+C:   0000041A  A$models$1023                      models
+C:   0000041B  A$models$1024                      models
+C:   0000041C  A$models$1025                      models
+C:   0000041F  A$models$1026                      models
+C:   00000420  A$models$1027                      models
+C:   00000421  A$models$1028                      models
+C:   00000422  A$models$1029                      models
+C:   00000424  A$models$1030                      models
+C:   00000425  A$models$1033                      models
+C:   00000425  C$models.c$96$1_0$48               models
+C:   00000427  A$models$1034                      models
+C:   00000429  A$models$1037                      models
+C:   0000042B  A$models$1041                      models
+C:   0000042B  C$models.c$98$2_0$54               models
+C:   0000042C  A$models$1042                      models
+C:   0000042F  A$models$1043                      models
+C:   00000430  A$models$1044                      models
+C:   00000432  A$models$1045                      models
+C:   00000434  A$models$1046                      models
+C:   00000436  A$models$1047                      models
+C:   00000438  A$models$1048                      models
+C:   0000043A  A$models$1049                      models
+C:   0000043B  A$models$1050                      models
+C:   0000043C  A$models$1051                      models
+C:   0000043D  A$models$1052                      models
+C:   0000043E  A$models$1053                      models
+C:   0000043F  A$models$1054                      models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 32.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000AF    000005CE =        1486. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000440  A$models$1055                      models
+C:   00000441  A$models$1056                      models
+C:   00000443  A$models$1057                      models
+C:   00000445  A$models$1058                      models
+C:   00000447  A$models$1059                      models
+C:   0000044A  A$models$1060                      models
+C:   0000044C  A$models$1062                      models
+C:   0000044E  A$models$1063                      models
+C:   00000450  A$models$1064                      models
+C:   00000452  A$models$1065                      models
+C:   00000454  A$models$1066                      models
+C:   00000455  A$models$1068                      models
+C:   00000457  A$models$1069                      models
+C:   00000459  A$models$1070                      models
+C:   0000045B  A$models$1071                      models
+C:   0000045D  A$models$1072                      models
+C:   0000045F  A$models$1075                      models
+C:   0000045F  C$models.c$97$2_0$54               models
+C:   00000460  A$models$1076                      models
+C:   00000463  A$models$1078                      models
+C:   00000465  A$models$1081                      models
+C:   00000465  C$models.c$99$1_0$48               models
+C:   00000467  A$models$1082                      models
+C:   00000468  A$models$1083                      models
+C:   00000469  A$models$1084                      models
+C:   0000046A  A$models$1085                      models
+C:   0000046B  A$models$1086                      models
+C:   0000046C  A$models$1089                      models
+C:   0000046C  C$models.c$100$1_0$48              models
+C:   0000046E  A$models$1090                      models
+C:   00000470  A$models$1091                      models
+C:   00000471  A$models$1094                      models
+C:   00000471  C$models.c$101$1_0$48              models
+C:   00000474  A$models$1099                      models
+C:   00000474  C$models.c$102$1_0$48              models
+C:   00000474  XG$main$0$0                        models
+C:   00000475  Fmodels$__str_0$0_0$0              models
+C:   00000475  ___memcpy                          __memcpy
+C:   000004DF  __gptrput                          _gptrput
+C:   000004FA  __mulint                           _mulint
+C:   0000051A  __mullong                          _mullong
+C:   0000065D  __gptrget                          _gptrget
+C:   00000679  ___sdcc_external_startup           _startup
+ASxxxx Linker V03.00/V05.40 + sdld,  page 33.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CONST                               0000067D    00000011 =          17. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000067D  Fmodels$ftab$0_0$0                 models
+C:   00000683  G$c4$0_0$0                         models
+C:   00000683  _c4                                models
+ASxxxx Linker V03.00/V05.40 + sdld,  page 34.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+XINIT                               0000068E    00000001 =           1. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000068E  Fmodels$__xinit_x3$0_0$0           models
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 35.
+
+Files Linked                              [ module(s) ]
+
+build/obj_models_medium/models.rel        [  ]
+
+
+Libraries Linked                          [ object file ]
+
+/usr/share/sdcc/lib/medium/mcs51.lib      [ crtclear.rel ]
+/usr/share/sdcc/lib/medium/libsdcc.lib    [ __memcpy.rel ]
+/usr/share/sdcc/lib/medium/mcs51.lib      [ crtxinit.rel ]
+/usr/share/sdcc/lib/medium/libsdcc.lib    [ _gptrput.rel ]
+/usr/share/sdcc/lib/medium/libint.lib     [ _mulint.rel ]
+/usr/share/sdcc/lib/medium/liblong.lib    [ _mullong.rel ]
+/usr/share/sdcc/lib/medium/mcs51.lib      [ crtxclear.rel ]
+/usr/share/sdcc/lib/medium/libsdcc.lib    [ _bp.rel ]
+/usr/share/sdcc/lib/medium/mcs51.lib      [ crtpagesfr.rel ]
+/usr/share/sdcc/lib/medium/mcs51.lib      [ crtstart.rel ]
+/usr/share/sdcc/lib/medium/libsdcc.lib    [ _gptrget.rel ]
+/usr/share/sdcc/lib/medium/libsdcc.lib    [ _startup.rel ]
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 36.
+
+User Base Address Definitions
+
+HOME = 0x0000
+XSEG = 0x0001
+PSEG = 0x0001
+ISEG = 0x0000
+BSEG = 0x0000
+
+

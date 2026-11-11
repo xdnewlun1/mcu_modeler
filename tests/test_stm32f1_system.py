@@ -93,11 +93,12 @@ def test_rcc_pll_hsi_div2_and_limits(desc):
 
 def test_rcc_switch_refused_and_cir(desc):
     chip = spin_chip(desc)
-    wr(chip, RCC + 0x04, 1)                                      # SW = HSE while HSE is off
-    assert (rd(chip, RCC + 0x04) >> 2) & 3 == 0 and any("refused" in m for m in warns(chip))
+    wr(chip, RCC + 0x04, 1)                                      # SW = HSE while HSE is off: pending (7.2.6)
+    assert (rd(chip, RCC + 0x04) >> 2) & 3 == 0 and any("pending" in m for m in warns(chip))
     wr(chip, RCC + 0x08, 1 << 11)                                # HSERDYIE
     wr(chip, RCC, rd(chip, RCC) | (1 << 16))
     assert rd(chip, RCC + 0x08) & (1 << 3) and asserted(chip, 5)   # HSERDYF -> RCC vector
+    assert (rd(chip, RCC + 0x04) >> 2) & 3 == 1                    # the pending switch completes once HSE is ready
     wr(chip, RCC + 0x08, (1 << 11) | (1 << 19))                  # HSERDYC
     assert not rd(chip, RCC + 0x08) & (1 << 3) and not asserted(chip, 5)
 
@@ -262,9 +263,11 @@ def test_rtc_counting_alarm_and_flags(desc):
     chip.run_for(100e3)
     assert rd(chip, RTC + 0x04) & 0x20
     chip.run_for(35e6)
-    assert rd(chip, RTC + 0x1C) == 3 and rd(chip, RTC + 0x04) & 0x2   # ALRF
+    assert rd(chip, RTC + 0x1C) == 3 and not rd(chip, RTC + 0x04) & 0x2
+    chip.run_for(6e6)
+    assert rd(chip, RTC + 0x1C) == 4 and rd(chip, RTC + 0x04) & 0x2   # ALRF at the end of CNT = ALR (18.3.5)
     alarm = [e for e in chip.log if e.kind == "info" and "RTC alarm" in e.fields.get("msg", "")]
-    assert alarm and abs(alarm[0].t_ns - t0 - 3 * 328 / 32768 * 1e9) < 2e5
+    assert alarm and abs(alarm[0].t_ns - t0 - (4 * 328 - 1) / 32768 * 1e9) < 2e5
     div = rd(chip, RTC + 0x14)
     assert 0 <= div <= 327
     wr(chip, RTC + 0x04, 0x3F & ~0x2)                             # rc_w0: clear ALRF only

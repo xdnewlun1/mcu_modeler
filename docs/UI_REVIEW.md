@@ -275,3 +275,68 @@ performance and polish. All were implemented:
 
 Not done: the LED on chip B of boards/three_chip_demo.yaml (board content, see UI_REVIEW_BOARD.md); 144/176-pin names
 at fit on three-chip boards at 1366x768.
+
+## Phase 5 (2026-11-11): real-browser pass, carry-overs
+
+Driver: `tools/ui_shots.py` (new, checked in). It drives headless Firefox through WebDriver BiDi on Firefox's own
+`--remote-debugging-port` with a stdlib WebSocket client (no geckodriver, no pip package), starts its own
+`chipem serve --port 0`, waits until the stream is `live`, runs scripted steps (real pointer clicks, real key events,
+typing, JS probes, direct API calls, stop / restart the server) and writes PNGs plus `report.json` with console errors /
+warnings and failed requests (HTTP >= 400, network errors). CLI: `--board/--fw`, `--size WxH`, `--theme`, `--run`,
+`--steps steps.json`; Python: `UiSession` (see its docstring). Exit status 1 when a run collected errors.
+Screenshots of this pass: `/tmp/claude-1000/-home-xnewlun-Documents-Programming-CHIP-EM/5251e9ff-a82d-4bea-b54c-84e9dd2c16f8/scratchpad/shots/`
+(`final/` = main view of six boards x 1366x768 / 1920x1080 x dark / light, all 24 runs without console errors or
+failed requests; `dbg3/`, `r1/`, `c2/`, `lod/`, `bus2/`, `parts/` = the interaction runs below).
+
+### Checked (pass / fixed)
+
+| item | result |
+|---|---|
+| main view, 1-, 2-, 3-chip boards incl. P89CV51 (PLCC44), F2808 (LQFP100), STM32F103T6 (VFQFPN36) + F405, STM32F437AI (UFBGA169), `boards/parts/k22_uart_device.yaml`, three_chip_demo; 1366 / 1920, both themes | pass after fixes below |
+| header at 1366 x 768: theme and help buttons and the stream indicator were clipped off the right edge (the rate control made the toolbar wider) | **fixed**: theme / help moved out of the clipped readouts (`.hdr-end`), the rate preset list is an arrow-only select next to the free-entry field, the stream state is a dot below 1500 px (text again when offline), `t` column 10ch |
+| rate control: every preset, free entry (0.003 -> `custom`), bad entry (toast), `max`, behind schedule (x1000: amber `×0.07/1000`, tooltip with MIPS per chip and bottleneck), 0.01x pause latency 0.16-0.18 s | pass |
+| performance block: preset switch (slice 500 / 2000, auto quantum), quantum change | **fixed**: the summary waited for the next state frame (up to 1 s while paused); it now updates from the POST answer |
+| Debug tab, ARM with source (uart_link_sender.elf): gutter breakpoint, F5 to it, F10 / F11 / Shift+F11 (outermost frame: clear toast), register edit, memory, watchpoint | pass after fixes: the go-to field rejected `file.c:12` although its placeholder offered it (`bad expression`; now FILE:LINE / function / expression); a go-to unchecked "follow pc", so later stops kept showing the old place (now a go-to / frame / breakpoint target is shown until the next stop, and marked); the pin stimulus field and the pin filter / copy / csv / vcd were shown over the debugger and register browser (now only on Pins / Discovery / Logic); the memory strip takes 77 px and collapses |
+| Debug tab, C28x with source (TI cl2000 `uart_chat.out`) and from a board (F2808), 8051 without source (P89CV51) | pass; addresses were printed 32-bit everywhere (8051 `0x0000007F`): now as wide as the chip's PC from the register metadata; the breakpoint row's delete button overflowed (sticky last cell) |
+| Registers tab: expand a peripheral and a register's fields, filter, write while paused (UART0.BDL = 0x41), `~` marker and **read** (UART0.D, toast), switching chips on a board (8051 -> STM32 tree) | pass; filter field was squeezed by the hint (hint now ellipsised) |
+| CPU register popover / Debug registers per architecture (B7) | **fixed**: app.js formatted registers with a regex of ARM / C28x / 8051 register names (8-bit 8051 registers as 32-bit hex). The server now sends `reg_meta` per chip (`chipem/regmeta.py`: width + format, overridable by `arch.reg_meta()`), `fmt.js fmtReg` formats from it; the popover lists registers first |
+| script part: edit, save with a syntax error (message, file not written, caret to the reported line), restore, reload | pass; "Save & reload" wrapped onto two lines (fixed) |
+| consent: opening a board with script parts from Board setup (styled in-dialog confirm) | pass; adding a script part used a native `window.confirm` (unthemed, invisible to screen captures): now the page's own `<dialog>` (`askConfirm`) |
+| Restart (t=0): confirm popover, page reload, t = 0, logs restart | pass |
+| server stopped: OFFLINE badge, red indicator, toast, reconnect after restart of the server | pass |
+| keyboard: typing `s r b w f 1 ?` into the UART field does nothing else; `?` opens help; F5 outside the Debug tab is left to the browser (reload; BiDi key events cannot trigger browser chrome shortcuts, so this is by design and not exercised); F5 / F4 / F9 act only while the Debug tab is shown, F10 / F11 everywhere | pass |
+| UART framing / parity / noise / break (item 6) | **added**: Events rows of received characters with a line error in the error colour; the UART pane's drop counter also counts line errors per UART (tooltip: last one, filter hint); a break sent by a UART is a `⟨BREAK n bits⟩` marker in the transcript |
+
+### Carry-overs
+
+1. **Pin names on 144 / 176-pin chips at fit** (done): level of detail in `package.js` `lodKeep`: below the name
+   threshold the names that matter stay, at the 9 px readable minimum (`--pfk`): pins on a net, the pinned card's pin
+   and traced pins, then GPIO pins with a peripheral function, greedily per side so names never collide; any pin shows
+   its name on hover / keyboard focus / find. `chip` button and **Z** zoom to the selected chip (again: fit); clicking a
+   chip body already did. three_chip_demo at 1366x768: B shows PC13, NRST, PA0, PA9, PA13, ...; C GPIO28/29, ...
+2. **Locals / globals / watch** (done): `chipem/dwarfvars.py` (DWARF locations incl. location lists, frame base, CFI
+   registers, pieces; base / struct / union / array / pointer / enum / bitfield types; unavailable with a reason, never
+   a guess; TI cl2000 C28x), `/api/debug/locals|globals|eval`, shell `info locals|args`, `print`, `display`; Debug tab
+   tabs registers / locals / watch / globals (`tests/test_dwarfvars.py`).
+3. **Frame / sample previews** (done): parts with `frame_info()/frame_view()` (camera, lcd_panel) get a "frame" popover
+   (canvas, size, frame number, png), parts with `sample_info()/sample_view()` (I2S / SAI codec) a 48 px two-channel
+   waveform in their row; `GET /api/part/frame`, `GET /api/part/samples`; generic by capability (`views` in the part
+   state), not by type name.
+4. **Static assets** (done): content-hash `ETag` + `Cache-Control: no-cache`, 304 on `If-None-Match`; API answers stay
+   `no-store`.
+5. **Bus lines** (done / verified): buses already take their own routing tracks (counted in the gutter and street
+   sizes), so they never share a track with a net; the bus node tags were blank on compact footprints (CAN board: only
+   `CAN0` shown) and are now drawn above the street where the drop leaves the bus. **LED on chip B of three_chip_demo:
+   not done**: B's only toggling pin is PB0, which wiring tests use as a free pin, and UART bytes are not pin edges.
+6. **UART framing / parity / break** (done, see above).
+7. **Register formats from data** (done, see above).
+
+### Still open / found, not mine
+
+- `boards/three_chip_demo.yaml` does not advance when run (virtual time stays 0, `chipem run --board ... --for 3ms`
+  does not return) in the current tree, while each of its chips runs alone: engine work in progress (`chip.py`,
+  `board.py` modified by another agent); recheck when that lands.
+- 8051 memory view: `sp` (an internal-RAM address) is dumped from the code space; the 8051 debugger support owns that.
+- The UFBGA169 package is drawn as a perimeter of 168 pads (chip data choice), not a ball grid.
+- A gutter click on a source line with two code ranges sets two breakpoints (one per address, like the shell's
+  `break file:line`); stepping over that line stops at the second one.

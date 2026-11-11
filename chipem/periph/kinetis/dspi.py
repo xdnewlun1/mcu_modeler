@@ -96,14 +96,16 @@ class DSPI(GatedBlock):
         self.gate = f"SPI{self.index}"
         ov = {"MCR": {"on_write": self._mcr_write},
               "SR": {"w1c_mask": W1C, "ro_mask": ~W1C & 0xFFFFFFFF, "on_read": self._sr_read,
-                     "on_write": self._sr_write},
+                     "on_write": self._sr_write, "on_peek": self._sr_read},
               "RSER": {"on_write": lambda b, r, o, n: self._update()},
               "CTAR0": {"on_write": self._ctar_write}, "CTAR1": {"on_write": self._ctar_write},
               "PUSHR": {"on_write": self._pushr_write},
-              "POPR": {"ro_mask": 0xFFFFFFFF, "on_read": self._popr_read}}
+              "POPR": {"ro_mask": 0xFFFFFFFF, "on_read": self._popr_read, "on_peek": self._popr_peek}}
         for i in range(4):
-            ov[f"TXFR{i}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._fifo_read(True, i)}
-            ov[f"RXFR{i}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._fifo_read(False, i)}
+            ov[f"TXFR{i}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._fifo_read(True, i),
+                              "on_peek": self._fifo_read(True, i)}
+            ov[f"RXFR{i}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._fifo_read(False, i),
+                              "on_peek": self._fifo_read(False, i)}
         r = build_regs((name, f"SPI{self.index}", "SPI0"), size, ov, params.get("regs_file"),
                        skip=("CTAR_SLAVE", "PUSHR_SLAVE"))
         super().__init__(name, base, size, r, log=log, params=params)
@@ -675,6 +677,11 @@ class DSPI(GatedBlock):
         self._update()
         self._kick()
         return None
+
+    def _popr_peek(self, blk, reg):
+        if self.rxq and not self.get("MCR") & MCR_MDIS:
+            return self.rxq[0]                          # the FIFO head, not popped
+        return self._last_rx
 
     def _popr_read(self, blk, reg):
         if self.rxq and not self.get("MCR") & MCR_MDIS:

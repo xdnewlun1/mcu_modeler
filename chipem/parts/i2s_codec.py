@@ -194,6 +194,18 @@ class I2SCodec(Part):
         else:
             self._drive_edge()
 
+    # ---------------------------------------------------------------- UI preview (side-effect free)
+    def sample_info(self) -> dict:
+        """Counters of the recorded stereo frames (the UI refetches the waveform when `seq` changes)."""
+        return {"seq": self.received, "kept": len(self.frames), "bits": self.bits, "channels": 2}
+
+    def sample_view(self, n: int = 512) -> dict:
+        """The last `n` recorded (received) stereo frames as [[left, right], ...] signed integers. When the recording
+        is full (`record_max`), these are the last ones recorded, not the newest received (`received` > `kept`)."""
+        n = max(1, min(int(n), 4096))
+        return {"bits": self.bits, "channels": 2, "received": self.received, "kept": len(self.frames),
+                "full": len(self.frames) >= self.record_max, "samples": [list(f) for f in self.frames[-n:]]}
+
     def state(self) -> dict:
         last = self.frames[-1] if self.frames else None
         return {"received": self.received, "sent": self.sent, "last": list(last) if last else None,

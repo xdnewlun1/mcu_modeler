@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Generate chips/tms320f2833x_regs.yaml (F2833x / F2823x superset register table, 16-bit units) and check it against
+the data sheet.
+
+TI publishes no SVD for the C2000 F2833x family.  chips/tms320f28232_regs.yaml (hand-written, the F28232 subset) holds
+every block of the die except the instances the F28232 does not bond out.  This script copies it and adds those
+instances with the layout of instance A, so the F28335 / F28334 / F28333 / F28332 / F28235 / F28234 descriptions get a
+table with every block of the family (the chip YAMLs then drop what a part does not have):
+
+* SCI-C at 0x7770 (SPRS439Q Table 8-14; PIE 8.5/8.6 SCIRXINTC/SCITXINTC)
+* eCAP5 at 0x6A80, eCAP6 at 0x6AA0 (Table 8-6; PIE 4.5/4.6)
+* McBSP-B at 0x5040 (Table 8-9; PIE 6.3/6.4 MRINTB/MXINTB)
+* ePWM5/6 already carry the HRPWM registers (TBPHSHR, CMPAHR, HRCNFG) in the F28232 table; the F28232 YAML simply
+  does not enable HRPWM on them.
+* DEV_EMU: CLASSID reset 0x00EF (F2833x floating-point class); the F2823x parts override it to 0x00E8 in their YAML
+  (Table 8-31).  The F2833x PARTID lives in OTP at 0x380090 (seeded by `boot.rom_words`), not in DEV_EMU.
+
+    .venv/bin/python -I tools/gen_tms320f2833x_regs.py                     # writes chips/tms320f2833x_regs.yaml
+    .venv/bin/python -I tools/gen_tms320f2833x_regs.py --check-ds ds.txt   # compare with `pdftotext -layout` of
+                                                                           # docs/datasheets/ti/tms320f28232.pdf
+The check parses the register tables of SPRS439Q chapter 8 (Tables 8-3..8-35) and reports every register whose
+address differs or that is missing on either side; it exits 1 on a mismatch.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import sys
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gen_tms320f2808_regs as g28  # noqa: E402  (shared YAML writer and data sheet table parser)
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "chips" / "tms320f28232_regs.yaml"
+DST = ROOT / "chips" / "tms320f2833x_regs.yaml"
+
+ORDER = ["DEV_EMU", "FLASH", "CSM", "ADCMIRROR", "XINTF", "CPUTIMER0", "CPUTIMER1", "CPUTIMER2", "PIE", "DMA",
+         "MCBSPA", "MCBSPB", "ECANA", "ECANB", "EPWM1", "EPWM2", "EPWM3", "EPWM4", "EPWM5", "EPWM6",
+         "ECAP1", "ECAP2", "ECAP3", "ECAP4", "ECAP5", "ECAP6", "EQEP1", "EQEP2", "GPIO", "SYSCTRL", "SPIA", "SCIA",
+         "XINT", "ADC", "SCIB", "SCIC", "I2CA"]
+
+# SPRS439Q chapter 8 register tables: table -> (block per address column, register-name suffix to strip)
+TABLES = {
+    "8-3": ("CPUTIMER", None), "8-4": (["EPWM1", "EPWM2", "EPWM3", "EPWM4", "EPWM5", "EPWM6"], None),
+    "8-6": (["ECAP1", "ECAP2", "ECAP3", "ECAP4", "ECAP5", "ECAP6"], None), "8-7": (["EQEP1", "EQEP2"], None),
+    "8-8": (["ADC", "ADCMIRROR"], None), "8-9": (["MCBSPA", "MCBSPB"], None), "8-11": (["ECANA", "ECANB"], None),
+    "8-12": (["SCIA"], "A"), "8-13": (["SCIB"], "B"), "8-14": (["SCIC"], "C"), "8-15": (["SPIA"], None),
+    "8-16": (["I2CA"], None), "8-17": (["GPIO"], None), "8-21": (["XINTF"], None), "8-31": (["DEV_EMU"], None),
+    "8-33": (["PIE"], None), "8-34": (["XINT"], None), "8-35": (["SYSCTRL"], None),
+}
+
+
+def build(src: dict) -> dict:
+    sp = src["peripherals"]
+    out = {k: copy.deepcopy(v) for k, v in sp.items()}
+    for name, base, irqs, desc in (
+            ("SCIC", 0x7770, {92: "SCIRXINTC", 93: "SCITXINTC"}, "SCI-C (same layout as SCI-A, SPRS439Q Table 8-14)"),
+            ("ECAP5", 0x6A80, {60: "ECAP5_INT"}, "eCAP5 (same layout as eCAP1, SPRS439Q Table 8-6)"),
+            ("ECAP6", 0x6AA0, {61: "ECAP6_INT"}, "eCAP6 (same layout as eCAP1, SPRS439Q Table 8-6)"),
+            ("MCBSPB", 0x5040, {74: "MRINTB", 75: "MXINTB"}, "McBSP-B (same layout as McBSP-A, SPRS439Q Table 8-9)")):
+        tmpl = {"SCIC": "SCIA", "ECAP5": "ECAP1", "ECAP6": "ECAP1", "MCBSPB": "MCBSPA"}[name]
+        b = copy.deepcopy(sp[tmpl])
+        b["base"] = base
+        b["description"] = desc
+        b["group"] = b.get("group", tmpl)
+        b["interrupts"] = irqs
+        out[name] = b
+    for r in out["DEV_EMU"]["registers"]:
+        if r["name"] == "CLASSID":
+            r["reset"] = 0x00EF
+            r["description"] = "0x00EF F2833x floating-point class (F2823x parts: 0x00E8, set in their chip YAML)"
+    out["DEV_EMU"]["description"] = "Device emulation registers (DEVICECNF, CLASSID, REVID, block protection)"
+    missing = [k for k in out if k not in ORDER]
+    if missing:
+        raise SystemExit(f"blocks not in ORDER: {missing}")
+    return {"device": "TMS320F2833x", "svd_version": "hand-written", "address_unit_bits": 16,
+            "cpu": {"name": "C28x", "fpu": True}, "interrupts": dict(sorted(src["interrupts"].items())),
+            "peripherals": {k: out[k] for k in ORDER}}
+
+
+HEADER = """\
+# TMS320F2833x / F2823x register table (superset of the die: F28335, F28334, F28333, F28332, F28235, F28234),
+# GENERATED by tools/gen_tms320f2833x_regs.py -- do not edit by hand; change the generator and rerun it.  TI publishes
+# no SVD for this family.  Every block is copied from chips/tms320f28232_regs.yaml (hand-written, see its header);
+# the instances the F28232 does not have (SCI-C, eCAP5/6, McBSP-B) take the layout of instance A at the SPRS439Q
+# addresses, CLASSID resets to 0x00EF (F2833x).  Every register address was compared with the data sheet tables:
+# `.venv/bin/python -I tools/gen_tms320f2833x_regs.py --check-ds <pdftotext -layout of the PDF>`.
+# Address units are 16-bit words: offsets/sizes/widths count words; a width-2 register is 32 bits, low word first.
+"""
+
+
+def dump(doc: dict) -> str:
+    txt = g28.dump(doc).replace(g28.HEADER.rstrip("\n"), HEADER.rstrip("\n"), 1)
+    return txt.replace("cpu: {name: C28x, fpu: false}", "cpu: {name: C28x, fpu: true}", 1)
+
+
+# data sheet spellings that differ from the register names used by the TRM / TI headers (and the table): typos in
+# SPRS439Q, fixed before the comparison
+DS_FIXES = (("GPIOINT7SEL", "GPIOXINT7SEL"),       # Table 8-17 (XINT5/6 rows above read GPIOXINT5SEL/6SEL)
+            ("SCIPRC ", "SCIPRIC "))               # Table 8-14 (SCI-A/B rows: SCIPRIA/SCIPRIB)
+
+
+def ds_text(raw: str) -> str:
+    """The data sheet text with the DS_FIXES applied and the Table 8-31 per-part value rows ("TMS320F28335 0x00EF",
+    which the table parser would read as registers) removed."""
+    for a, b in DS_FIXES:
+        raw = raw.replace(a, b)
+    return "\n".join(ln for ln in raw.splitlines() if not ln.strip().startswith("TMS320F28"))
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("-o", "--output", default=str(DST))
+    ap.add_argument("--check-ds", metavar="TXT", help="pdftotext -layout output of the F2833x data sheet (SPRS439Q)")
+    ap.add_argument("--no-write", action="store_true")
+    a = ap.parse_args(argv)
+    doc = build(yaml.safe_load(SRC.read_text()))
+    if not a.no_write:
+        Path(a.output).write_text(dump(doc))
+        print(f"wrote {a.output}")
+    if a.check_ds:
+        return 1 if g28.check(doc, ds_text(Path(a.check_ds).read_text(errors="replace")), TABLES, "8") else 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

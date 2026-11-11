@@ -3,7 +3,8 @@
 Parameters: `address` (7-bit bus address, default 0x50), `size` in bytes (default 256 = 24C02), `page` (write page
 size; default from the size: 8 for <= 256 B, 16 up to 2 KiB, 32 for 4-8 KiB, 64 for 16-32 KiB, 128 above), `twr`
 (internal write cycle time, default 5ms), `fill` (erased value, 0xFF), `init` (initial contents from address 0: a
-text string, or "hex:48656C6C6F"), `pullup` (SDA/SCL pull-ups on the breakout, default true).
+text string, or "hex:48656C6C6F"), `file` (initial contents from a binary file, e.g. a boot stream from
+tools/c28x_bootstream.py; relative to the board file), `pullup` (SDA/SCL pull-ups on the breakout, default true).
 
 Addressing (as the Atmel/Microchip AT24C family): up to 2 KiB one word-address byte follows the device address, and
 the memory blocks above 256 bytes are selected by the low device-address bits (a 24C16 answers 0x50..0x57); above
@@ -57,7 +58,14 @@ class I2CEeprom(I2CDevice):
     """24Cxx serial EEPROM on `sda`/`scl` (open drain, optional pull-ups): `address` (0x50), `size` in bytes (256;
     above 2 KiB two word-address bytes), `page` write buffer, `twr` write-cycle time (5ms, NACKs its address while
     busy), `init` text or hex:.. contents, `fill` erased value."""
-    PARAMS = {"address": 0x50, "size": 256, "page": None, "twr": "5ms", "fill": 0xFF, "init": "", "pullup": True}
+    PARAMS = {"address": 0x50, "size": 256, "page": None, "twr": "5ms", "fill": 0xFF, "init": "", "file": "",
+              "pullup": True}
+    PATH_PARAMS = ("file",)
+
+    def __init__(self, part_id: str, params: dict[str, Any] | None = None):
+        params = dict(params or {})
+        params.pop("_board_dir", None)              # (added by the board loader for PATH_PARAMS parts)
+        super().__init__(part_id, params)
     ID_PREFIX = "EE"
 
     def _setup(self) -> None:
@@ -80,6 +88,9 @@ class I2CEeprom(I2CDevice):
             raise ValueError(f"part {self.id}: a {size}-byte EEPROM answers {self.blocks} addresses; "
                              f"address must be a multiple of {self.blocks}")
         init = _init_bytes(self.params["init"])
+        if self.params.get("file"):
+            from pathlib import Path
+            init = Path(str(self.params["file"])).read_bytes()
         if len(init) > size:
             raise ValueError(f"part {self.id}: init has {len(init)} bytes, more than size {size}")
         self._init = init

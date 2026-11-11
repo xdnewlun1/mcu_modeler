@@ -1,0 +1,31 @@
+# TI TMS320F28015 (F2801x: 60 MHz, 16K-word flash, 6K SARAM = M0/M1/L0, ePWM1-4 (HRPWM 1A-4A), eCAP1/2, no eQEP, SPI-A, SCI-A, no eCAN, I2C-A, 3.75-MSPS ADC).
+# Package: 100-pin LQFP "PZ", same pinout as the F2808 ("All the devices in the 280x family have the same MUXing scheme",
+# SPRU712H 4.2; mux selections of peripherals a part does not have are reserved).  Sources: SPRS230P (Rev. P, Feb 2021)
+# Table 6-2 (device comparison), Figure 9-22 (F28015 memory map), Table 9-21 (flash sectors), Table 9-27 (PARTID 0x001C).
+# This file includes the F2808 description (pins, peripherals, PIE table, boot ROM stand-in) and overrides name, core and
+# memory; `drop:` removes the blocks and PIE lines the part does not have, `peripheral_params:` sets PARTID, CSM ranges,
+# the clock and ADC-clock limits, `add_peripherals:` the smaller SARAM mirror.
+include: tms320f2808.yaml
+name: TMS320F28015
+package: LQFP100 (PZ)
+regs_file: tms320f2808_regs.yaml
+core: {arch: c28x, backend: c28x, cpu: c28x, fpu: false, clock_hz: 60000000, addr_unit_bits: 16, num_irqs: 0}
+
+memory:
+  - {name: M0, base: 0x000000, size: 0x0400, kind: ram}
+  - {name: M1, base: 0x000400, size: 0x0400, kind: ram}
+  - {name: L0, base: 0x008000, size: 0x1000, kind: ram}         # L0 (4K, secure), mirrored at 0x3F8000
+  - {name: OTP, base: 0x3D7800, size: 0x0400, kind: rom, fill: 0xFF}       # 1K user OTP (secure)
+  - {name: FLASH, base: 0x3F4000, size: 0x4000, kind: flash, fill: 0xFF}  # sectors D..A, 4K each (Table 9-21); 0x3F7FF6 entry
+  - {name: BOOTROM, base: 0x3FF000, size: 0x1000, kind: rom, fill: 0xFF}   # boot ROM (4K); CPU vectors at 0x3FFFC0
+
+drop: [L01H0HI, EPWM5, EPWM5_TZINT, EPWM5_INT, EPWM6, EPWM6_TZINT, EPWM6_INT, ECAP3, ECAP3_INT, ECAP4, ECAP4_INT,
+       EQEP1, EQEP1_INT, EQEP2, EQEP2_INT, SPIB, SPIRXINTB, SPITXINTB, SPIC, SPIRXINTC, SPITXINTC, SPID, SPIRXINTD,
+       SPITXINTD, SCIB, SCIRXINTB, SCITXINTB, ECANA, ECAN0INTA, ECAN1INTA, ECANB, ECAN0INTB, ECAN1INTB]
+peripheral_params:
+  DEV_EMU: {reset: {PARTID: 0x001C}}    # SPRS230P Table 9-27
+  CSM: {pwl_base: 0x3F7FF8, secure_ranges: [[0x8000, 0x9000], [0x3D7800, 0x3D7C00], [0x3F4000, 0x3F8000], [0x3F8000, 0x3F9000]]}   # L0, OTP, flash, mirror
+  SYSCTRL: {ext_hz: 20000000, max_hz: 60000000}   # 20 MHz crystal: PLLCR = 6, CLKINDIV = 0 -> 60 MHz
+  ADC: {adcclk_max_hz: 7500000}         # ADC clock limit (SPRS230P electrical characteristics)
+add_peripherals:
+  - {name: L0HI, model: ti_c2000.alias, base: 0x3F8000, size: 0x1000, params: {target: 0x8000}}  # program view of L0

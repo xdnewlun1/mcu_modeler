@@ -29,12 +29,19 @@ DOR2, SR.
   (the channel keeps converting old data, 14.3.7) and, with CR.DMAUDRIEx, raises IRQ "TIM6_DAC" (shared with TIM6,
   OR'd).
 Clock gate RCC_APB1ENR.DACEN (a gated-off access logs one `warn`); RCC_APB1RSTR resets the block.
+
+STM32F1 (params `f1: true`, RM0008 ch. 12; high-density / XL / connectivity line): the same channel logic, but there
+is no DAC_SR, no DMAUDRx flag and no DAC interrupt (DMAUDRIEx bits are reserved, 12.5.1): "the DAC DMA request is not
+queued so that if a second external trigger arrives before the acknowledgement of the last request, then the new
+request will not be serviced and no error is reported" (12.3.7) -- the conversion itself still happens.  Triggers
+(12.5.1 TSELx): 000 TIM6, 001 TIM8 (high/XL density; TIM3 on the connectivity line: params `triggers`, the list of
+the six timer names for TSEL 000-101), 010 TIM7, 011 TIM5, 100 TIM2, 101 TIM4, 110 EXTI line 9, 111 software.
 """
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, dma_request, find_model, gpio_resync, irq_number, shared_irq
 
@@ -69,13 +76,15 @@ class DAC(GatedBlock):
         dhr = {"on_write": self._dhr_write, "on_read": self._dhr_read}
         ov = {"CR": {"on_write": self._cr_write},
               "SWTRIGR": {"on_write": self._swtrig_write},
-              "DOR1": {"ro_mask": 0xFFFFFFFF, "on_read": lambda b, r: self.ch[0].dor},
-              "DOR2": {"ro_mask": 0xFFFFFFFF, "on_read": lambda b, r: self.ch[1].dor},
+              "DOR1": {"ro_mask": 0xFFFFFFFF, "on_read": pure_read(lambda b, r: self.ch[0].dor)},
+              "DOR2": {"ro_mask": 0xFFFFFFFF, "on_read": pure_read(lambda b, r: self.ch[1].dor)},
               "SR": {"w1c_mask": SR_DMAUDR[0] | SR_DMAUDR[1], "on_write": self._sr_write}}
         for n in ("DHR12R1", "DHR12L1", "DHR8R1", "DHR12R2", "DHR12L2", "DHR8R2", "DHR12RD", "DHR12LD", "DHR8RD"):
             ov[n] = dhr
         r = build_regs((name, "DAC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        self.f1 = bool(params.get("f1", False))                  # RM0008: no SR / DMAUDR / DAC interrupt
+        self.tsel_timers = tuple(params.get("triggers") or TSEL_TIMERS)
         self.vref = float(params.get("vref", 3.3))
         self.ch = [_Chan(1), _Chan(2)]
         self.listeners: list[Callable[[Any, int], None]] = []
@@ -86,7 +95,7 @@ class DAC(GatedBlock):
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
-        self._irqn = irq_number(chip, "TIM6_DAC", "DAC")
+        self._irqn = None if self.f1 else irq_number(chip, "TIM6_DAC", "DAC")
         board = getattr(chip, "pins", None)
         for c in self.ch:
             sig = f"DAC_OUT{c.n}"
@@ -192,7 +201,7 @@ class DAC(GatedBlock):
         return None
 
     def _update_irq(self) -> None:
-        if self.chip is None:
+        if self.chip is None or self.f1:
             return
         sr, cr = self.get("SR"), self.get("CR")
         on = bool((sr & SR_DMAUDR[0] and cr & DMAUDRIE) or (sr & SR_DMAUDR[1] and cr & (DMAUDRIE << 16)))
@@ -243,7 +252,11 @@ class DAC(GatedBlock):
         cr = self._cr(c)
         if not cr & TEN:                         # 14.3.1: the digital interface works even with ENx = 0
             return
-        if hw and cr & DMAEN:
+        if hw and cr & DMAEN and self.f1:
+            if not c.req:                        # RM0008 12.3.7: not queued; a trigger before the ack is not served
+                c.req = True
+                dma_request(self.chip, f"DAC{c.n}", True)
+        elif hw and cr & DMAEN:
             udr = SR_DMAUDR[c.n - 1]
             if c.req and not self.get("SR") & udr:
                 self.set("SR", self.get("SR") | udr)
@@ -271,8 +284,8 @@ class DAC(GatedBlock):
         if cr & TEN:
             tsel = (cr >> 3) & 7
             if tsel < 6:
-                blk = find_model(self.chip, "stm32.tim", TSEL_TIMERS[tsel])
-                if blk is not None and blk.name == TSEL_TIMERS[tsel]:
+                blk = find_model(self.chip, "stm32.tim", self.tsel_timers[tsel])
+                if blk is not None and blk.name == self.tsel_timers[tsel]:
                     want = blk
             elif tsel == 6:
                 self._warn_once("exti9", f"{self.name}: trigger EXTI line 9 (TSEL{c.n}=110) is not modelled")
@@ -357,6 +370,7 @@ class DAC(GatedBlock):
                 self._transfer_in(c, 1)
         return 0
 
+    @pure_read
     def _dhr_read(self, blk, reg):
         nm = reg.name
         d1, d2 = self.ch[0].dhr, self.ch[1].dhr

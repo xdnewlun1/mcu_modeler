@@ -46,10 +46,10 @@ class Timer01(SfrBlock):
     table = ("TIMER01",)
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        ov = {"TCON": {"on_read": self._tcon_r, "on_write": self._tcon_w},
+        ov = {"TCON": {"on_read": self._tcon_r, "on_write": self._tcon_w, "on_peek": self._fold_peek},
               "TMOD": {"on_write": self._tmod_w}}
         for r in ("TL0", "TH0", "TL1", "TH1"):
-            ov[r] = {"on_read": self._cnt_r, "on_write": self._cnt_w}
+            ov[r] = {"on_read": self._cnt_r, "on_write": self._cnt_w, "on_peek": self._fold_peek}
         super().__init__(name, base, size, regs, params=params, log=log, overrides=ov)
         self.units: list[_Unit] = []
         self.ovf_listeners: dict[int, list[Callable[[], None]]] = {0: [], 1: []}
@@ -201,6 +201,24 @@ class Timer01(SfrBlock):
             n = self._advance(u, k)
             if n:
                 self._overflowed(u, n)
+
+    def _fold_peek(self, blk, reg) -> int:
+        """Debugger peek: the register as a read (which folds the running timers up to now) would return it. The fold
+        runs on the register storage only (counts and TFx), which is restored afterwards: no flags/IRQ lines/t0."""
+        if self.chip is None:
+            return self.get(reg.name)
+        saved = bytes(self.mem)
+        try:
+            now = self.now()
+            for u in self.units:
+                if not self._run.get(id(u)) or not self._timer_mode(u):
+                    continue
+                k = (now - u.t0) // self._div(u)
+                if k > 0 and self._advance(u, k) and u.flag:
+                    self.set("TCON", self.get("TCON") | u.flag)
+            return self.get(reg.name)
+        finally:
+            self.mem[:] = saved
 
     def _overflowed(self, u: _Unit, n: int) -> None:
         if u.timer in (0, 1):

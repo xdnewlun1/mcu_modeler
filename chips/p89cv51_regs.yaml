@@ -11,14 +11,14 @@ device: P89CV51RD2
 svd_version: "hand-written"
 address_unit_bits: 8
 cpu: {name: 80C51, fpu: false}
-interrupts:                 # interrupt number n -> vector 8n+3 (data sheet Table 41 p.53)
+interrupts:                 # interrupt number n -> vector 8n+3 (Table 41 p.53; Timer 2 at 002BH, see chips/p89cv51rd2.yaml)
   0: INT0
   1: TIMER0
   2: INT1
   3: TIMER1
   4: SERIAL
+  5: TIMER2
   6: PCA
-  7: TIMER2
 peripherals:
   CPU:
     base: 0x30000

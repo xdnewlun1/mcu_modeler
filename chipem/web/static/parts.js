@@ -479,3 +479,148 @@ function railSymbol(body, bw, bh) {
     }
   };
 }
+
+// ---------------------------------------------------------------- previews: frame (camera, LCD panel, ...) and audio
+// Generic: a part announces previews in `views` next to its state ({frame: {w, h, seq}}, {samples: {seq, ...}};
+// chipem/web/server.py part_views). The UI never looks at the part type. Data: GET /api/part/frame | /api/part/samples.
+const PREVIEW_MS = 250;              // at most 4 fetches a second per preview, and only when `seq` changed
+
+function cssVar(el, name, dflt) {
+  const v = getComputedStyle(el).getPropertyValue(name).trim();
+  return v || dflt;
+}
+
+// two channels (left above right) of signed samples as polylines in a fixed-height canvas
+export function drawWave(canvas, r) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth || 160, H = canvas.clientHeight || 48;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  }
+  const g = canvas.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const s = (r && r.samples) || [];
+  const full = 2 ** ((r && r.bits ? r.bits : 16) - 1);
+  const half = H / 2;
+  g.strokeStyle = cssVar(canvas, "--line", "gray");
+  g.lineWidth = 1;
+  g.beginPath();
+  for (const y of [half / 2, half + half / 2]) { g.moveTo(0, Math.round(y) + 0.5); g.lineTo(W, Math.round(y) + 0.5); }
+  g.moveTo(0, Math.round(half) + 0.5); g.lineTo(W, Math.round(half) + 0.5);
+  g.stroke();
+  if (!s.length) return;
+  const cols = [cssVar(canvas, "--accent", "blue"), cssVar(canvas, "--own", "teal")];
+  for (let ch = 0; ch < 2; ch++) {
+    const y0 = ch * half + half / 2, amp = half / 2 - 1.5;
+    g.strokeStyle = cols[ch];
+    g.beginPath();
+    s.forEach((fr, i) => {
+      const x = s.length > 1 ? (i * (W - 1)) / (s.length - 1) : 0;
+      const y = y0 - Math.max(-1, Math.min(1, (fr[ch] || 0) / full)) * amp;
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    });
+    g.stroke();
+  }
+}
+
+// one fixed-size popover with a part's frame; refreshes itself (≤ 4 Hz) while open when the frame's seq changes
+export class FramePreview {
+  constructor(api, onClose) {
+    this.api = api;
+    this.onClose = onClose || (() => {});
+    this.id = null; this.seq = null; this.t = 0; this.busy = false; this.last = null;
+    const d = this.el = document.createElement("div");
+    d.className = "help-pop frame-pop";
+    d.setAttribute("role", "dialog");
+    d.hidden = true;
+    d.innerHTML = `<div class="pop-head"><b class="fp-title">frame</b><span class="fp-info"></span>` +
+      `<button type="button" class="btn small ghost" data-a="png" title="download the frame as PNG (full shown resolution)">png</button>` +
+      `<button type="button" class="btn small ghost" data-a="close" title="close (Esc)" aria-label="close">×</button></div>` +
+      `<canvas class="fp-canvas" width="320" height="240"></canvas>`;
+    document.body.appendChild(d);
+    this.cv = d.querySelector("canvas");
+    d.addEventListener("click", (e) => {
+      const a = e.target.closest("[data-a]")?.dataset.a;
+      if (a === "close") this.close();
+      else if (a === "png") this.download();
+    });
+  }
+  get open() { return !this.el.hidden; }
+  show(id, anchor) {
+    this.id = id; this.seq = null; this.last = null;
+    this.el.querySelector(".fp-title").textContent = `${id} frame`;
+    this.el.querySelector(".fp-info").textContent = "loading…";
+    this.el.hidden = false;
+    if (anchor) {
+      const r = anchor.getBoundingClientRect();
+      // beside the button (left of it), never over it; kept inside the window
+      this.el.style.left = `${Math.max(8, Math.min(window.innerWidth - 360, r.left - 352))}px`;
+      this.el.style.top = `${Math.max(40, Math.min(window.innerHeight - 300, r.top - 140))}px`;
+      this.el.style.right = "auto";
+    }
+    this.fetch();
+  }
+  close() { this.el.hidden = true; this.id = null; this.onClose(); }
+  // views: the part's latest `views` from the state stream
+  update(id, views) {
+    if (!this.open || id !== this.id || !views || !views.frame) return;
+    if (views.frame.seq === this.seq) return;
+    if (performance.now() - this.t < PREVIEW_MS) { clearTimeout(this._tm); this._tm = setTimeout(() => this.update(id, views), PREVIEW_MS); return; }
+    this.fetch();
+  }
+  async fetch() {
+    if (this.busy || !this.id) return;
+    this.busy = true; this.t = performance.now();
+    try {
+      const r = await this.api(`/api/part/frame?id=${encodeURIComponent(this.id)}&max_w=320`);
+      if (r.id !== this.id) return;
+      this.seq = r.seq; this.last = r;
+      const raw = atob(r.data || "");
+      const img = new ImageData(Math.max(1, r.w), Math.max(1, r.h));
+      for (let i = 0, j = 0; i + 2 < raw.length && j < img.data.length; i += 3, j += 4) {
+        img.data[j] = raw.charCodeAt(i); img.data[j + 1] = raw.charCodeAt(i + 1); img.data[j + 2] = raw.charCodeAt(i + 2); img.data[j + 3] = 255;
+      }
+      this.cv.width = r.w; this.cv.height = r.h;
+      this.cv.getContext("2d").putImageData(img, 0, 0);
+      // fixed box: the image scaled (integer factor where possible, pixelated) to at most 320 x 240
+      const k = Math.min(320 / r.w, 240 / r.h);
+      const kk = k >= 1 ? Math.floor(k) : k;
+      this.cv.style.width = `${Math.round(r.w * kk)}px`; this.cv.style.height = `${Math.round(r.h * kk)}px`;
+      this.el.querySelector(".fp-info").textContent =
+        `${r.src_w}×${r.src_h}${r.w !== r.src_w ? ` (shown ${r.w}×${r.h})` : ""} · frame ${r.seq}`;
+    } catch (e) {
+      this.el.querySelector(".fp-info").textContent = e.message;
+    } finally { this.busy = false; }
+  }
+  download() {
+    this.cv.toBlob((b) => {
+      if (!b) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b);
+      a.download = `${this.id}_frame${this.seq ?? ""}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }, "image/png");
+  }
+}
+
+// inline waveform of a part with `views.samples` (one per part row), refetched ≤ 4 Hz when seq changes and visible
+export class WavePreviews {
+  constructor(api) { this.api = api; this.m = new Map(); }
+  update(id, views, canvas) {
+    if (!canvas || !views || !views.samples || canvas.offsetParent === null) return;
+    let w = this.m.get(id);
+    if (!w) { w = { seq: null, t: 0, busy: false, r: null }; this.m.set(id, w); }
+    if (w.r && canvas._drawn !== w.r) { drawWave(canvas, w.r); canvas._drawn = w.r; }
+    if (views.samples.seq === w.seq || w.busy || performance.now() - w.t < PREVIEW_MS) return;
+    w.busy = true; w.t = performance.now();
+    this.api(`/api/part/samples?id=${encodeURIComponent(id)}&n=256`).then((r) => {
+      w.seq = views.samples.seq; w.r = r;
+      drawWave(canvas, r); canvas._drawn = r;
+      const n = r.samples.length, last = r.samples[n - 1];
+      canvas.title = `last ${n} of ${r.kept} recorded stereo frames (${r.bits}-bit; left = upper trace, right = lower)` +
+        `${last ? `\nlast: L ${last[0]}  R ${last[1]}` : ""}${r.full ? "\nrecording full (record_max): newer frames are not kept" : ""}`;
+    }).catch(() => {}).finally(() => { w.busy = false; });
+  }
+}

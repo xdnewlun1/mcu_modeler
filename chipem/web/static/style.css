@@ -177,7 +177,7 @@ input:disabled, select:disabled { color: var(--dis-fg); background: var(--dis-bg
 .term .ln.in { color: var(--fg-2); }
 .uart-input { display: flex; gap: 4px; padding: 4px 6px; border-top: 1px solid var(--line); }
 .uart-input input { flex: 1; min-width: 0; font-family: var(--mono); }
-.uart-drops { align-self: center; font-size: 11.5px; color: var(--lv-x); white-space: nowrap; }
+.uart-drops { align-self: center; font-size: 11.5px; color: var(--lv-x); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .link-mon { padding: 4px 8px; display: grid; gap: 2px; font: 11.5px var(--mono); }
 .mon-row { display: grid; grid-template-columns: max-content 1fr max-content; gap: 8px; align-items: center; }
 .mon-dir { color: var(--fg-2); white-space: nowrap; }
@@ -193,6 +193,8 @@ input:disabled, select:disabled { color: var(--dis-fg); background: var(--dis-bg
 .ev .kind { font-weight: 600; }
 .ev .msg { color: var(--fg); overflow-wrap: anywhere; }
 .ev .rep { color: var(--fg-2); font-weight: 700; margin-left: 6px; }
+.ev.ev-err .msg { color: var(--danger); }             /* received character with a framing / parity / noise error or a break */
+.umark { color: var(--lv-x); font-weight: 600; }      /* transcript marker (a break sent), not line text */
 .k-pin { color: var(--lv-h); } .k-uart { color: var(--accent); } .k-can, .k-i2s, .k-usb, .k-eth { color: var(--k-net); }
 .k-part { color: var(--k-part); } .k-irq { color: var(--fg-2); }
 .k-reset { color: var(--own); } .k-fault { color: var(--danger); } .k-warn { color: var(--lv-x); }
@@ -387,3 +389,15 @@ dialog.dialog::backdrop { background: var(--shadow); }
 .bd-chip-head b { margin-right: auto; }
 .bd-confirm, .confirm-pop { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 6px; font-size: 12px;
   background: var(--err-bg); color: var(--err-fg); border: 1px solid var(--err-line); border-radius: var(--radius); }
+/* part previews (parts.js FramePreview / WavePreviews): frame popover and inline two-channel waveform */
+.frame-pop { width: auto; min-width: 220px; max-width: 360px; }
+.frame-pop .fp-info { font: 11px var(--mono); color: var(--fg-3); font-weight: normal; }
+.fp-canvas { display: block; image-rendering: pixelated; background: var(--term-bg); border: 1px solid var(--line); }
+.part-row .part-wave { flex: 1 0 100%; width: 100%; height: 48px; background: var(--term-bg); border: 1px solid var(--line); }
+
+/* confirm dialog (app.js askConfirm): script-part consent */
+dialog.dialog.ask-dlg { width: 460px; top: 25%; left: 50%; right: auto; transform: translateX(-50%); }
+.ask-dlg .dlg-foot { padding: 0 10px 8px; }
+.ask-text { white-space: pre-wrap; margin: 8px 10px; font-size: 12.5px; line-height: 1.45; }
+.script-dlg .dlg-foot .btn { white-space: nowrap; flex: 0 0 auto; }
+.sd-err { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }

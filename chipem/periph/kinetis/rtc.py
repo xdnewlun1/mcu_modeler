@@ -38,8 +38,10 @@ class RTC(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         super().__init__(name, base, size, ram_like=True, log=log, params=params)
         once = dict(on_write=lambda b, r, o, n: o & n)
-        ov = {"TSR": dict(on_write=self._tsr_write, on_read=lambda b, r: self.get("TSR")),
-              "TPR": dict(on_write=self._tpr_write, on_read=lambda b, r: self.tpr()),
+        ov = {"TSR": dict(on_write=self._tsr_write, on_read=lambda b, r: self.get("TSR"),
+                         on_peek=lambda b, r: self.get("TSR")),
+              "TPR": dict(on_write=self._tpr_write, on_read=lambda b, r: self.tpr(),
+                         on_peek=lambda b, r: self.tpr()),
               "TAR": dict(on_write=self._tar_write),
               "CR": dict(on_write=self._cr_write),
               "SR": dict(ro_mask=SR_TIF | SR_TOF | SR_TAF, on_write=self._sr_write),

@@ -567,6 +567,8 @@ class Net:
     def _update_once(self, src_chip: Any) -> None:
         lvl, conflict = self.resolve()
         t = src_chip.now_ns() if src_chip is not None else None
+        if t is not None and self.board._src_t is not None and self.board._src_t < t:
+            t = self.board._src_t           # a lazily published edge (PinBoard.drive_wave): its own time
         if conflict and not self.conflict:
             self.conflicts += 1
             who = ", ".join(f"{w}={v}" for w, v in self.drivers())
@@ -803,6 +805,8 @@ class Board:
                                                     # run_for stops every chip at the next one (sync point)
         self._wave: list[Net] | None = None         # nets queued for the next propagation wave
         self._src: Any = None                       # chip whose event is being propagated
+        self._src_t: float | None = None            # time of the pin event being propagated (a waveform source's
+                                                    # edges are published lazily, with their own past timestamps)
         self._loop_warned: set = set()
         # merged log: copy what the chips logged so far (time order), then mirror live
         backlog = []
@@ -820,6 +824,8 @@ class Board:
                 self._unsubs.append(chip.log.subscribe(lambda ev, _c=cid: self._mirror(_c, ev)))
             if chip.pins is not None:
                 self._unsubs.append(chip.pins.subscribe(lambda ev, _c=cid, _chip=chip: self._on_pin(_c, _chip, ev)))
+                if hasattr(chip.pins, "wave_rt_hook"):
+                    chip.pins.wave_rt_hook = lambda pin, _c=cid: self._wave_rt(_c, pin)
 
     # ---------------------------------------------------------------- log
     def _mirror(self, cid: str, ev: Any) -> None:
@@ -1198,7 +1204,36 @@ class Board:
             # only an output's level change is a new contribution
             if chip.pins.get(ev.pin).direction != "out":
                 return
+            prev, self._src_t = self._src_t, ev.t_ns
+            try:
+                net.update(chip)
+            finally:
+                self._src_t = prev
+            return
         net.update(chip)
+
+    def _wave_rt(self, cid: str, pin: Any) -> bool:
+        """PinBoard.wave_rt_hook: must the edges of a waveform source (UART TX frame) on this chip pin be applied
+        live (one scheduler event per edge) because the pin's net has an observer? Parts on the net and member pins
+        that something reads (GPIO, timer capture, interrupts: any owner but a UART RX, which gets the frame through
+        the board's UART link, or a disabled / analog pin) need them live; otherwise the edges reach the net lazily
+        with their own timestamps (a chip behind the source still gets each change at its time)."""
+        net = self._net_of.get((cid, pin.id))
+        if net is None:
+            return False
+        if any(part.ports[port].is_input for part, port in net.ports):
+            return True
+        for _c, _chip, p in net.members:
+            if p is pin:
+                continue
+            own = p.owner
+            if own in ("disabled", "analog") or p.direction == "analog":
+                continue
+            us = uart_signal(own)
+            if us is not None and us[1] == "rx":
+                continue
+            return True
+        return False
 
     # ---------------------------------------------------------------- export
     def to_dict(self, base: str | Path | None = None) -> dict:

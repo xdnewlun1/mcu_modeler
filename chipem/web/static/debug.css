@@ -34,10 +34,10 @@
 .dbg-code .empty { color: var(--fg-3); padding: 4px 8px; }
 .dbg-side { flex: 0 0 42%; min-width: 220px; display: flex; flex-direction: column; overflow: hidden; }
 .dbg-sec { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
-.dbg-regs-sec { flex: 3 1 0; }
-.dbg-stack-sec { flex: 1.3 1 0; }
-.dbg-bps-sec { flex: 1.7 1 0; }
-.dbg-h { display: flex; align-items: center; gap: 4px; padding: 1px 4px; border-bottom: 1px solid var(--line); background: var(--raise);
+.dbg-regs-sec { flex: 4 1 0; }
+.dbg-stack-sec { flex: 1.2 1 0; min-height: 52px; }
+.dbg-bps-sec { flex: 1.4 1 0; min-height: 52px; }
+.dbg-h { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 1px 4px; border-bottom: 1px solid var(--line); background: var(--raise);
   font-size: 11.5px; min-height: 22px; flex-wrap: wrap; }
 .dbg-h b { font-weight: 600; color: var(--fg-2); }
 .dbg-h .btn { margin-left: auto; }
@@ -55,7 +55,9 @@
 .dbg-stack td.ad, .dbg-bps td.ad { color: var(--fg-3); }
 .dbg-bps td.ad { cursor: pointer; }
 .dbg-stack td.how { color: var(--lv-x); }
-.dbg-bps td.wh { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+.dbg-bps td.wh { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+.dbg-bps td.cd { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
+.dbg-bps td:last-child { position: sticky; right: 0; background: var(--panel); }
 .dbg-bps td.cd { cursor: pointer; color: var(--fg-2); }
 .dbg-bps .btn { margin: 0; }
 .dbg-add { display: flex; gap: 3px; flex: 1 1 auto; margin-left: 6px; }
@@ -64,7 +66,7 @@
 .dbg-mem { flex: 0 0 auto; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
 .dbg-mem .dbg-h .btn { margin-left: 0; }
 .dbg-mem-addr { width: 150px; }
-.dbg-dump { height: 98px; margin: 0; overflow: auto; font: 11.5px/15px var(--mono); padding: 2px 6px; white-space: pre; }
+.dbg-dump { height: 77px; margin: 0; overflow: auto; font: 11.5px/15px var(--mono); padding: 2px 6px; white-space: pre; }
 .nx { color: var(--fg-3); }
 .dbg-dump .chg { color: var(--lv-x); font-weight: 600; }
 /* registers browser */
@@ -82,3 +84,34 @@
 .rv-table tr.chg td.v { color: var(--lv-x); font-weight: 600; }
 .rv-table tr.rv-f td.nm { color: var(--fg-2); padding-left: 18px; }
 .rv-table .btn { height: 18px; padding: 0 4px; }
+/* side column tabs (registers / locals / watch / globals) and variable tables */
+.dbg-tabs { gap: 0; padding: 0 2px; flex-wrap: nowrap; }
+.dtab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--fg-2); font: 600 11.5px var(--sans);
+  padding: 2px 7px; cursor: pointer; }
+.dtab:hover { color: var(--fg); }
+.dtab.on { color: var(--fg); border-bottom-color: var(--accent); }
+.dbg-tab-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbg-vars th { color: var(--fg-3); font-weight: normal; position: sticky; top: 0; background: var(--panel); }
+.dbg-vars th.fr { color: var(--fg-2); }
+.dbg-vars td.nm { color: var(--fg); }
+.dbg-vars tr.has-kids td.nm { cursor: pointer; }
+.dbg-vars td.v { color: var(--term-fg); max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+.dbg-vars td.ty, .dbg-vars td.lc { color: var(--fg-3); max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+.dbg-vars td.lc [data-b=mem] { cursor: pointer; text-decoration: underline dotted; }
+.dbg-vars td.err { color: var(--danger); }
+.dbg-vars .na { color: var(--fg-3); font-style: italic; }
+.dbg-vars tr.chg td.v { color: var(--lv-x); font-weight: 600; }
+.dbg-vars tr:hover td { background: var(--raise); }
+.dbg-vars .btn { height: 16px; padding: 0 4px; margin: 0; }
+.dbg-watch-add { display: flex; gap: 3px; padding: 2px 4px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.dbg-watch-add input { flex: 1 1 auto; min-width: 8ch; height: 22px; font: 11.5px var(--mono); background: var(--panel); color: var(--fg);
+  border: 1px solid var(--input-line); border-radius: 3px; padding: 0 4px; }
+.dbg-glob-filter { margin: 2px 4px; width: calc(100% - 8px); }
+.dbg-stack tr.sel td { background: var(--sel-row); }
+.dbg-mem.collapsed .dbg-dump { display: none; }
+.dbg-mem-tog { margin-right: 2px; }
+.dbg-mem.collapsed .pane-tog::before { content: "▸"; }
+.dbg-code .r.tgt { box-shadow: inset 2px 0 0 var(--accent); }
+.rv .dbg-bar { flex-wrap: nowrap; }
+.rv .dbg-bar .dbg-hint { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-filter { flex: 0 0 280px; }

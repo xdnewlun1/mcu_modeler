@@ -28,6 +28,7 @@ TABLE = SignalTable([
     (r"SDIO_CMD", OUT_H),                    # idles high (pulled up)
     (r"SDIO_D\d", IN),
     (r"DCMI_(D\d+|HSYNC|VSYNC|PIXCLK)", IN),   # camera interface: all inputs (stm32.dcmi)
+    (r"LCD_(CLK|HSYNC|VSYNC|DE|[RGB]\d)", OUT_L),   # LCD-TFT outputs (stm32.ltdc sets the live idle levels)
     (r"ETH_MDC", OUT_L),                     # MDIO clock (stm32.eth summarises it as a `wave`)
     (r"ETH_MDIO", OD),                       # management data: pulled up between transactions
     (r"ETH_(MII|RMII)_(TX_EN|TXD\d)", OUT_L),  # transmit data (not toggled per bit)
@@ -42,4 +43,12 @@ TABLE = SignalTable([
     (r"JTMS-SWDIO|JTCK-SWCLK|JTDI|NJTRST", IN),
     (r"JTDO|TRACESWO", OUT_H),
     (r"(ADC\d*_IN\d+|DAC_OUT\d+)", ANALOG),
+    # STM32F446 (stm32.quadspi drives CLK/NCS/IO live while a command runs; the others are register storage only)
+    (r"QUADSPI_CLK", OUT_L),
+    (r"QUADSPI_BK\d_NCS", OUT_H),           # chip select, active low
+    (r"QUADSPI_BK\d_IO\d", IN),             # bidirectional data; released (pulled up on boards) between commands
+    (r"FMPI2C\d+_(SDA|SCL)", OD),
+    (r"FMPI2C\d+_SMBA", IN),
+    (r"CEC", OD),                            # HDMI-CEC single-wire bus (open-drain)
+    (r"SPDIFRX_IN\d", IN),
 ])

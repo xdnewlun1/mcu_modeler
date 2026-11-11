@@ -63,7 +63,7 @@ class PDB(GatedBlock):
         self.gate = params.get("gate", "PDB")
         ov: dict[str, dict] = {
             "SC": {"on_write": self._sc_write},
-            "CNT": {"on_read": self._cnt_read},
+            "CNT": {"on_read": self._cnt_read, "on_peek": self._cnt_read},     # computed from the time
         }
         for n in range(NCH):
             ov[f"CH{n}S"] = {"on_write": self._chs_write}

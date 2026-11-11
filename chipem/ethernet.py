@@ -852,7 +852,9 @@ def find_eth(chip: Any, name: str) -> str | None:
     return None
 
 
-PHY_KEYS = ("model", "addr", "aneg", "link", "reset", "id1", "id2")
+PHY_KEYS = ("model", "addr", "aneg", "link", "reset", "id1", "id2", "clock")
+# `clock`: where the PHY's reference clock comes from: "phy" (its own crystal, default) or "mco" (an MCU clock output;
+# only MACs that model it use it, e.g. stm32f1.eth: the STM32F107 MCO pin; others drop it)
 
 
 def phy_options(d: Any, where: str) -> dict:

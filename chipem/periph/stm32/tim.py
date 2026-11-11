@@ -106,12 +106,15 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
 * OCxFE (fast enable) is a no-op: trigger reactions are already immediate.  Not modelled: OCxCE (OCxREF clear on
   ETRF), CR2 CCPC/COM preload (COMG), the ETF / ICxF digital filters, TIM2_OR / TIM5_OR / TIM11_OR input remaps, the
   DMA burst registers DCR/DMAR (stored only).
+* `params.strict_regs` (STM32F401/F411 chip files, RM0368/RM0383 ch. 12-14): ARR resets to 0xFFFF (TIM2/TIM5
+  0xFFFFFFFF), CNT/ARR/CCRx bits above a 16-bit counter are reserved, TIM9/TIM12 have no CR2.  Without it the SVD
+  values are kept (ARR = 0 after reset, 32-bit storage on TIM3/4).
 """
 from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, irq_number, timer_hz, rcc
 
@@ -217,9 +220,9 @@ class TIM(GatedBlock):
             "PSC": {"on_write": self._psc_write},
             "ARR": {"on_write": self._arr_write},
             "CNT": {"on_read": self._cnt_read, "on_write": self._cnt_write},
-            "EGR": {"on_write": self._egr_write, "on_read": lambda b, r: 0},
+            "EGR": {"on_write": self._egr_write, "on_read": pure_read(lambda b, r: 0)},
             "DIER": {"on_write": self._dier_write},
-            "SR": {"on_write": self._sr_write, "on_read": self._sr_read},
+            "SR": {"on_write": self._sr_write, "on_read": self._sr_read, "on_peek": self._sr_peek},
             "CCER": {"on_write": self._ccer_write},
             "BDTR": {"on_write": self._bdtr_write},
             "SMCR": {"on_write": self._smcr_write},
@@ -227,9 +230,21 @@ class TIM(GatedBlock):
             "CCMR2_Output": {"on_write": self._oc_cfg_write}, "CCMR2_Input": {"on_write": self._oc_cfg_write},
         }
         for n in range(1, 5):
-            ov[f"CCR{n}"] = {"on_write": self._ccr_write(n), "on_read": self._ccr_read(n)}
+            ov[f"CCR{n}"] = {"on_write": self._ccr_write(n), "on_read": self._ccr_read(n),
+                             "on_peek": lambda b, r: None}      # the stored value; the read clears CCxIF
         if name in ONE_CH_TIMERS:      # RM0090 19.5.1 (Rev 22): CR1.OPM exists; the SVD marks bit 3 reserved
             ov["CR1"]["ro_mask"] = 0xFFFFFC70
+        if params.get("strict_regs"):
+            # RM0368/RM0383 12.4.12, 13.4.10-13.4.16, 14.4.8-14.4.12, 14.5.7-14.5.10: ARR resets to all ones of the
+            # counter (0xFFFF, TIM2/TIM5 0xFFFFFFFF); CNT/ARR/CCRx bits above the counter width are reserved (TIM3/4
+            # are 16-bit); TIM9 (two-channel, 14.4) has no CR2 at 0x04 (Table 59).  The SVD gives ARR = 0, 32-bit
+            # fields on TIM3/4 and a TIM9 CR2.MMS.
+            ov["ARR"]["reset"] = self.cmask
+            if self.bits < 32:
+                for rn in ["CNT", "ARR"] + [f"CCR{n}" for n in range(1, 5)]:
+                    ov[rn]["ro_mask"] = ~self.cmask & 0xFFFFFFFF
+            if name in ("TIM9", "TIM12"):
+                ov["CR2"] = {"ro_mask": 0xFFFFFFFF, "on_read": pure_read(lambda b, r: 0)}
         r = build_regs((name, "TIM2" if name in WIDE else "TIM3"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self._ev = None
@@ -635,6 +650,7 @@ class TIM(GatedBlock):
         self.irq(n, bool(who))
 
     # ------------------------------------------------------------ register hooks
+    @pure_read
     def _cr1_read(self, blk, reg):
         v = int.from_bytes(self.mem[reg.boff:reg.boff + reg.bw], "little")
         if self.running and (v >> CMS_SHIFT) & 3:          # center-aligned: DIR is read-only status
@@ -714,6 +730,7 @@ class TIM(GatedBlock):
                 self.arr = new & self.cmask
         return None
 
+    @pure_read
     def _cnt_read(self, blk, reg):
         return self.cnt()
 
@@ -1009,6 +1026,21 @@ class TIM(GatedBlock):
         if new != sr:
             self.set("SR", new)
             self._update_line()
+
+    def _sr_peek(self, blk, reg):
+        """SR as read now (quiet channels: the CCxIF of matches already passed), without storing them."""
+        sr = self.get("SR")
+        if self._quiet and self.running:
+            upto = self._ticks_now()
+            pos0 = self._start_cnt
+            for c in self._quiet:
+                lk = c.lazy_k
+                for k in self._match_ticks(pos0, c.ccr):
+                    if k > lk and k <= upto + 1e-9:
+                        if self._flag_dir_ok(pos0, k):
+                            sr |= 1 << c.n
+                        lk = k
+        return sr
 
     def _sr_read(self, blk, reg):
         if self._quiet and self.running:

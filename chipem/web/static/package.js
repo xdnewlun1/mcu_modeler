@@ -324,6 +324,7 @@ export class PackageView {
 
   // rows: live pin rows of this chip; only attributes that changed are written to the DOM
   update(rows, changed = new Set()) {
+    if (this._lab === false) queueMicrotask(() => this.lodKeep());     // nets / owners may have changed
     for (const r of rows) {
       const it = this.items.get(r.num);
       if (!it) continue;
@@ -334,7 +335,7 @@ export class PackageView {
       const cat = ownerCategory(pin, owner);
       const c = `pin ${cls} own-${cat}` + (pin.kind === "gpio" ? " clickable" : "") + (r.net ? " in-net" : "") +
                 (changed.has(r.num) ? " flash" : "");
-      if (c !== it.cls) { it.g.setAttribute("class", c); it.cls = c; if (r.net && it.bgFw !== this.fw) this.fitOwner(it, true); }
+      if (c !== it.cls) { it.g.setAttribute("class", c + (it.keep ? " lod-keep" : "")); it.cls = c; if (r.net && it.bgFw !== this.fw) this.fitOwner(it, true); }
       const dir = r.direction;
       const d = dir === "in" || dir === "out" ? this.arrowPath(it, dir) : "";
       if (d !== it.d) { it.arrow.setAttribute("d", d); it.d = d; }
@@ -401,13 +402,52 @@ export class PackageView {
   // Level of detail at `scale` screen px per world unit. Names: native size, but never below MIN_LABEL_PX while the
   // pitch has room (counter-scaled), capped by the pitch so adjacent names do not overlap; hidden only below HIDE_LABEL_PX.
   // Owners keep their native size and show when the label fits (fitOwner). Numbers hide below 4.5 px.
+  // Level of detail below the name threshold: name the pins that matter: wired to a net, selected / pinned in the
+  // card (setMarked), then pins owned by a peripheral, as long as their names do not collide on screen (greedy along
+  // each side, MIN_LABEL_PX names need ~1.15 x that much pitch). Every other pin shows its name on hover / focus.
+  setMarked(nums) { this.marked = new Set(nums || []); this._keepSig = null; if (this._lab === false) this.lodKeep(); }
+
+  lodKeep() {
+    const scale = this._scale || 1;
+    const prio = (it) => {
+      const r = it.row || {};
+      if (this.marked && this.marked.has(it.pin.num)) return 0;
+      if (r.net) return 1;
+      if (it.pin.kind === "gpio" && ownerCategory(it.pin, r.owner || "") === "periph" && r.owner !== "analog") return 2;
+      return 9;
+    };
+    const cands = [];
+    for (const it of this.items.values()) { const pr = prio(it); if (pr < 9) cands.push([pr, it]); }
+    const sig = cands.map(([pr, it]) => `${pr}${it.pin.num}`).join(",") + `|${Math.round(scale * 200)}`;
+    if (sig === this._keepSig) return;
+    this._keepSig = sig;
+    cands.sort((a, b) => a[0] - b[0] || a[1].pin.num - b[1].pin.num);
+    const need = (MIN_LABEL_PX * 1.15) / scale;
+    const placed = { L: [], R: [], T: [], B: [] };
+    const keep = new Set();
+    for (const [, it] of cands) {
+      const side = it.p.side, pos = side === "L" || side === "R" ? it.p.y : it.p.x;
+      if (placed[side].some((q) => Math.abs(q - pos) < need)) continue;
+      placed[side].push(pos);
+      keep.add(it);
+    }
+    for (const it of this.items.values()) {
+      const k = keep.has(it);
+      if (k !== !!it.keep) { it.keep = k; it.g.classList.toggle("lod-keep", k); }
+    }
+  }
+
   setScale(scale) {
     const G = this.geo;
     // names may use the full pitch: mono capitals are ~0.7 em tall, so 9 px names in a 8.7 px pitch keep a 2 px gap
     const px = Math.min(Math.max(G.font * scale, MIN_LABEL_PX), G.pitch * scale * 1.04);
     const lab = px >= HIDE_LABEL_PX, num = G.numFont * scale >= 4.5;
     if (Math.abs(scale - (this._bodyScale || 0)) / scale > 0.02) this.layoutBody(scale);
-    if (lab !== this._lab) { this.root.classList.toggle("lod-nolabel", !lab); this._lab = lab; }
+    if (lab !== this._lab) { this.root.classList.toggle("lod-nolabel", !lab); this._lab = lab; this._keepSig = null; }
+    this._scale = scale;
+    // names too small for every pin: still name the pins that matter (lodKeep), at the readable minimum size
+    this.root.style.setProperty("--pfk", `${(MIN_LABEL_PX / scale).toFixed(2)}px`);
+    if (!lab) this.lodKeep();
     if (num !== this._num) { this.root.classList.toggle("lod-nonum", !num); this._num = num; }
     const fw = Math.round(Math.max(G.font, px / scale) * 20) / 20;
     const ownOk = G.font * 0.92 * scale >= OWNER_MIN_PX, zoomedIn = G.font * scale >= 11;

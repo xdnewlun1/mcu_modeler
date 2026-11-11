@@ -25,7 +25,8 @@ class Wdt(SfrBlock):
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         super().__init__(name, base, size, regs, params=params, log=log,
-                         overrides={"WDTRST": {"on_write": self._wr, "on_read": lambda b, r: 0}})
+                         overrides={"WDTRST": {"on_write": self._wr, "on_read": lambda b, r: 0,
+                                                 "on_peek": lambda b, r: 0}})
         self.enabled = False
         self._seq = False
         self._ev = None

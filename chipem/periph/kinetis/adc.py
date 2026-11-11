@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..base import peek_stored as _stored
 from ..registry import register
 from ._util import GatedBlock, build_regs, find_model, irq_number
 from .dma import dma_request
@@ -62,7 +63,7 @@ class ADC(GatedBlock):
         ov = {"SC1A": {"on_write": self._sc1_write}, "SC1B": {"on_write": self._sc1_write},
               "SC3": {"on_write": self._sc3_write, "ro_mask": 0xFFFFFF30 & ~CALF, "w1c_mask": CALF},
               "SC2": {"on_write": self._sc2_write},
-              "RA": {"on_read": self._r_read}, "RB": {"on_read": self._r_read}}
+              "RA": {"on_read": self._r_read, "on_peek": _stored}, "RB": {"on_read": self._r_read, "on_peek": _stored}}
         r = build_regs((name, f"ADC{self.index}", "ADC0"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.conv_ns = float(params.get("conv_ns", 4000.0))

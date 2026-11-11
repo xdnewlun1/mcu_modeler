@@ -843,7 +843,7 @@ export class BoardView {
         perChip.set(cid, j + 1);
         const x = b.x + Math.min(b.body * 0.25, 30) + j * 14, y = b.y + b.body * 0.55;
         members.push({ side: "T", x, y, dx: 0, dy: -1, ci });
-        tags.push({ text: blk, x, y, right: b.x + b.body - 2 });
+        tags.push({ text: blk, x, y, right: b.x + b.body - 2, sy: this.sy(b.r, track) });
       }
       if (!members.length) continue;
       const { d, segs } = this.route(members, track);
@@ -1262,7 +1262,8 @@ export class BoardView {
       <button type="button" data-z="out" title="Zoom out (-)">−</button>
       <button type="button" data-z="one" class="bv-pct" title="Zoom level · click: 1:1 (one unit = one pixel)">100%</button>
       <button type="button" data-z="in" title="Zoom in (+)">+</button>
-      <button type="button" data-z="fit" title="Fit (0, F or double-click)">fit</button>`;
+      <button type="button" data-z="fit" title="Fit (0, F or double-click)">fit</button>
+      <button type="button" data-z="chip" class="bv-chipz" title="Zoom to the selected chip (Z; again: fit) — names of every pin readable">chip</button>`;
     // in the board pane's header when there is one (the canvas keeps its full height), else floating on the canvas
     const head = wrap.closest(".pane") && wrap.closest(".pane").querySelector(":scope > .pane-head");
     if (head) {
@@ -1281,6 +1282,7 @@ export class BoardView {
       const z = e.target.closest("button")?.dataset.z;
       if (z === "in") this.zoom(1 / 1.4); else if (z === "out") this.zoom(1.4);
       else if (z === "fit") this.fit(); else if (z === "one") this.oneToOne();
+      else if (z === "chip") this.zoomTo(this.selCid || this.ids[0]);
     });
     this.findInput.addEventListener("input", () => this.runFind(true));
     this.findInput.addEventListener("keydown", (e) => {
@@ -1350,6 +1352,7 @@ export class BoardView {
       if (e.key === "+" || e.key === "=") { e.preventDefault(); this.zoom(1 / 1.4); }
       else if (e.key === "-" || e.key === "_") { e.preventDefault(); this.zoom(1.4); }
       else if (e.key === "0" || e.key === ")") { e.preventDefault(); this.fit(); }
+      else if (e.key === "z" || e.key === "Z") { e.preventDefault(); this.zoomTo(this.selCid || this.ids[0]); }
       else if (e.key === "/") { e.preventDefault(); this.findInput && this.findInput.focus(); this.findInput && this.findInput.select(); }
       else if (e.key === "Escape" && this.card && this.card.pinned) { e.preventDefault(); this.closeCard(); }
     });
@@ -1387,6 +1390,7 @@ export class BoardView {
     }
     this.card = { cid, num, pinned: true, x, y, kbd: !e || e.clientX === undefined || this._kbdPin === `${cid}:${num}` };
     this.renderCard();
+    this.markPins();
     this.loadHistory(cid, num);
     if (this.h.onPinSelect) this.h.onPinSelect(this.chips.find((c) => c.id === cid), it.pin);
   }
@@ -1424,8 +1428,18 @@ export class BoardView {
   }
 
   // pins in the logic strip ("cid:num"): the pin card's trace button shows on / off
+  // pins whose names stay on the canvas at any zoom (package.js lodKeep): the pinned card's pin and traced pins
+  markPins() {
+    const by = new Map();
+    const add = (cid, num) => { if (!by.has(cid)) by.set(cid, []); by.get(cid).push(+num); };
+    if (this.card && this.card.pinned) add(this.card.cid, this.card.num);
+    for (const k of this.traced || []) { const i = String(k).lastIndexOf(":"); if (i > 0) add(k.slice(0, i), k.slice(i + 1)); }
+    for (const [cid, pv] of this.pkgs) pv.setMarked?.(by.get(cid) || []);
+  }
+
   setTraced(keys) {
     this.traced = new Set(keys || []);
+    this.markPins();
     if (this.card && this.card.pinned) this.renderCard();
   }
 
@@ -1465,7 +1479,9 @@ export class BoardView {
 
   hideCard(evenPinned) {
     if (!this.card || (this.card.pinned && !evenPinned)) return;
+    const was = this.card.pinned;
     this.card = null;
+    if (was) this.markPins();
     this.cardEl.hidden = true;
     this._cardHtml = "";
   }
@@ -1780,9 +1796,11 @@ export class BoardView {
     for (const B of (this.busEls || new Map()).values()) {
       for (const t of B.tags) {
         // inside the footprint corner (right of the drop, left of the top pins' labels): shortened to fit, else hidden
-        const tx = t.x + 3 / s, ty = t.y + fs * 0.35;
+        let tx = t.x + 3 / s, ty = t.y + fs * 0.35;
         const n = Math.floor((t.right - tx) / cw);
-        const txt = t.text.length <= n ? t.text : n >= 4 ? `${t.text.slice(0, n - 1)}…` : "";
+        let txt = t.text.length <= n ? t.text : n >= 4 ? `${t.text.slice(0, n - 1)}…` : "";
+        // compact footprint: no room in the corner; name the node where its drop leaves the bus (above the street)
+        if (!txt && t.sy != null) { txt = t.text; ty = t.sy - 3 / s; }
         if (t.el.textContent !== txt) t.el.textContent = txt;
         t.el.setAttribute("x", tx); t.el.setAttribute("y", ty);
         if (txt) labels.push({ x: tx, y: ty - fs, w: txt.length * cw, h: fs });

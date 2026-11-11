@@ -98,8 +98,8 @@ class USART(UartRx, GatedBlock):
         self.gate = name
         self.apb = int(params.get("apb", 2 if name in APB2_UARTS else 1))
         ov = {"SR": {"reset": SR_TXE | SR_TC, "ro_mask": 0xFFFFFFFF & ~SR_RC_W0, "on_write": self._sr_write,
-                     "on_read": self._sr_read},
-              "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
+                     "on_read": self._sr_read, "on_peek": lambda b, r: None},     # peek: no SR-then-DR clear
+              "DR": {"on_read": self._dr_read, "on_write": self._dr_write, "on_peek": lambda b, r: self._rx_byte},
               "BRR": {"on_write": self._ctl_write},
               "CR1": {"on_write": self._cr1_write},
               "CR2": {"on_write": self._ctl_write},
@@ -108,8 +108,11 @@ class USART(UartRx, GatedBlock):
         r = build_regs((name, tbl, "USART1"), size, ov, params.get("regs_file"))
         self._rx_init()
         super().__init__(name, base, size, r, log=log, params=params)
+        if "CR3" in self.regs:       # DMAR/DMAT exist on every U(S)ART (RM0090/RM0033 DMA request tables include
+            self.regs["CR3"].ro_mask &= ~0xC0      # UART5); STM32F21x.svd omits them for UART5
         self.output = bytearray()
         self.rx_signal = f"{name}_RX"
+        self.tx_signal = f"{name}_TX"                    # bit-level waveform on the TX pin (uartwire._tx_emit)
         self._rx_byte = 0
         self._tx_ev = None
         self._idle_ev = None
@@ -330,6 +333,10 @@ class USART(UartRx, GatedBlock):
             self._try_tx_hold()
         self._update_line()
         return new
+
+    def tx_wave_od(self) -> bool:
+        """Half duplex (HDSEL) and smartcard (SCEN): one open-drain line (RM0090 30.3.10/30.3.11; 0 pulls low)."""
+        return bool(self._cr3 & (CR3_HDSEL | CR3_SCEN))
 
     def _warn_mode(self, what: str) -> None:
         if what not in self._warned_modes:

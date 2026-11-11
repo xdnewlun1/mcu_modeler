@@ -244,19 +244,23 @@ _TABLES = {   # SPRS230P table number -> (block names, one per address column; n
 _SKIP_DS = {"AQCSFR"}     # wrapped in the PDF ("AQCSFR" + "C" on the next line); checked through AQCSFRC below
 
 
-def parse_ds(text: str) -> dict[tuple[str, str], int]:
-    """{(block, register): word address} from the register tables of the data sheet text."""
+def parse_ds(text: str, tables: dict | None = None, chapter: str = "9") -> dict[tuple[str, str], int]:
+    """{(block, register): word address} from the register tables of the data sheet text (`tables`: table number ->
+    (block per address column, name suffix); default the SPRS230P tables, chapter 9).  Addresses printed as
+    "0x00 7070" / "0x00-0B20" (SPRS439) are normalised to "0x7070"."""
+    tables = _TABLES if tables is None else tables
+    text = re.sub(r"0x00[ \u2212-]([0-9A-F]{4})\b", r"0x\1", text)
     lines = text.splitlines()
     out: dict[tuple[str, str], int] = {}
     cur = None
     for i, ln in enumerate(lines):
-        m = re.search(r"Table (9-\d+)\.", ln)
+        m = re.search(rf"Table ({chapter}-\d+)\.", ln)
         if m:
-            cur = m.group(1) if m.group(1) in _TABLES else None
+            cur = m.group(1) if m.group(1) in tables else None
             continue
         if cur is None:
             continue
-        blocks, suffix = _TABLES[cur]
+        blocks, suffix = tables[cur]
         m = re.match(r"^\s*([A-Z][A-Z0-9]+)(?:\(\d\))?\s+((?:(?:0x[0-9A-F]{4}|N/A)(?:\(\d\))?\s+)+)", ln + " ")
         if not m:
             # TBPHSHR is split over three lines in the PDF ("TBPHSH" / addresses / "R")
@@ -286,13 +290,13 @@ def parse_ds(text: str) -> dict[tuple[str, str], int]:
         if ln.strip().startswith("AQCSFR") and "Continuous" in ln:
             nxt = lines[i + 1] if i + 1 < len(lines) else ""
             addrs = re.findall(r"0x[0-9A-F]{4}", nxt)
-            for blk, a in zip(_TABLES["9-3"][0], addrs):
+            for blk, a in zip(tables[f"{chapter}-{4 if chapter == '8' else 3}"][0], addrs):
                 out[(blk, "AQCSFRC")] = int(a, 16)
     return out
 
 
-def check(doc: dict, text: str) -> int:
-    ds = parse_ds(text)
+def check(doc: dict, text: str, tables: dict | None = None, chapter: str = "9") -> int:
+    ds = parse_ds(text, tables, chapter)
     tbl, halves = {}, {}
     for blk, p in doc["peripherals"].items():
         for r in p["registers"]:

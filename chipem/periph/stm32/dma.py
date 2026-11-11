@@ -68,7 +68,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...bus import BusError
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, irq_number
 
@@ -106,6 +106,16 @@ def _split(table) -> list[list[tuple[str, ...]]]:
 
 
 REQUESTS = {1: _split(_T42), 2: _split(_T43)}
+
+# Request maps of other STM32F4 lines (chip YAML `params: {requests: <name>}` on DMA1/DMA2; default "f40x" = RM0090
+# Tables 43/44 above).  Line-specific modules register theirs with register_request_table() at import time (the stm32
+# package imports every submodule before any model is built), e.g. chipem/periph/stm32/f4x1.py, f446.py.
+REQUEST_TABLES: dict[str, dict[int, list[list[tuple[str, ...]]]]] = {"f40x": REQUESTS}
+
+
+def register_request_table(name: str, dma1: list, dma2: list) -> None:
+    """Register a request map: `dma1`/`dma2` are 8 rows (channel 0..7) of 8 cells (stream 0..7), like _T42/_T43."""
+    REQUEST_TABLES[name] = {1: _split(dma1), 2: _split(dma2)}
 
 # SxCR
 EN, DMEIE, TEIE, HTIE, TCIE, PFCTRL = 1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5
@@ -178,8 +188,8 @@ class DMA(GatedBlock):
         self.m2m_ok = bool(params.get("m2m", self.controller == 2))
         ov: dict[str, dict] = {
             "LISR": {"ro_mask": 0xFFFFFFFF}, "HISR": {"ro_mask": 0xFFFFFFFF},
-            "LIFCR": {"on_write": self._ifcr_write(0), "on_read": lambda b, r: 0},
-            "HIFCR": {"on_write": self._ifcr_write(4), "on_read": lambda b, r: 0},
+            "LIFCR": {"on_write": self._ifcr_write(0), "on_read": pure_read(lambda b, r: 0)},
+            "HIFCR": {"on_write": self._ifcr_write(4), "on_read": pure_read(lambda b, r: 0)},
         }
         for s in range(NSTREAMS):
             ov[f"S{s}CR"] = {"on_write": self._cr_write(s)}
@@ -190,7 +200,11 @@ class DMA(GatedBlock):
             ov[f"S{s}FCR"] = {"on_write": self._fcr_write(s), "ro_mask": FS_MASK}
         r = build_regs((name, f"DMA{self.controller}", "DMA2"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
-        self.table = REQUESTS[self.controller]
+        tname = str(params.get("requests", "f40x"))
+        if tname not in REQUEST_TABLES:
+            raise ValueError(f"{name}: unknown DMA request table params.requests = {tname!r} "
+                             f"(known: {', '.join(sorted(REQUEST_TABLES))})")
+        self.table = REQUEST_TABLES[tname][self.controller]
         self.known = {n for row in self.table for cell in row for n in cell}
         self.levels: dict[str, bool] = {}
         self.lasts: dict[str, bool] = {}

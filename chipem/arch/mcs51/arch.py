@@ -85,11 +85,11 @@ class CpuSfrBlock(_SparseBlock):
 
     def __init__(self, arch: "MCS51Arch", addrs: dict[str, int]):
         self.arch = arch
-        regs = [Reg(n, a, 1, reset, on_read=self._rd, on_write=self._wr)
+        regs = [Reg(n, a, 1, reset, on_read=self._rd, on_write=self._wr, on_peek=self._rd)    # core state: pure
                 for n, a, reset in [("SP", 0x81, 0x07), ("DPL", 0x82, 0), ("DPH", 0x83, 0), ("PSW", 0xD0, 0),
                                     ("ACC", 0xE0, 0), ("B", 0xF0, 0)]]
         if addrs.get("auxr1") is not None:
-            regs.append(Reg("AUXR1", addrs["auxr1"], 1, 0, on_read=self._rd, on_write=self._wr))
+            regs.append(Reg("AUXR1", addrs["auxr1"], 1, 0, on_read=self._rd, on_write=self._wr, on_peek=self._rd))
         super().__init__("CPU", regs)
 
     def _rd(self, blk, reg):
@@ -148,6 +148,18 @@ class MCS51Arch:
         self.flags = 0                       # bit i: source i has an asserted line
         self.active: list[int] = []          # priority levels in progress (flip-flops), innermost last
         self._active_src: list[_Source] = []
+        self._active_sp: list[int] = []      # SP after each in-progress interrupt pushed the PC (debugger stack walk)
+        # interrupt response timing (Intel MCS-51 user's manual, "Response Time"): a flag set in machine cycle C1
+        # is polled in C2 and the hardware LCALL takes C3-C4, so the handler starts >= 3 machine cycles after the
+        # flag.  `_ready[idx]` = flag time + 1 machine cycle: the source is not taken before it (the instruction
+        # running in the polling cycle completes first; after an Idle wake-up the polling cycle is charged).
+        self._ready: dict[int, int] = {}
+        self.event_due: int | None = None    # due cycle of the family event being processed (mcs51 SfrBlock._fire)
+        self._woke = False
+        self.poll_cycle = bool(cfg.get("poll_cycle", True))
+        hooks = getattr(chip, "power_hooks", None)
+        if isinstance(hooks, list):
+            hooks.append(self)
         self.asserted: set[int] = set()
         self.lockup = False
         self.reset_requested: str | None = None
@@ -222,6 +234,8 @@ class MCS51Arch:
             self.asserted.add(s.num)
             if not self.flags & bit:
                 self.flags |= bit
+                t = self.event_due if self.event_due is not None else self.chip.now_cycles()
+                self._ready[s.idx] = t + getattr(self.core, "clocks_per_mc", 12)
                 self._maybe_stop()
             return
         if any(self.levels.get(ln) for ln in s.lines if ln != key) or \
@@ -312,6 +326,14 @@ class MCS51Arch:
         s = self._select()
         if s is None:
             return False
+        ready = self._ready.get(s.idx) if self.poll_cycle else None
+        now = self.chip.clock.cycles
+        woke, self._woke = self._woke, False
+        if ready is not None and now < ready:
+            if not woke:
+                core.inhibit = True                  # the instruction in the polling cycle completes first
+                return False
+            core.add_clocks(ready - now)             # woken from Idle / Power-down: the polling cycle passes idle
         self.active.append(self._prio(s))
         self._active_src.append(s)
         for ln in s.lines:
@@ -320,17 +342,27 @@ class MCS51Arch:
                 if ack is not None:
                     ack()
         core.take_interrupt(s.vector)
+        self._active_sp.append(core.sfr[0x81])
         self.entries += 1
         self.last_vector = s.num
         if self.trace is not None:
             self.trace("enter", s.num)
         return True
 
+    # chip.power_hooks entry (registered in __init__): only notes the wake-up for the polling-cycle rule
+    def on_sleep(self, chip: Any) -> None:
+        self._woke = False
+
+    def on_wake(self, chip: Any) -> None:
+        self._woke = True
+
     def on_stop(self, reason: StopReason, info: Any) -> bool:
         if reason is StopReason.EXC_RETURN:                # RETI: clear the highest priority-level flip-flop
             if self.active:
                 self.active.pop()
                 self._active_src.pop()
+                if self._active_sp:
+                    self._active_sp.pop()
             return True
         if reason is StopReason.FAULT:
             return False
@@ -349,6 +381,9 @@ class MCS51Arch:
             blk.reset()
         self.active.clear()
         self._active_src.clear()
+        self._active_sp.clear()
+        self._ready.clear()
+        self._woke = False
         self.lockup = False
         self.reset_requested = None
         self.last_vector = None
@@ -428,19 +463,46 @@ class MCS51Arch:
             return _N(self._names.sfrs, self._names.bits, dict(labels))
         return self._names
 
+    def map_symbols(self, image: Any) -> None:
+        """Called by Chip.load_firmware: XDATA symbols of a toolchain (SDCC `__xdata`, tagged 0x1xxxx = the MOVX
+        view) below the on-chip expanded RAM size live in the on-chip XRAM (tag 0x4xxxx) while AUXR.EXTRAM = 0, the
+        reset state, so they are re-tagged there; `mem`/`print`/watchpoints then show what MOVX reads."""
+        syms = getattr(image, "symbols", None)
+        n = getattr(self.core, "xram_size", 0)
+        if not syms or not n:
+            return
+        for k, v in list(syms.items()):
+            if isinstance(v, int) and 0x10000 <= v < 0x10000 + n:
+                syms[k] = v - 0x10000 + 0x40000
+
     def debug_support(self):
         """Debugger hooks for chipem/debug.py (registers, decode, stack walk)."""
         from .debug import MCS51DebugSupport
         return MCS51DebugSupport(self)
 
+    def interrupt_frames(self) -> list[tuple[int, int, str]]:
+        """[(stack address of the pushed PC's low byte, interrupted PC, source name)] of the interrupts in progress,
+        innermost first (recorded when the hardware LCALL pushed the PC)."""
+        core = self.core
+        out = []
+        for sp, src in zip(reversed(self._active_sp), reversed(self._active_src)):
+            out.append(((sp - 1) & 0xFF, core.iram[sp] << 8 | core.iram[(sp - 1) & 0xFF], src.name))
+        return out
+
     def backtrace(self, max_frames: int = 16) -> list[tuple[int, int]]:
         """Best-effort call stack from the 8-bit stack: [(stack address, return address)] for every pushed 16-bit
-        value that points just after an ACALL/LCALL (or is an interrupted PC when an interrupt is active)."""
+        value that points just after an ACALL/LCALL, and the interrupted PC of every interrupt in progress (the
+        stack slot recorded at interrupt entry), innermost first."""
         core = self.core
         sp = core.sfr[0x81]
         out = []
+        irq = {a: ret for a, ret, _n in self.interrupt_frames()}
         a = sp
         while a > 0x07 and len(out) < max_frames:
+            if a - 1 in irq:
+                out.append((a - 1, irq[a - 1]))
+                a -= 2
+                continue
             hi, lo = core.iram[a], core.iram[a - 1]
             ret = hi << 8 | lo
             c = core.code

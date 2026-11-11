@@ -1,0 +1,281 @@
+# STMicroelectronics STM32F107VC (Cortex-M3, 72 MHz, 256 KB flash, 64 KB SRAM, LQFP100; connectivity line with
+# Ethernet MAC, USB OTG FS, two bxCANs, I2S with audio PLL).  Part number: STM32 F 107 V = 100 pins, C = 256 KB flash,
+# T = LQFP.  Base file of the connectivity-line die (DEV_ID 0x418): stm32f107rc / stm32f105rc / stm32f105vc `include:`
+# it and override name, package and pins; the Ethernet MAC (ETH) carries `params: {only: [STM32F107]}` (a stub on the F105).
+# Sources (the STM32F105xx/F107xx data sheet DS6014 could not be downloaded, see chips/README.md):
+#   RM0008 Rev 21 (docs/datasheets/st/RM0008_stm32f1_reference_manual.pdf): 3.3 memory map / Table 3 (register
+#   boundary addresses), ch. 8 (connectivity-line RCC), 9.3 / 9.4.2 (AFIO remaps, connectivity-line MAPR), 10.1.2
+#   Table 61 (vector table for connectivity line devices, 68 vectors), 10.2.5 (EXTI line 18 OTG FS wake-up, line 19
+#   Ethernet wake-up), 13.3.7 (DMA1/DMA2 requests), ch. 24 (bxCAN, 28 filter banks shared by CAN1/CAN2), ch. 28 (OTG_FS),
+#   ch. 29 (Ethernet), 31.6.1 (DBGMCU_IDCODE DEV_ID 0x418, REV_ID 0x1000 rev A / 0x1001 rev Z).
+#   CMSIS-SVD STM32F107xx.svd (cmsis-svd-data @ c65f8551, svd/dl-stm32f107/) for bases, register tables and IRQ numbers.
+#   ST STM32_open_pin_data @ 7d1f1514 (svd/dl-open-pin-data-f10x-cl/: mcu/STM32F107V(B-C)Tx.xml for the pin positions
+#   and signals, mcu/IP/GPIO-STM32F107_gpio_v1_0_Modes.xml for default vs remapped functions).
+# Pin table: generated from the open pin data (tools/opd_stm32f1_cl_pins.py, chips/README.md); remapped functions
+# under REMAP, cross-checked against RM0008 9.3 Tables 34-58.  Ethernet names are RM0008's (ETH_MII_* / ETH_RMII_*,
+# ETH_MDC, ETH_MDIO, ETH_PPS_OUT; both MII and RMII names where a pin serves both).  OTG_FS_DM/DP/VBUS are
+# `additional` (controlled by the OTG PHY, RM0008 9.1.11 Table 30); ETH_PPS_OUT is a REMAP of PB5 (MAPR.PTP_PPS_REMAP).
+# Power pins keep the open pin data names (VSS/VDD without the data sheet's _1.._5 suffixes).
+# functions keys (family stm32f1): AF (default alternate functions), REMAP (after an AFIO_MAPR remap), ADC, analog,
+# additional, debug -- see chips/stm32f103t6.yaml.
+name: STM32F107VC
+package: LQFP100
+family: stm32f1
+regs_file: stm32f107_regs.yaml
+gpio_name_format: "P{port}{bit}"
+# 8 MHz HSI after reset; stm32f1.rcc_cl derives HCLK from CFGR/CFGR2 (72 MHz max: 25 MHz HSE, PLL2, PLL x9).
+core: {arch: armv7-m, backend: unicorn, cpu: cortex-m3, fpu: false, clock_hz: 8000000, addr_unit_bits: 8, num_irqs: 68}
+# SysTick CLKSOURCE=0 reference: HCLK/8 (RM0008 8.2 "The RCC feeds the Cortex System Timer (SysTick) external clock
+# with the AHB clock (HCLK) divided by 8").
+systick_ext_div: 8
+# SYST_CALIB = 9000 (RM0008 10.1.1: "The SysTick calibration value is set to 9000, which gives a reference time base
+# of 1 ms with the SysTick clock set to 9 MHz (max HCLK/8)").
+systick_calib: 9000
+# BOOT0 = 0: the vector table is fetched through the alias at 0; images are linked at 0x08000000.
+vtor: 0x08000000
+
+memory:
+  - {name: FLASH, base: 0x08000000, size: 0x40000, kind: flash}    # 256 KB main flash, 128 pages of 2 KB (RM0008 3.3.3)
+  - {name: SRAM, base: 0x20000000, size: 0x10000, kind: ram}       # 64 KB
+  # System memory 0x1FFFB000-0x1FFFF7FF (18 KB bootloader on the connectivity line, RM0008 3.3.3 Table 8; F_SIZE and
+  # the unique ID at 0x1FFFF7E0/0x1FFFF7E8) and option bytes 0x1FFFF800 are MMIO blocks below.
+
+# armv7m.scs (0xE000E000, SysTick/NVIC/SCB) is created by the arch layer, not listed here.
+# The reused STM32F4 models take their register tables (and the F1's reserved bits) from the F107 SVD table;
+# `reserved_zero: true` makes the registers the F1 lacks read 0 / ignore writes (as in chips/stm32f103t6.yaml).
+peripherals:
+  # APB1
+  - {name: TIM2, model: stm32.tim, base: 0x40000000, size: 0x400, params: {bits: 16, reserved_zero: true}}    # 16-bit on the F1
+  - {name: TIM3, model: stm32.tim, base: 0x40000400, size: 0x400, params: {reserved_zero: true}}
+  - {name: TIM4, model: stm32.tim, base: 0x40000800, size: 0x400, params: {reserved_zero: true}}
+  - {name: TIM5, model: stm32.tim, base: 0x40000C00, size: 0x400, params: {bits: 16, reserved_zero: true}}    # 16-bit on the F1
+  - {name: TIM6, model: stm32.tim, base: 0x40001000, size: 0x400, params: {irq: TIM6, reserved_zero: true}}   # basic (DAC trigger)
+  - {name: TIM7, model: stm32.tim, base: 0x40001400, size: 0x400, params: {irq: TIM7, reserved_zero: true}}
+  - {name: RTC, model: stm32f1.rtc, base: 0x40002800, size: 0x400}
+  - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400}
+  - {name: IWDG, model: stm32.iwdg, base: 0x40003000, size: 0x400, params: {lsi_hz: 40000}}   # LSI 40 kHz (RM0008 8.2.5)
+  - {name: SPI2, model: stm32.spi, base: 0x40003800, size: 0x400, params: {i2s: true, reserved_zero: true}}    # SPI2/I2S2
+  - {name: SPI3, model: stm32.spi, base: 0x40003C00, size: 0x400, params: {i2s: true, reserved_zero: true}}    # SPI3/I2S3
+  - {name: USART2, model: stm32.usart, base: 0x40004400, size: 0x400, params: {index: 2, kind: usart, reserved_zero: true}}
+  - {name: USART3, model: stm32.usart, base: 0x40004800, size: 0x400, params: {index: 3, kind: usart, reserved_zero: true}}
+  - {name: UART4, model: stm32.usart, base: 0x40004C00, size: 0x400, params: {index: 4, kind: uart, reserved_zero: true}}
+  - {name: UART5, model: stm32.usart, base: 0x40005000, size: 0x400, params: {index: 5, kind: uart, reserved_zero: true}}
+  - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400, params: {reserved_zero: true}}
+  # I2C2: on the die and in the F107 SVD; ST's open pin data lists I2C2 pins only for the STM32F105 (on the F107
+  # PB10/PB11 carry the Ethernet MII RX_ER / TX_EN instead, and the F107 pin tables have no I2C2 functions).
+  - {name: I2C2, model: stm32.i2c, base: 0x40005800, size: 0x400, params: {reserved_zero: true}}
+  # bxCAN1 (master: owns the 28 filter banks, FMR.CAN2SB splits them) and bxCAN2 (slave, needs the CAN1 clock);
+  # RM0008 24.1 / 24.3.1.  No USB device and no shared USB/CAN SRAM on the connectivity line.
+  - {name: CAN1, model: stm32f1.can_cl, base: 0x40006400, size: 0x400, params: {index: 1}}
+  - {name: CAN2, model: stm32f1.can_cl, base: 0x40006800, size: 0x400, params: {index: 2}}
+  - {name: BKP, model: stm32f1.bkp, base: 0x40006C04, size: 0x3FC, params: {data_regs: 42}}   # DR1-DR42 (RM0008 6.4)
+  - {name: PWR, model: stm32f1.pwr, base: 0x40007000, size: 0x400}
+  - {name: DAC, model: stm32.dac, base: 0x40007400, size: 0x400, params: {f1: true}}   # 2 x 12-bit (RM0008 ch. 12)
+  # APB2
+  - {name: AFIO, model: stm32f1.afio, base: 0x40010000, size: 0x400, params: {density: cl}}       # connectivity-line MAPR (RM0008 9.4.2)
+  - {name: EXTI, model: stm32f1.exti, base: 0x40010400, size: 0x400, params: {lines: 20}}   # line 18 OTG FS wake-up, 19 Ethernet wake-up (10.2.5)
+  - {name: GPIOA, model: stm32f1.gpio, base: 0x40010800, size: 0x400, params: {port: A}}
+  - {name: GPIOB, model: stm32f1.gpio, base: 0x40010C00, size: 0x400, params: {port: B}}
+  - {name: GPIOC, model: stm32f1.gpio, base: 0x40011000, size: 0x400, params: {port: C}}
+  - {name: GPIOD, model: stm32f1.gpio, base: 0x40011400, size: 0x400, params: {port: D}}
+  - {name: GPIOE, model: stm32f1.gpio, base: 0x40011800, size: 0x400, params: {port: E}}
+  - {name: ADC1, model: stm32f1.adc, base: 0x40012400, size: 0x400}
+  - {name: ADC2, model: stm32f1.adc, base: 0x40012800, size: 0x400}
+  - {name: TIM1, model: stm32.tim, base: 0x40012C00, size: 0x400, params: {irq: TIM1_UP, reserved_zero: true}}
+  - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400, params: {i2s: false, reserved_zero: true}}
+  - {name: USART1, model: stm32.usart, base: 0x40013800, size: 0x400, params: {index: 1, kind: usart, reserved_zero: true}}
+  # AHB
+  - {name: DMA1, model: stm32f1.dma, base: 0x40020000, size: 0x400}           # 7 channels
+  - {name: DMA2, model: stm32f1.dma, base: 0x40020400, size: 0x400}           # 5 channels (RM0008 13.3.7 Table 79)
+  - {name: RCC, model: stm32f1.rcc_cl, base: 0x40021000, size: 0x400, params: {ext_hz: 25000000}}   # 25 MHz crystal
+  - {name: FLASH, model: stm32f1.flash, base: 0x40022000, size: 0x400, params: {page_size: 2048}}   # 2 KB pages (RM0008 3.3.3)
+  - {name: CRC, model: stm32.crc, base: 0x40023000, size: 0x400}
+  # Ethernet MAC + MMC + PTP + DMA (0x40028000-0x400293FF, RM0008 29.8.5): STM32F107 only
+  - {name: ETH, model: stm32f1.eth, base: 0x40028000, size: 0x1400, params: {only: [STM32F107]}}   # SVD ETHERNET_MAC/_MMC/_PTP/_DMA
+  # USB OTG FS core (256 KB window: CSRs, FIFO push/pop windows, FIFO RAM; RM0008 28.6)
+  - {name: OTG_FS, model: stm32f1.otg_fs, base: 0x50000000, size: 0x40000}
+  # system memory: device electronic signature (F_SIZE, UID) and option bytes
+  - {name: SYSMEM, model: stm32f1.sysmem, base: 0x1FFFF000, size: 0x800}
+  - {name: OB, model: stm32f1.optbytes, base: 0x1FFFF800, size: 0x400}
+  # Cortex-M3 debug MCU
+  - {name: DBG, model: stm32f1.dbgmcu, base: 0xE0042000, size: 0x400, params: {density: cl}}   # DEV_ID 0x418, REV_ID 0x1001 (rev Z, RM0008 31.6.1)
+
+# External interrupt numbers (exception = 16 + n): RM0008 Table 61 (connectivity line, 68 vectors) with the CMSIS
+# stm32f107xc.h names (ADC1_2, RTC_Alarm); 43-49 are reserved.  The SVD names every vector with an "_IRQ" suffix and
+# calls 18 ADC_IRQ, 41 RTCAlarm_IRQ; it has no OTG_FS_WKUP (42): see `svd_irq_names` (svd2chip --check: RENAMED).
+irqs:
+  0: WWDG
+  1: PVD
+  2: TAMPER
+  3: RTC
+  4: FLASH
+  5: RCC
+  6: EXTI0
+  7: EXTI1
+  8: EXTI2
+  9: EXTI3
+  10: EXTI4
+  11: DMA1_Channel1
+  12: DMA1_Channel2
+  13: DMA1_Channel3
+  14: DMA1_Channel4
+  15: DMA1_Channel5
+  16: DMA1_Channel6
+  17: DMA1_Channel7
+  18: ADC1_2
+  19: CAN1_TX
+  20: CAN1_RX0
+  21: CAN1_RX1
+  22: CAN1_SCE
+  23: EXTI9_5
+  24: TIM1_BRK
+  25: TIM1_UP
+  26: TIM1_TRG_COM
+  27: TIM1_CC
+  28: TIM2
+  29: TIM3
+  30: TIM4
+  31: I2C1_EV
+  32: I2C1_ER
+  33: I2C2_EV
+  34: I2C2_ER
+  35: SPI1
+  36: SPI2
+  37: USART1
+  38: USART2
+  39: USART3
+  40: EXTI15_10
+  41: RTC_Alarm
+  42: OTG_FS_WKUP
+  50: TIM5
+  51: SPI3
+  52: UART4
+  53: UART5
+  54: TIM6
+  55: TIM7
+  56: DMA2_Channel1
+  57: DMA2_Channel2
+  58: DMA2_Channel3
+  59: DMA2_Channel4
+  60: DMA2_Channel5
+  61: ETH
+  62: ETH_WKUP
+  63: CAN2_TX
+  64: CAN2_RX0
+  65: CAN2_RX1
+  66: CAN2_SCE
+  67: OTG_FS
+svd_irq_names: {0: WWDG_IRQ, 1: PVD_IRQ, 2: TAMPER_IRQ, 3: RTC_IRQ, 4: FLASH_IRQ, 5: RCC_IRQ, 6: EXTI0_IRQ,
+                7: EXTI1_IRQ, 8: EXTI2_IRQ, 9: EXTI3_IRQ, 10: EXTI4_IRQ, 11: DMA1_Channel1_IRQ, 12: DMA1_Channel2_IRQ,
+                13: DMA1_Channel3_IRQ, 14: DMA1_Channel4_IRQ, 15: DMA1_Channel5_IRQ, 16: DMA1_Channel6_IRQ,
+                17: DMA1_Channel7_IRQ, 18: ADC_IRQ, 19: CAN1_TX_IRQ, 20: CAN1_RX0_IRQ, 21: CAN1_RX1_IRQ,
+                22: CAN1_SCE_IRQ, 23: EXTI9_5_IRQ, 24: TIM1_BRK_IRQ, 25: TIM1_UP_IRQ, 26: TIM1_TRG_COM_IRQ,
+                27: TIM1_CC_IRQ, 28: TIM2_IRQ, 29: TIM3_IRQ, 30: TIM4_IRQ, 31: I2C1_EV_IRQ, 32: I2C1_ER_IRQ,
+                33: I2C2_EV_IRQ, 34: I2C2_ER_IRQ, 35: SPI1_IRQ, 36: SPI2_IRQ, 37: USART1_IRQ, 38: USART2_IRQ,
+                39: USART3_IRQ, 40: EXTI15_10_IRQ, 41: RTCAlarm_IRQ, 50: TIM5_IRQ, 51: SPI3_IRQ, 52: UART4_IRQ,
+                53: UART5_IRQ, 54: TIM6_IRQ, 55: TIM7_IRQ, 56: DMA2_Channel1_IRQ, 57: DMA2_Channel2_IRQ,
+                58: DMA2_Channel3_IRQ, 59: DMA2_Channel4_IRQ, 60: DMA2_Channel5_IRQ, 61: ETH_IRQ,
+                63: CAN2_TX_IRQ, 64: CAN2_RX0_IRQ, 65: CAN2_RX1_IRQ, 66: CAN2_SCE_IRQ, 67: OTG_FS_IRQ}
+
+# All 100 package pins (open pin data STM32F107V(B-C)Tx: 80 GPIOs PA0-15, PB0-15, PC0-15, PD0-15, PE0-15).
+pins:
+  - {num: 1, name: PE2, kind: gpio, port: E, bit: 2, default: GPIO, functions: {AF: TRACECK}}
+  - {num: 2, name: PE3, kind: gpio, port: E, bit: 3, default: GPIO, functions: {AF: TRACED0}}
+  - {num: 3, name: PE4, kind: gpio, port: E, bit: 4, default: GPIO, functions: {AF: TRACED1}}
+  - {num: 4, name: PE5, kind: gpio, port: E, bit: 5, default: GPIO, functions: {AF: TRACED2}}
+  - {num: 5, name: PE6, kind: gpio, port: E, bit: 6, default: GPIO, functions: {AF: TRACED3}}
+  - {num: 6, name: VBAT, kind: power, default: VBAT}
+  - {num: 7, name: PC13/TAMPER-RTC, kind: gpio, port: C, bit: 13, default: GPIO, functions: {additional: TAMPER-RTC}}
+  - {num: 8, name: PC14/OSC32_IN, kind: gpio, port: C, bit: 14, default: GPIO, functions: {analog: OSC32_IN}}
+  - {num: 9, name: PC15/OSC32_OUT, kind: gpio, port: C, bit: 15, default: GPIO, functions: {analog: OSC32_OUT}}
+  - {num: 10, name: VSS, kind: power, default: VSS}
+  - {num: 11, name: VDD, kind: power, default: VDD}
+  - {num: 12, name: OSC_IN, kind: analog, default: OSC_IN}
+  - {num: 13, name: OSC_OUT, kind: analog, default: OSC_OUT}
+  - {num: 14, name: NRST, kind: special, default: NRST}
+  - {num: 15, name: PC0, kind: gpio, port: C, bit: 0, default: GPIO, functions: {ADC: ADC12_IN10}}
+  - {num: 16, name: PC1, kind: gpio, port: C, bit: 1, default: GPIO, functions: {AF: ETH_MDC, ADC: ADC12_IN11}}
+  - {num: 17, name: PC2, kind: gpio, port: C, bit: 2, default: GPIO, functions: {AF: ETH_MII_TXD2, ADC: ADC12_IN12}}
+  - {num: 18, name: PC3, kind: gpio, port: C, bit: 3, default: GPIO, functions: {AF: ETH_MII_TX_CLK, ADC: ADC12_IN13}}
+  - {num: 19, name: VSSA, kind: power, default: VSSA}
+  - {num: 20, name: VREF-, kind: power, default: VREF-}
+  - {num: 21, name: VREF+, kind: power, default: VREF+}
+  - {num: 22, name: VDDA, kind: power, default: VDDA}
+  - {num: 23, name: PA0/WKUP, kind: gpio, port: A, bit: 0, default: GPIO, functions: {AF: ETH_MII_CRS/TIM2_CH1_ETR/TIM5_CH1/USART2_CTS, ADC: ADC12_IN0, additional: WKUP}}
+  - {num: 24, name: PA1, kind: gpio, port: A, bit: 1, default: GPIO, functions: {AF: ETH_MII_RX_CLK/ETH_RMII_REF_CLK/TIM2_CH2/TIM5_CH2/USART2_RTS, ADC: ADC12_IN1}}
+  - {num: 25, name: PA2, kind: gpio, port: A, bit: 2, default: GPIO, functions: {AF: ETH_MDIO/TIM2_CH3/TIM5_CH3/USART2_TX, ADC: ADC12_IN2}}
+  - {num: 26, name: PA3, kind: gpio, port: A, bit: 3, default: GPIO, functions: {AF: ETH_MII_COL/TIM2_CH4/TIM5_CH4/USART2_RX, ADC: ADC12_IN3}}
+  - {num: 27, name: VSS, kind: power, default: VSS}
+  - {num: 28, name: VDD, kind: power, default: VDD}
+  - {num: 29, name: PA4, kind: gpio, port: A, bit: 4, default: GPIO, functions: {AF: SPI1_NSS/USART2_CK, ADC: ADC12_IN4, REMAP: I2S3_WS/SPI3_NSS, analog: DAC_OUT1}}
+  - {num: 30, name: PA5, kind: gpio, port: A, bit: 5, default: GPIO, functions: {AF: SPI1_SCK, ADC: ADC12_IN5, analog: DAC_OUT2}}
+  - {num: 31, name: PA6, kind: gpio, port: A, bit: 6, default: GPIO, functions: {AF: SPI1_MISO/TIM3_CH1, ADC: ADC12_IN6, REMAP: TIM1_BKIN}}
+  - {num: 32, name: PA7, kind: gpio, port: A, bit: 7, default: GPIO, functions: {AF: ETH_MII_RX_DV/ETH_RMII_CRS_DV/SPI1_MOSI/TIM3_CH2, ADC: ADC12_IN7, REMAP: TIM1_CH1N}}
+  - {num: 33, name: PC4, kind: gpio, port: C, bit: 4, default: GPIO, functions: {AF: ETH_MII_RXD0/ETH_RMII_RXD0, ADC: ADC12_IN14}}
+  - {num: 34, name: PC5, kind: gpio, port: C, bit: 5, default: GPIO, functions: {AF: ETH_MII_RXD1/ETH_RMII_RXD1, ADC: ADC12_IN15}}
+  - {num: 35, name: PB0, kind: gpio, port: B, bit: 0, default: GPIO, functions: {AF: ETH_MII_RXD2/TIM3_CH3, ADC: ADC12_IN8, REMAP: TIM1_CH2N}}
+  - {num: 36, name: PB1, kind: gpio, port: B, bit: 1, default: GPIO, functions: {AF: ETH_MII_RXD3/TIM3_CH4, ADC: ADC12_IN9, REMAP: TIM1_CH3N}}
+  - {num: 37, name: PB2/BOOT1, kind: gpio, port: B, bit: 2, default: GPIO, functions: {additional: BOOT1}}
+  - {num: 38, name: PE7, kind: gpio, port: E, bit: 7, default: GPIO, functions: {REMAP: TIM1_ETR}}
+  - {num: 39, name: PE8, kind: gpio, port: E, bit: 8, default: GPIO, functions: {REMAP: TIM1_CH1N}}
+  - {num: 40, name: PE9, kind: gpio, port: E, bit: 9, default: GPIO, functions: {REMAP: TIM1_CH1}}
+  - {num: 41, name: PE10, kind: gpio, port: E, bit: 10, default: GPIO, functions: {REMAP: TIM1_CH2N}}
+  - {num: 42, name: PE11, kind: gpio, port: E, bit: 11, default: GPIO, functions: {REMAP: TIM1_CH2}}
+  - {num: 43, name: PE12, kind: gpio, port: E, bit: 12, default: GPIO, functions: {REMAP: TIM1_CH3N}}
+  - {num: 44, name: PE13, kind: gpio, port: E, bit: 13, default: GPIO, functions: {REMAP: TIM1_CH3}}
+  - {num: 45, name: PE14, kind: gpio, port: E, bit: 14, default: GPIO, functions: {REMAP: TIM1_CH4}}
+  - {num: 46, name: PE15, kind: gpio, port: E, bit: 15, default: GPIO, functions: {REMAP: TIM1_BKIN}}
+  - {num: 47, name: PB10, kind: gpio, port: B, bit: 10, default: GPIO, functions: {AF: ETH_MII_RX_ER/USART3_TX, REMAP: TIM2_CH3}}
+  - {num: 48, name: PB11, kind: gpio, port: B, bit: 11, default: GPIO, functions: {AF: ETH_MII_TX_EN/ETH_RMII_TX_EN/USART3_RX, REMAP: TIM2_CH4}}
+  - {num: 49, name: VSS, kind: power, default: VSS}
+  - {num: 50, name: VDD, kind: power, default: VDD}
+  - {num: 51, name: PB12, kind: gpio, port: B, bit: 12, default: GPIO, functions: {AF: CAN2_RX/ETH_MII_TXD0/ETH_RMII_TXD0/I2S2_WS/SPI2_NSS/TIM1_BKIN/USART3_CK}}
+  - {num: 52, name: PB13, kind: gpio, port: B, bit: 13, default: GPIO, functions: {AF: CAN2_TX/ETH_MII_TXD1/ETH_RMII_TXD1/I2S2_CK/SPI2_SCK/TIM1_CH1N/USART3_CTS}}
+  - {num: 53, name: PB14, kind: gpio, port: B, bit: 14, default: GPIO, functions: {AF: SPI2_MISO/TIM1_CH2N/USART3_RTS}}
+  - {num: 54, name: PB15, kind: gpio, port: B, bit: 15, default: GPIO, functions: {AF: I2S2_SD/SPI2_MOSI/TIM1_CH3N}}
+  - {num: 55, name: PD8, kind: gpio, port: D, bit: 8, default: GPIO, functions: {REMAP: ETH_MII_RX_DV/ETH_RMII_CRS_DV/USART3_TX}}
+  - {num: 56, name: PD9, kind: gpio, port: D, bit: 9, default: GPIO, functions: {REMAP: ETH_MII_RXD0/ETH_RMII_RXD0/USART3_RX}}
+  - {num: 57, name: PD10, kind: gpio, port: D, bit: 10, default: GPIO, functions: {REMAP: ETH_MII_RXD1/ETH_RMII_RXD1/USART3_CK}}
+  - {num: 58, name: PD11, kind: gpio, port: D, bit: 11, default: GPIO, functions: {REMAP: ETH_MII_RXD2/USART3_CTS}}
+  - {num: 59, name: PD12, kind: gpio, port: D, bit: 12, default: GPIO, functions: {REMAP: ETH_MII_RXD3/TIM4_CH1/USART3_RTS}}
+  - {num: 60, name: PD13, kind: gpio, port: D, bit: 13, default: GPIO, functions: {REMAP: TIM4_CH2}}
+  - {num: 61, name: PD14, kind: gpio, port: D, bit: 14, default: GPIO, functions: {REMAP: TIM4_CH3}}
+  - {num: 62, name: PD15, kind: gpio, port: D, bit: 15, default: GPIO, functions: {REMAP: TIM4_CH4}}
+  - {num: 63, name: PC6, kind: gpio, port: C, bit: 6, default: GPIO, functions: {AF: I2S2_MCK, REMAP: TIM3_CH1}}
+  - {num: 64, name: PC7, kind: gpio, port: C, bit: 7, default: GPIO, functions: {AF: I2S3_MCK, REMAP: TIM3_CH2}}
+  - {num: 65, name: PC8, kind: gpio, port: C, bit: 8, default: GPIO, functions: {REMAP: TIM3_CH3}}
+  - {num: 66, name: PC9, kind: gpio, port: C, bit: 9, default: GPIO, functions: {REMAP: TIM3_CH4}}
+  - {num: 67, name: PA8, kind: gpio, port: A, bit: 8, default: GPIO, functions: {AF: MCO/OTG_FS_SOF/TIM1_CH1/USART1_CK}}
+  - {num: 68, name: PA9, kind: gpio, port: A, bit: 9, default: GPIO, functions: {AF: TIM1_CH2/USART1_TX, additional: OTG_FS_VBUS}}
+  - {num: 69, name: PA10, kind: gpio, port: A, bit: 10, default: GPIO, functions: {AF: OTG_FS_ID/TIM1_CH3/USART1_RX}}
+  - {num: 70, name: PA11, kind: gpio, port: A, bit: 11, default: GPIO, functions: {AF: CAN1_RX/TIM1_CH4/USART1_CTS, additional: OTG_FS_DM}}
+  - {num: 71, name: PA12, kind: gpio, port: A, bit: 12, default: GPIO, functions: {AF: CAN1_TX/TIM1_ETR/USART1_RTS, additional: OTG_FS_DP}}
+  - {num: 72, name: PA13, kind: gpio, port: A, bit: 13, default: JTMS/SWDIO, functions: {debug: JTMS/SWDIO}}
+  - {num: 73, name: NC, kind: special, default: NC}
+  - {num: 74, name: VSS, kind: power, default: VSS}
+  - {num: 75, name: VDD, kind: power, default: VDD}
+  - {num: 76, name: PA14, kind: gpio, port: A, bit: 14, default: JTCK/SWCLK, functions: {debug: JTCK/SWCLK}}
+  - {num: 77, name: PA15, kind: gpio, port: A, bit: 15, default: JTDI, functions: {debug: JTDI, AF: I2S3_WS/SPI3_NSS, REMAP: SPI1_NSS/TIM2_CH1_ETR}}
+  - {num: 78, name: PC10, kind: gpio, port: C, bit: 10, default: GPIO, functions: {AF: UART4_TX, REMAP: I2S3_CK/SPI3_SCK/USART3_TX}}
+  - {num: 79, name: PC11, kind: gpio, port: C, bit: 11, default: GPIO, functions: {AF: UART4_RX, REMAP: SPI3_MISO/USART3_RX}}
+  - {num: 80, name: PC12, kind: gpio, port: C, bit: 12, default: GPIO, functions: {AF: UART5_TX, REMAP: I2S3_SD/SPI3_MOSI/USART3_CK}}
+  - {num: 81, name: PD0, kind: gpio, port: D, bit: 0, default: GPIO, functions: {REMAP: CAN1_RX}}
+  - {num: 82, name: PD1, kind: gpio, port: D, bit: 1, default: GPIO, functions: {REMAP: CAN1_TX}}
+  - {num: 83, name: PD2, kind: gpio, port: D, bit: 2, default: GPIO, functions: {AF: TIM3_ETR/UART5_RX}}
+  - {num: 84, name: PD3, kind: gpio, port: D, bit: 3, default: GPIO, functions: {REMAP: USART2_CTS}}
+  - {num: 85, name: PD4, kind: gpio, port: D, bit: 4, default: GPIO, functions: {REMAP: USART2_RTS}}
+  - {num: 86, name: PD5, kind: gpio, port: D, bit: 5, default: GPIO, functions: {REMAP: USART2_TX}}
+  - {num: 87, name: PD6, kind: gpio, port: D, bit: 6, default: GPIO, functions: {REMAP: USART2_RX}}
+  - {num: 88, name: PD7, kind: gpio, port: D, bit: 7, default: GPIO, functions: {REMAP: USART2_CK}}
+  - {num: 89, name: PB3, kind: gpio, port: B, bit: 3, default: JTDO/TRACESWO, functions: {debug: JTDO/TRACESWO, AF: I2S3_CK/SPI3_SCK, REMAP: SPI1_SCK/TIM2_CH2}}
+  - {num: 90, name: PB4, kind: gpio, port: B, bit: 4, default: NJTRST, functions: {debug: NJTRST, AF: SPI3_MISO, REMAP: SPI1_MISO/TIM3_CH1}}
+  - {num: 91, name: PB5, kind: gpio, port: B, bit: 5, default: GPIO, functions: {AF: I2C1_SMBA/I2S3_SD/SPI3_MOSI, REMAP: CAN2_RX/ETH_PPS_OUT/SPI1_MOSI/TIM3_CH2}}
+  - {num: 92, name: PB6, kind: gpio, port: B, bit: 6, default: GPIO, functions: {AF: I2C1_SCL/TIM4_CH1, REMAP: CAN2_TX/USART1_TX}}
+  - {num: 93, name: PB7, kind: gpio, port: B, bit: 7, default: GPIO, functions: {AF: I2C1_SDA/TIM4_CH2, REMAP: USART1_RX}}
+  - {num: 94, name: BOOT0, kind: special, default: BOOT0}
+  - {num: 95, name: PB8, kind: gpio, port: B, bit: 8, default: GPIO, functions: {AF: ETH_MII_TXD3/TIM4_CH3, REMAP: CAN1_RX/I2C1_SCL}}
+  - {num: 96, name: PB9, kind: gpio, port: B, bit: 9, default: GPIO, functions: {AF: TIM4_CH4, REMAP: CAN1_TX/I2C1_SDA}}
+  - {num: 97, name: PE0, kind: gpio, port: E, bit: 0, default: GPIO, functions: {AF: TIM4_ETR}}
+  - {num: 98, name: PE1, kind: gpio, port: E, bit: 1, default: GPIO, functions: {additional: EXTI1}}   # no alternate function (EXTI line 1 source only)
+  - {num: 99, name: VSS, kind: power, default: VSS}
+  - {num: 100, name: VDD, kind: power, default: VDD}

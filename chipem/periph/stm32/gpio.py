@@ -14,7 +14,9 @@ Per pin (MODER field):
   directions follow master/slave mode) and toggle the pin with PinBoard.drive_signal (timer channels, SPI).
 * 11 analog: owner = the pin's "ADC" (or "analog") function, else "analog"; direction "analog"; no pull.
 Reset values come from the SVD (GPIOA: PA13/PA14/PA15 AF0 = JTMS-SWDIO/JTCK-SWCLK/JTDI with pulls; GPIOB: PB3/PB4 AF0
-= JTDO/TRACESWO and NJTRST), so the debug pins start owned by SWD/JTAG.
+= JTDO/TRACESWO and NJTRST), so the debug pins start owned by SWD/JTAG.  `params.reset` ({register: value}) replaces an
+SVD reset value the reference manual contradicts (STM32F401/F411: GPIOA_OSPEEDR 0x0C000000, PA13 SWDIO very high
+speed, RM0368/RM0383 8.4.3).
 
 IDR = resolved levels of all pins of the port (H -> 1, L/X -> 0) except analog-mode pins (read 0). Reading a
 floating (X) input pin whose configuration the firmware changed (MODER/PUPDR/OTYPER/AFR field written with a new
@@ -36,7 +38,7 @@ import re
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs
 from .signals import TABLE as SIGNALS
@@ -62,10 +64,12 @@ class GPIO(GatedBlock):
         self.port = str(params.get("port") or name[-1]).upper()
         self.gate = f"GPIO{self.port}"
         ov: dict[str, dict] = {n: {"on_write": self._cfg_write} for n in CFG_REGS}
-        ov["IDR"] = {"on_read": self._idr_read, "ro_mask": 0xFFFFFFFF}
+        ov["IDR"] = {"on_read": self._idr_read, "ro_mask": 0xFFFFFFFF, "on_peek": self._idr_peek}
         ov["ODR"] = {"on_write": self._odr_write, "ro_mask": 0xFFFF0000}
         ov["BSRR"] = {"on_write": self._bsrr_write, "on_read": _zero}
-        ov["LCKR"] = {"on_write": self._lckr_write, "on_read": self._lckr_read}
+        ov["LCKR"] = {"on_write": self._lckr_write, "on_read": self._lckr_read, "on_peek": self._lckr_peek}
+        for rn, val in (params.get("reset") or {}).items():       # RM reset value where the SVD differs
+            ov.setdefault(str(rn), {})["reset"] = int(val)
         r = build_regs((name, f"GPIO{self.port}"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.pins: list[Any] = [None] * 16
@@ -216,6 +220,8 @@ class GPIO(GatedBlock):
             blk = periphs.get(pre)
             if blk is None and pre.startswith("I2S") and pre[3:].isdigit():
                 blk = periphs.get("SPI" + pre[3:])          # I2S2_MCK -> SPI2 (I2S mode of the SPI block)
+            if blk is None and pre == "LCD":
+                blk = periphs.get("LTDC")                   # LCD_HSYNC -> LTDC (idle levels follow LTDC_GCR polarity)
             f = getattr(blk, "signal_state", None)
             if f is not None:
                 r = f(part)
@@ -473,6 +479,19 @@ class GPIO(GatedBlock):
             self._lock_val = mask
         return mask
 
+    def _lckr_peek(self, blk, reg):
+        locked = self._lock_val if self._lock_seq == 3 else self._locked    # the read would complete the sequence
+        return (locked | LCKK) if locked else None
+
+    def _idr_peek(self, blk, reg):
+        """IDR from the pin levels, without the read counters, pin-report touches, warnings or the cache."""
+        v = 0
+        moder = self.get("MODER")
+        for i, pin in enumerate(self.pins):
+            if pin is not None and (moder >> (2 * i)) & 3 != 3 and pin.level() == "H":
+                v |= 1 << i
+        return v
+
     def _lckr_read(self, blk, reg):
         if self._lock_seq == 3:
             self._lock_seq = 0
@@ -489,6 +508,9 @@ class GPIO(GatedBlock):
         return v if v is not None else self._idr_compute()
 
     def _idr_compute(self) -> int:
+        pb = self.chip.pins if self.chip is not None else None
+        if pb is not None and pb._waves:
+            pb.sync_waves()                 # waveform sources (UART TX frames): the pins' levels at this instruction
         v = 0
         rep = self._rep
         pc = rep.pc() if rep is not None else None
@@ -510,7 +532,7 @@ class GPIO(GatedBlock):
                     self._warned_x.add(i)
                     self.emit("warn", block=self.name, pin=pin.id,
                               msg=f"reading floating pin {pin.id} (no pull, nothing connected): reads 0")
-        self._idr = v
+        self._idr = v if pb is None or not pb._waves else None      # no cache while a waveform is pending
         o = self._idr_off
         self.mem[o:o + 4] = v.to_bytes(4, "little")
         return v

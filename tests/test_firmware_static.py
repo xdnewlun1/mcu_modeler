@@ -162,3 +162,53 @@ def test_pin_report_static_agreement(fw, chip):
     s.run_for(20e6)
     d = report_dict(s.chip)
     assert d["pins"] and all(p["static"] == "confirmed" for p in d["pins"])
+
+
+F1 = ROOT / "firmware" / "samples_stm32f1" / "build"
+
+
+@pytest.mark.skipif(not (F1 / "uart_echo.elf").exists(), reason="STM32F1 samples not built")
+def test_stm32f1_crl_crh_static_roles():
+    """STM32F1 GPIOx_CRL/CRH (RM0008 9.2.1/9.2.2, Table 20): one MODE/CNF nibble per pin, AF outputs named from the
+    pin's default/remap functions; the GPIOA base held in lr (clang) is followed."""
+    r = analyze(load_firmware(F1 / "uart_echo.elf"), load_chip(ROOT / "chips" / "stm32f103t6.yaml"))
+    pins = r.pins_configured
+    assert "GPIOA_CRH=0xb AF push-pull 50 MHz (USART1_TX/TIM1_CH2)".lower() in [n.lower() for n in pins["PA9"]]
+    assert any("input floating" in n for n in pins["PA10"])
+
+
+def test_stm32f1_crl_decoding_thumb():
+    """Immediate CRL/BSRR/BRR/ODR stores on the F1 (RM0008 9.2): output, input pull with ODR, AF open-drain."""
+    src = """
+  movw r0, #0x0800
+  movt r0, #0x4001
+  movw r1, #0x8f43
+  movt r1, #0x4444
+  str r1, [r0]
+  movs r2, #0x08
+  str r2, [r0, #0x0c]
+  movs r2, #0x01
+  str r2, [r0, #0x10]
+  movs r2, #0x02
+  str r2, [r0, #0x14]
+  b .
+"""
+    r = analyze(_thumb_image(src), load_chip(ROOT / "chips" / "stm32f103t6.yaml"))
+    pins = r.pins_configured
+    assert any("output push-pull 50 MHz" in n for n in pins["PA0"])
+    assert not any("CRL" in n for n in pins["PA1"])        # full write, PA1 nibble at its reset value 0x4
+    assert any("AF open-drain 50 MHz (USART2_TX/TIM2_CH3)" in n for n in pins["PA2"])
+    assert any("input pull-up/down" in n for n in pins["PA3"])
+    assert any("pull-up as input" in n for n in pins["PA3"])
+    assert any(n.endswith("set") for n in pins["PA0"]) and any(n.endswith("reset") for n in pins["PA1"])
+
+
+@pytest.mark.skipif(not (F1 / "uart_echo.elf").exists(), reason="STM32F1 samples not built")
+def test_stm32f1_pin_report_static_agreement():
+    from chipem.pinreport import report_dict
+    from chipem.session import Session
+    s = Session("chips/stm32f103t6.yaml", str(F1 / "uart_echo.elf"), quiet=True)
+    s.run_for(5e6)
+    d = report_dict(s.chip)
+    by = {p["pin"]: p for p in d["pins"]}
+    assert by["PA9"]["static"] == "confirmed"

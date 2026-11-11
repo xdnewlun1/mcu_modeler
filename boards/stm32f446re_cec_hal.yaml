@@ -1,0 +1,13 @@
+# HDMI-CEC with the STM32CubeF4 HAL: A runs the bare-metal initiator firmware/samples_stm32f446/cec_ping.c (logical
+# address 4), B the HAL_CEC follower firmware/samples_stm32_hal_f446/cec_hal.c (logical address 0 = TV: HAL_CEC_Init,
+# HAL_CEC_IRQHandler, HAL_CEC_Transmit_IT; CEC clock HSI/488 via HAL_RCCEx_PeriphCLKConfig).  Same transcript as
+# boards/stm32f446re_cec_pair.yaml.  CEC on PB6 (AF3, open drain) on an open-drain net; console USART2 (PA2, 115200).
+# Run:   chipem run --board boards/stm32f446re_cec_hal.yaml --for 400ms
+# Build: firmware/samples_stm32f446/build.sh; firmware/samples_stm32_hal_f446/build.sh
+name: stm32f446re_cec_hal
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f446re, firmware: ../firmware/samples_stm32f446/build/cec_ping.elf}
+  - {id: B, chip: stm32f446re, firmware: ../firmware/samples_stm32_hal_f446/build/cec_hal.elf}
+nets:
+  - {name: CEC, pins: [A.PB6, B.PB6], open_drain: true}

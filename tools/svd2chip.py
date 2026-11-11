@@ -462,6 +462,7 @@ ALIASES = {  # chip-YAML name -> candidate SVD names
     "PTA": ["GPIOA"], "PTB": ["GPIOB"], "PTC": ["GPIOC"], "PTD": ["GPIOD"], "PTE": ["GPIOE"],
     "LPTMR": ["LPTMR0"], "USB": ["USB0"], "I2S": ["I2S0"], "PDB": ["PDB0"], "DAC": ["DAC0"],
     "CMP": ["CMP0"], "FTFL": ["FTFE"], "FTFA": ["FTFE"], "NV": ["FTFE_FlashConfig"],
+    "SDIO": ["SDMMC"], "SPDIFRX": ["SPDIF_RX"], "CEC": ["HDMI_CEC"],          # STM32F446.svd names (HAL names in the YAML)
 }
 
 

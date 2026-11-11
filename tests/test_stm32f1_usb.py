@@ -267,6 +267,8 @@ def test_control_setup_in_out_toggles(desc):
     set_stat(c, 0, rx=1)                                     # STALL both ways; a SETUP still gets through
     set_stat(c, 0, tx=1)
     assert d.out(0, b"x", "DATA0") == "STALL" and d.inn(0) == "STALL"
+    assert d.setup(pkt) is None                              # RM0008 23.4.2: CTR_RX still set -> discarded
+    w(c, epr(0), (r(c, epr(0)) & 0x070F) | CTR_TX)           # clear CTR_RX
     assert d.setup(pkt) == "ACK"
     set_stat(c, 0, rx=3, extra=0x0100)                       # STATUS_OUT: an OUT with data is STALLed
     assert d.out(0, b"x", "DATA1") == "STALL"
@@ -302,16 +304,20 @@ def test_double_buffered_bulk_in_uses_hp_line(desc):
     pma.write_bytes(0x140, b"BB")
     w(c, epr(1), 0x0101)                                     # bulk + EP_KIND (double buffer), EA 1
     set_stat(c, 1, tx=3)
-    assert d.inn(1) == "NAK"                                 # DTOG_TX == SW_BUF (DTOG_RX): no buffer for the USB
-    w(c, epr(1), 0x0101 | CTR_RX | CTR_TX | DTOG_RX)         # application releases a buffer (SW_BUF = 1)
+    # RM0008 23.4.3: the first transaction after DBL_BUF is set ends like a plain one (STAT_TX -> NAK)
     assert d.inn(1) == ("DATA0", b"AAA")
     v = r(c, epr(1))
-    assert v & CTR_TX and v & DTOG_TX and (v >> 4) & 3 == 3  # STAT_TX stays VALID
+    assert v & CTR_TX and v & DTOG_TX and (v >> 4) & 3 == 2
     assert 16 + HP in c.arch.asserted and 16 + LP in c.arch.asserted
-    assert d.inn(1) == "NAK"                                 # DTOG_TX caught up with SW_BUF
-    w(c, epr(1), 0x0101 | CTR_RX | DTOG_RX)                  # clear CTR_TX, SW_BUF = 0
+    w(c, epr(1), 0x0101 | CTR_RX | DTOG_RX)                  # clear CTR_TX, SW_BUF = 1
     assert 16 + HP not in c.arch.asserted
+    set_stat(c, 1, tx=3)
+    assert d.inn(1) == "NAK"                                 # DTOG_TX == SW_BUF (DTOG_RX): no buffer for the USB
+    w(c, epr(1), 0x0101 | CTR_RX | CTR_TX | DTOG_RX)         # application releases a buffer (SW_BUF = 0)
     assert d.inn(1) == ("DATA1", b"BB")
+    v = r(c, epr(1))
+    assert v & CTR_TX and not v & DTOG_TX and (v >> 4) & 3 == 3   # now STAT_TX stays VALID
+    assert d.inn(1) == "NAK"                                 # DTOG_TX caught up with SW_BUF
 
 
 def test_bus_reset_suspend_resume_and_remote_wakeup(desc):

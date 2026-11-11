@@ -51,7 +51,7 @@ from collections import deque
 from typing import Any
 
 from ... import crypto_algos as ca
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, dma_request, irq_number, make_absent, part_present, shared_irq
 from .cryp import swap_word
@@ -77,8 +77,8 @@ class HASH(GatedBlock):
         ro = {"ro_mask": 0xFFFFFFFF}
         ov: dict[str, dict] = {
             "CR": {"on_write": self._cr_write, "on_read": self._cr_read},
-            "DIN": {"on_write": self._din_write, "on_read": lambda b, r: self._din_last},
-            "STR": {"on_write": self._str_write, "on_read": lambda b, r: self.get("STR") & 0x1F},
+            "DIN": {"on_write": self._din_write, "on_read": pure_read(lambda b, r: self._din_last)},
+            "STR": {"on_write": self._str_write, "on_read": pure_read(lambda b, r: self.get("STR") & 0x1F)},
             "IMR": {"on_write": self._imr_write},
             "SR": {"ro_mask": 0xFFFFFFFF & ~(DINIS | DCIS), "on_write": self._sr_write, "on_read": self._sr_read},
         }
@@ -89,9 +89,10 @@ class HASH(GatedBlock):
         sha2 = bool(params.get("sha2", False))
         for i in range(NCSR):
             if i < NCSR_F415 or sha2:
-                ov[f"CSR{i}"] = {"on_read": self._csr_read(i), "on_write": self._csr_write}
+                ov[f"CSR{i}"] = {"on_read": self._csr_read(i), "on_write": self._csr_write,
+                                 "on_peek": self._csr_peek(i)}
             else:                       # CSR51..53: STM32F43x only
-                ov[f"CSR{i}"] = {**ro, "on_read": lambda b, r: 0}
+                ov[f"CSR{i}"] = {**ro, "on_read": pure_read(lambda b, r: 0)}
         r = build_regs((name, "HASH"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.sha2 = sha2
@@ -324,6 +325,13 @@ class HASH(GatedBlock):
                 words[CSR_HMAC + i] = int.from_bytes(self.inner[4 * i:4 * i + 4], "big")
         return words
 
+    def _csr_peek(self, i: int):
+        def pk(blk, reg):
+            if not self._ctx_live:
+                return 2 if i == 0 else (0x20000000 if i == 2 and self.sha2 else 0)
+            return self._ctx()[i]
+        return pk
+
     def _csr_read(self, i: int):
         def rd(blk, reg):
             if not self._ctx_live:
@@ -336,7 +344,7 @@ class HASH(GatedBlock):
 
     def _csr_write(self, blk, reg, old, new):
         self._store(reg, new)
-        w = [self.get(f"CSR{i}") for i in range(NCSR)]
+        w = [self.get(f"CSR{i}") if f"CSR{i}" in self.regs else 0 for i in range(NCSR)]   # STM32F2: CSR0..50 only
         if w[0] & 0xFF000000 != MAGIC:
             return None
         c0 = w[0]
@@ -361,8 +369,10 @@ class HASH(GatedBlock):
             if self._pending_digest is not None:                  # read stalled until the digest is ready (25.4.5)
                 return self._pending_digest[i] if i < len(self._pending_digest) and (wide or i < 5) else 0
             return self.get(reg.name)
+        rd.pure_read = True
         return rd
 
+    @pure_read
     def _cr_read(self, blk, reg):
         v = self.get("CR") & ~(INIT | DINNE | (0xF << 8))
         n = len(self.pending)
@@ -395,7 +405,8 @@ class HASH(GatedBlock):
             for i in range(5):                            # digest registers take their reset value (25.4.5)
                 self.set(f"HR{i}", 0)
             for i in range(8):
-                self.set(f"HASH_HR{i}", 0)
+                if f"HASH_HR{i}" in self.regs:            # absent on the STM32F2 (STM32F21x.svd / RM0033 21.4)
+                    self.set(f"HASH_HR{i}", 0)
             self._ctx_live = True
             self._store(reg, new)
             self.set("SR", (self.get("SR") & ~DCIS) | DINIS)
@@ -433,6 +444,7 @@ class HASH(GatedBlock):
         self._update()
         return None
 
+    @pure_read
     def _sr_read(self, blk, reg):
         v = self.get("SR") & (DINIS | DCIS)
         if self.get("CR") & DMAE:

@@ -1,0 +1,14 @@
+# STM32F446RE FMPI2C1 controller in Fast-mode Plus (1 MHz, RM0390 Table 135 TIMINGR for a 16 MHz HSI kernel clock)
+# on PC6 SCL / PC7 SDA (AF4, open drain) + 24C02 EEPROM part at 0x50 on open-drain nets. The firmware writes
+# "Hello FMPI2C!" in 8-byte pages with acknowledge polling of the 5 ms write cycle (NACKF + automatic STOP while the
+# EEPROM is busy), reads it back (dummy write with TC, repeated START, AUTOEND) and prints "EEPROM: Hello FMPI2C!" on
+# USART2 (PA2, 115200). quantum 200ns: shorter than the 312.5 ns SCL low time of Fm+.
+name: stm32f446re_fmpi2c_eeprom
+quantum: 200ns
+chips:
+  - {id: A, chip: stm32f446re, firmware: ../firmware/samples_stm32f446/build/fmpi2c_eeprom.elf}
+nets:
+  - {name: SCL, pins: [A.PC6], open_drain: true}
+  - {name: SDA, pins: [A.PC7], open_drain: true}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 256, ports: {sda: SDA, scl: SCL}}

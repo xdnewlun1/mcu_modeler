@@ -1,82 +1,71 @@
-"""STM32F1 12-bit ADC (ADC1 / ADC2, RM0008 ch. 11 layout: SR CR1 CR2 SMPR1-2 JOFR1-4 HTR LTR SQR1-3 JSQR JDR1-4 DR).
+"""STM32F1 12-bit ADC (ADC1 / ADC2 / ADC3, RM0008 ch. 11: SR CR1 CR2 SMPR1-2 JOFR1-4 HTR LTR SQR1-3 JSQR JDR1-4 DR).
 
-Not verified against RM0008 (the reference manual was not available when this was written): behaviour from the
-RM0008 ADC chapter as known and as used by the HAL/LL/SPL drivers; timing data from the STM32F103x4/x6 data sheet
+Verified against RM0008 Rev 21 ch. 11; timing figures RM0008 does not give come from the STM32F103x4/x6 data sheet
 (DS15060: Table 46 tSTAB / tCAL / tlat / tlatr, Table 50 temperature sensor, Table 12 VREFINT).  Registers from ST's
-STM32F103xx.svd (chips/stm32f103_regs.yaml).  Analog inputs use the same store and naming as stm32.adc (pin values
-shared with the board / `--adc` / scripted analog parts).
+STM32F103xx.svd (chips/stm32f103_regs.yaml); the SVD's TSVREFE in ADC2/ADC3 is made reserved here (11.12.3).  Analog
+inputs use the same store and naming as stm32.adc (pin values shared with the board / `--adc` / scripted parts).
 
-Power and calibration (CR2):
-* ADON 0 -> 1 powers the ADC up; it is ready tSTAB later (`params.tstab_us`, 1 us, DS15060 Table 46).  Writing CR2
-  again with ADON = 1 and no other bit changed starts a regular conversion (the F1 "second ADON write" start; RM0008:
-  a conversion is not triggered if any other CR2 bit changes in the same write).  It is done only with EXTTRIG = 0
-  (assumption: with EXTTRIG = 1 the regular group waits for its selected trigger).  ADON 1 -> 0 powers down: running
-  conversions and a calibration in progress are lost (CAL / RSTCAL clear).  A conversion requested before tSTAB has
-  elapsed starts when the ADC is ready.
-* CAL (set by software, cleared by hardware): calibration takes tCAL = 83 ADCCLK (`params.cal_adcclk`), then CAL reads
-  0 and DR holds the calibration code (`params.cal_code`, 0: an ideal converter).  RSTCAL clears after
-  `params.rstcal_adcclk` ADCCLK (2; RM0008 gives no figure).  Software cannot clear either bit.  Setting CAL while
-  ADON = 0 starts nothing (one `warn`; CAL stays set); setting it before tSTAB has elapsed logs one `warn` (RM0008:
-  power the ADC for at least 2 ADCCLK before calibrating) and calibrates from the ready time.  Conversion triggers
-  during calibration are ignored (one `warn`).
+Parameters: `index` (from the name), `triggers` ("adc12" Tables 67/68, "adc3" Tables 69/70; default by index), `dma`
+(default: ADC1 and ADC3), `tsvrefe` (default ADC1), `vss_channels` (default ADC2: 16, 17; ADC3: 9, 14-17), `irq`
+(default "ADC1_2", ADC3 "ADC3"), `vref`, `default`, `tstab_us` (1), `cal_adcclk` (83), `rstcal_adcclk` (2), `cal_code`.
 
-Regular group:
-* Triggers: SWSTART (only with EXTTRIG = 1 and EXTSEL = 111; otherwise it stays set without effect, one `warn`), the
-  second ADON write (above), or the EXTSEL source with EXTTRIG = 1 (rising edge only):
-  000 TIM1_CC1, 001 TIM1_CC2, 010 TIM1_CC3, 011 TIM2_CC2, 100 TIM3_TRGO, 101 TIM4_CC4, 110 EXTI line 11 (not modelled:
-  one `warn`), 111 SWSTART.  Timer signals come from stm32.tim `add_trigger_listener` (TIMx_CCy = OCyREF of an output
-  channel or a pulse per capture; TRGO per CR2.MMS); a timer absent on the part (TIM4 on the F103T6) logs one `warn`.
-  SR.STRT is set at the trigger; SWSTART reads 0 again at once.  A trigger while a regular conversion runs, while the
-  ADC is off or calibrating, or with the RCC clock (APB2ENR.ADCxEN) off is ignored.
-* Sequence: SQR1.L + 1 channels SQ1..SQ16 with CR1.SCAN (or DISCEN), SQ1 alone otherwise.  CR2.CONT restarts the
-  sequence at its end, back to back.  CR1.DISCEN: each trigger converts DISCNUM + 1 channels, continuing where the
-  previous subgroup stopped (CONT with DISCEN is not allowed: one `warn`, DISCEN wins).  Writing a different value to
-  SQR1-3 during a regular conversion restarts the group from SQ1 (JSQR likewise for the injected group).
-* Timing (ADCCLK = rcc.adc_hz() = PCLK2 / ADCPRE): a conversion takes SMPx (1.5, 7.5, 13.5, 28.5, 41.5, 55.5, 71.5,
-  239.5) + 12.5 ADCCLK; the first conversion after a trigger starts after the regular trigger latency tlatr = 2 ADCCLK
-  (injected: tlat = 3 ADCCLK), the next ones follow back to back.  One scheduler event per conversion; clock changes
-  during a conversion do not re-time it.
-* Result: 12-bit code = floor(V / VREF+ x 4096) clipped to 0..4095 (VREF+ = `params.vref`, 3.3 V) taken at the end of
-  the conversion; CR2.ALIGN right (bits 11..0) or left (bits 15..4).  SR.EOC is set at the end of the regular group
-  (after every conversion with SCAN = 0; at the end of the whole sequence with SCAN or DISCEN), cleared by reading DR.
-  There is no overrun detection on the F1: a new result overwrites DR.  SR bits are rc_w0 (write 0 clears).
-* DMA (CR2.DMA, ADC1 only): the request "ADC1" (DMA1 channel 1) after every regular conversion, deasserted when DR is
-  read.  ADC2 has no DMA request (setting its DMA bit logs one `warn`); in dual mode ADC1's DR bits 31..16 hold the
-  ADC2 regular result, so a 32-bit ADC1 DMA transfer moves both.
-
-Injected group: JSQR.JL + 1 channels, the last JL + 1 of JSQ1..JSQ4 (JL = 0: JSQ4 alone), the i-th converted channel
-goes to JDRi with offset JOFRi subtracted (signed: right alignment sign-extended to 16 bits, left alignment shifted by
-3 with bit 15 the sign).  Triggers: JSWSTART (JEXTTRIG = 1 and JEXTSEL = 111) or JEXTSEL with JEXTTRIG = 1 (rising
-edge): 000 TIM1_TRGO, 001 TIM1_CC4, 010 TIM2_TRGO, 011 TIM2_CC1, 100 TIM3_CC4, 101 TIM4_TRGO, 110 EXTI line 15 (not
-modelled), 111 JSWSTART.  SR.JSTRT at the trigger; JEOC at the end of the injected group, and EOC as well (RM0008 SR:
-"EOC: end of a group channel conversion (regular or injected)").  An injected trigger during a regular conversion
-interrupts it; the regular sequence resumes with that channel after the injected group.  CR1.JAUTO converts the
-injected group right after the regular group (injected triggers ignored, one `warn`); CR1.JDISCEN converts one injected
-channel per trigger.
-Analog watchdog: CR1.AWDEN (regular) / JAWDEN (injected), all channels or AWDSGL + AWDCH; the raw 12-bit code outside
-[LTR, HTR] sets SR.AWD.
-Interrupt: one NVIC line "ADC1_2" shared by both ADCs: EOC & EOCIE | JEOC & JEOCIE | AWD & AWDIE (level).
-
-Channels: 0-9 on the pins whose ADC function is ADC12_INn (PA0-PA7, PB0, PB1 on the F103T6), 10-15 on no pin of this
-package (values stored as "ADCn_INm"); ADC1 channel 16 = temperature sensor and 17 = VREFINT, both enabled by ADC1
-CR2.TSVREFE (0 V while disabled): V_SENSE = V25 - Avg_Slope x (T - 25) = 1.43 V - 4.3 mV/degC x (T - 25) (DS15060
-Table 50 typical; T: "TEMP" in degC, default 25), VREFINT 1.20 V (DS15060 Table 12 typical).  On ADC2 channels 16/17
-read 0 V.  Sensor start-up time and the 17.1 us minimum sampling time are not checked.  Stimulus API as stm32.adc:
-`set_channel(name, value)` (float volts, int raw code; "IN5", "ADC1_IN5", "ADC12_IN5", a pin "PA5", "TEMP").
-
-Dual mode (ADC1 CR1.DUALMOD; ADC1 is the master, the slave ADC2's own triggers for the synchronised group are ignored
-with one `warn`):
-  0001 regular simultaneous + injected simultaneous, 0010 regular simultaneous + alternate trigger,
-  0011 injected simultaneous + fast interleaved, 0100 injected simultaneous + slow interleaved,
-  0101 injected simultaneous, 0110 regular simultaneous, 0111 fast interleaved, 1000 slow interleaved,
-  1001 alternate trigger.
-Regular simultaneous: an ADC1 regular trigger starts both regular groups at once.  Injected simultaneous likewise for
-the injected groups.  Fast interleaved: ADC2 starts at the trigger and ADC1 7 ADCCLK later (with CONT each restarts at
-its own end, keeping the phase).  Slow interleaved is approximated as fast interleaved with a 14 ADCCLK offset (one
-`warn`; the RM's ADC2/ADC1 alternation every 14 ADCCLK without CONT is not modelled).  Alternate trigger: successive
-ADC1 injected triggers convert the injected group of ADC1, then ADC2, then ADC1 ...  The RM's requirement of equal
-sampling times / sequence lengths in simultaneous modes is not checked.  DUALMOD 1010-1111 are reserved (one `warn`,
-independent).
+Verified (RM0008 section):
+* Power (11.3.1, 11.12.3 ADON): ADON 0 -> 1 wakes the ADC (ready tSTAB later, 1 us DS15060); writing ADON = 1 again
+  while it holds 1 starts a regular conversion, whatever EXTTRIG is, unless another CR2 bit changes in the same write
+  ("then conversion is not triggered").  ADON 1 -> 0 powers down (conversions and calibration lost).  A conversion
+  requested before tSTAB starts when the ADC is ready.
+* Calibration (11.4): CAL set by software, cleared by hardware after tCAL = 83 ADCCLK (DS15060); the calibration code
+  is then stored in DR.  The ADC must have been on (ADON = 1) for at least 2 ADCCLK: an earlier CAL logs one `warn` and
+  starts 2 ADCCLK after ADON.  CAL with ADON = 0 does nothing (one `warn`).
+* Channels / groups (11.3.3): regular SQ1..SQ16 (SQR1.L + 1) with SCAN (or DISCEN), injected JL + 1 channels starting
+  at JSQ(4 - JL) (11.12.12 note), results to JDR1.. in order; SQRx / JSQR modified during a conversion restart the group.
+  Single / continuous (11.3.4/11.3.5), scan (11.3.8: EOC / JEOC at the end of the group), discontinuous (11.3.10:
+  DISCNUM + 1 regular channels per trigger, no rollover, "an EOC event is generated at each conversion"; JDISCEN one
+  injected channel per trigger, JEOC and EOC after the last one).
+* Injected (11.3.9): a triggered injection during a regular conversion interrupts it and the regular group resumes with
+  the interrupted channel; a regular trigger during an injected sequence waits for its end.  JAUTO converts the injected
+  group after the regular group, with a 1 ADCCLK (ADC prescaler 4-8) or 2 ADCCLK (prescaler 2) gap each way; injected
+  triggers are ignored with JAUTO (one `warn`).
+* SR (11.12.1): bits rc_w0; EOC "at the end of a group channel conversion (regular or injected)" and cleared by reading
+  DR; JEOC at the end of all injected channels; STRT / JSTRT at the start.  No overrun on the F1 (a new result
+  overwrites DR).
+* Data (11.5): right / left alignment; injected data = code - JOFRx, sign-extended (right: SEXT in 15:12; left: shifted
+  by 3, bit 15 sign); the analog watchdog compares the raw 12-bit code before alignment (11.3.7).
+* Analog watchdog (11.3.7 Table 66): AWDEN (regular), JAWDEN (injected), AWDSGL + AWDCH; outside [LTR, HTR] sets AWD.
+  HTR resets to 0x0FFF (11.12.7).
+* Sample time (11.6, 11.12.4/5): Tconv = SMPx (1.5 .. 239.5) + 12.5 ADCCLK; ADCCLK = PCLK2 / ADCPRE (RCC), above
+  14 MHz one `warn` (11.1).  First conversion after a trigger: + tlatr 2 ADCCLK (regular) / tlat 3 ADCCLK (injected).
+* External triggers (11.7, rising edge only): ADC1/ADC2 Tables 67/68 (TIM1_CC1/CC2/CC3, TIM2_CC2, TIM3_TRGO, TIM4_CC4,
+  EXTI11 or TIM8_TRGO; TIM1_TRGO/CC4, TIM2_TRGO/CC1, TIM3_CC4, TIM4_TRGO, EXTI15 or TIM8_CC4), ADC3 Tables 69/70; the
+  110 entry follows AFIO_MAPR ADCx_ETRGREG_REMAP / ADCx_ETRGINJ_REMAP (9.4.2).  SWSTART / JSWSTART (11.12.3) start a
+  group only when selected by EXTSEL / JEXTSEL = 111 with EXTTRIG / JEXTTRIG = 1 (SWSTART stays set otherwise, one
+  `warn`), and are cleared when the conversion starts.  Timer signals come from stm32.tim `add_trigger_listener`.
+* DMA (11.8, CR2.DMA): ADC1 ("ADC1", DMA1 channel 1) and ADC3 ("ADC3", DMA2 channel 5) request after each regular
+  conversion; the request is served when DR is read.  ADC2 has no DMA request (one `warn`).
+* Internal channels (11.10, 11.12.2): ADC1 16 = temperature sensor, 17 = VREFINT, enabled by ADC1 CR2.TSVREFE (0 V while
+  disabled): V_SENSE = 1.43 V - 4.3 mV/degC x (T - 25) (DS15060 Table 50 typical; "TEMP" in degC, default 25), VREFINT
+  1.20 V (DS15060 Table 12).  ADC2 channels 16/17 and ADC3 channels 9, 14-17 are wired to VSS.
+* Interrupts (11.11): ADC1 and ADC2 share "ADC1_2"; ADC3 has "ADC3".  Line = EOC & EOCIE | JEOC & JEOCIE | AWD & AWDIE.
+* Dual mode (11.9, ADC1 CR1.DUALMOD, reserved in ADC2/ADC3; ADC1 master, ADC2 slave whose own triggers for the
+  synchronised group are ignored with one `warn`): 0001 regular + injected simultaneous, 0010 regular simultaneous +
+  alternate trigger, 0011 injected simultaneous + fast interleaved, 0100 injected simultaneous + slow interleaved,
+  0101 injected simultaneous, 0110 regular simultaneous, 0111 fast interleaved, 1000 slow interleaved, 1001 alternate
+  trigger; 1010-1111 reserved (one `warn`, independent).  Simultaneous: one ADC1 trigger starts both groups (11.9.1/2).
+  Fast interleaved: ADC2 at the trigger, ADC1 7 ADCCLK later (11.9.3).  Slow interleaved: ADC2 at the trigger, ADC1
+  14 ADCCLK later, then each ADC restarts every 28 ADCCLK without CONT (11.9.4; CONT set logs one `warn`).  Alternate
+  trigger: successive injected triggers convert ADC1's group, then ADC2's (11.9.5; with JDISCEN one channel each).
+  ADC1 DR bits 31:16 (ADC2DATA) show ADC2's regular result in dual mode when ADC1 CR2.DMA = 1 (11.9 note: "the DMA bit
+  must be enabled even if it is not used"), so a 32-bit ADC1 DMA transfer moves both.
+Approximate / not modelled:
+* RSTCAL clears after `rstcal_adcclk` = 2 ADCCLK (RM0008 gives no time; "additional cycles" when set during a conversion
+  are not added); the calibration code is `cal_code` (0: RM0008 gives no value; it is a per-chip analog result).
+* EXTI line 11 / 15 triggers (EXTSEL / JEXTSEL = 110 without the TIM8 remap) are not modelled (one `warn`).
+* Dual mode: the equal-sampling-time / same-channel rules (11.9.1-11.9.4 notes) are not checked; in combined regular
+  simultaneous + alternate trigger mode (11.9.8) only the ADC that converts the injected group pauses its regular group
+  (silicon stops and resumes both); the prescaler-4 interleaved spacing of 11.9.9 (8/6 ADCCLK) is not modelled.
+* Sensor start-up time and the 17.1 us minimum sampling time (11.10) are not checked; one scheduler event per
+  conversion; clock changes during a conversion do not re-time it.  The registers' "access by words" rule (11.12) is not
+  enforced.
 """
 from __future__ import annotations
 
@@ -86,7 +75,7 @@ from typing import Any
 from ..base import MMIOBlock
 from ..registry import register
 from ..stm32.adc import _CH_NAME, _INT_NAME, _PIN_FN, _store
-from ._util import GatedBlock, apb_hz, build_regs, dma_request, irq_number, rcc
+from ._util import GatedBlock, add_ro, afio, apb_hz, build_regs, dma_request, irq_number, rcc
 
 # SR
 AWD, EOC, JEOC, JSTRT, STRT = 1, 2, 4, 8, 16
@@ -101,11 +90,22 @@ JEXTTRIG, EXTTRIG, JSWSTART, SWSTART, TSVREFE = 1 << 15, 1 << 20, 1 << 21, 1 << 
 SMP_HALF = (1.5, 7.5, 13.5, 28.5, 41.5, 55.5, 71.5, 239.5)
 CONV_ADCCLK = 12.5
 TLATR_ADCCLK, TLAT_ADCCLK = 2, 3            # DS15060 Table 46: regular / injected trigger latency
-# EXTSEL / JEXTSEL -> (block, signal); 7 = software start
+# EXTSEL / JEXTSEL -> (block, signal); 7 = software start.  RM0008 11.7 Tables 67/68 (ADC1, ADC2): 110 is EXTI line 11
+# (regular) / 15 (injected), or TIM8_TRGO / TIM8_CC4 when AFIO_MAPR ADCx_ETRGREG_REMAP / ADCx_ETRGINJ_REMAP is set
+# (high/XL density, 9.4.2); ("EXTI", n, timer signal) marks that entry.  Tables 69/70: ADC3's own lists.
 TRIGGERS = (("TIM1", "CC1"), ("TIM1", "CC2"), ("TIM1", "CC3"), ("TIM2", "CC2"), ("TIM3", "TRGO"), ("TIM4", "CC4"),
-            ("EXTI", "11"), None)
+            ("EXTI", "11", "TRGO"), None)
 JTRIGGERS = (("TIM1", "TRGO"), ("TIM1", "CC4"), ("TIM2", "TRGO"), ("TIM2", "CC1"), ("TIM3", "CC4"), ("TIM4", "TRGO"),
-             ("EXTI", "15"), None)
+             ("EXTI", "15", "CC4"), None)
+TRIGGERS_ADC3 = (("TIM3", "CC1"), ("TIM2", "CC3"), ("TIM1", "CC3"), ("TIM8", "CC1"), ("TIM8", "TRGO"), ("TIM5", "CC1"),
+                 ("TIM5", "CC3"), None)
+JTRIGGERS_ADC3 = (("TIM1", "TRGO"), ("TIM1", "CC4"), ("TIM4", "CC3"), ("TIM8", "CC2"), ("TIM8", "CC4"), ("TIM5", "TRGO"),
+                  ("TIM5", "CC4"), None)
+TRIGGER_TABLES = {"adc12": (TRIGGERS, JTRIGGERS), "adc3": (TRIGGERS_ADC3, JTRIGGERS_ADC3)}
+# AFIO_MAPR (RM0008 9.4.2): ADC1_ETRGINJ_REMAP 17, ADC1_ETRGREG_REMAP 18, ADC2_ETRGINJ_REMAP 19, ADC2_ETRGREG_REMAP 20
+ETRG_REMAP_BIT = {(1, False): 18, (1, True): 17, (2, False): 20, (2, True): 19}
+ADCCLK_MAX_HZ = 14e6                        # RM0008 11.1: ADCCLK must not exceed 14 MHz
+SLOW_PERIOD_ADCCLK = 28                     # 11.9.4: a new ADC2 start every 28 ADCCLK
 # DUALMOD -> (regular mode, injected mode)
 DUAL_MODES = {0: (None, None), 1: ("sim", "sim"), 2: ("sim", "alt"), 3: ("fast", "sim"), 4: ("slow", "sim"),
               5: (None, "sim"), 6: ("sim", None), 7: ("fast", None), 8: ("slow", None), 9: (None, "alt")}
@@ -121,20 +121,36 @@ class ADC(GatedBlock):
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
+        params.setdefault("reserved_zero", True)        # reserved offsets read 0, writes ignored
         m = re.search(r"(\d+)$", name)
         self.index = int(params.get("index", m.group(1) if m else 1))
         self.gate = f"ADC{self.index}"
+        tt = str(params.get("triggers", "adc3" if self.index == 3 else "adc12")).lower()
+        if tt not in TRIGGER_TABLES:
+            raise ValueError(f"{name}: stm32f1.adc triggers must be one of {sorted(TRIGGER_TABLES)}")
+        self.triggers, self.jtriggers = TRIGGER_TABLES[tt]
+        # 11.8 / CR2.DMA: only ADC1 and ADC3 generate DMA requests; 11.10 / CR2.TSVREFE: sensor and VREFINT on ADC1 only
+        self.has_dma = bool(params.get("dma", self.index in (1, 3)))
+        self.dma_name = f"ADC{self.index}"
+        self.has_tsvrefe = bool(params.get("tsvrefe", self.index == 1))
+        # channels wired to VSS (11.12.2 AWDCH note, 11.12.4): ADC2 16/17; ADC3 9, 14, 15, 16, 17
+        self.vss_channels = frozenset(int(c) for c in params.get(
+            "vss_channels", (9, 14, 15, 16, 17) if self.index == 3 else (() if self.index == 1 else (16, 17))))
         ov: dict[str, dict] = {
             "SR": {"on_write": self._sr_write},
             "CR1": {"on_write": self._cr1_write},
             "CR2": {"on_write": self._cr2_write},
             "SQR1": {"on_write": self._sqr_write}, "SQR2": {"on_write": self._sqr_write},
             "SQR3": {"on_write": self._sqr_write}, "JSQR": {"on_write": self._jsqr_write},
-            "DR": {"on_read": self._dr_read, "ro_mask": 0xFFFFFFFF},
+            "DR": {"on_read": self._dr_read, "ro_mask": 0xFFFFFFFF, "on_peek": self._dr_peek},
         }
         for k in range(1, 5):
             ov[f"JDR{k}"] = {"ro_mask": 0xFFFFFFFF}
         r = build_regs((name, f"ADC{self.index}", "ADC1"), size, ov, params.get("regs_file"))
+        if not self.has_tsvrefe:             # 11.12.3: TSVREFE exists in ADC1 only (the SVD lists it in ADC2/ADC3)
+            add_ro(next(x for x in r if x.name == "CR2"), TSVREFE)
+        if self.index != 1:                  # 11.12.2: DUALMOD is reserved in ADC2 and ADC3
+            add_ro(next(x for x in r if x.name == "CR1"), 0xF << 16)
         super().__init__(name, base, size, r, log=log, params=params)
         self.vref = float(params.get("vref", 3.3))
         self.default = float(params.get("default", 0.0))
@@ -159,6 +175,8 @@ class ADC(GatedBlock):
 
     def _init_state(self) -> None:
         self._ready_at = 0           # core cycle at which the powered ADC is ready (tSTAB)
+        self._on_at = 0              # core cycle of the ADON 0 -> 1 write
+        self._conv_start = 0         # core cycle at which the running regular conversion started (slow interleaved)
         self._pos = 0
         self._burst: int | None = None
         self._jpos = 0
@@ -170,7 +188,8 @@ class ADC(GatedBlock):
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
-        self._irqn = irq_number(chip, str(self.params.get("irq", "ADC1_2")), "ADC1_2", "ADC")
+        dflt = "ADC3" if self.index == 3 else "ADC1_2"
+        self._irqn = irq_number(chip, str(self.params.get("irq", dflt)), dflt, "ADC")
         self.vals = _store(chip)
         board = getattr(chip, "pins", None)
         for p in (board.pins if board is not None else ()):
@@ -194,7 +213,7 @@ class ADC(GatedBlock):
         self._sub_src = self._jsub_src = None
         self._trig_lvl = self._jtrig_lvl = False
         if self._dma_req and self.chip is not None:
-            dma_request(self.chip, "ADC1", False)
+            dma_request(self.chip, self.dma_name, False)
         self._init_state()
         super().reset()
         if self.chip is not None:
@@ -259,8 +278,10 @@ class ADC(GatedBlock):
 
     def volts(self, ch: int) -> float:
         """Input voltage of channel `ch` now."""
+        if ch in self.vss_channels:
+            return 0.0
         if ch >= 16:
-            if self.index != 1 or ch > 17:
+            if not self.has_tsvrefe or ch > 17:
                 if ch > 17:
                     self._warn_once(f"ch{ch}", f"{self.name}: channel {ch} does not exist (0-17): converts 0")
                 return 0.0
@@ -343,7 +364,10 @@ class ADC(GatedBlock):
         return b if getattr(b, "model", None) == self.model else None
 
     def dual_mode(self) -> tuple[str | None, str | None]:
-        """(regular mode, injected mode) of ADC1 CR1.DUALMOD: "sim" / "fast" / "slow" / "alt" / None."""
+        """(regular mode, injected mode) of ADC1 CR1.DUALMOD: "sim" / "fast" / "slow" / "alt" / None.  Dual mode
+        pairs ADC1 (master) and ADC2 (slave) only (11.9); ADC3 is always independent."""
+        if self.index not in (1, 2):
+            return None, None
         a1 = self._peer(1)
         if a1 is None or self._peer(2) is None:
             return None, None
@@ -357,6 +381,9 @@ class ADC(GatedBlock):
     def _can_start(self) -> bool:
         if self.chip is None or not self.get("CR2") & ADON:
             return False
+        if "adcclk" not in self._warned and self.adc_hz() > ADCCLK_MAX_HZ * 1.0001:
+            self._warn_once("adcclk", f"{self.name}: ADCCLK {self.adc_hz() / 1e6:.3g} MHz exceeds the 14 MHz maximum "
+                                      "(RM0008 11.1; RCC_CFGR.ADCPRE)")
         if self._cal_ev is not None or self._rst_ev is not None:
             self._warn_once("cal_trig", f"{self.name}: conversion trigger during calibration: ignored")
             return False
@@ -388,6 +415,7 @@ class ADC(GatedBlock):
         if self._pos >= len(seq):
             self._pos = 0
         start = max(t, self._ready_at) + self._cyc(TLATR_ADCCLK)
+        self._conv_start = start
         self._ev = self.chip.sched.at_cycles(start + self.conv_cycles(seq[self._pos]), self._done)
         return True
 
@@ -405,22 +433,31 @@ class ADC(GatedBlock):
         sr = self.get("SR")
         if cr1 & AWDEN and (not cr1 & AWDSGL or (cr1 & 0x1F) == ch) and self._awd_out(c12):
             sr |= AWD
-        if last:
+        if last or cr1 & DISCEN:             # 11.3.10: in discontinuous mode "an EOC event is generated at each conversion"
             sr |= EOC
         self.set("SR", sr)
         self._pos = 0 if last else pos + 1
         self._update_irq()
         if cr2 & DMA:
-            if self.index == 1:
+            if self.has_dma:
                 self._dma_req = True
-                dma_request(chip, "ADC1")
+                dma_request(chip, self.dma_name)
             else:
                 self._warn_once("dma2", f"{self.name}: CR2.DMA set but ADC2 has no DMA request (use dual mode and "
                                         "the ADC1 DMA)")
         now = chip.now_cycles()
         if last and cr1 & JAUTO and not (self._burst is not None and self._burst > 1):
             self._burst = None
-            self._start_inj(now, auto=True)
+            self._start_inj(now + self._cyc(self._jauto_gap()), auto=True)
+            return
+        if self._burst is None and last and self.dual_mode()[0] == "slow" and self._peer(2) is not None:
+            # 11.9.4: slow interleaved runs on by itself, each ADC starting every 28 ADCCLK (CONT must stay 0)
+            if cr2 & CONT:
+                self._warn_once("slow_cont", f"{self.name}: CONT must not be set in slow interleaved mode (RM0008 "
+                                             "11.9.4)")
+            nxt = max(now, self._conv_start + self._cyc(SLOW_PERIOD_ADCCLK))
+            self._conv_start = nxt
+            self._ev = chip.sched.at_cycles(nxt + self.conv_cycles(seq[0]), self._done)
             return
         if self._burst is not None:
             self._burst -= 1
@@ -451,9 +488,6 @@ class ADC(GatedBlock):
             a2._trigger(t)                           # ADC2 first: at equal end times its result is in place first
             self._trigger(t)
             return
-        if reg == "slow":
-            self._warn_once("slow", f"{self.name}: slow interleaved dual mode approximated as interleaved with a "
-                                    f"{SLOW_DELAY_ADCCLK} ADCCLK offset")
         delay = FAST_DELAY_ADCCLK if reg == "fast" else SLOW_DELAY_ADCCLK
         a2._trigger(t)
         self._trigger(t + self._cyc(delay))
@@ -509,7 +543,8 @@ class ADC(GatedBlock):
         if auto:
             if cr2 & CONT and cr2 & ADON:
                 self._pos = 0
-                self._ev = chip.sched.at_cycles(now + self.conv_cycles(self.sequence()[0]), self._done)
+                self._ev = chip.sched.at_cycles(now + self._cyc(self._jauto_gap()) + self.conv_cycles(self.sequence()[0]),
+                                                self._done)
             return
         if self._reg_resume:
             self._reg_resume = False
@@ -542,6 +577,15 @@ class ADC(GatedBlock):
         k, self._alt = self._alt, self._alt ^ 1      # alternate trigger: ADC1, ADC2, ADC1 ...
         (self if k == 0 else a2)._jtrigger(t)
 
+    def _jauto_gap(self) -> int:
+        """11.3.9 auto-injection: 1 ADCCLK between the regular and injected sequences (and back) with ADCPRE 4..8,
+        2 ADCCLK with ADCPRE 2."""
+        try:
+            pre = round(apb_hz(self.chip, 2) / self.adc_hz())
+        except (ZeroDivisionError, TypeError, AttributeError):
+            pre = 2
+        return 2 if pre <= 2 else 1
+
     # ------------------------------------------------------------ interrupt
     def _update_irq(self) -> None:
         if self.chip is None or self._irqn is None:
@@ -568,8 +612,8 @@ class ADC(GatedBlock):
     def _resubscribe(self) -> None:
         cr2 = self.get("CR2")
         on = bool(cr2 & ADON) and self.chip is not None
-        self._subscribe(TRIGGERS[cr2 >> 17 & 7] if on and cr2 & EXTTRIG else None, inj=False)
-        self._subscribe(JTRIGGERS[cr2 >> 12 & 7] if on and cr2 & JEXTTRIG else None, inj=True)
+        self._subscribe(self.triggers[cr2 >> 17 & 7] if on and cr2 & EXTTRIG else None, inj=False)
+        self._subscribe(self.jtriggers[cr2 >> 12 & 7] if on and cr2 & JEXTTRIG else None, inj=True)
 
     def _subscribe(self, want: tuple | None, inj: bool) -> None:
         if want == (self._jsub_src if inj else self._sub_src):
@@ -582,12 +626,20 @@ class ADC(GatedBlock):
             self._sub_src = want
         if want is None:
             return
-        blk_name, sig = want
-        blk = self.chip.peripherals.get(blk_name)
-        if blk_name == "EXTI" or not hasattr(blk, "add_trigger_listener"):
-            what = "is not modelled" if blk_name == "EXTI" else f"is not present on this part ({blk_name})"
+        blk_name, sig = want[0], want[1]
+        if blk_name == "EXTI":
+            # EXTI line 11/15, or TIM8_TRGO / TIM8_CC4 with AFIO_MAPR ADCx_ETRGxxx_REMAP = 1 (checked per edge)
+            blk_name, sig = "TIM8", want[2]
+            blk = self.chip.peripherals.get(blk_name)
+            if not hasattr(blk, "add_trigger_listener"):
+                self._warn_once(f"trigEXTI{want[1]}", f"{self.name}: external {'injected ' if inj else ''}trigger "
+                                f"EXTI line {want[1]} is not modelled: no conversions are triggered")
+                return
+        else:
+            blk = self.chip.peripherals.get(blk_name)
+        if not hasattr(blk, "add_trigger_listener"):
             self._warn_once(f"trig{blk_name}{sig}", f"{self.name}: external {'injected ' if inj else ''}trigger "
-                            f"{blk_name}_{sig} {what}: no conversions are triggered")
+                            f"{blk_name}_{sig} is not present on this part ({blk_name}): no conversions are triggered")
             return
         cb = self._ext_jtrig if inj else self._ext_trig
         blk.add_trigger_listener(sig, cb)
@@ -607,18 +659,32 @@ class ADC(GatedBlock):
 
     lp_frozen: Any = False              # PWR freezer: Stop (no ADC clock, triggers missed)
 
+    def _remapped(self, inj: bool) -> bool:
+        """For EXTSEL/JEXTSEL = 110 on ADC1/ADC2: True when AFIO_MAPR routes TIM8 (not the EXTI line) to the ADC."""
+        src = self._jsub_src if inj else self._sub_src
+        if src is None or src[0] != "EXTI":
+            return True
+        bit = ETRG_REMAP_BIT.get((self.index, inj))
+        a = afio(self.chip)
+        if bit is not None and a is not None and a.get("MAPR") >> bit & 1:
+            return True
+        self._warn_once(f"trigEXTI{src[1]}", f"{self.name}: external {'injected ' if inj else ''}trigger EXTI line "
+                        f"{src[1]} (AFIO_MAPR ADC{self.index}_ETRG{'INJ' if inj else 'REG'}_REMAP = 0) is not "
+                        "modelled: no conversions are triggered")
+        return False
+
     def _ext_trig(self, t: int, level: bool) -> None:
         if level == self._trig_lvl:
             return
         self._trig_lvl = level
-        if level and not self.lp_frozen:              # rising edge only on the F1
+        if level and not self.lp_frozen and self._remapped(False):   # rising edge only on the F1 (11.7)
             self._start_regular(t)
 
     def _ext_jtrig(self, t: int, level: bool) -> None:
         if level == self._jtrig_lvl:
             return
         self._jtrig_lvl = level
-        if level and not self.lp_frozen:
+        if level and not self.lp_frozen and self._remapped(True):
             self._start_injected(t)
 
     # ------------------------------------------------------------ register hooks
@@ -663,8 +729,9 @@ class ADC(GatedBlock):
         if chip is None:
             return v
         if new & ADON and not old & ADON:
+            self._on_at = now
             self._ready_at = now + max(0, round(self.tstab_us * 1e-6 * chip.clock.hz))
-        if new & DMA and self.index != 1 and not old & DMA:
+        if new & DMA and not self.has_dma and not old & DMA:
             self._warn_once("dma2", f"{self.name}: CR2.DMA set but ADC2 has no DMA request (use dual mode and the ADC1 "
                                     "DMA)")
         self._resubscribe()
@@ -682,7 +749,7 @@ class ADC(GatedBlock):
                 self._start_regular(now)
             else:
                 self._warn_once("swstart", f"{self.name}: SWSTART needs EXTTRIG = 1 and EXTSEL = 111: no conversion")
-        elif restart and not new & EXTTRIG:
+        elif restart:                        # 11.12.3 ADON: "Conversion starts when this bit holds 1 and 1 is written"
             self._start_regular(now)
         return v
 
@@ -693,10 +760,13 @@ class ADC(GatedBlock):
         return bool(cr2 & EXTTRIG) and (cr2 >> 17 & 7) == 7
 
     def _start_cal(self, now: int, reset: bool) -> None:
-        if now < self._ready_at and not reset:
-            self._warn_once("cal_early", f"{self.name}: calibration started before the ADC power-up time (tSTAB) "
-                                         "elapsed; RM0008 requires ADON = 1 for at least 2 ADCCLK first")
-        start = max(now, self._ready_at)
+        start = now
+        if not reset:
+            earliest = self._on_at + self._cyc(2)    # 11.4: ADON = 1 for at least two ADC clock cycles before CAL
+            if now < earliest:
+                self._warn_once("cal_early", f"{self.name}: calibration started less than 2 ADCCLK after ADON was set "
+                                             "(RM0008 11.4); it starts 2 ADCCLK after ADON")
+            start = max(now, earliest)
         if reset:
             if self._rst_ev is not None:
                 return
@@ -735,16 +805,26 @@ class ADC(GatedBlock):
             self._start_inj(self.chip.now_cycles() + self._cyc(TLAT_ADCCLK), auto=self._auto_inj)
         return None
 
+    def _dr_peek(self, blk, reg):
+        v = self.get("DR") & 0xFFFF
+        if self.index == 1 and self.get("CR1") >> 16 & 0xF and self.get("CR2") & DMA:
+            a2 = self._peer(2)
+            if a2 is not None:
+                v |= (a2.get("DR") & 0xFFFF) << 16
+        return v
+
     def _dr_read(self, blk, reg):
         if self._dma_req:                            # read by the DMA or the CPU: the request is served
             self._dma_req = False
-            dma_request(self.chip, "ADC1", False)
+            dma_request(self.chip, self.dma_name, False)
         sr = self.get("SR")
         if sr & EOC:
             self.set("SR", sr & ~EOC)
             self._update_irq()
         v = self.get("DR") & 0xFFFF
-        if self.index == 1 and self.get("CR1") >> 16 & 0xF:
+        # 11.12.14 / 11.9 note: ADC2DATA holds the ADC2 regular result in dual mode; the master's DMA bit must be set
+        # to read it there "even if it is not used to transfer converted regular channel data"
+        if self.index == 1 and self.get("CR1") >> 16 & 0xF and self.get("CR2") & DMA:
             a2 = self._peer(2)
             if a2 is not None:
                 v |= (a2.get("DR") & 0xFFFF) << 16    # ADC2DATA: the ADC2 regular result in dual mode

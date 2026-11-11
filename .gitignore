@@ -1,0 +1,9 @@
+# Python bytecode and test caches (regenerated on every run)
+__pycache__/
+*.pyc
+.pytest_cache/
+# local virtualenv (see CLAUDE.md: always use .venv/bin/python)
+.venv/
+# firmware/*/build/ stays tracked on purpose: tests skip when a sample is not built
+# setuptools metadata written by `pip install -e .`
+*.egg-info/

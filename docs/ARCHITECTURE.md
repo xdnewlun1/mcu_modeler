@@ -84,8 +84,7 @@ Properties of this loop:
   slice ends right after the accessing instruction.
 - **Exceptions are taken between slices.** When something pends an exception during a slice and it could
   preempt now, `ArmV7M.set_pending_exc` asks the core to stop after the current instruction. The stop is
-  only possible after a plain store (see "Stopping from MMIO" below). Otherwise the exception is taken at
-  the end of the slice, up to 2000 instructions late.
+  works after any instruction, load or store (see "Stopping from MMIO" below).
 - **WFI/WFE skip time.** After a WFI the chip advances the clock directly to the next scheduler event. That
   is why idle RTOS firmware runs faster than real time (the Withings image: about 140 M "insn"/s of virtual
   cycles). Deep-sleep modes are family logic: the power controller (Kinetis SMC, STM32 PWR, C2000 LPMCR0) is a
@@ -273,11 +272,14 @@ pin report reads the live PC from the run loop's frame. `/api/state` for a C28x 
   `chipem.arch.<family>` for `armv*`) on demand, and an unknown name falls back to `stub` with a `warn`.
 
 **Stopping from MMIO.** A model sometimes needs the current slice to end right after the accessing
-instruction: it scheduled an earlier event, pended a preempting exception, or requested a reset. Unicorn's
-`emu_stop()` inside a write callback leaves PC at the store instruction, which has already taken effect.
-The core checks with capstone that the instruction is a single-register `str/strb/strh` without writeback
-and not inside an IT block, stops, and advances PC past it. For any other instruction the request is
-declined and the effect is seen at the end of the slice.
+instruction, or at an event it scheduled inside the slice: it pended a preempting exception, requested a reset,
+changed the clock, or scheduled an earlier event. Unicorn's `emu_stop()` cannot be used there (in a write callback
+it leaves PC at the store, which runs again on resume; in a read callback it aborts the load). Instead the core
+lowers the instruction limit of the running `emu_start` (the word next to the calibrated counter): Unicorn's own
+count hook then ends the run in front of the next instruction, or at the event's cycle (`Core.end_slice_at`,
+`Chip._early_event`). This works for every instruction form (load/store multiple, writeback, IT blocks) and costs
+nothing per instruction. Mapping changes requested from callbacks (external memory windows) are queued and applied
+right after the accessing instruction the same way.
 
 ## Pins: PinBoard, PORT and GPIO
 
@@ -457,7 +459,8 @@ cable → USB-serial adapter → host port) is built from parts on nets:
   driver on each side at different levels is a conflict on the nets; a driver that goes away is gone everywhere.
   `plug_a`/`plug_b` wire a cable end to a connector part's (or the adapter's built-in DE-9's) pins and check that the
   connectors mate.
-- *Bytes* travel by path resolution, not bit edges (UART models do not toggle their pins). The board's
+- *Bytes* travel by path resolution, not bit edges (the UART TX pins do toggle, as waveform sources, but the
+  receivers are fed frames, never by sampling a pin). The board's
   `SerialRouter` hooks every UART's `tx_listeners`; a byte from a chip UART (from the pins currently muxed to its TX)
   or from the adapter's TXD walks nets and parts via `serial_paths` (cable wires pass, transceiver channels invert
   and change the level domain, `buf`/`not` pass/invert) to the receivers it reaches: chip pins offering a UART RX

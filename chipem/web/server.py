@@ -82,6 +82,11 @@ Board parts (switches, LEDs, gates, ...; chipem/parts; board sessions only):
   Script parts (chipem/parts/script.py; Python with the user's privileges):
   POST /api/part/reload            {id}   re-read the script (state restarts; ports must stay the same)
   GET  /api/part/script?id=U5      {id, file, inline, code}   the script source (editor)
+  Previews (any part with frame_view() / sample_view(); parts announce them in `views` next to their state:
+  {frame: {w, h, seq, format}} / {samples: {seq, kept, bits, channels}}; refetch when `seq` changes):
+  GET  /api/part/frame?id=CAM&max_w=320   {id, w, h, src_w, src_h, format: "rgb", seq, data: base64 RGB888}
+                                   (downscaled to <= max_w pixels wide, at most 640; side-effect free)
+  GET  /api/part/samples?id=CODEC&n=512   {id, bits, channels, received, kept, full, samples: [[l, r], ...]}
   POST /api/part/script            {id, code}   write the file (or the inline code) and reload; nothing is written
                                    when the new code does not load
   Adding a script part (/api/part) or opening a board with script parts (/api/board/open) needs `allow_scripts:
@@ -112,6 +117,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from ..cmd_shell import event_dict, jsonable
+from ..regmeta import cpu_reg_meta
 from .evfmt import describe_event, event_line, text_matcher
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -395,6 +401,12 @@ class Worker:
                 st["board"]["parts"] = [{"id": k, "state": v} for k, v in jsonable(part_states(b)).items()]
             except Exception:
                 pass
+        if b is not None and isinstance(st.get("board"), dict):
+            for d in st["board"].get("parts") or ():           # preview sequence numbers (frame / samples)
+                p = (getattr(b, "parts", None) or {}).get(d.get("id"))
+                v = part_views(p) if p is not None else None
+                if v:
+                    d["views"] = v
         st["running"] = self.running
         st["run_target_ns"] = self.run_target_ns
         st["last_stop"] = self.last_stop
@@ -1013,6 +1025,7 @@ def _one_chip_info(session: Any, cid: str) -> dict:
         "firmware": Path(getattr(img, "source", "") or "").name if img is not None else None,
         "firmware_format": getattr(img, "fmt", None) if img is not None else None,
         "load_addr": img.start if img is not None and getattr(img, "segments", None) else None,
+        "reg_meta": cpu_reg_meta(chip),          # CPU register widths / formats for the UI (chipem/regmeta.py)
     }
 
 
@@ -1066,6 +1079,9 @@ def parts_info(b: Any) -> list[dict]:
             st = {"error": f"{type(e).__name__}: {e}"}
         d = {"id": pid, "type": p.type, "params": dict(getattr(p, "params", {}) or {}), "ports": ports,
              "dirs": {k: _port_dir(v) for k, v in p.ports.items()}, "state": st}
+        views = part_views(p)
+        if views:
+            d["views"] = views
         if hasattr(p, "ui_info"):                 # script parts: file, controls, actions, fault (chipem/parts/script.py)
             try:
                 d["script"] = p.ui_info()
@@ -1073,6 +1089,41 @@ def parts_info(b: Any) -> list[dict]:
                 d["script"] = {"error": f"{type(e).__name__}: {e}"}
         out.append(d)
     return out
+
+
+def part_views(p: Any) -> dict | None:
+    """Preview capabilities of a part (duck-typed: frame_info / sample_info), or None."""
+    v = {}
+    for key, meth in (("frame", "frame_info"), ("samples", "sample_info")):
+        f = getattr(p, meth, None)
+        if callable(f):
+            try:
+                v[key] = f()
+            except Exception:
+                pass
+    return v or None
+
+
+def part_preview(session: Any, pid: str, what: str, qs: dict) -> dict:
+    """GET /api/part/frame | /api/part/samples (on the worker)."""
+    import base64
+    b = _board(session)
+    p = (getattr(b, "parts", None) or {}).get(pid)
+    if p is None:
+        raise ValueError(f"no part {pid!r}")
+    if what == "frame":
+        f = getattr(p, "frame_view", None)
+        if not callable(f):
+            raise ValueError(f"part {pid} has no frame")
+        mw = max(16, min(int((qs.get("max_w") or ["320"])[0] or 320), 640))
+        d = dict(f(mw))
+        d["data"] = base64.b64encode(d.get("data") or b"").decode()
+        return {"id": pid, **d}
+    f = getattr(p, "sample_view", None)
+    if not callable(f):
+        raise ValueError(f"part {pid} has no samples")
+    n = int((qs.get("n") or ["512"])[0] or 512)
+    return {"id": pid, **f(n)}
 
 
 def part_states(b: Any) -> dict:
@@ -1111,6 +1162,21 @@ class ScriptConfirm(ValueError):
 
 class ScriptRefused(ValueError):
     """A script request that does not come from this UI (answered 403)."""
+
+
+_STATIC_CACHE: dict[str, tuple[int, int, bytes, str]] = {}
+
+
+def _static_file(p: Path) -> tuple[bytes, str]:
+    """(bytes, quoted ETag) of a static file; the hash is recomputed only when size or mtime change."""
+    import hashlib
+    st = p.stat()
+    c = _STATIC_CACHE.get(str(p))
+    if c is None or c[0] != st.st_mtime_ns or c[1] != st.st_size:
+        body = p.read_bytes()
+        c = (st.st_mtime_ns, st.st_size, body, '"' + hashlib.sha256(body).hexdigest()[:20] + '"')
+        _STATIC_CACHE[str(p)] = c
+    return c[2], c[3]
 
 
 def _is_ip(name: str) -> bool:
@@ -1449,6 +1515,10 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(app.worker.call(_info))
             if path == "/api/parts/types":
                 return self._json(part_types())
+            if path in ("/api/part/frame", "/api/part/samples"):
+                pid = (qs.get("id") or [""])[0]
+                what = path.rsplit("/", 1)[1]
+                return self._json(app.worker.call(lambda: jsonable(part_preview(app.session, pid, what, qs))))
             if path == "/api/part/script":
                 self._script_guard()
                 pid = (qs.get("id") or [""])[0]
@@ -1481,7 +1551,24 @@ class _Handler(BaseHTTPRequestHandler):
             ctype = "text/javascript"
         if ctype.startswith("text/") or ctype.endswith("javascript"):
             ctype += "; charset=utf-8"
-        self._send(200, p.read_bytes(), ctype)
+        # content-hash ETag + no-cache: the browser revalidates every load (never stale after an edit) and gets a
+        # bodiless 304 when the file is unchanged (cheap reloads)
+        body, etag = _static_file(p)
+        inm = self.headers.get("If-None-Match") or ""
+        if etag in [t.strip() for t in inm.split(",")] or inm.strip() == "*":
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("ETag", etag)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _stream(self, since: int) -> None:
         """Server-Sent Events: `state` snapshots (≤ every 50 ms while something changes, else a 1 s heartbeat)

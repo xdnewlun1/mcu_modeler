@@ -95,6 +95,7 @@ from typing import Any, Callable
 
 from ...pins import PinBoard
 from ..base import MMIOBlock
+from ..base import peek_stored as _stored
 from ..registry import register
 from ._util import GatedBlock, build_regs, find_model
 from .clockutil import bus_hz, irq_number
@@ -166,23 +167,25 @@ class FTM(GatedBlock):
         self.gate = params.get("gate", name)
         ov: dict[str, dict] = {
             # TOF / CHnF are read-only in the SVD; they clear by "read 1, then write 0", done in the hooks
-            "SC": {"on_read": self._sc_read, "on_write": self._sc_write, "ro_mask": 0xFFFFFF00},
-            "CNT": {"on_read": self._cnt_read, "on_write": self._cnt_write},
+            "SC": {"on_read": self._sc_read, "on_write": self._sc_write, "ro_mask": 0xFFFFFF00, "on_peek": _stored},
+            "CNT": {"on_read": self._cnt_read, "on_write": self._cnt_write, "on_peek": self._cnt_read},
             "MOD": {"on_write": self._buf_write}, "CNTIN": {"on_write": self._buf_write},
-            "STATUS": {"on_read": self._status_read, "on_write": self._status_write},
+            "STATUS": {"on_read": self._status_read, "on_write": self._status_write, "on_peek": self._status_peek},
             "MODE": {"on_write": self._mode_write},
-            "FMS": {"on_read": self._fms_read, "on_write": self._fms_write, "ro_mask": 0},
+            "FMS": {"on_read": self._fms_read, "on_write": self._fms_write, "ro_mask": 0, "on_peek": self._fms_peek},
             "SYNC": {"on_write": self._sync_write},
             "COMBINE": {"on_write": self._cfg_write}, "POL": {"on_write": self._cfg_write},
             "OUTMASK": {"on_write": self._cfg_write}, "SWOCTRL": {"on_write": self._cfg_write},
             "DEADTIME": {"on_write": self._cfg_write}, "QDCTRL": {"on_write": self._qd_write},
             "PWMLOAD": {"on_write": self._cfg_write},
             "FLTCTRL": {"on_write": self._cfg_write}, "FLTPOL": {"on_write": self._cfg_write},
-            "EXTTRIG": {"on_read": self._exttrig_read, "on_write": self._exttrig_write, "ro_mask": 0xFFFFFF00},
+            "EXTTRIG": {"on_read": self._exttrig_read, "on_write": self._exttrig_write, "ro_mask": 0xFFFFFF00,
+                        "on_peek": _stored},
         }
         for n in range(8):
-            ov[f"C{n}SC"] = {"on_read": self._csc_read(n), "on_write": self._csc_write(n), "ro_mask": 0xFFFFFF02}
-            ov[f"C{n}V"] = {"on_write": self._buf_write, "on_read": self._cv_read(n)}
+            ov[f"C{n}SC"] = {"on_read": self._csc_read(n), "on_write": self._csc_write(n), "ro_mask": 0xFFFFFF02,
+                             "on_peek": self._csc_peek(n)}
+            ov[f"C{n}V"] = {"on_write": self._buf_write, "on_read": self._cv_read(n), "on_peek": _stored}
         regs_ = build_regs((name, "FTM0"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs_, log=log, params=params)
         self.ch = [_Ch(n) for n in range(8) if f"C{n}SC" in self.regs]
@@ -1412,6 +1415,28 @@ class FTM(GatedBlock):
             return new
         return wr
 
+    # ------------------------------------------------------------ debugger peeks (no arming, no lazy-flag commit)
+    def _lazy_due(self, n: int) -> bool:
+        """A quiet channel's CHnF that _lazy_flags would set now (computed, not stored)."""
+        if not (self._quiet and self.running) or n >= len(self.ch) or self.ch[n] not in self._quiet:
+            return False
+        c = self.ch[n]
+        upto = self._pos_now()
+        tol = self._tick_ns * 1e-3
+        return any(c.lazy_k < k <= upto + EPS and self._t(k) > c.last_t + tol for k in self._match_positions(c))
+
+    def _csc_peek(self, n: int):
+        def pk(blk, reg):
+            v = self.get(f"C{n}SC")
+            return v | CHF if self._lazy_due(n) else v
+        return pk
+
+    def _status_peek(self, blk, reg):
+        return sum(1 << c.n for c in self.ch if self.get(f"C{c.n}SC") & CHF or self._lazy_due(c.n))
+
+    def _fms_peek(self, blk, reg):
+        return (self.get("FMS") & ~FAULTIN) | (FAULTIN if self._faultin() else 0)
+
     def _status_read(self, blk, reg):
         if self._quiet and self.running:
             self._lazy_flags(self._pos_now())
@@ -1538,6 +1563,10 @@ class FTMAlias(MMIOBlock):
     def read(self, offset: int, size: int) -> int:
         t = self._target
         return t.read(offset, size) if t is not None else MMIOBlock.read(self, offset, size)
+
+    def peek_bytes(self, offset: int, n: int):
+        t = self._target
+        return t.peek_bytes(offset, n) if t is not None else MMIOBlock.peek_bytes(self, offset, n)
 
     def write(self, offset: int, size: int, value: int) -> None:
         t = self._target

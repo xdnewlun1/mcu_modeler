@@ -3,8 +3,11 @@ baud rates sec. 6.5.4-6.5.5 p.35; PCON.SMOD1/SMOD0 Table 4).
 
 Modes (SCON.SM0:SM1; SM0 is SCON.7 while PCON.SMOD0 = 0):
   0  shift register: 8 bits LSB first on RXD with the shift clock on TXD, one bit per peripheral clock (fosc/12, or
-     fosc/6 in 6-clock mode with CKCON.SIX2 = 0).  Transmit is modelled (TI after 8 bit times, the byte is logged);
-     receive is not (it would need a clocked partner on RXD).
+     fosc/6 in 6-clock mode with CKCON.SIX2 = 0).  Transmit: TI after 8 bit times, the byte is logged.  Receive
+     (sec. 6.6.2; Intel MCS-51 "Mode 0"): starts when REN = 1 and RI = 0 (an SCON write that makes the condition
+     true); one bit time later the UART shifts 8 bits in from the RXD pin, LSB first, one per bit time, sampled in
+     the middle of the bit while TXD outputs the shift clock (low for the first half of each bit, high for the
+     second half: the partner shifts on the rising edge); RI is set at the end of the 8th bit.
   1  8-bit UART, 10 bits (start, 8 data, stop); baud = Timer 1 overflow rate x 2^SMOD1 / 32, or Timer 2 overflow
      rate / 16 when T2CON.TCLK (transmit) / RCLK (receive) is set.
   2  9-bit UART, 11 bits; baud = fosc x 2^SMOD1 / 64 in 12-clock mode (fosc / 32 x 2^SMOD1 in 6-clock mode, SIX2 = 0).
@@ -43,8 +46,8 @@ class Uart(UartRx, SfrBlock):
     table = ("UART",)
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        ov = {"SCON": {"on_read": self._scon_r, "on_write": self._scon_w},
-              "SBUF": {"on_read": self._sbuf_r, "on_write": self._sbuf_w}}
+        ov = {"SCON": {"on_read": self._scon_r, "on_write": self._scon_w, "on_peek": self._scon_r},
+              "SBUF": {"on_read": self._sbuf_r, "on_write": self._sbuf_w, "on_peek": self._sbuf_r}}
         self._rx_init()
         super().__init__(name, base, size, regs, params=params, log=log, overrides=ov)
         self.output = bytearray()
@@ -60,12 +63,15 @@ class Uart(UartRx, SfrBlock):
         self._stopped = False
         self._used = False
         self._warned_busy = False
+        self._m0_evs: list = []                         # mode 0 receive: pending shift-clock / sample events
+        self._m0_byte = 0
 
     # ------------------------------------------------------------------ lifecycle
     def attach(self, chip: Any) -> None:
         super().attach(chip)
 
     def reset(self) -> None:
+        self._m0_cancel()
         self.cancel(self._tx_ev)
         self.cancel(self._ti_ev)
         self._tx_ev = self._ti_ev = None
@@ -163,6 +169,7 @@ class Uart(UartRx, SfrBlock):
             self._used = True
         self._line()
         self._claims()
+        self._m0_check()
         return new
 
     def _claims(self) -> None:
@@ -241,6 +248,56 @@ class Uart(UartRx, SfrBlock):
         if self._tx_queue:
             self._start_tx(self._tx_queue.pop(0))
 
+    # ------------------------------------------------------------------ mode 0 receive
+    def _m0_cancel(self) -> None:
+        for ev in self._m0_evs:
+            self.cancel(ev)
+        self._m0_evs = []
+
+    def _m0_check(self) -> None:
+        """Mode 0: REN = 1 and RI = 0 start a reception (unless one is running); leaving the condition aborts it."""
+        scon = self.get("SCON")
+        if self.mode() != 0 or not scon & REN or scon & RI or getattr(self, "lp_frozen", False):
+            if self._m0_evs and (self.mode() != 0 or not scon & REN):
+                self._m0_cancel()
+            return
+        if self._m0_evs:
+            return
+        bit = self._bit_cycles(True)
+        t0 = self.now() + int(bit)                     # shifting begins one bit time after the condition is met
+        self._m0_byte = 0
+        evs = []
+        for k in range(8):
+            start = t0 + int(k * bit)
+            evs.append(self.at(start, self._m0_clock, "L"))
+            evs.append(self.at(start + int(bit // 2), self._m0_sample, k))
+        evs.append(self.at(t0 + int(8 * bit), self._m0_done))
+        self._m0_evs = evs
+        if not self._used:
+            self._used = True
+            self._claims()
+
+    def _m0_clock(self, level: str) -> None:
+        ports = find_model(self.chip, "mcs51.port")
+        txp = ports.pin_for(self.tx_signal) if ports is not None else None
+        if txp is not None:
+            ports.claim(txp, self.tx_signal, level)
+
+    def _m0_sample(self, k: int) -> None:
+        from ._util import pin_level
+        ports = find_model(self.chip, "mcs51.port")
+        rxp = ports.pin_for(self.rx_signal) if ports is not None else None
+        if pin_level(self.chip, rxp or "P3.0") == "H":
+            self._m0_byte |= 1 << k
+        self._m0_clock("H")                             # rising shift-clock edge in the middle of the bit
+
+    def _m0_done(self) -> None:
+        self._m0_evs = []
+        b = self._m0_byte
+        self.rx_buf = b
+        self.emit("uart", uart=self.name, dir="rx", byte=b, mode=0)
+        self._set_scon(RI)
+
     # ------------------------------------------------------------------ RX
     def rx_pending(self) -> int:
         return self.wire_pending()
@@ -252,7 +309,7 @@ class Uart(UartRx, SfrBlock):
         if not scon & REN:
             return "rx_disabled"
         if self.mode() == 0:
-            return "rx_disabled"                       # mode 0 receive needs a clocked partner (not modelled)
+            return "mode0"                             # mode 0 shifts RXD in with its own clock (_m0_check)
         return None
 
     def _rx_accept(self, ch: RxChar) -> None:

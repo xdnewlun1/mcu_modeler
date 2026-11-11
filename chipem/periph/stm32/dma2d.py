@@ -61,6 +61,7 @@ import struct
 from typing import Any
 
 from ...bus import BusError
+from ..base import pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, irq_number
 
@@ -213,7 +214,7 @@ class DMA2D(GatedBlock):
         ov: dict[str, dict] = {n: {"ro_mask": 0xFFFFFFFF & ~v} for n, v in _VALID.items()}
         ov["DMA2D_CR"]["on_write"] = self._cr_write
         ov["DMA2D_ISR"] = {"ro_mask": 0xFFFFFFFF}
-        ov["DMA2D_IFCR"].update(on_write=self._ifcr_write, on_read=lambda b, r: 0)
+        ov["DMA2D_IFCR"].update(on_write=self._ifcr_write, on_read=pure_read(lambda b, r: 0))
         ov["DMA2D_FGPFCCR"]["on_write"] = self._pfccr_write("fg")
         ov["DMA2D_BGPFCCR"]["on_write"] = self._pfccr_write("bg")
         for n in _PROTECTED:

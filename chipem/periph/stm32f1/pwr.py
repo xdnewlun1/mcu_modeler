@@ -1,27 +1,34 @@
-"""STM32F1 PWR (RM0008 ch. 5 layout: CR LPDS/PDDS/CWUF/CSBF/PVDE/PLS/DBP, CSR WUF/SBF/PVDO/EWUP) and low-power modes.
+"""STM32F1 PWR (RM0008 ch. 5: CR LPDS/PDDS/CWUF/CSBF/PVDE/PLS/DBP, CSR WUF/SBF/PVDO/EWUP) and low-power modes.
 
-Not verified against RM0008 (not available when written): behaviour from the F1 documentation as used by ST's
-drivers, DS15060 (Table 11 PVD levels, Table 26 wake-up timings) and the generic CHIP_EM low-power hooks
-(CONTRACTS.md "Low-power modes", chipem/periph/lowpower.py).
+Verified against RM0008 Rev 21 ch. 5 (5.2 supervisor, 5.3 low-power modes, Tables 11-15, 5.4.1/5.4.2 registers);
+the generic CHIP_EM low-power hooks are described in CONTRACTS.md "Low-power modes" (chipem/periph/lowpower.py).
 
-Registers: CR.CWUF / CR.CSBF (write 1) clear CSR.WUF / CSR.SBF and read 0.  DBP enables writes to the backup domain
-(RCC_BDCR, BKP data registers, RTC; stm32f1.rcc / bkp / rtc check it).  PVD: CSR.PVDO = PVDE and VDD (params `vdd`,
-default 3.3 V; `set_vdd()`) below the PLS threshold (2.2 ... 2.9 V); PVDO drives EXTI line 16.  CSR reset: WUF and
-EWUP are cleared by every system reset except a Standby wake-up; SBF only by power-on reset (or CSBF).
-Low-power modes, entered when the core stops in WFI/WFE (this block is a `chip.power_hooks` entry):
-* Sleep (SCR.SLEEPDEEP = 0): the core stops, peripherals run, any enabled interrupt (or event with WFE) wakes it.
-* Stop (SLEEPDEEP = 1, PDDS = 0; LPDS only changes the wake-up latency on silicon, DS15060 Table 26, not modelled):
-  ignored (execution continues) when an EXTI pending bit or the RTC alarm flag (RTC_CRL.ALRF) is set.  On entry HSE
-  and PLL stop (CR.HSEON/PLLON and their RDY bits cleared) and SYSCLK becomes HSI (SW = SWS = 0, prescalers kept), as
-  firmware sees it after the Stop exit.  The 1.8 V domain clocks stop: every block except RCC, PWR, BKP, RTC, IWDG,
-  EXTI, AFIO, GPIO, FLASH, DBG and the system memory is frozen (chipem.periph.lowpower.Freezer: pending events held,
-  `clock_stop()` called where defined).  Only an EXTI line wakes the core (`chip.wake_gate`: PR & IMR, or an EMR event
-  with WFE): pins EXTI0-15, PVD (16), RTC alarm (17), USB wakeup (18).
-* Standby (SLEEPDEEP = 1, PDDS = 1): CSR.SBF set; all blocks except the backup domain (RTC, BKP), IWDG, RCC (CSR flags,
-  BDCR) and PWR are reset, pins return to their reset state (PA0 pulled down when CSR.EWUP = 1), SRAM is cleared (lost
-  on silicon).  Wake-up: WKUP (PA0) rising edge with EWUP = 1 or an RTC alarm event set CSR.WUF and reset the chip
-  ("standby_wakeup"); NRST and an IWDG timeout end Standby too.  Entering Standby with WUF set exits at once.
-* WFE event register as in stm32.pwr (exception return, SEV before WFE, EXTI EMR event, SEVONPEND).
+Registers (5.4): CR reset 0 (also by the Standby exit); CWUF / CSBF (write 1, read 0) clear CSR.WUF / CSR.SBF.  DBP
+enables writes to the backup domain (RCC_BDCR LSEON/LSEBYP/RTCSEL/RTCEN, BKP registers, RTC; stm32f1.rcc / bkp / rtc
+check it).  PVD (5.2.2): CSR.PVDO = PVDE and VDD (params `vdd`, default 3.3 V; `set_vdd()`) below the PLS level
+(000 2.2 V ... 111 2.9 V, 5.4.1); PVDO drives EXTI line 16; 0 after reset / Standby until PVDE is set.  CSR is not
+reset by the Standby exit (5.3.5); otherwise a system reset clears WUF and EWUP, SBF only a power-on reset (or CSBF).
+WUF is set by a WKUP rising edge (EWUP = 1) or an RTC alarm, and when EWUP is set while WKUP is already high (5.4.2
+note).  EWUP = 1 forces the WKUP pin (PA0) to input pull-down, in every mode (stm32f1.gpio shows it as owner "WKUP").
+Low-power modes, entered when the core stops in WFI/WFE (this block is a `chip.power_hooks` entry, 5.3 Table 11):
+* Sleep (SCR.SLEEPDEEP = 0): the core stops, peripherals run, any enabled interrupt (WFI) or event (WFE) wakes it.
+* Stop (SLEEPDEEP = 1, PDDS = 0, Table 14): ignored (execution continues) when an EXTI pending bit or the RTC alarm
+  flag (RTC_CRL.ALRF) is set.  On entry PLL and HSE stop and, as on the exit, SYSCLK is the HSI (stm32f1.rcc
+  `enter_stop()`: SW = SWS = 00, prescalers kept, 5.3.4).  The 1.8 V domain clocks stop: every block except RCC, PWR,
+  BKP, RTC, IWDG, EXTI, AFIO, GPIO, FLASH, DBG and the system memory is frozen (chipem.periph.lowpower.Freezer: pending
+  events held, `clock_stop()` called where defined).  Only an EXTI line wakes the core (`chip.wake_gate`: PR & IMR, or
+  an EMR event with WFE): pins EXTI0-15, PVD (16), RTC alarm (17), USB wakeup (18).  Option byte nRST_STOP = 0 resets
+  instead (7.1.1, RCC_CSR.LPWRRSTF).
+* Standby (SLEEPDEEP = 1, PDDS = 1, Table 15): CSR.SBF set; all blocks except the backup domain (RTC, BKP), IWDG,
+  RCC (CSR flags, BDCR) and PWR are reset, pins go high impedance (5.3.5; PA0 pulled down when CSR.EWUP = 1), SRAM is
+  cleared (lost on silicon).  Wake-up: WKUP rising edge with EWUP = 1 or an RTC alarm rising edge set CSR.WUF and reset
+  the chip ("standby_wakeup"); NRST and an IWDG timeout end Standby too.  Entering Standby with WUF set exits at once
+  (Table 15 requires WUF = 0).  Option byte nRST_STDBY = 0 resets instead.
+* WFE event register as in stm32.pwr (exception return, SEV before WFE, EXTI EMR event, SEVONPEND, 10.2.3).
+Not modelled: LPDS (only the Stop wake-up latency: HSI start-up + regulator wake-up, Table 14), the Stop-entry delay
+while a flash program/erase or APB access is ongoing, "all peripheral interrupt pending bits must be reset" before Stop
+(only EXTI_PR and ALRF are checked; a pending enabled NVIC interrupt prevents WFI sleep anyway), CWUF's 2-cycle delay,
+PVD hysteresis (100 mV), DBGMCU_CR.DBG_SLEEP/STOP/STANDBY (debugger only).
 """
 from __future__ import annotations
 
@@ -103,7 +110,13 @@ class PWR(GatedBlock):
     # ------------------------------------------------------------ registers
     def _csr_write(self, blk, reg, old, new):
         if new & ~old & EWUP and self._wkup_level:
-            new |= WUF               # enabling WKUP while the pin is high is a wake-up event
+            new |= WUF               # enabling WKUP while the pin is high is a wake-up event (5.4.2 note)
+        if (old ^ new) & EWUP and self.chip is not None:
+            self._store(reg, new)
+            from ._util import gpio_ports
+            for p in gpio_ports(self.chip):      # EWUP = 1 forces the WKUP pin to input pull-down (5.4.2)
+                if p.port == "A":
+                    p.resync_all()
         return new
 
     def _cr_write(self, blk, reg, old, new):
@@ -235,10 +248,14 @@ class PWR(GatedBlock):
         self.entries["stop"] += 1
         r = rcc(chip)
         if r is not None:
-            from .rcc import HSEON, HSERDY, HSION, HSIRDY, PLLON, PLLRDY
-            r.set("CR", (r.get("CR") | HSION | HSIRDY) & ~(HSEON | HSERDY | PLLON | PLLRDY))
-            r.set("CFGR", r.get("CFGR") & ~0xF)
-            r.update()
+            stop = getattr(r, "enter_stop", None)
+            if stop is not None:
+                stop()
+            else:
+                from .rcc import HSEON, HSERDY, HSION, HSIRDY, PLLON, PLLRDY
+                r.set("CR", (r.get("CR") | HSION | HSIRDY) & ~(HSEON | HSERDY | PLLON | PLLRDY))
+                r.set("CFGR", r.get("CFGR") & ~0xF)
+                r.update()
         arch_blocks = getattr(chip, "arch_blocks", [])
         self._frz.freeze([b for b in chip.peripherals.values()
                           if b not in arch_blocks and getattr(b, "model", None) not in STOP_KEEP], "stop")

@@ -1,0 +1,192 @@
+# TI TMS320F28335 in the 179-ball ZHH MicroStar BGA (12 x 12 mm; the ZAY nFBGA has the same ballout).
+# Same die, memory map, peripherals and IRQs as chips/tms320f28335.yaml (LQFP176), which is included; this file
+# overrides name, package and pins.  Ball table generated from SPRS439Q Table 6-1 (the ZHH ball column next to each
+# PGF pin number; names and functions = the LQFP176 pin with that number) and cross-checked against the ballout
+# figures (Figures 6-2..6-5, pdftotext -bbox, cells matched by row/column label): 179 of 179 balls carry the same signal
+# names.  The 3 balls with no LQFP pin are VSS N11, P6, P8 (Table 6-1).
+# Ball numbering: `num` = row-major index over the 179 balls (rows A..P without I/O, columns 1..14), `ball` = the
+# ball name.  Check with: tools/pin_table_check.py chips/tms320f28335zhh.yaml --expect 179 --strict
+include: tms320f28335.yaml
+name: TMS320F28335ZHH
+package: BGA179 (ZHH)
+
+pins:
+  - {num: 1, ball: A2, name: "GPIO31/CANTXA/XA17", kind: gpio, port: A, bit: 31, default: GPIO, functions: {GPIO: "GPIO31", MUX1: "CANTXA", MUX2: "XA17", MUX3: "XA17"}}
+  - {num: 2, ball: A3, name: "GPIO87/XA15", kind: gpio, port: C, bit: 23, default: GPIO, functions: {GPIO: "GPIO87", MUX1: "GPIO87", MUX2: "XA15", MUX3: "XA15"}}
+  - {num: 3, ball: A4, name: "VDDIO", kind: power}
+  - {num: 4, ball: A5, name: "VSS", kind: power}
+  - {num: 5, ball: A6, name: "GPIO47/XA7", kind: gpio, port: B, bit: 15, default: GPIO, functions: {GPIO: "GPIO47", MUX2: "XA7", MUX3: "XA7"}}
+  - {num: 6, ball: A7, name: "GPIO44/XA4", kind: gpio, port: B, bit: 12, default: GPIO, functions: {GPIO: "GPIO44", MUX2: "XA4", MUX3: "XA4"}}
+  - {num: 7, ball: A8, name: "GPIO41/XA1", kind: gpio, port: B, bit: 9, default: GPIO, functions: {GPIO: "GPIO41", MUX2: "XA1", MUX3: "XA1"}}
+  - {num: 8, ball: A9, name: "GPIO35/SCITXDA/XR/W", kind: gpio, port: B, bit: 3, default: GPIO, functions: {GPIO: "GPIO35", MUX1: "SCITXDA", MUX2: "XR/W", MUX3: "XR/W"}}
+  - {num: 9, ball: A10, name: "VSS", kind: power}
+  - {num: 10, ball: A11, name: "VSS", kind: power}
+  - {num: 11, ball: A12, name: "GPIO79/XD0", kind: gpio, port: C, bit: 15, default: GPIO, functions: {GPIO: "GPIO79", MUX1: "GPIO79", MUX2: "XD0", MUX3: "XD0"}}
+  - {num: 12, ball: A13, name: "GPIO77/XD2", kind: gpio, port: C, bit: 13, default: GPIO, functions: {GPIO: "GPIO77", MUX1: "GPIO77", MUX2: "XD2", MUX3: "XD2"}}
+  - {num: 13, ball: A14, name: "GPIO75/XD4", kind: gpio, port: C, bit: 11, default: GPIO, functions: {GPIO: "GPIO75", MUX1: "GPIO75", MUX2: "XD4", MUX3: "XD4"}}
+  - {num: 14, ball: B1, name: "VDD", kind: power}
+  - {num: 15, ball: B2, name: "GPIO30/CANRXA/XA18", kind: gpio, port: A, bit: 30, default: GPIO, functions: {GPIO: "GPIO30", MUX1: "CANRXA", MUX2: "XA18", MUX3: "XA18"}}
+  - {num: 16, ball: B3, name: "GPIO39/XA16", kind: gpio, port: B, bit: 7, default: GPIO, functions: {GPIO: "GPIO39", MUX2: "XA16", MUX3: "XA16"}}
+  - {num: 17, ball: B4, name: "VSS", kind: power}
+  - {num: 18, ball: B5, name: "VDD", kind: power}
+  - {num: 19, ball: B6, name: "GPIO46/XA6", kind: gpio, port: B, bit: 14, default: GPIO, functions: {GPIO: "GPIO46", MUX2: "XA6", MUX3: "XA6"}}
+  - {num: 20, ball: B7, name: "GPIO43/XA3", kind: gpio, port: B, bit: 11, default: GPIO, functions: {GPIO: "GPIO43", MUX2: "XA3", MUX3: "XA3"}}
+  - {num: 21, ball: B8, name: "GPIO42/XA2", kind: gpio, port: B, bit: 10, default: GPIO, functions: {GPIO: "GPIO42", MUX2: "XA2", MUX3: "XA2"}}
+  - {num: 22, ball: B9, name: "XRD", kind: special}
+  - {num: 23, ball: B10, name: "VDDIO", kind: power}
+  - {num: 24, ball: B11, name: "VDD", kind: power}
+  - {num: 25, ball: B12, name: "GPIO78/XD1", kind: gpio, port: C, bit: 14, default: GPIO, functions: {GPIO: "GPIO78", MUX1: "GPIO78", MUX2: "XD1", MUX3: "XD1"}}
+  - {num: 26, ball: B13, name: "GPIO76/XD3", kind: gpio, port: C, bit: 12, default: GPIO, functions: {GPIO: "GPIO76", MUX1: "GPIO76", MUX2: "XD3", MUX3: "XD3"}}
+  - {num: 27, ball: B14, name: "GPIO72/XD7", kind: gpio, port: C, bit: 8, default: GPIO, functions: {GPIO: "GPIO72", MUX1: "GPIO72", MUX2: "XD7", MUX3: "XD7"}}
+  - {num: 28, ball: C1, name: "GPIO0/EPWM1A", kind: gpio, port: A, bit: 0, default: GPIO, functions: {GPIO: "GPIO0", MUX1: "EPWM1A"}}
+  - {num: 29, ball: C2, name: "GPIO29/SCITXDA/XA19", kind: gpio, port: A, bit: 29, default: GPIO, functions: {GPIO: "GPIO29", MUX1: "SCITXDA", MUX2: "XA19", MUX3: "XA19"}}
+  - {num: 30, ball: C3, name: "VSS", kind: power}
+  - {num: 31, ball: C4, name: "GPIO85/XA13", kind: gpio, port: C, bit: 21, default: GPIO, functions: {GPIO: "GPIO85", MUX1: "GPIO85", MUX2: "XA13", MUX3: "XA13"}}
+  - {num: 32, ball: C5, name: "GPIO82/XA10", kind: gpio, port: C, bit: 18, default: GPIO, functions: {GPIO: "GPIO82", MUX1: "GPIO82", MUX2: "XA10", MUX3: "XA10"}}
+  - {num: 33, ball: C6, name: "GPIO80/XA8", kind: gpio, port: C, bit: 16, default: GPIO, functions: {GPIO: "GPIO80", MUX1: "GPIO80", MUX2: "XA8", MUX3: "XA8"}}
+  - {num: 34, ball: C7, name: "VSS", kind: power}
+  - {num: 35, ball: C8, name: "VDD", kind: power}
+  - {num: 36, ball: C9, name: "VSS", kind: power}
+  - {num: 37, ball: C10, name: "GPIO36/SCIRXDA/XZCS0", kind: gpio, port: B, bit: 4, default: GPIO, functions: {GPIO: "GPIO36", MUX1: "SCIRXDA", MUX2: "XZCS0", MUX3: "XZCS0"}}
+  - {num: 38, ball: C11, name: "XCLKOUT", kind: special, functions: {MUX1: "XCLKOUT"}}
+  - {num: 39, ball: C12, name: "GPIO73/XD6", kind: gpio, port: C, bit: 9, default: GPIO, functions: {GPIO: "GPIO73", MUX1: "GPIO73", MUX2: "XD6", MUX3: "XD6"}}
+  - {num: 40, ball: C13, name: "GPIO74/XD5", kind: gpio, port: C, bit: 10, default: GPIO, functions: {GPIO: "GPIO74", MUX1: "GPIO74", MUX2: "XD5", MUX3: "XD5"}}
+  - {num: 41, ball: C14, name: "GPIO71/XD8", kind: gpio, port: C, bit: 7, default: GPIO, functions: {GPIO: "GPIO71", MUX1: "GPIO71", MUX2: "XD8", MUX3: "XD8"}}
+  - {num: 42, ball: D1, name: "VSS", kind: power}
+  - {num: 43, ball: D2, name: "GPIO2/EPWM2A", kind: gpio, port: A, bit: 2, default: GPIO, functions: {GPIO: "GPIO2", MUX1: "EPWM2A"}}
+  - {num: 44, ball: D3, name: "GPIO1/EPWM1B/ECAP6/MFSRB", kind: gpio, port: A, bit: 1, default: GPIO, functions: {GPIO: "GPIO1", MUX1: "EPWM1B", MUX2: "ECAP6", MUX3: "MFSRB"}}
+  - {num: 45, ball: D4, name: "GPIO86/XA14", kind: gpio, port: C, bit: 22, default: GPIO, functions: {GPIO: "GPIO86", MUX1: "GPIO86", MUX2: "XA14", MUX3: "XA14"}}
+  - {num: 46, ball: D5, name: "GPIO83/XA11", kind: gpio, port: C, bit: 19, default: GPIO, functions: {GPIO: "GPIO83", MUX1: "GPIO83", MUX2: "XA11", MUX3: "XA11"}}
+  - {num: 47, ball: D6, name: "VSS", kind: power}
+  - {num: 48, ball: D7, name: "GPIO45/XA5", kind: gpio, port: B, bit: 13, default: GPIO, functions: {GPIO: "GPIO45", MUX2: "XA5", MUX3: "XA5"}}
+  - {num: 49, ball: D8, name: "GPIO40/XA0/XWE1", kind: gpio, port: B, bit: 8, default: GPIO, functions: {GPIO: "GPIO40", MUX2: "XA0/XWE1", MUX3: "XA0/XWE1"}}
+  - {num: 50, ball: D9, name: "GPIO37/ECAP2/XZCS7", kind: gpio, port: B, bit: 5, default: GPIO, functions: {GPIO: "GPIO37", MUX1: "ECAP2", MUX2: "XZCS7", MUX3: "XZCS7"}}
+  - {num: 51, ball: D10, name: "GPIO34/ECAP1/XREADY", kind: gpio, port: B, bit: 2, default: GPIO, functions: {GPIO: "GPIO34", MUX1: "ECAP1", MUX2: "XREADY", MUX3: "XREADY"}}
+  - {num: 52, ball: D11, name: "GPIO38/XWE0", kind: gpio, port: B, bit: 6, default: GPIO, functions: {GPIO: "GPIO38", MUX2: "XWE0", MUX3: "XWE0"}}
+  - {num: 53, ball: D12, name: "GPIO70/XD9", kind: gpio, port: C, bit: 6, default: GPIO, functions: {GPIO: "GPIO70", MUX1: "GPIO70", MUX2: "XD9", MUX3: "XD9"}}
+  - {num: 54, ball: D13, name: "VDD", kind: power}
+  - {num: 55, ball: D14, name: "VSS", kind: power}
+  - {num: 56, ball: E1, name: "GPIO6/EPWM4A/EPWMSYNCI/EPWMSYNCO", kind: gpio, port: A, bit: 6, default: GPIO, functions: {GPIO: "GPIO6", MUX1: "EPWM4A", MUX2: "EPWMSYNCI", MUX3: "EPWMSYNCO"}}
+  - {num: 57, ball: E2, name: "GPIO4/EPWM3A", kind: gpio, port: A, bit: 4, default: GPIO, functions: {GPIO: "GPIO4", MUX1: "EPWM3A"}}
+  - {num: 58, ball: E3, name: "GPIO5/EPWM3B/MFSRA/ECAP1", kind: gpio, port: A, bit: 5, default: GPIO, functions: {GPIO: "GPIO5", MUX1: "EPWM3B", MUX2: "MFSRA", MUX3: "ECAP1"}}
+  - {num: 59, ball: E4, name: "GPIO3/EPWM2B/ECAP5/MCLKRB", kind: gpio, port: A, bit: 3, default: GPIO, functions: {GPIO: "GPIO3", MUX1: "EPWM2B", MUX2: "ECAP5", MUX3: "MCLKRB"}}
+  - {num: 60, ball: E5, name: "GPIO84/XA12", kind: gpio, port: C, bit: 20, default: GPIO, functions: {GPIO: "GPIO84", MUX1: "GPIO84", MUX2: "XA12", MUX3: "XA12"}}
+  - {num: 61, ball: E6, name: "GPIO81/XA9", kind: gpio, port: C, bit: 17, default: GPIO, functions: {GPIO: "GPIO81", MUX1: "GPIO81", MUX2: "XA9", MUX3: "XA9"}}
+  - {num: 62, ball: E7, name: "VDDIO", kind: power}
+  - {num: 63, ball: E8, name: "VSS", kind: power}
+  - {num: 64, ball: E9, name: "VDD", kind: power}
+  - {num: 65, ball: E10, name: "GPIO28/SCIRXDA/XZCS6", kind: gpio, port: A, bit: 28, default: GPIO, functions: {GPIO: "GPIO28", MUX1: "SCIRXDA", MUX2: "XZCS6", MUX3: "XZCS6"}}
+  - {num: 66, ball: E11, name: "GPIO68/XD11", kind: gpio, port: C, bit: 4, default: GPIO, functions: {GPIO: "GPIO68", MUX1: "GPIO68", MUX2: "XD11", MUX3: "XD11"}}
+  - {num: 67, ball: E12, name: "VDDIO", kind: power}
+  - {num: 68, ball: E13, name: "GPIO67/XD12", kind: gpio, port: C, bit: 3, default: GPIO, functions: {GPIO: "GPIO67", MUX1: "GPIO67", MUX2: "XD12", MUX3: "XD12"}}
+  - {num: 69, ball: E14, name: "VSS", kind: power}
+  - {num: 70, ball: F1, name: "GPIO8/EPWM5A/CANTXB/ADCSOCAO", kind: gpio, port: A, bit: 8, default: GPIO, functions: {GPIO: "GPIO8", MUX1: "EPWM5A", MUX2: "CANTXB", MUX3: "ADCSOCAO"}}
+  - {num: 71, ball: F2, name: "GPIO7/EPWM4B/MCLKRA/ECAP2", kind: gpio, port: A, bit: 7, default: GPIO, functions: {GPIO: "GPIO7", MUX1: "EPWM4B", MUX2: "MCLKRA", MUX3: "ECAP2"}}
+  - {num: 72, ball: F3, name: "VDD", kind: power}
+  - {num: 73, ball: F4, name: "VSS", kind: power}
+  - {num: 74, ball: F5, name: "VDDIO", kind: power}
+  - {num: 75, ball: F10, name: "GPIO69/XD10", kind: gpio, port: C, bit: 5, default: GPIO, functions: {GPIO: "GPIO69", MUX1: "GPIO69", MUX2: "XD10", MUX3: "XD10"}}
+  - {num: 76, ball: F11, name: "GPIO66/XD13", kind: gpio, port: C, bit: 2, default: GPIO, functions: {GPIO: "GPIO66", MUX1: "GPIO66", MUX2: "XD13", MUX3: "XD13"}}
+  - {num: 77, ball: F12, name: "VSS", kind: power}
+  - {num: 78, ball: F13, name: "VDD", kind: power}
+  - {num: 79, ball: F14, name: "GPIO65/XD14", kind: gpio, port: C, bit: 1, default: GPIO, functions: {GPIO: "GPIO65", MUX1: "GPIO65", MUX2: "XD14", MUX3: "XD14"}}
+  - {num: 80, ball: G1, name: "VSS", kind: power}
+  - {num: 81, ball: G2, name: "GPIO11/EPWM6B/SCIRXDB/ECAP4", kind: gpio, port: A, bit: 11, default: GPIO, functions: {GPIO: "GPIO11", MUX1: "EPWM6B", MUX2: "SCIRXDB", MUX3: "ECAP4"}}
+  - {num: 82, ball: G3, name: "GPIO12/TZ1/CANTXB/MDXB", kind: gpio, port: A, bit: 12, default: GPIO, functions: {GPIO: "GPIO12", MUX1: "TZ1", MUX2: "CANTXB", MUX3: "MDXB"}}
+  - {num: 83, ball: G4, name: "GPIO10/EPWM6A/CANRXB/ADCSOCBO", kind: gpio, port: A, bit: 10, default: GPIO, functions: {GPIO: "GPIO10", MUX1: "EPWM6A", MUX2: "CANRXB", MUX3: "ADCSOCBO"}}
+  - {num: 84, ball: G5, name: "GPIO9/EPWM5B/SCITXDB/ECAP3", kind: gpio, port: A, bit: 9, default: GPIO, functions: {GPIO: "GPIO9", MUX1: "EPWM5B", MUX2: "SCITXDB", MUX3: "ECAP3"}}
+  - {num: 85, ball: G10, name: "GPIO64/XD15", kind: gpio, port: C, bit: 0, default: GPIO, functions: {GPIO: "GPIO64", MUX1: "GPIO64", MUX2: "XD15", MUX3: "XD15"}}
+  - {num: 86, ball: G11, name: "GPIO63/SCITXDC/XD16", kind: gpio, port: B, bit: 31, default: GPIO, functions: {GPIO: "GPIO63", MUX1: "SCITXDC", MUX2: "XD16", MUX3: "XD16"}}
+  - {num: 87, ball: G12, name: "GPIO61/MFSRB/XD18", kind: gpio, port: B, bit: 29, default: GPIO, functions: {GPIO: "GPIO61", MUX1: "MFSRB", MUX2: "XD18", MUX3: "XD18"}}
+  - {num: 88, ball: G13, name: "GPIO62/SCIRXDC/XD17", kind: gpio, port: B, bit: 30, default: GPIO, functions: {GPIO: "GPIO62", MUX1: "SCIRXDC", MUX2: "XD17", MUX3: "XD17"}}
+  - {num: 89, ball: G14, name: "GPIO60/MCLKRB/XD19", kind: gpio, port: B, bit: 28, default: GPIO, functions: {GPIO: "GPIO60", MUX1: "MCLKRB", MUX2: "XD19", MUX3: "XD19"}}
+  - {num: 90, ball: H1, name: "VDD", kind: power}
+  - {num: 91, ball: H2, name: "GPIO14/TZ3/XHOLD/SCITXDB/MCLKXB", kind: gpio, port: A, bit: 14, default: GPIO, functions: {GPIO: "GPIO14", MUX1: "TZ3/XHOLD", MUX2: "SCITXDB", MUX3: "MCLKXB"}}
+  - {num: 92, ball: H3, name: "GPIO13/TZ2/CANRXB/MDRB", kind: gpio, port: A, bit: 13, default: GPIO, functions: {GPIO: "GPIO13", MUX1: "TZ2", MUX2: "CANRXB", MUX3: "MDRB"}}
+  - {num: 93, ball: H4, name: "GPIO15/TZ4/XHOLDA/SCIRXDB/MFSXB", kind: gpio, port: A, bit: 15, default: GPIO, functions: {GPIO: "GPIO15", MUX1: "TZ4/XHOLDA", MUX2: "SCIRXDB", MUX3: "MFSXB"}}
+  - {num: 94, ball: H5, name: "GPIO16/SPISIMOA/CANTXB/TZ5", kind: gpio, port: A, bit: 16, default: GPIO, functions: {GPIO: "GPIO16", MUX1: "SPISIMOA", MUX2: "CANTXB", MUX3: "TZ5"}}
+  - {num: 95, ball: H10, name: "VSS", kind: power}
+  - {num: 96, ball: H11, name: "VDDIO", kind: power}
+  - {num: 97, ball: H12, name: "VDD", kind: power}
+  - {num: 98, ball: H13, name: "VSS", kind: power}
+  - {num: 99, ball: H14, name: "GPIO59/MFSRA/XD20", kind: gpio, port: B, bit: 27, default: GPIO, functions: {GPIO: "GPIO59", MUX1: "MFSRA", MUX2: "XD20", MUX3: "XD20"}}
+  - {num: 100, ball: J1, name: "GPIO17/SPISOMIA/CANRXB/TZ6", kind: gpio, port: A, bit: 17, default: GPIO, functions: {GPIO: "GPIO17", MUX1: "SPISOMIA", MUX2: "CANRXB", MUX3: "TZ6"}}
+  - {num: 101, ball: J2, name: "VDD", kind: power}
+  - {num: 102, ball: J3, name: "VSS", kind: power}
+  - {num: 103, ball: J4, name: "VDD1A18", kind: power}
+  - {num: 104, ball: J5, name: "ADCINA6", kind: analog, functions: {ANALOG: "ADCINA6"}}
+  - {num: 105, ball: J10, name: "VSS", kind: power}
+  - {num: 106, ball: J11, name: "X2", kind: special}
+  - {num: 107, ball: J12, name: "VSS", kind: power}
+  - {num: 108, ball: J13, name: "X1", kind: special}
+  - {num: 109, ball: J14, name: "XCLKIN", kind: special}
+  - {num: 110, ball: K1, name: "VSS1AGND", kind: power}
+  - {num: 111, ball: K2, name: "VDDA2", kind: power}
+  - {num: 112, ball: K3, name: "VSSA2", kind: power}
+  - {num: 113, ball: K4, name: "ADCINA7", kind: analog, functions: {ANALOG: "ADCINA7"}}
+  - {num: 114, ball: K5, name: "ADCINB7", kind: analog, functions: {ANALOG: "ADCINB7"}}
+  - {num: 115, ball: K6, name: "VSS2AGND", kind: power}
+  - {num: 116, ball: K7, name: "GPIO19/SPISTEA/SCIRXDB/CANTXA", kind: gpio, port: A, bit: 19, default: GPIO, functions: {GPIO: "GPIO19", MUX1: "SPISTEA", MUX2: "SCIRXDB", MUX3: "CANTXA"}}
+  - {num: 117, ball: K8, name: "GPIO26/ECAP3/EQEP2I/MCLKXB", kind: gpio, port: A, bit: 26, default: GPIO, functions: {GPIO: "GPIO26", MUX1: "ECAP3", MUX2: "EQEP2I", MUX3: "MCLKXB"}}
+  - {num: 118, ball: K9, name: "TDO", kind: special}
+  - {num: 119, ball: K10, name: "TEST1", kind: special}
+  - {num: 120, ball: K11, name: "GPIO56/SPICLKA/XD23", kind: gpio, port: B, bit: 24, default: GPIO, functions: {GPIO: "GPIO56", MUX1: "SPICLKA", MUX2: "XD23", MUX3: "XD23"}}
+  - {num: 121, ball: K12, name: "GPIO58/MCLKRA/XD21", kind: gpio, port: B, bit: 26, default: GPIO, functions: {GPIO: "GPIO58", MUX1: "MCLKRA", MUX2: "XD21", MUX3: "XD21"}}
+  - {num: 122, ball: K13, name: "GPIO57/SPISTEA/XD22", kind: gpio, port: B, bit: 25, default: GPIO, functions: {GPIO: "GPIO57", MUX1: "SPISTEA", MUX2: "XD22", MUX3: "XD22"}}
+  - {num: 123, ball: K14, name: "VDD", kind: power}
+  - {num: 124, ball: L1, name: "ADCINA5", kind: analog, functions: {ANALOG: "ADCINA5"}}
+  - {num: 125, ball: L2, name: "ADCINA4", kind: analog, functions: {ANALOG: "ADCINA4"}}
+  - {num: 126, ball: L3, name: "ADCINA3", kind: analog, functions: {ANALOG: "ADCINA3"}}
+  - {num: 127, ball: L4, name: "ADCINB3", kind: analog, functions: {ANALOG: "ADCINB3"}}
+  - {num: 128, ball: L5, name: "ADCREFIN", kind: special}
+  - {num: 129, ball: L6, name: "GPIO18/SPICLKA/SCITXDB/CANRXA", kind: gpio, port: A, bit: 18, default: GPIO, functions: {GPIO: "GPIO18", MUX1: "SPICLKA", MUX2: "SCITXDB", MUX3: "CANRXA"}}
+  - {num: 130, ball: L7, name: "GPIO20/EQEP1A/MDXA/CANTXB", kind: gpio, port: A, bit: 20, default: GPIO, functions: {GPIO: "GPIO20", MUX1: "EQEP1A", MUX2: "MDXA", MUX3: "CANTXB"}}
+  - {num: 131, ball: L8, name: "VDDIO", kind: power}
+  - {num: 132, ball: L9, name: "GPIO27/ECAP4/EQEP2S/MFSXB", kind: gpio, port: A, bit: 27, default: GPIO, functions: {GPIO: "GPIO27", MUX1: "ECAP4", MUX2: "EQEP2S", MUX3: "MFSXB"}}
+  - {num: 133, ball: L10, name: "XRS", kind: special}
+  - {num: 134, ball: L11, name: "EMU0", kind: special}
+  - {num: 135, ball: L12, name: "GPIO53/EQEP1I/XD26", kind: gpio, port: B, bit: 21, default: GPIO, functions: {GPIO: "GPIO53", MUX1: "EQEP1I", MUX2: "XD26", MUX3: "XD26"}}
+  - {num: 136, ball: L13, name: "GPIO54/SPISIMOA/XD25", kind: gpio, port: B, bit: 22, default: GPIO, functions: {GPIO: "GPIO54", MUX1: "SPISIMOA", MUX2: "XD25", MUX3: "XD25"}}
+  - {num: 137, ball: L14, name: "GPIO55/SPISOMIA/XD24", kind: gpio, port: B, bit: 23, default: GPIO, functions: {GPIO: "GPIO55", MUX1: "SPISOMIA", MUX2: "XD24", MUX3: "XD24"}}
+  - {num: 138, ball: M1, name: "ADCINA2", kind: analog, functions: {ANALOG: "ADCINA2"}}
+  - {num: 139, ball: M2, name: "ADCLO", kind: special}
+  - {num: 140, ball: M3, name: "ADCINA0", kind: analog, functions: {ANALOG: "ADCINA0"}}
+  - {num: 141, ball: M4, name: "ADCINB4", kind: analog, functions: {ANALOG: "ADCINB4"}}
+  - {num: 142, ball: M5, name: "ADCRESEXT", kind: special}
+  - {num: 143, ball: M6, name: "VDD2A18", kind: power}
+  - {num: 144, ball: M7, name: "GPIO23/EQEP1I/MFSXA/SCIRXDB", kind: gpio, port: A, bit: 23, default: GPIO, functions: {GPIO: "GPIO23", MUX1: "EQEP1I", MUX2: "MFSXA", MUX3: "SCIRXDB"}}
+  - {num: 145, ball: M8, name: "GPIO24/ECAP1/EQEP2A/MDXB", kind: gpio, port: A, bit: 24, default: GPIO, functions: {GPIO: "GPIO24", MUX1: "ECAP1", MUX2: "EQEP2A", MUX3: "MDXB"}}
+  - {num: 146, ball: M9, name: "TDI", kind: special}
+  - {num: 147, ball: M10, name: "TRST", kind: special}
+  - {num: 148, ball: M11, name: "VDD3VFL", kind: power}
+  - {num: 149, ball: M12, name: "VSS", kind: power}
+  - {num: 150, ball: M13, name: "GPIO51/EQEP1B/XD28", kind: gpio, port: B, bit: 19, default: GPIO, functions: {GPIO: "GPIO51", MUX1: "EQEP1B", MUX2: "XD28", MUX3: "XD28"}}
+  - {num: 151, ball: M14, name: "GPIO52/EQEP1S/XD27", kind: gpio, port: B, bit: 20, default: GPIO, functions: {GPIO: "GPIO52", MUX1: "EQEP1S", MUX2: "XD27", MUX3: "XD27"}}
+  - {num: 152, ball: N1, name: "ADCINA1", kind: analog, functions: {ANALOG: "ADCINA1"}}
+  - {num: 153, ball: N2, name: "VDDAIO", kind: power}
+  - {num: 154, ball: N3, name: "ADCINB1", kind: analog, functions: {ANALOG: "ADCINB1"}}
+  - {num: 155, ball: N4, name: "ADCINB5", kind: analog, functions: {ANALOG: "ADCINB5"}}
+  - {num: 156, ball: N5, name: "ADCREFM", kind: special}
+  - {num: 157, ball: N6, name: "VDD", kind: power}
+  - {num: 158, ball: N7, name: "GPIO22/EQEP1S/MCLKXA/SCITXDB", kind: gpio, port: A, bit: 22, default: GPIO, functions: {GPIO: "GPIO22", MUX1: "EQEP1S", MUX2: "MCLKXA", MUX3: "SCITXDB"}}
+  - {num: 159, ball: N8, name: "GPIO25/ECAP2/EQEP2B/MDRB", kind: gpio, port: A, bit: 25, default: GPIO, functions: {GPIO: "GPIO25", MUX1: "ECAP2", MUX2: "EQEP2B", MUX3: "MDRB"}}
+  - {num: 160, ball: N9, name: "GPIO32/SDAA/EPWMSYNCI/ADCSOCAO", kind: gpio, port: B, bit: 0, default: GPIO, functions: {GPIO: "GPIO32", MUX1: "SDAA", MUX2: "EPWMSYNCI", MUX3: "ADCSOCAO"}}
+  - {num: 161, ball: N10, name: "VSS", kind: power}
+  - {num: 162, ball: N11, name: "VSS", kind: power}
+  - {num: 163, ball: N12, name: "TCK", kind: special}
+  - {num: 164, ball: N13, name: "GPIO49/ECAP6/XD30", kind: gpio, port: B, bit: 17, default: GPIO, functions: {GPIO: "GPIO49", MUX1: "ECAP6", MUX2: "XD30", MUX3: "XD30"}}
+  - {num: 165, ball: N14, name: "VDDIO", kind: power}
+  - {num: 166, ball: P1, name: "VSSAIO", kind: power}
+  - {num: 167, ball: P2, name: "ADCINB0", kind: analog, functions: {ANALOG: "ADCINB0"}}
+  - {num: 168, ball: P3, name: "ADCINB2", kind: analog, functions: {ANALOG: "ADCINB2"}}
+  - {num: 169, ball: P4, name: "ADCINB6", kind: analog, functions: {ANALOG: "ADCINB6"}}
+  - {num: 170, ball: P5, name: "ADCREFP", kind: special}
+  - {num: 171, ball: P6, name: "VSS", kind: power}
+  - {num: 172, ball: P7, name: "GPIO21/EQEP1B/MDRA/CANRXB", kind: gpio, port: A, bit: 21, default: GPIO, functions: {GPIO: "GPIO21", MUX1: "EQEP1B", MUX2: "MDRA", MUX3: "CANRXB"}}
+  - {num: 173, ball: P8, name: "VSS", kind: power}
+  - {num: 174, ball: P9, name: "GPIO33/SCLA/EPWMSYNCO/ADCSOCBO", kind: gpio, port: B, bit: 1, default: GPIO, functions: {GPIO: "GPIO33", MUX1: "SCLA", MUX2: "EPWMSYNCO", MUX3: "ADCSOCBO"}}
+  - {num: 175, ball: P10, name: "TMS", kind: special}
+  - {num: 176, ball: P11, name: "TEST2", kind: special}
+  - {num: 177, ball: P12, name: "EMU1", kind: special}
+  - {num: 178, ball: P13, name: "GPIO48/ECAP5/XD31", kind: gpio, port: B, bit: 16, default: GPIO, functions: {GPIO: "GPIO48", MUX1: "ECAP5", MUX2: "XD31", MUX3: "XD31"}}
+  - {num: 179, ball: P14, name: "GPIO50/EQEP1A/XD29", kind: gpio, port: B, bit: 18, default: GPIO, functions: {GPIO: "GPIO50", MUX1: "EQEP1A", MUX2: "XD29", MUX3: "XD29"}}

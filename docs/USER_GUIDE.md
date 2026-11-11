@@ -31,9 +31,20 @@ Work from the checkout root. Always call the tools through the venv; there is no
 ```sh
 python3 -m venv .venv                      # once; Python 3.12 or newer
 .venv/bin/pip install -e '.[test]'         # unicorn, capstone, pyelftools, pyyaml + pytest, keystone-engine
+.venv/bin/chipem doctor                    # what is installed, and which features that enables
 ```
 
 The install must be editable (`-e`): `chips/` and the web assets are found relative to the source tree.
+Use the `dev` extra (`'.[dev]'`) to add `pyserial` for `--uart-port`. The full list of required and optional
+packages and tools (with Fedora, Debian/Ubuntu and Homebrew package names) is in the README's
+[Requirements](../README.md#requirements) table. None of the firmware toolchains are needed to run the
+prebuilt samples.
+
+`chipem doctor` checks the Python version and required packages, runs the Unicorn instruction-counter calibration
+(exact fast-mode timing depends on Unicorn 2.1.x), looks for the optional tools (pyserial, PTYs, gdb, clang /
+ld.lld, TI `cl2000`, SDCC under either naming scheme, pdftotext, node, Firefox) and ends with a yes/no feature
+list. It exits non-zero only when a required piece is missing; `--json` prints the same as JSON. `chipem
+--version` prints the version.
 
 Check that it works:
 
@@ -114,7 +125,12 @@ up as `chips/NAME.yaml`) or `--chip path/to/file.yaml`. The default is `mk22fn1m
 | ST STM32F405ZG | `stm32f405zg` | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PB0` |
 | ST STM32F405RG / OG / OE / VG | `stm32f405rg` (LQFP64), `stm32f405og`, `stm32f405oe` (WLCSP90), `stm32f405vg` (LQFP100) | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PB0` |
 | ST STM32F407VG / VE / ZG / ZE / IG / IE | `stm32f407vg`, `stm32f407ve` (LQFP100), `stm32f407zg`, `stm32f407ze` (LQFP144), `stm32f407ig`, `stm32f407ie` (LQFP176), `stm32f407igh`, `stm32f407ieh` (UFBGA176) | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PI1` |
+| ST STM32F205 / F207 / F215 / F217 (STM32F2) | `stm32f207zg` (base, LQFP144), `stm32f205rg`, `stm32f215rg` (LQFP64), `stm32f205rgy` (WLCSP64+2), `stm32f205vg`, `stm32f207vg`, `stm32f215vg`, `stm32f217vg` (LQFP100), `stm32f205zg`, `stm32f215zg`, `stm32f217zg` (LQFP144), `stm32f207ig`, `stm32f217ig` (LQFP176), `stm32f207igh`, `stm32f217igh` (UFBGA176) | Cortex-M3 (no FPU) | 16 MHz (HSI) | `PA9`, `PB0` |
 | ST STM32F103T6 (VFQFPN36, family `stm32f1`) | `stm32f103t6` | Cortex-M3 (no FPU) | 8 MHz (HSI) | `PA9`, `PB0` |
+| ST STM32F103 low density (family `stm32f1`) | `stm32f103t4` (VFQFPN36), `stm32f103c4`, `stm32f103c6` (LQFP48), `stm32f103r4`, `stm32f103r6` (LQFP64) | Cortex-M3 (no FPU) | 8 MHz (HSI) | `PA9`, `PB0` |
+| ST STM32F103 medium density | `stm32f103vb` (base, LQFP100), `stm32f103v8`, `stm32f103c8` ("Blue Pill"), `stm32f103cb` (LQFP48), `stm32f103r8`, `stm32f103rb` (LQFP64), `stm32f103t8`, `stm32f103tb` (VFQFPN36) | Cortex-M3 (no FPU) | 8 MHz (HSI) | `PC13`, `PA9` |
+| ST STM32F103 high density | `stm32f103ze` (base, LQFP144), `stm32f103zc`, `stm32f103vc`, `stm32f103ve` (LQFP100), `stm32f103rc`, `stm32f103re` (LQFP64) | Cortex-M3 (no FPU) | 8 MHz (HSI) | `PA9`, `PG0` |
+| ST STM32F105 / F107 (connectivity line) | `stm32f107vc` (base, LQFP100), `stm32f107rc`, `stm32f105rc` (LQFP64), `stm32f105vc` (LQFP100) | Cortex-M3 (no FPU) | 8 MHz (HSI) | `PA9`, `PD8` |
 | TI TMS320F28232 | `tms320f28232` | C28x (16-bit words) | 10 MHz | `GPIO34` |
 
 **Firmware formats.** The format is sniffed; `--format` forces it.
@@ -558,6 +574,23 @@ UART output:
   SCIA (3 bytes): "hi\n"
 ```
 
+Booting a TMS320F2808 over SCI-A, like a real device with its boot-mode pins at 1 1 0 (GPIO34 low): the boot ROM
+stand-in (`chips/tms320f2808_bootrom.asm`) waits for the autobaud character `A`, echoes every byte and loads the
+SPRU722C stream that `tools/c28x_bootstream.py` builds from a RAM-linked `.c28img` / TI `.out` (`--format at` prints
+it, with the leading `A`, as a `--at` value). The firmware argument must have no entry point (otherwise reset skips
+the ROM); any flash-only image (such as the `_FLASH_PROBE` of `tests/test_c2000_f280x_boot.py`) does:
+
+```
+$ AT=$(.venv/bin/python tools/c28x_bootstream.py ram_prog.c28img --format at)
+$ .venv/bin/chipem run probe.c28img --chip tms320f2808 --set GPIO34=0 --at "100us:SCIA=$AT" --for 5ms
+...
+stop         : COUNT; pc=0x00008008 mode=thread          (running the loaded program in L0)
+```
+
+The other loaders take the same stream: SPI-A from a board `spi_flash` device with `addr_bytes: 2` on GPIO19
+(pins 1 0 1), I2C-A from an `i2c_eeprom` part at 0x50 with `file: prog.boot` (1 0 0), eCAN-A from frames with ID 0x001,
+one word per frame (0 1 1), parallel from GPIO0-15 with the GPIO26/GPIO27 handshake (0 0 0).
+
 `--log-mmio` shows every register access, named from the register table:
 
 ```
@@ -808,12 +841,12 @@ The page:
 | area | what you do there |
 |---|---|
 | Toolbar | Run, Pause, Step N (count field; steps the selected chip), Reset (chips reset, virtual time continues), Restart (rebuild the current setup at t=0, the page reloads), "Run for" a duration (Enter runs); readouts: status badge (with the emulator error inline: click copies it), virtual time, speed, clock, PC (click: CPU registers popover, copyable), instructions, cycles; chip tabs on boards |
-| Package / board canvas | the package drawn to scale, pins coloured by level, owner tags (`UART0_TX`); on boards also nets, UART links and CAN / Ethernet / USB buses (bus line with name and live counters; click: its row in Links). Wheel zooms, drag pans, double-click fits. Hover a pin for its data, click for the pin card (copy, locate, drive H / L / open, trace, analog value for ADC pins), **alt-click to drive it H → L → open**. Keyboard: one Tab stop per package, arrows move between pins, Enter opens the card, Esc closes it |
+| Package / board canvas | the package drawn to scale, pins coloured by level, owner tags (`UART0_TX`); on boards also nets, UART links and CAN / Ethernet / USB buses (bus line with name and live counters; click: its row in Links). When the fit zoom is too small for every pin name (144 / 176-pin packages on a board), only the names that matter are drawn at a readable size: wired pins, the pinned card's and traced pins, then pins with a peripheral function, as long as they do not collide; hover or focus any pin for its name, `chip` / **Z** zooms to the selected chip. Wheel zooms, drag pans, double-click fits. Hover a pin for its data, click for the pin card (copy, locate, drive H / L / open, trace, analog value for ADC pins), **alt-click to drive it H → L → open**. Keyboard: one Tab stop per package, arrows move between pins, Enter opens the card, Esc closes it |
 | Pins tab | sortable (click or Enter on a header), filterable pin table with wave (frequency and duty %) and analog columns; "changed only" and "hide power/disabled" toggles; a row click shows the pin on the canvas; copy, CSV, `vcd` (traced pins, else the selected chip); `at` field for timed stimulus (`10ms:PTC6=0`, `+5ms:B.PA0=H`, `1ms:UART0=hi\r\n`, `SW1=H`) with a history |
 | Discovery tab | the pin report (section 4.6), with a toggle to compare against the static guess |
 | Logic tab | logic-analyser strip of the traced pins (T on a table row, or "trace" in the pin card): wheel zooms, drag pans, double-click fits, cursor with time and levels, follow, copy |
-| UART | choose a UART (it follows the first one that prints), read its output ("lines" with optional timestamps, or "raw"; default lines on boards with UART links, else raw, your choice is kept), send text with a line ending; a drop counter shows bytes the receiver lost; copy and download; link monitor on boards |
-| Events | live log with per-kind (and per-chip) filters (kinds without events sit behind "+N"), text filter, follow, copy, `.txt`/CSV download; identical consecutive events fold into one row with ×N |
+| UART | choose a UART (it follows the first one that prints), read its output ("lines" with optional timestamps, or "raw"; default lines on boards with UART links, else raw, your choice is kept), send text with a line ending; a counter next to the send field shows bytes the receiver lost and received characters with line errors (framing / parity / noise / break; the tooltip has the last one), a break the UART sends is marked `⟨BREAK n bits⟩` in the transcript; copy and download; link monitor on boards |
+| Events | live log with per-kind (and per-chip) filters (kinds without events sit behind "+N"), text filter, follow, copy, `.txt`/CSV download; identical consecutive events fold into one row with ×N; received characters with a line error (`FE`, `PE`, `NF`, `BREAK`) are drawn in the error colour, filter them with `/FE|PE|NF|BREAK/` |
 | Status | CAN TEC / REC / bus state, USB host state, address and device strings, Ethernet link and frame counters, SD card state and capacity, host serial endpoints (connection, line, bytes, lost, errors, modem lines) and real-time pacing |
 | Nets, Links, Parts | on boards (section 5.5 and 6): rename a net inline (double-click), deleting a net, link or part shows a toast with "undo" |
 
@@ -829,6 +862,7 @@ Keyboard shortcuts (case-insensitive; ignored while typing in a field or while a
 | S | step N instructions on the selected chip |
 | R | reset (time continues) |
 | F, 0 | fit the canvas |
+| Z | zoom to the selected chip (again: fit) |
 | + − | zoom the canvas |
 | B | board setup dialog |
 | W | wire mode (boards; click two pins) |
@@ -963,6 +997,18 @@ LCR/LC/FFC on the C28x) and stops after it; `finish` runs until the current func
 `step`/`stepi` moves only the selected chip by one instruction. In `--exec` scripts a run that does not stop within 10
 s of wall time is interrupted.
 
+**Variables** (DWARF images): `info args`, `info locals` (the frame selected with `frame N` / `up` / `down`; a stop
+selects frame 0 again), `print EXPR` / `p/x EXPR`, and `display[/x] EXPR` (shown after every stop and step;
+`display` alone shows them, `info display` lists, `undisplay N`). Expressions: locals and arguments of the selected
+frame, then globals and statics (`main::calls` for a function-local static), `a.b`, `a[3]`, `p->x`, `*p`, `&x`,
+casts (`*(uint16_t *)0x20000000`), `*0x20000000` (4 bytes; one word on the C28x), `$r0` / `$sp` (registers),
+`USART1.SR` / `USART1.SR.RXNE` (peripheral registers and fields, peeked without side effects), `sizeof`, arithmetic;
+anything else goes to the condition evaluator above (`mem32[...]`, `addr(sym)`). Values are read without side
+effects. A value the debugger cannot determine is shown as `<reason>`, never guessed: `optimized out` (no location,
+or no location-list entry at this PC), `register not recovered` (a register value in an outer frame the CFI did not
+save; always on the C28x, which has no unwinder for outer frames), or an unsupported DWARF operation. Without DWARF,
+`print` still takes symbols, registers and addresses, and globals come from the symbol table (type `?`).
+
 **On a board** a breakpoint or watchpoint on any chip stops every chip. The board runs chips in lockstep slices of
 at most one quantum (`quantum:` in the board YAML, default 10 us), and the stopping chip is the one furthest behind,
 so the others are ahead of it by at most one quantum: the stop message shows the skew (`[board skew 8625 ns]`).
@@ -971,10 +1017,17 @@ Lower the quantum for tighter stops.
 **Browser** (`chipem serve`, pins tray): the **Debug** tab follows the PC of the selected chip. Toolbar: continue,
 pause, into, over, out, stepi, run to cursor; view mixed / asm / source; "follow pc"; a go-to field (any location).
 Click a row to place the cursor, click the gutter (or F9) for a breakpoint; in asm view into/over are instruction
-steps. Right column: registers (changed since the last stop in amber; double-click a value to edit it while paused),
-call stack (click a frame to show its code), breakpoints and watchpoints (enable box, hits, click the condition to
+steps. A go-to (or a click on a call stack frame / breakpoint address) shows that place until the next stop; with
+"follow pc" every stop shows the PC again. Right column, top: tabs **registers** (widths and formats from the server,
+`reg_meta` in `/api/chip`: 8-bit 8051 registers print as `0x2A`, the 22-bit C28x PC as `0x3F0012`; changed since the
+last stop in amber; double-click a value to edit it while paused), **locals** (arguments and locals of the selected
+frame from DWARF, structs / arrays expand; a variable whose location the debugger cannot evaluate shows
+`<optimized out>` / `<unavailable: reason>`, never a guess), **watch** (expressions re-evaluated at every stop:
+`counter`, `buf[2]`, `p->x`, `*0x20000000`, `USART1.SR.TXE`; kept per chip in the browser) and **globals** (globals
+and statics with type, address and size; click one to watch it). Below: call stack (click a frame to show its code
+and its locals), breakpoints and watchpoints (enable box, hits, click the condition to
 edit, x deletes; the field takes `main`, `file.c:12 if r0==3`, `w USART1.SR`, `r 0x20000000:4`, `a counter`). Memory
-view at the bottom: an address or expression (`sp`, `buffer`, `0x20000000`), or follow a register. Keys: F5
+view at the bottom (collapsible; a variable's location link opens it there): an address or expression (`sp`, `buffer`, `0x20000000`), or follow a register. Keys: F5
 continue, Shift+F5 pause, F10 over, F11 into, Shift+F11 out, F4 run to cursor, F9 breakpoint (F5/F4/F9 only while the
 Debug tab is shown). The **Registers** tab lists every peripheral of the selected chip; expand one for its registers,
 a register for its bit fields with the enumerated meaning of each value. Values are peeked without side effects:
@@ -1053,11 +1106,11 @@ shell command (`perf KEY=VALUE`, `quantum`), in the board YAML (where it is a bo
 
 | setting | CLI / YAML | what it costs |
 |---|---|---|
-| preset | `--fast`, `--accurate`, `--preset`; YAML `performance:` | sets the rows below together (accurate: max slice 500, every pin edge logged; fast: auto quantum, poll skip 100 µs, no mmio events, UI every 200 ms) |
+| preset | `--fast`, `--accurate`, `--preset`; YAML `performance:` | sets the rows below together (accurate: max slice 500, every pin edge logged; fast: max slice 20000, auto quantum, poll skip 100 µs, no mmio events, UI every 200 ms) |
 | poll skip | `--poll-skip 100us` | A polling loop is fast-forwarded by whole iterations up to the next event, at most 100 µs at a time. It qualifies when its MMIO reads return the same values, it writes no MMIO register, and all CPU registers are identical in two consecutive iterations. Exact for status bits that models flip in scheduler events, which covers every board in `boards/` (identical event logs). A value a model computes from the time on each read is seen up to the cap late, so a large cap (1 s) breaks such models (USB, RTC, FMC tests fail at 1 s and pass at 100 µs). On ARM the polling load runs once more after a skip. A loop that changes only RAM, with no register trace, would be skipped wrongly. |
 | auto quantum | `--auto-quantum`; YAML `auto_quantum: true` | A sleeping chip (WFI/IDLE) or a parked one (self-branch, skipped polling loop) holds the others back only up to its next event, so its timer-driven edges arrive exactly on time. Anything sent to it ends the sender's run. Awake chips keep the quantum bound. Event order between chips may differ from the default, within the quantum. |
 | quantum | `--quantum`, YAML `quantum:`; shell `quantum 20us`; live in the UI | the worst-case cross-chip latency of a pin edge or link byte; bit-level SPI/I2C/McBSP between chips needs it below half a bit period |
-| max slice | `--max-slice N`; YAML `max_slice:` | Larger slices delay pause/stop, and events that a model schedules inside an MMIO read callback (noticed at slice end, up to one slice late). 50000 made `k22_i2c_eeprom` three times *slower*, which is why no preset raises it. |
+| max slice | `--max-slice N`; YAML `max_slice:` | Slices end exactly at the next event, also one a model schedules inside an MMIO read or write callback (the core lowers the running slice's instruction limit). Larger slices only delay what is not an event (a timestamp taken with the slice-start clock). 20000 (the `fast` preset) is 10-15 % faster on busy loops and about 30 % on `k22_sdcard`; no measured case gets slower. |
 | pin log | `--pin-log all/auto/off` | `off`: no pin events in the log, event list or Discovery tab (VCD and the pin table still see every edge) |
 | drop events | `--drop-events mmio,i2s` | the kinds are neither stored nor streamed |
 | UI interval | `--ui-interval 200ms` | how often the UI refreshes |
@@ -1312,6 +1365,10 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `stm32f103_stm32f405_uart.yaml` | STM32F103T6 + STM32F405 | F103 (72 MHz) `ping N` every 2 ms, F405 echoes uppercased, TX/RX nets | 4 / 4 lines in 10 ms |
 | `stm32f103_stm32f405_can.yaml` | STM32F103T6 + STM32F405 | F103 bxCAN `100#...` every 10 ms, F405 `can_echo` answers `202#...` | 3 / 3 frames in 35 ms |
 | `stm32f103_usb_cdc.yaml` | STM32F103T6 + USB host | F1 USB device CDC-ACM enumerates, echoes uppercased | `F103 CDC ready`, `HELLO` |
+| `stm32f103c8_stm32f405_uart.yaml` | STM32F103C8 (Blue Pill) + STM32F405 | Blue Pill at 72 MHz pings over USART1, F405 echoes uppercased | echoes in 20 ms |
+| `stm32f103ze_spi_i2c.yaml`, `stm32f103ze_sdcard.yaml`, `stm32f103ze_fsmc_sram.yaml` | STM32F103ZE | SPI2 flash + I2C2 EEPROM + SPI3; SDIO SD card with DMA2; FSMC SRAM | `done` |
+| `stm32f107vc_eth_ping.yaml` | STM32F107VC + Ethernet host | RMII PHY clocked from MCO = PLL3 50 MHz, answers pings | 4 replies in 20 ms |
+| `stm32f105rc_usb_cdc.yaml`, `stm32f105rc_dual_can.yaml` | STM32F105RC | OTG_FS CDC-ACM device; CAN1 <-> CAN2 with CAN2SB = 14 | `F105 CDC ready`; frames both ways |
 | `k22_c2000_stm32_can.yaml` | K22 + F28232 + STM32F405 | three CAN families on one bus | 4 / 8 frames in 45 ms |
 | `c2000_stm32_uart.yaml` | F28232 + STM32F405 | C28x sender, STM32 echo | 48 / 48 |
 | `c2000_stm32_chat.yaml` | F28232 + STM32F405 | two-way "chat" protocol (HELLO/PING/PONG), bare-metal STM32, nets only | 122 / 130 |
@@ -1336,6 +1393,14 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `k22_i2c_eeprom.yaml` | K22 | I2C0 master and an `i2c_eeprom` part (page writes, ack polling, random read) | UART0 `wrote "Hello over I2C!", read "Hello over I2C!"`, `PASS` |
 | `k22_rs232_console.yaml` | K22 | the cable chain to PC software: UART0 → RS-232 transceiver → RJ50 jack → DB9-RJ50 cable → USB-serial adapter → PTY (section 6.2; runs until Ctrl-C) | open the printed `/dev/pts/N`: `CHIP_EM K22 console - type help` |
 | `pwm_capture_3way.yaml` | STM32F405 + K22 + F28232 | one STM32 PWM (PA6, 1 kHz 25 %) measured by a probe, a K22 FTM capture and a C2000 eCAP (`--for 12ms`) | probe 1000 Hz, K22 `period 60000`, eCAP 100000 / 25000 cycles |
+| `stm32f429zi_disco_lcd.yaml` | STM32F429ZI | LTDC + 8 MB SDRAM frame buffers into a 240x320 `lcd_panel` (`--for 250ms`) | USART1 `LTDC frames 12`, panel 65.3 fps |
+| `stm32f411re_f401re_uart.yaml` | STM32F411RE + STM32F401RE | Nucleo-style access-line pair: F411 (100 MHz) `REQ n` on USART1 every 2 ms, F401 (84 MHz) answers `ACK n n²` on USART6 (PA11/PA12 AF8) | 28 / 37 bytes in 9 ms |
+| `stm32f411_i2s5_codec.yaml` | STM32F411RE | I2S on SPI5 (I2S5) with the F411's PLLI2SM divider, 32 kHz to an `i2s_codec` part | 128 frames, `I2S5 54002010 tx 256 ok` |
+| `stm32f446re_qspi_flash.yaml` | STM32F446RE | NUCLEO-F446RE + W25Q128 on QUADSPI (dual I/O): read ID, erase with status polling, program, indirect / DMA / memory-mapped reads (`--for 70ms`) | USART2 139 bytes, erase 45000 us |
+| `stm32f446re_fmpi2c_eeprom.yaml` | STM32F446RE | FMPI2C1 Fm+ (1 MHz, HSI kernel clock) + 24C02: page writes with acknowledge polling, random read (`--for 20ms`) | USART2 `EEPROM: Hello FMPI2C!` |
+| `stm32f446re_cec_pair.yaml` | 2x STM32F446RE | HDMI-CEC ping / Get CEC Version / reply / broadcast on PB6, one open-drain net (`--for 400ms`) | A: `...bcast 4F 82 10 00: ack`, `done`; B: `errors 00`, `done` |
+| `stm32f446re_cec_hal.yaml` | 2x STM32F446RE | the same, follower B runs HAL_CEC (`--for 400ms`) | same transcript |
+| `stm32f446re_spdifrx.yaml` | STM32F446RE + `spdif_source` | SPDIFRX synchronisation, channel status, DMA samples (`--for 30ms`) | `SYNCD WIDTH5 163 Fs ~47929 Hz`, `pairs ok 8/8` |
 
 ### 5.4 Pin report on a board
 
@@ -1630,6 +1695,45 @@ pixclk net), and PIXCLK is summarised as a `wave` event instead of toggling. Wit
 ITU-656 style codes instead of HSYNC/VSYNC. `image:` takes a binary PGM (P5) or a raw file (relative to the current
 directory, then to the board file); otherwise a `pattern` is generated. `--set CAM=checker` changes the pattern at
 run time. One `part` event per frame. Example: `chipem run --board boards/stm32f407_dcmi_camera.yaml --for 50ms`.
+
+### 6.3a LCD-TFT panel (STM32F429/F439 LTDC)
+
+Add an `lcd_panel` part to a board and connect its `clk`, `hsync`, `vsync`, `de` ports (and the data lines `r0..r7`,
+`g0..g7`, `b0..b7` the panel has; an 18-bit panel uses r2..r7, g2..g7, b2..b7 and `bits: 6`) to the chip pins muxed to
+LCD_CLK, LCD_HSYNC, ... Params `width`, `height`, `hsync`/`vsync` (active level L/H), `de` (L/H/ignore), `pclk_edge`.
+The part keeps the last frame: `state()` shows frames, fps, CRC-32 and the centre pixel (also in `chipem run` part
+summaries and `/api/board`); Python access: `session.board.parts["LCD"].frame_rgb()`, `.pixel(x, y)`, `.frame_ppm()`.
+Example: `chipem run --board boards/stm32f429zi_disco_lcd.yaml --for 250ms`.
+
+### 6.3b Quad-SPI NOR flash (STM32F446 QUADSPI)
+
+```sh
+firmware/samples_stm32f446/build.sh; firmware/samples_stm32_hal_f446/build.sh
+.venv/bin/chipem run --board boards/stm32f446re_qspi_flash.yaml --for 70ms        # NUCLEO-F446RE + W25Q128 on QUADSPI
+.venv/bin/chipem run firmware/samples_stm32f446/build/qspi_quad.elf --chip stm32f446ze \
+    --spi-flash "QUADSPI:jedec=0xEF4018,size=16M,t_se_us=45000" --for 70ms
+```
+A quad-SPI flash is attached with the existing `spi_flash` device type (board `devices: [{type: spi_flash, chip: A,
+spi: QUADSPI, jedec: 0xEF4018, size: 16M, qe: sr2, t_se_us: ..., bank: 1}]` or `--spi-flash QUADSPI:...`): when the
+named block is a quad-SPI controller, a `chipem.devices.qspi_flash.QspiNorFlash` is built instead of the plain SPI
+flash. In memory-mapped mode the flash array is mapped at 0x90000000 (code can execute from it) when the read command
+is valid and TCEN = 0.
+With two flashes (`bank: 1` and `bank: 2`) and CR.DFM = 1 the QUADSPI runs in dual-flash mode (even bytes in flash 1,
+odd bytes in flash 2, RM0390 12.3.4); the memory-mapped window then goes through the per-access path.
+
+### 6.3c STM32F446 FMPI2C, HDMI-CEC and SPDIFRX
+
+```sh
+firmware/samples_stm32f446/build.sh; firmware/samples_stm32_hal_f446/build.sh
+.venv/bin/chipem run --board boards/stm32f446re_fmpi2c_eeprom.yaml --for 20ms   # FMPI2C1 (I2C v2) + 24C02 EEPROM
+.venv/bin/chipem run --board boards/stm32f446re_cec_pair.yaml --for 400ms       # two F446RE talking HDMI-CEC on PB6
+.venv/bin/chipem run --board boards/stm32f446re_spdifrx.yaml --for 30ms         # SPDIFRX fed by an spdif_source part
+```
+FMPI2C1 is a pin-level I2C controller/target like `stm32.i2c` (any `i2c_eeprom` / `i2c_register_device` part or
+another chip on the SDA/SCL nets; boards with I2C use `quantum: 1us`). The CEC line is one open-drain net with a
+pull-up between the CEC pins of the chips (PA15 AF4 or PB6 AF3 on the RE); use a board quantum of 10 us or less. The
+`spdif_source` part (`rate`, `signal`, channel status, parity / coding error injection) feeds IEC 60958 sub-frames to
+the SPDIFRX input it is wired to; the line itself is shown as a `wave` summary, not toggled edge by edge.
 
 ### 6.4 Writing your own part in Python
 
@@ -2120,6 +2224,23 @@ Run with `--chip p89cv51rd2` (the crystal is `--clock`, default 11.0592 MHz).  A
 and symbols are tagged: CODE 0x00000, XDATA 0x10000, IDATA 0x20000 (`mem 0x20030 16`), SFR 0x30080 (`mem 0x30087 1`
 = PCON), on-chip XRAM 0x40000.  The UART is `UART` (`--at 50ms:UART=hello`); pins are `P1.0`-style.
 `firmware/samples_mcs51/` has the samples; docs/MCS51_CORE.md the details.
+
+C with SDCC: `firmware/samples_mcs51/c/build.sh` (SDCC 4.x; the binary is `sdcc` or, on Fedora, `sdcc-sdcc`) builds
+each sample with `--debug` into `c/build/<name>.ihx` plus `<name>.cdb`; include `p89cv51.h` (SFRs and bits from the
+data sheet, `TF2_VECTOR` 5 = 002Bh, `PCA_VECTOR` 6).  Run the `.ihx` like a `.hex`; the debugger reads the `.cdb`:
+
+```sh
+.venv/bin/chipem shell firmware/samples_mcs51/c/build/timer_tick.ihx --chip p89cv51rd2 \
+    --exec "break main; continue; list; break t0_isr; continue; bt; dis; next; info break"
+```
+
+`break main` stops at the first statement, `break timer_tick.c:31` at a line, `list`/`dis` interleave the C source,
+`bt` shows `main` below an interrupt handler (`[interrupt]`) and recursive calls, `next` steps over calls.  Variables
+are symbols with tagged addresses (`mem ticks 2`; `__xdata` ones point into the on-chip XRAM, 0x4xxxx); there are no
+local variables or C types for SDCC builds.  `--gdb PORT` serves a generic RSP target (`mcs51` target description;
+gdb itself has no 8051 support).  For arbitrary 8052 firmware (SDCC `<8052.h>`, no NXP extensions) use
+`--chip i80c52`, a generic 80C52 (not from a data sheet).  `tools/mcs51_ucsim_diff.py` compares the core with SDCC's
+ucsim simulator (`s51` / `sdcc-s51`).
 
 ### 8.4 C for the F28232 with TI's compiler
 

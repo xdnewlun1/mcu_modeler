@@ -1,0 +1,23 @@
+# STM32F107VC Ethernet (RMII) with a TI DP83848 PHY clocked from the MCU's MCO pin (PLL3 = 50 MHz, as on ST's
+# STM3210C-EVAL in RMII mode), on a LAN segment with a host PC that pings it.
+#   A (STM32F107VC) runs eth_ping: 72 MHz through PLL2, MCO = PLL3 50 MHz, AFIO_MAPR.MII_RMII_SEL = RMII, brings the PHY
+#     up over MDIO, sends a gratuitous ARP and answers ARP + ICMP echo itself (no IP stack); USART1 prints
+#     "PHY 2000:5C90", "link 100FD", "garp", "arp 192.168.0.1", "ping 1" ...
+#   LAN: the segment (hub); HOST = a PC at 192.168.0.1 that pings 192.168.0.10 four times every 2 ms from t = 5 ms.
+#   `clock: mco`: the PHY has no crystal of its own; without 50 MHz on PA8 (MCO) the RMII REF_CLK is missing and the
+#   MAC's software reset never completes (stm32f1.eth).
+# Auto-negotiation is shortened to 1 ms here (a real PHY takes 1-2 s).
+# Run:   chipem run --board boards/stm32f107vc_eth_ping.yaml --for 20ms
+#        chipem serve --board boards/stm32f107vc_eth_ping.yaml
+# Build: firmware/samples_stm32f1_cl/build.sh
+name: stm32f107vc_eth_ping
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f107vc, firmware: ../firmware/samples_stm32f1_cl/build/eth_ping.elf}
+links:
+  - type: eth
+    name: LAN
+    nodes: [A.ETH]
+    phy: {model: dp83848, addr: 1, aneg: 1ms, clock: mco}
+    host: {name: HOST, mac: "02:00:00:00:00:01", ip: 192.168.0.1, ping: 192.168.0.10, count: 4, interval: 2ms,
+           start: 5ms}

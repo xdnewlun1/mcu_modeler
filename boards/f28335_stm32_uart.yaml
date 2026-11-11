@@ -1,0 +1,14 @@
+# A TMS320F28335 (C2000 Delfino, FPU32, 150 MHz) and an STM32F405ZG talking over a UART link: the C28x sends, the
+# STM32 echoes (the F28232 board boards/c2000_stm32_uart.yaml at the F28335's clock).
+#   A (F28335)     runs f28335_uart_link_sender: "ping N\r\n" every 2 ms on SCI-A (CPU timer 0), toggles GPIO34 per
+#                  reply line.  PLL 30 MHz x 10 / 2 = 150 MHz (~4.4 ms lock), LSPCLK 37.5 MHz, BRR 40: 114329 baud.
+#   B (STM32F405)  runs uart_link_echo: echoes every byte uppercased on USART1 (PA9/PA10), toggles PB0 per byte
+#                  (16 MHz HSI, BRR 139: 115108 baud; within 1 % of the F28335).
+# Run:  chipem run --board boards/f28335_stm32_uart.yaml --for 20ms
+name: f28335_stm32_uart
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28335, firmware: ../firmware/samples_c2000/build/f28335_uart_link_sender.c28img}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/uart_link_echo.elf}
+links:
+  - {type: uart, from: A.SCIA, to: B.USART1}

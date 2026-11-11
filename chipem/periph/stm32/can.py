@@ -84,7 +84,7 @@ from collections import deque
 from typing import Any
 
 from ...canbus import BUS_IDLE_BITS, BUSOFF_RECOVERY_BITS, INTERMISSION, CanBus, CanErrorCounters, CanFrame, pin_reason
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, apb_hz, build_regs, irq_number
 
@@ -138,15 +138,16 @@ class BxCAN(GatedBlock):
         self._master: BxCAN | None = None
         self.tx_frames = self.rx_frames = self.rx_lost = 0
         ov: dict[str, dict] = {
-            "MCR": dict(on_write=self._mcr_write),
-            "MSR": dict(ro_mask=0xFFFFFFFF, on_read=self._msr_read, on_write=self._msr_write),
-            "TSR": dict(ro_mask=0xFFFFFFFF, on_read=self._tsr_read, on_write=self._tsr_write),
+            # reset values of RM0090 32.9.2 / RM0033 27.9.2 (STM32F21x.svd gives 0 for MCR/MSR/TSR/FMR)
+            "MCR": dict(on_write=self._mcr_write, reset=0x00010002),
+            "MSR": dict(ro_mask=0xFFFFFFFF, on_read=self._msr_read, on_peek=self._msr_peek, on_write=self._msr_write, reset=0x00000C02),
+            "TSR": dict(ro_mask=0xFFFFFFFF, on_read=self._tsr_read, on_write=self._tsr_write, reset=0x1C000000),
             "RF0R": dict(ro_mask=0xFFFFFFFF, on_read=self._rfr_reader(0), on_write=self._rfr_writer(0)),
             "RF1R": dict(ro_mask=0xFFFFFFFF, on_read=self._rfr_reader(1), on_write=self._rfr_writer(1)),
             "IER": dict(on_write=self._ier_write),
             "ESR": dict(ro_mask=0xFFFFFF8F, on_read=self._esr_read, on_write=self._esr_write),
             "BTR": dict(on_write=self._btr_write, reset=0x01230000),     # RM0090 32.9.2 (the SVD says 0)
-            "FMR": dict(on_write=self._fmr_write),
+            "FMR": dict(on_write=self._fmr_write, reset=0x2A1C0E01),
             "FM1R": dict(on_write=self._finit_guard),
             "FS1R": dict(on_write=self._finit_guard),
             "FFA1R": dict(on_write=self._finit_guard),
@@ -227,6 +228,11 @@ class BxCAN(GatedBlock):
             return
         self._wval = (offset, size, value)
         MMIOBlock.write(self, offset, size, value)
+
+    def peek_reg(self, reg):
+        if reg.offset >= 0x200 and not self.has_filters:
+            return 0, True                               # CAN2: no filter registers (read returns 0)
+        return MMIOBlock.peek_reg(self, reg)
 
     def read(self, offset: int, size: int) -> int:
         if offset >= 0x200 and not self.has_filters:
@@ -504,6 +510,9 @@ class BxCAN(GatedBlock):
     def _msr_read(self, blk, reg):
         if self._want_normal and self._sync_ev is None:
             self._try_sync()                           # a pin / clock configured since: retry
+        return self._msr_peek(blk, reg)
+
+    def _msr_peek(self, blk, reg):
         v = self.get("MSR") & (ERRI | WKUI | SLAKI)
         mcr = self.get("MCR")
         if self.mode == "init":
@@ -539,6 +548,7 @@ class BxCAN(GatedBlock):
             return sorted(pend, key=lambda k: self._order.get(k, 0))
         return sorted(pend, key=lambda k: (self._frame_of(k).arb, k))
 
+    @pure_read
     def _tsr_read(self, blk, reg):
         v = self.get("TSR") & 0x008F8F8F
         prio = self._prio_list()
@@ -588,6 +598,7 @@ class BxCAN(GatedBlock):
     def _rfr_reader(self, f: int):
         def hook(blk, reg):
             return (self.get(reg.name) & (FULL | FOVR)) | len(self._fifo[f])
+        hook.pure_read = True
         return hook
 
     def _rfr_writer(self, f: int):
@@ -602,6 +613,7 @@ class BxCAN(GatedBlock):
             return v
         return hook
 
+    @pure_read
     def _esr_read(self, blk, reg):
         e = self.errors
         v = self.get("ESR") & 0x70

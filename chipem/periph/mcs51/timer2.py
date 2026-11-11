@@ -36,10 +36,10 @@ class Timer2(SfrBlock):
     table = ("TIMER2",)
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        ov = {"T2CON": {"on_read": self._fold_r, "on_write": self._cfg_w},
+        ov = {"T2CON": {"on_read": self._fold_r, "on_write": self._cfg_w, "on_peek": self._fold_peek},
               "T2MOD": {"on_write": self._cfg_w, "ro_mask": 0xFC},
-              "TL2": {"on_read": self._fold_r, "on_write": self._cnt_w},
-              "TH2": {"on_read": self._fold_r, "on_write": self._cnt_w},
+              "TL2": {"on_read": self._fold_r, "on_write": self._cnt_w, "on_peek": self._fold_peek},
+              "TH2": {"on_read": self._fold_r, "on_write": self._cnt_w, "on_peek": self._fold_peek},
               "RCAP2L": {"on_write": self._cfg_w}, "RCAP2H": {"on_write": self._cfg_w}}
         super().__init__(name, base, size, regs, params=params, log=log, overrides=ov)
         self.t0 = 0
@@ -256,6 +256,25 @@ class Timer2(SfrBlock):
                 self._overflowed(n)
 
     # ------------------------------------------------------------------ SFR hooks
+    def _fold_peek(self, blk, reg) -> int:
+        """Debugger peek: the value a read (which folds the counter up to now) returns, computed on the register
+        storage only and restored afterwards (no t0 / IRQ line change)."""
+        if self.chip is None or not self.running() or self.counter_mode():
+            return self.get(reg.name)
+        saved = bytes(self.mem)
+        try:
+            k = (self.now() - self.t0) // self.period()
+            n = self._advance(k) if k > 0 else 0
+            if n and not (self.brg() or self.clock_out()):
+                con = self._con()
+                new = con | TF2
+                if self.get("T2MOD") & DCEN and not con & CP_RL2 and n & 1:
+                    new ^= EXF2
+                self.set("T2CON", new)
+            return self.get(reg.name)
+        finally:
+            self.mem[:] = saved
+
     def _fold_r(self, blk, reg):
         self._fold()
         return None

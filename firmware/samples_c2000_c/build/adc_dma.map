@@ -1,7 +1,7 @@
 ******************************************************************************
              TMS320C2000 Linker Unix v25.11.1                  
 ******************************************************************************
->> Linked Tue Nov 10 17:36:14 2026
+>> Linked Wed Nov 11 09:45:51 2026
 
 OUTPUT FILE NAME:   <build/adc_dma.out>
 ENTRY POINT SYMBOL: "code_start"  address: 0033fff6

@@ -78,6 +78,9 @@ struct ADC_REGS {
 #define ADCTRL2_INT_ENA_SEQ1   0x0800u
 #define ADCTRL2_RST_SEQ1       0x4000u
 #define ADCTRL3_POWER_UP       0x00E0u   /* ADCBGRFDN = 11, ADCPWDN = 1 */
+#define ADCTRL3_ADCCLKPS_2     0x0002u   /* ADCCLKPS (bits 4:1) = 1 */
+/* ADCCLK = HSPCLK / 2: 50 MHz (HISPCP reset value, SYSCLKOUT / 2) -> 25 MHz,
+                                            the ADCCLK maximum of the F2823x / F2833x (SPRS439) */
 #define ADCST_INT_SEQ1_CLR     0x0010u
 
 #define PCLKCR0_TBCLKSYNC 0x0004u
@@ -149,7 +152,7 @@ static void init_epwm1(void)
 
 static void init_adc(void)
 {
-    AdcRegs.ADCTRL3 = ADCTRL3_POWER_UP;
+    AdcRegs.ADCTRL3 = ADCTRL3_POWER_UP | ADCTRL3_ADCCLKPS_2;
     AdcRegs.ADCTRL1 = ADCTRL1_SEQ_CASC;                 /* cascaded, start/stop mode */
     AdcRegs.ADCMAXCONV = 0;                             /* one conversion */
     AdcRegs.ADCCHSELSEQ1 = 0;                           /* CONV00 = ADCINA0 */

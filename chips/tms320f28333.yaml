@@ -1,0 +1,32 @@
+# TI TMS320F28333 (F2833x: FPU32, 100 MHz, 256K-word flash, 34K SARAM, eCAP1-6, HRPWM on ePWM1A-6A, McBSP-A/B, SCI-A/B/C; PGF only).
+# Package: 176-pin LQFP "PGF" (same pinout as the F28335 / F28232: one die).  Sources: SPRS439Q (Aug 2022) Table 5-1
+# (device comparison), Figure 8-23 (F28335/F28333/F28235 memory map), Table 8-22 (flash sectors), Table 8-31 (PARTID 0x00E0 in OTP at 0x380090,
+# CLASSID 0x00EF), Table 8-32 (PIE).  This file includes the F28335 superset description (memory map, peripherals,
+# pins, IRQs) and overrides name, core, boot words and memory; `drop:` removes the blocks / PIE lines this part does not
+# have, `peripheral_params:` sets its PARTID-class, CSM ranges, clock limit.
+include: tms320f28335.yaml
+name: TMS320F28333
+package: LQFP176 (PGF)
+regs_file: tms320f2833x_regs.yaml
+core: {arch: c28x, backend: c28x, cpu: c28x, fpu: true, clock_hz: 100000000, addr_unit_bits: 16, num_irqs: 0}
+
+boot:
+  entry: 0x33FFF6                      # boot-to-flash entry; an image entry overrides
+  sp: 0x0400
+  rom_words:
+    0x380080: [0x0006]                 # ADC_cal routine (Device_cal): just LRETR
+    0x380090: [0x00E0]                 # PARTID: TMS320F28333 (Table 8-31)
+
+memory:
+  - {name: M0, base: 0x000000, size: 0x0400, kind: ram}
+  - {name: M1, base: 0x000400, size: 0x0400, kind: ram}
+  - {name: L0L7, base: 0x008000, size: 0x8000, kind: ram}      # L0-L3 (secure, dual-mapped) + L4-L7 (DMA) SARAM
+  - {name: FLASH, base: 0x300000, size: 0x40000, kind: flash, fill: 0xFF}  # sectors H..A, 32K each (Table 8-22); 0x33FFF6 entry
+  - {name: OTP, base: 0x380000, size: 0x0800, kind: rom, fill: 0xFF}       # ADC cal + PARTID, user OTP 0x380400
+  - {name: BOOTROM, base: 0x3FE000, size: 0x2000, kind: rom, fill: 0xFF}   # boot ROM (8K); BROM vectors at 0x3FFFC0
+
+# drop: nothing (same blocks as the F28335)
+peripheral_params:
+  DEV_EMU: {reset: {CLASSID: 0x00EF}}    # Table 8-31: F2833x floating-point class
+  CSM: {secure_ranges: [[0x8000, 0xC000], [0x300000, 0x340000], [0x380000, 0x380800], [0x3F8000, 0x3FC000]]}
+  SYSCTRL: {ext_hz: 20000000, boot_divsel: 2, max_hz: 100000000}   # 20 MHz crystal, PLLCR = 10, DIVSEL = /2 -> 100 MHz

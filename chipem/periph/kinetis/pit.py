@@ -58,7 +58,7 @@ class PIT(MMIOBlock):
         ov = {"MCR": dict(on_write=self._mcr_write)}
         for n in range(NCH):
             ov[f"LDVAL{n}"] = dict(on_write=self._ldval_write(n))
-            ov[f"CVAL{n}"] = dict(ro_mask=0xFFFFFFFF, on_read=self._cval_read(n))
+            ov[f"CVAL{n}"] = dict(ro_mask=0xFFFFFFFF, on_read=self._cval_read(n), on_peek=self._cval_read(n))
             ov[f"TCTRL{n}"] = dict(on_write=self._tctrl_write(n))
             ov[f"TFLG{n}"] = dict(ro_mask=0xFFFFFFFE, w1c_mask=TIF, on_write=self._tflg_write(n))
         tbl = name if name.startswith("PIT") else "PIT"

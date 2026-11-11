@@ -1,0 +1,172 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      184     4 .isr_vector
+ 8000000  8000000      184     4         /tmp/startup-a144c6.o:(.isr_vector)
+ 8000000  8000000      184     1                 __vector_table
+ 8000184  8000184      518     4 .text
+ 8000184  8000184        2     4         /tmp/startup-a144c6.o:(.text.Default_Handler)
+ 8000184  8000184        0     1                 $t
+ 8000185  8000185        2     1                 Default_Handler
+ 8000185  8000185        2     1                 NMI_Handler
+ 8000185  8000185        2     1                 HardFault_Handler
+ 8000185  8000185        2     1                 MemManage_Handler
+ 8000185  8000185        2     1                 BusFault_Handler
+ 8000185  8000185        2     1                 UsageFault_Handler
+ 8000185  8000185        2     1                 SVC_Handler
+ 8000185  8000185        2     1                 DebugMon_Handler
+ 8000185  8000185        2     1                 PendSV_Handler
+ 8000185  8000185        2     1                 SysTick_Handler
+ 8000185  8000185        2     1                 WWDG_IRQHandler
+ 8000185  8000185        2     1                 PVD_IRQHandler
+ 8000185  8000185        2     1                 TAMP_STAMP_IRQHandler
+ 8000185  8000185        2     1                 RTC_WKUP_IRQHandler
+ 8000185  8000185        2     1                 FLASH_IRQHandler
+ 8000185  8000185        2     1                 RCC_IRQHandler
+ 8000185  8000185        2     1                 EXTI0_IRQHandler
+ 8000185  8000185        2     1                 EXTI1_IRQHandler
+ 8000185  8000185        2     1                 EXTI2_IRQHandler
+ 8000185  8000185        2     1                 EXTI3_IRQHandler
+ 8000185  8000185        2     1                 EXTI4_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream0_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream1_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream2_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream3_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream4_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream5_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream6_IRQHandler
+ 8000185  8000185        2     1                 ADC_IRQHandler
+ 8000185  8000185        2     1                 CAN1_TX_IRQHandler
+ 8000185  8000185        2     1                 CAN1_SCE_IRQHandler
+ 8000185  8000185        2     1                 EXTI9_5_IRQHandler
+ 8000185  8000185        2     1                 TIM1_BRK_TIM9_IRQHandler
+ 8000185  8000185        2     1                 TIM1_UP_TIM10_IRQHandler
+ 8000185  8000185        2     1                 TIM1_TRG_COM_TIM11_IRQHandler
+ 8000185  8000185        2     1                 TIM1_CC_IRQHandler
+ 8000185  8000185        2     1                 TIM2_IRQHandler
+ 8000185  8000185        2     1                 TIM3_IRQHandler
+ 8000185  8000185        2     1                 TIM4_IRQHandler
+ 8000185  8000185        2     1                 I2C1_EV_IRQHandler
+ 8000185  8000185        2     1                 I2C1_ER_IRQHandler
+ 8000185  8000185        2     1                 I2C2_EV_IRQHandler
+ 8000185  8000185        2     1                 I2C2_ER_IRQHandler
+ 8000185  8000185        2     1                 SPI1_IRQHandler
+ 8000185  8000185        2     1                 SPI2_IRQHandler
+ 8000185  8000185        2     1                 USART1_IRQHandler
+ 8000185  8000185        2     1                 USART2_IRQHandler
+ 8000185  8000185        2     1                 USART3_IRQHandler
+ 8000185  8000185        2     1                 EXTI15_10_IRQHandler
+ 8000185  8000185        2     1                 RTC_Alarm_IRQHandler
+ 8000185  8000185        2     1                 OTG_FS_WKUP_IRQHandler
+ 8000185  8000185        2     1                 TIM8_BRK_TIM12_IRQHandler
+ 8000185  8000185        2     1                 TIM8_UP_TIM13_IRQHandler
+ 8000185  8000185        2     1                 TIM8_TRG_COM_TIM14_IRQHandler
+ 8000185  8000185        2     1                 TIM8_CC_IRQHandler
+ 8000185  8000185        2     1                 DMA1_Stream7_IRQHandler
+ 8000185  8000185        2     1                 FSMC_IRQHandler
+ 8000185  8000185        2     1                 SDIO_IRQHandler
+ 8000185  8000185        2     1                 TIM5_IRQHandler
+ 8000185  8000185        2     1                 SPI3_IRQHandler
+ 8000185  8000185        2     1                 UART4_IRQHandler
+ 8000185  8000185        2     1                 UART5_IRQHandler
+ 8000185  8000185        2     1                 TIM6_DAC_IRQHandler
+ 8000185  8000185        2     1                 TIM7_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream0_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream1_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream2_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream3_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream4_IRQHandler
+ 8000185  8000185        2     1                 ETH_IRQHandler
+ 8000185  8000185        2     1                 ETH_WKUP_IRQHandler
+ 8000185  8000185        2     1                 CAN2_TX_IRQHandler
+ 8000185  8000185        2     1                 CAN2_RX0_IRQHandler
+ 8000185  8000185        2     1                 CAN2_RX1_IRQHandler
+ 8000185  8000185        2     1                 CAN2_SCE_IRQHandler
+ 8000185  8000185        2     1                 OTG_FS_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream5_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream6_IRQHandler
+ 8000185  8000185        2     1                 DMA2_Stream7_IRQHandler
+ 8000185  8000185        2     1                 USART6_IRQHandler
+ 8000185  8000185        2     1                 I2C3_EV_IRQHandler
+ 8000185  8000185        2     1                 I2C3_ER_IRQHandler
+ 8000185  8000185        2     1                 OTG_HS_EP1_OUT_IRQHandler
+ 8000185  8000185        2     1                 OTG_HS_EP1_IN_IRQHandler
+ 8000185  8000185        2     1                 OTG_HS_WKUP_IRQHandler
+ 8000185  8000185        2     1                 OTG_HS_IRQHandler
+ 8000185  8000185        2     1                 DCMI_IRQHandler
+ 8000185  8000185        2     1                 CRYP_IRQHandler
+ 8000185  8000185        2     1                 HASH_RNG_IRQHandler
+ 8000188  8000188       5a     4         /tmp/startup-a144c6.o:(.text.Reset_Handler)
+ 8000188  8000188        0     1                 $t
+ 8000189  8000189       5a     1                 Reset_Handler
+ 80001e4  80001e4       6a     4         /tmp/can_echo-597678.o:(.text.CAN1_RX0_IRQHandler)
+ 80001e4  80001e4        0     1                 $t
+ 80001e5  80001e5       6a     1                 CAN1_RX0_IRQHandler
+ 8000250  8000250       6a     4         /tmp/can_echo-597678.o:(.text.CAN1_RX1_IRQHandler)
+ 8000250  8000250        0     1                 $t
+ 8000251  8000251       6a     1                 CAN1_RX1_IRQHandler
+ 80002bc  80002bc      39e     4         /tmp/can_echo-597678.o:(.text.main)
+ 80002bc  80002bc        0     1                 $t
+ 80002bd  80002bd      39e     1                 main
+ 800065a  800065a       3f     1         <internal>:(.rodata.str1.1)
+ 8000699  8000699        3     1         . = ALIGN(4)
+ 800069c  800069c       10     4 .ARM.exidx
+ 800069c  800069c       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000       b0     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/can_echo-597678.o:(.bss.tail)
+20000000 20000000        4     1                 tail
+20000004 20000004        4     4         /tmp/can_echo-597678.o:(.bss.head)
+20000004 20000004        4     1                 head
+20000008 20000008       a0     4         /tmp/can_echo-597678.o:(.bss.ring)
+20000008 20000008       a0     1                 ring
+200000a8 200000a8        4     4         /tmp/can_echo-597678.o:(.bss.received)
+200000a8 200000a8        4     1                 received
+200000ac 200000ac        4     4         /tmp/can_echo-597678.o:(.bss.echoed)
+200000ac 200000ac        4     1                 echoed
+200000b0 200000b0        0     1         . = ALIGN(4)
+200000b0 200000b0        0     1         _ebss = .
+       0        0      17d     1 .debug_loclists
+       0        0       39     1         /tmp/startup-a144c6.o:(.debug_loclists)
+      39       39      144     1         /tmp/can_echo-597678.o:(.debug_loclists)
+       0        0      29e     1 .debug_abbrev
+       0        0       c9     1         /tmp/startup-a144c6.o:(.debug_abbrev)
+      c9       c9      1d5     1         /tmp/can_echo-597678.o:(.debug_abbrev)
+       0        0      77b     1 .debug_info
+       0        0       aa     1         /tmp/startup-a144c6.o:(.debug_info)
+      aa       aa      6d1     1         /tmp/can_echo-597678.o:(.debug_info)
+       0        0      129     1 .debug_rnglists
+       0        0       17     1         /tmp/startup-a144c6.o:(.debug_rnglists)
+      17       17      112     1         /tmp/can_echo-597678.o:(.debug_rnglists)
+       0        0      15c     1 .debug_str_offsets
+       0        0       38     1         /tmp/startup-a144c6.o:(.debug_str_offsets)
+      38       38      124     1         /tmp/can_echo-597678.o:(.debug_str_offsets)
+       0        0      287     1 .debug_str
+       0        0      287     1         <internal>:(.debug_str)
+       0        0       d0     1 .debug_addr
+       0        0       18     1         /tmp/startup-a144c6.o:(.debug_addr)
+      18       18       b8     1         /tmp/can_echo-597678.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       41     1 .ARM.attributes
+       0        0       41     1         /tmp/startup-a144c6.o:(.ARM.attributes)
+       0        0       8c     4 .debug_frame
+       0        0       34     4         /tmp/startup-a144c6.o:(.debug_frame)
+      34       34       58     4         /tmp/can_echo-597678.o:(.debug_frame)
+       0        0      5bb     1 .debug_line
+       0        0       c3     1         /tmp/startup-a144c6.o:(.debug_line)
+      c3       c3      4f8     1         /tmp/can_echo-597678.o:(.debug_line)
+       0        0       b2     1 .debug_line_str
+       0        0       b2     1         <internal>:(.debug_line_str)
+       0        0      710     4 .symtab
+       0        0      710     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      78b     1 .strtab
+       0        0      78b     1         <internal>:(.strtab)

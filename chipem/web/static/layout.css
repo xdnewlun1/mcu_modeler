@@ -28,14 +28,17 @@ body { display: flex; flex-direction: column; }
 /* narrow headers drop the least important items first (cycles before the title shrinks) */
 @media (max-width: 1800px) { .ro-cyc { display: none !important; } }
 @media (max-width: 1700px) { .topbar .chip-meta { display: none; } .chip-tab span.cn { display: none; } }
-@media (max-width: 1500px) { .ro-insn { display: none !important; } .runfor input { width: 52px; } }
+@media (max-width: 1500px) { .ro-insn { display: none !important; } .runfor input { width: 52px; }
+  .readouts { gap: 7px; } .topbar { gap: 8px; }
+  .conn { font-size: 0; gap: 0; }        /* stream state as the dot only (live / offline in its title and colour) */
+  body.offline .conn { font-size: 11px; gap: 4px; } }
 @media (max-width: 1280px) { .ro-clk, .controls .btn svg { display: none !important; } }
 .readouts .ro { display: inline-flex; align-items: baseline; gap: 4px; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
 .readouts .ro i { font-style: normal; color: var(--fg-3); font-family: var(--sans); font-size: 11px; }
 .readouts .ro b { font-weight: 500; color: var(--fg); }
 button.ro { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 0 3px; cursor: pointer; color: inherit; }
 button.ro:hover, button.ro[aria-expanded=true] { border-color: var(--line-2); background: var(--raise); }
-#tTime { min-width: 11ch; display: inline-block; text-align: right; }
+#tTime { min-width: 10ch; display: inline-block; text-align: right; }
 body.offline .readouts .ro b { color: var(--fg-3); }
 .status-badge {
   font: 700 11px var(--mono); letter-spacing: .3px; padding: 1px 6px; border-radius: var(--radius);
@@ -208,8 +211,16 @@ mark { background: var(--mark); color: inherit; border-radius: 1px; }
 
 /* ---------- emulation rate (toolbar) and performance block (status pane; chipem/perf.py) ---------- */
 .rate { margin-left: 4px; }
-.rate select { height: 26px; font: 12px var(--mono); }
-.rate input { width: 6ch; text-align: right; }
+/* free-entry factor + an arrow-only preset list (the input shows the value; the select would repeat it) */
+.rate input { width: 6.5ch; text-align: right; }
+.rate { position: relative; }
+.rate select { height: 26px; width: 22px; padding: 0; font: 12px var(--mono); color: transparent; text-shadow: none;
+  appearance: none; -moz-appearance: none; background: var(--raise); border: 1px solid var(--line-2); cursor: pointer; }
+.rate select:hover { background: var(--sel-row); }
+.rate::after { content: "▾"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); pointer-events: none;
+  color: var(--fg-2); font-size: 11px; }
+.rate select option { color: var(--fg); background: var(--panel); }
+.hdr-end { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .readouts .ro b.behind { color: var(--lv-x); }
 .perf { flex: 0 0 auto; border-bottom: 1px solid var(--line); font-size: 11.5px; }
 .perf > summary { padding: 2px 8px; cursor: pointer; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

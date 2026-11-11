@@ -41,7 +41,8 @@ Registers (SVD table): CR1, CR2, OAR1, OAR2, DR, SR1, SR2, CCR, TRISE.
 * DMA (§27.3.8): CR2.DMAEN asserts "I2Cx_TX" while TxE (transmitting) and "I2Cx_RX" while RxNE (RM0090 Table 43).
 Not modelled: 10-bit slave addressing (OAR1.ADDMODE = 1 never matches), SMBus (SMBUS, PEC, ALERT, ARP, timeouts),
 bus errors (BERR), the fixed analog spike filter (the programmable FLTR filters are F42x/F43x only, §27.3.5), OTYPER push-pull on I2C pins (always open-drain), the rise time.
-I2C_FLTR (§27.6.10, STM32F42xxx/43xxx register tables only): ANOFF / DNF[3:0] are stored and readable; a write that
+I2C_FLTR (§27.6.10, STM32F42xxx/43xxx register tables; also STM32F401/F411, RM0368/RM0383 18.6.10, where the SVD
+omits it and `params.fltr: true` adds it at 0x24): ANOFF / DNF[3:0] are stored and readable; a write that
 changes them while CR1.PE = 1 is ignored with one `warn` ("must be configured only when the I2C is disabled"). The
 filters themselves (spike suppression up to DNF x TPCLK1, the extra (DNF + 1) x TPCLK1 SDA hold time) are not modelled:
 the bus model has no glitches to filter.
@@ -81,12 +82,17 @@ class I2C(GatedBlock):
         self.gate = f"I2C{self.index}"
         ov = {"CR1": {"on_write": self._cr1_write},
               "CR2": {"on_write": self._cr2_write},
-              "SR1": {"ro_mask": 0x20FF, "on_read": self._sr1_read, "on_write": self._sr1_write},
-              "SR2": {"ro_mask": 0xFFFF, "on_read": self._sr2_read},
-              "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
-              "FLTR": {"ro_mask": 0xFFE0, "on_write": self._fltr_write}}   # F42x/F43x register tables only
+              "SR1": {"ro_mask": 0x20FF, "on_read": self._sr1_read, "on_write": self._sr1_write,
+                      "on_peek": lambda b, r: None},                      # peek: does not arm the SR1-SR2 clear
+              "SR2": {"ro_mask": 0xFFFF, "on_read": self._sr2_read, "on_peek": lambda b, r: self._sr2()},
+              "DR": {"on_read": self._dr_read, "on_write": self._dr_write, "on_peek": lambda b, r: self._rx},
+              "FLTR": {"ro_mask": 0xFFFFFFE0, "on_write": self._fltr_write}}   # F42x/F43x register tables only
         r = build_regs((name, f"I2C{self.index}", "I2C1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        if params.get("fltr") and "FLTR" not in self.regs:
+            # FLTR exists but the SVD omits it (STM32F401/F411: RM0368/RM0383 18.6.10, offset 0x24, reset 0)
+            from ..base import Reg
+            self.add_reg(Reg("FLTR", 0x24, 4, reset=0, ro_mask=0xFFFFFFE0, on_write=self._fltr_write))
         self.sda_sig, self.scl_sig = f"I2C{self.index}_SDA", f"I2C{self.index}_SCL"
         self.port: I2CPort | None = None
         self._ev_irq = self._er_irq = None
@@ -216,6 +222,14 @@ class I2C(GatedBlock):
         """DMA reception with CR2.LAST: is the byte being received the last one (DMA EOT-1 reached)?"""
         name = f"I2C{self.index}_RX"
         for c in getattr(self.chip, "_stm32_dmas", None) or self._dmas():
+            rem = getattr(c, "remaining_items", None)  # channel-based controllers (stm32f1.dma)
+            if rem is not None:
+                left = rem(name)
+                if left is None:
+                    continue
+                if self.get("SR1") & RXNE:
+                    left -= 1
+                return left <= 1
             for s in range(8):
                 cr = c._crv(s)
                 if cr & 1 and name in c.stream_request(s):

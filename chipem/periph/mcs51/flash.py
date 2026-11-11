@@ -14,15 +14,20 @@ IAP functions (Table 12, function code in R1; bit 7 of R1 set = also feed the wa
   04 erase status bit and boot vector (boot vector -> FCH, status bit -> 0)
   05 program security bit DPL = 0, 1, 2 (bits 1 write protect, 2 read protect, 3 external execution inhibit)
   06 program DPL = 00 status bit (-> 1), 01 boot vector (ACC), 02 6x/12x bit (FX2: 6-clock mode from now on)
-  07 read DPL = 00 security bits (bit 0-2 = security bits 1-3, bit 7 = FX2: our reading of the garbled "ACC = 00
-     SoftICE S/N-match 0 SB 0 DBL_CLK" line), 01 status bit, 02 boot vector (the table says "ACC = 07H": R1 is used
-     like every other call)
+  07 read DPL = 00 security bits, 01 status bit, 02 boot vector (the table says "ACC = 07H": R1 is used like every
+     other call).  DPL = 00 returns the layout printed as "ACC = 00 SoftICE S/N-match 0 SB 0 DBL_CLK", read as the
+     eight bits 7..0 = 0, 0, SoftICE, S/N-match, 0, SB, 0, DBL_CLK (the same line in the P89V51RB2/RC2/RD2 data sheet
+     Rev. 05, whose single security bit is SB): bit 2 = SB = any of the three security bits programmed (the data
+     sheet gives no position for security bits 2 and 3), bit 0 = DBL_CLK = the 6-clock (FX2) bit, SoftICE and the
+     serial-number match read 0 (no SoftICE on this part).
   08 erase 128-byte page at DPH:DPL
   0C erase 4 KB block (DPH = block address high byte; R0 = oscillator MHz, ignored)
 Return: ACC = 00H pass, non-zero fail (unknown function: 0FFH; program/erase with security bit 1 programmed: 01H;
 address beyond the device's flash: 02H).  The ID bytes are not in the data sheet: `params.ids` (default manufacturer
-15H, IDs C2H / 01H as placeholders).  Durations: `params.page_erase_ms` (default 0: the data sheet gives "30 ms page
-erase, 150 ms block erase" as typical figures) and `iap_us_per_byte` are charged as CPU time of the call.
+15H, IDs C2H / 01H as placeholders).  Durations (charged as CPU time of the call: the boot code returns when done):
+page erase `params.page_erase_ms` (default 30, "30 ms page erase", p.1/sec. 2), block erase (4 KB, 8/16 KB)
+`params.block_erase_ms` (default 150, "150 ms block erase"), byte program `params.iap_us_per_byte` (default 0: no
+figure in the data sheet).
 Reset (sec. 6.3.4-6.3.5): PC = 0000H, unless the status bit is 1 or PSEN is held low at reset: then PC = boot vector
 << 8 with ENBOOT = 1.  Starting at the default boot vector FCH means NXP's ISP bootloader, which is not emulated:
 one `warn` and the core stops at FC00H (`params.isp: halt`, default).  Security bits only matter for ISP / parallel
@@ -58,7 +63,8 @@ class Flash(MMIOBlock):
         ids = p.get("ids") or {}
         self.ids = {0x00: 0x15, 0x01: 0xC2, 0x02: 0x01, 0x80: 0x01}
         self.ids.update({int(k): int(v) for k, v in ids.items()})
-        self.page_erase_ms = float(p.get("page_erase_ms", 0))
+        self.page_erase_ms = float(p.get("page_erase_ms", 30))
+        self.block_erase_ms = float(p.get("block_erase_ms", 150))
         self.us_per_byte = float(p.get("iap_us_per_byte", 0))
         self.isp = str(p.get("isp", "halt"))
         self._saved: bytes | None = None          # user flash under the boot overlay
@@ -188,7 +194,7 @@ class Flash(MMIOBlock):
                 res = 0x02
             else:
                 self._erase(lo, n)
-                busy_us = self.page_erase_ms * 1000.0 * (n // PAGE)
+                busy_us = 1000.0 * (self.page_erase_ms if fn == 0x08 else self.block_erase_ms)
         elif fn == 0x04:
             self.boot_vector, self.status_bit = 0xFC, 0
         elif fn == 0x05:
@@ -209,7 +215,8 @@ class Flash(MMIOBlock):
             else:
                 res = 0xFF
         elif fn == 0x07:
-            res = {0x00: self.security | (self.fx2 << 7), 0x01: self.status_bit, 0x02: self.boot_vector}.get(dpl, 0xFF)
+            res = {0x00: (4 if self.security else 0) | int(self.fx2), 0x01: self.status_bit,
+                   0x02: self.boot_vector}.get(dpl, 0xFF)
         else:
             res = 0xFF
         core.write_reg("a", res & 0xFF)

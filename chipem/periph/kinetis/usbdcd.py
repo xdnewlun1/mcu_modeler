@@ -44,7 +44,7 @@ class UsbDcd(GatedBlock):
             "CONTROL": {"ro_mask": 0xFCFCFEFE | IF, "on_write": self._control_write},
             "CLOCK": {"ro_mask": 0xFFFFF002},
             "STATUS": {"ro_mask": 0xFFFFFFFF},
-            "TIMER0": {"ro_mask": 0xFC00FFFF, "on_read": self._timer0_read},
+            "TIMER0": {"ro_mask": 0xFC00FFFF, "on_read": self._timer0_read, "on_peek": self._timer0_read},
             "TIMER1": {"ro_mask": 0xFC00FC00},
             "TIMER2_BC11": {"ro_mask": 0xFC00FC00},
         }

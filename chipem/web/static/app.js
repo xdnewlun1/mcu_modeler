@@ -7,7 +7,7 @@ import { ownerCategory } from "./package.js";
 import { BoardView } from "./board.js";
 import * as partsMod from "./parts.js";
 import { initBoardDialog, boardDialogOpen, closeBoardDialog } from "./boarddlg.js";
-import { esc, hex32, fmtTime, fmtTs, fmtFreq, fmtDuty, fmtRate, fmtWave, parseDurationMs, chipCls } from "./fmt.js";
+import { esc, hex32, fmtTime, fmtTs, fmtFreq, fmtDuty, fmtRate, fmtWave, parseDurationMs, chipCls, fmtReg } from "./fmt.js";
 
 const { stateText, counterValue, ledColor, LED_COLORS, partCategory, portList } = partsMod;
 // parts.js partGroup (inputs / indicators / logic / devices / connectors); fallback from the layout category
@@ -65,11 +65,13 @@ const ui = {
   rafPending: false,
   uartDirty: false,
   uartDrops: new Map(),           // uart -> {n, reason} bytes its receiver dropped (uart events dir "drop")
+  uartErrs: new Map(),            // uart -> {fe, pe, nf, brk: counts, last} received characters with line errors
   wiring: 0,                      // board wiring version of ui.info (nets/links); refetched when it changes
   wireMode: false,
   pendingPin: null,               // wire mode: first picked pin {cid, pin}
   selNet: null,
   partState: {},                  // part id -> latest state (state frames + `part` events)
+  partViews: {},                  // part id -> previews it offers ({frame: {w, h, seq}}, {samples: {seq, ...}})
   partsDirty: false,
   partTypes: null,                // /api/parts/types (loaded when the add-part dialog first opens)
   pickTarget: null,               // add-part dialog: the port input a board click fills
@@ -734,6 +736,7 @@ function applyState(st) {
   if (st.board) {
     if ((st.board.wiring ?? 0) !== ui.wiring) reloadWiring(st.board.wiring ?? 0);
     if (st.board.parts) Object.assign(ui.partState, partStateMap(st.board.parts));
+    if (Array.isArray(st.board.parts)) for (const p of st.board.parts) if (p.views) ui.partViews[p.id] = p.views;
     ui.board.updateBoard(st.board);
     renderWiringLevels(st.board);
     renderBusStats(st.board);
@@ -868,10 +871,16 @@ function regRows() {
   const cs = chipState(ui.state, ui.sel) || ui.state || {};
   const skip = new Set(["chips", "board", "pins", "running", "chip", "host", "periph", "waves", "adc", "uart_out_len",
     "version", "pins_version", "event_seq", "boot", "run_target_ns", "last_stop", "error", "realtime", "t_ns", "pins_full", "time_ns"]);
-  const keys = [...REG_ORDER.filter((k) => k in cs), ...Object.keys(cs).filter((k) => !REG_ORDER.includes(k) && !skip.has(k))];
+  // registers: width / format from the server (info.chips[].reg_meta, chipem/regmeta.py); other state fields as is.
+  // Order: the registers (in the server's order, ARM ones by REG_ORDER), then the state fields.
+  const meta = ui.chipById.get(ui.sel)?.reg_meta || {};
+  const isReg = (k) => !!meta[k];
+  const first = [...REG_ORDER.filter((k) => k in cs && isReg(k)), ...Object.keys(meta).filter((k) => k in cs && !REG_ORDER.includes(k))];
+  const keys = [...first, ...REG_ORDER.filter((k) => k in cs && !first.includes(k)),
+    ...Object.keys(cs).filter((k) => !first.includes(k) && !REG_ORDER.includes(k) && !skip.has(k))];
   const val = (k, v) => {
     if (v == null) return "—";
-    if (typeof v === "number" && /^(pc|sp|lr|msp|psp|xpsr|control|r\d+|xar\d|acc|p|xt|st\d|ier|ifr|dp|a|b|psw|dptr|ie|ip|iph)$/i.test(k)) return hex32(v);
+    if (meta[k]) return fmtReg(v, meta[k]);
     if (typeof v === "object") return JSON.stringify(v);
     return typeof v === "number" ? v.toLocaleString() : String(v);
   };
@@ -1084,7 +1093,8 @@ function editAnalog(td, cid, p) {
 
 // ---------------------------------------------------------------- debugger + register browser (debug.js, regview.js)
 async function initDebug() {
-  const opts = () => ({ api, toast, toastErr, chip: ui.sel, isBoard: ui.isBoard });
+  const opts = () => ({ api, toast, toastErr, chip: ui.sel, isBoard: ui.isBoard,
+    regMeta: (cid) => ui.chipById.get(cid || ui.sel)?.reg_meta || {} });
   try {
     const { DebugPane } = await import("./debug.js");
     ui.debug = new DebugPane($("debugPane"), opts());
@@ -1337,7 +1347,7 @@ function appendRows(evs) {
       continue;
     }
     const row = document.createElement("div");
-    row.className = "ev";
+    row.className = uartErr(ev) ? "ev ev-err" : "ev";
     row.dataset.kind = ev.kind;
     row.dataset.chip = chip;
     row._key = key;
@@ -1360,17 +1370,42 @@ function appendRows(evs) {
 }
 
 // ---------------------------------------------------------------- UART: transcript, link monitor, raw output
+// line errors of one received character (chipem/periph/uartwire.py): framing / parity / noise flags, a break
+const uartErr = (ev) => ev.kind === "uart" && (ev.dir === "rx" || ev.dir === "drop") && !!(ev.fe || ev.pe || ev.nf || ev.brk);
+const ERR_NAMES = { fe: "framing", pe: "parity", nf: "noise", brk: "break" };
+
 function showUartDrops() {
   const el = $("uartDrops");
-  const d = ui.uartDrops.get(ui.uart);
-  el.hidden = !d;
-  if (d) el.textContent = `RX dropped ${d.n} (${d.reason})`;
+  const d = ui.uartDrops.get(ui.uart), e = ui.uartErrs.get(ui.uart);
+  el.hidden = !d && !e;
+  const parts = [];
+  if (d) parts.push(`RX dropped ${d.n} (${d.reason})`);
+  if (e) parts.push(Object.entries(e).filter(([k]) => k !== "last").map(([k, n]) => `${n} ${ERR_NAMES[k]}`).join(", "));
+  el.textContent = parts.join(" · ");
+  el.title = "bytes the receiver lost (not listening, overrun) and received characters with line errors (framing / parity / " +
+    "noise / break), as on hardware" + (e?.last ? `\nlast error: ${e.last}` : "") + "\nfilter the Events pane with /FE|PE|NF|BREAK/ to list them";
 }
 
 function uartEvent(ev, live) {
-  if (ev.byte == null) return;
   const cid = evChip(ev);
   const u = qual(cid, ev.uart || ev.name || "UART");
+  if (uartErr(ev)) {
+    const e = ui.uartErrs.get(u) || {};
+    for (const k of ["fe", "pe", "nf", "brk"]) if (ev[k]) e[k] = (e[k] || 0) + 1;
+    e.last = `${fmtTime(ev.t_ns)} ${ev.desc || ""}`;
+    ui.uartErrs.set(u, e);
+    if (u === ui.uart) showUartDrops();
+  }
+  if (ev.byte == null) {
+    // a break sent by this UART: mark it in the transcript (it is not a character)
+    if (ev.dir === "tx" && ev.brk) {
+      const open = ui.openLine.get(u);
+      if (open) { ui.openLine.delete(u); open.done = true; }
+      pushLine({ uart: u, chip: cid, text: `\u27e8BREAK ${ev.brk} bits\u27e9`, t: ev.t_ns, done: true, mark: true });
+      ui.uartDirty = true;
+    }
+    return;
+  }
   if (ev.dir === "drop") {
     const d = ui.uartDrops.get(u) || { n: 0, reason: "" };
     d.n += 1;
@@ -1483,7 +1518,7 @@ function transcriptText() {
 function lineHtml(l, m) {
   const who = lineWho(l);
   return `${ui.uartTs ? `<span class="ts">${esc(fmtTs(l.t))}</span>  ` : ""}` +
-    `${who ? `<span class="who">${esc(who)}:</span> ` : ""}${hl(l.text, m)}`;
+    `${who ? `<span class="who">${esc(who)}:</span> ` : ""}${l.mark ? `<span class="umark">${hl(l.text, m)}</span>` : hl(l.text, m)}`;
 }
 
 function lineEl(l, m) {
@@ -1804,7 +1839,10 @@ async function setRate(v) {
 }
 
 async function setPerf(patch) {
-  try { await api("/api/perf", patch); } catch (e) { toastErr(`performance: ${e.message}`); }
+  try {
+    const r = await api("/api/perf", patch);
+    if (r && r.speed && ui.state) renderPerf({ ...ui.state, speed: { ...(ui.state.speed || {}), ...r.speed } });   // now, not at the next frame
+  } catch (e) { toastErr(`performance: ${e.message}`); }
 }
 
 function bindPerf() {
@@ -1848,6 +1886,10 @@ function showTab(tab) {
   }
   $("pinTools").hidden = tab !== "pins";
   $("discTools").hidden = tab !== "disc";
+  // the stimulus field and the pin filter / copy / csv / vcd act on pins: not shown over the debugger / registers
+  const pinsy = tab === "pins" || tab === "disc" || tab === "logic";
+  $("stimForm").hidden = !pinsy;
+  document.querySelector("#panePins > .pane-head > .pane-tools").hidden = !pinsy;
   if (tab === "disc") loadDiscovery();
   if (tab === "logic") ui.logic?.resize?.();
   ui.debug?.show?.(tab === "debug");                 // debug.js / regview.js (initDebug)
@@ -2173,7 +2215,16 @@ async function saveScript() {
     const r = await api("/api/part/script", { id: scriptEdit, code: $("sdCode").value });
     scriptUpdated(scriptEdit, r);
     toast(`${scriptEdit}: saved and reloaded`);
-  } catch (e) { $("sdErr").textContent = e.message; }
+  } catch (e) {
+    $("sdErr").textContent = e.message;
+    const m = /line (\d+)/.exec(e.message);              // put the caret on the reported line
+    if (m) {
+      const ta = $("sdCode"), lines = ta.value.split("\n"), n = Math.min(+m[1], lines.length) - 1;
+      const at = lines.slice(0, n).reduce((a, l) => a + l.length + 1, 0);
+      ta.focus(); ta.setSelectionRange(at, at + (lines[n] || "").length);
+      ta.scrollTop = Math.max(0, n * (parseFloat(getComputedStyle(ta).lineHeight) || 16) - ta.clientHeight / 2);
+    }
+  }
 }
 
 function wireScriptEditor() {
@@ -2202,9 +2253,28 @@ function wireScriptEditor() {
 async function apiScripts(path, body) {
   try { return await api(path, body); } catch (e) {
     if (e.status !== 409 || !/script parts/.test(e.message)) throw e;
-    if (!window.confirm(`${e.message.replace(/ \(send allow_scripts: true\)$/, "")}.\n\nA script part can do anything your user can do. Run it?`)) return null;
+    const list = (e.scripts || []).map((x) => String(x).replace(/^.*\//, "")).join(", ");
+    if (!await askConfirm("Run Python script parts?", `${e.message.replace(/ \(send allow_scripts: true\)$/, "")}${list && !e.message.includes(list) ? ` (${list})` : ""}.\n\n` +
+      "A script part runs with your user's privileges and can do anything you can do. Only continue if you trust it.", "Run scripts")) return null;
     return api(path, { ...body, allow_scripts: true });
   }
+}
+
+// modal yes / no in the page's own style (a native confirm() cannot be themed or read by screen captures)
+function askConfirm(title, text, okLabel = "OK") {
+  const d = $("askDlg");
+  $("askTitle").textContent = title;
+  $("askText").textContent = text;
+  $("askYes").textContent = okLabel;
+  return new Promise((resolve) => {
+    const done = (v) => { $("askYes").onclick = $("askNo").onclick = null; d.onclose = null; if (d.open) d.close(); document.body.classList.remove("modal-open"); resolve(v); };
+    $("askYes").onclick = () => done(true);
+    $("askNo").onclick = () => done(false);
+    d.onclose = () => done(false);                       // Esc
+    document.body.classList.add("modal-open");
+    d.showModal();
+    $("askNo").focus();
+  });
 }
 
 function panelStateText(p, st) {
@@ -2250,11 +2320,19 @@ function renderPartsPanel() {
       <span class="part-name">${esc(p.id)}</span><span class="part-type">${esc(p.type)}</span>
       <span class="part-st" data-st>${esc(panelStateText(p, st))}</span>
       <button class="btn small ghost part-del" title="remove part (undo in the toast)" aria-label="remove part ${esc(p.id)}">×</button>
-      <div class="part-ctl">${partControls(p)}</div>
+      <div class="part-ctl">${partControls(p)}${previewControls(p)}</div>
       <div class="part-ports">${ports}</div>
     </div>`;
   }).join("") : `<div class="empty">no parts — add a switch, LED or gate and wire it to a net or pin</div>`;
   applyWiringFilters();
+}
+
+// previews announced by the part (views: frame / samples; parts.js FramePreview, WavePreviews), never by type
+function partViews(p) { return ui.partViews[p.id] || p.views || null; }
+function previewControls(p) {
+  const v = partViews(p) || {};
+  return (v.frame ? `<button class="btn small ghost" data-preview="frame" title="show the part's current frame (refreshed while open)">frame</button>` : "") +
+    (v.samples ? `<canvas class="part-wave" aria-label="${esc(p.id)} recent samples"></canvas>` : "");
 }
 
 function renderPartStates() {
@@ -2262,6 +2340,11 @@ function renderPartStates() {
   for (const row of $("partList").children) {
     const p = partById(row.dataset.part);
     if (!p) continue;
+    const views = partViews(p);
+    if (views) {
+      ui.wavePrev?.update(p.id, views, row.querySelector(".part-wave"));
+      ui.framePrev?.update(p.id, views);
+    }
     const st = ui.partState[p.id] || p.state || {};
     const t = panelStateText(p, st);
     const se = row.querySelector("[data-st]");
@@ -2352,7 +2435,16 @@ function buildPartsPanel() {
     if (sc) { if (sc.dataset.script === "reload") scriptReload(id); else openScriptEditor(id); return; }
     const sb = e.target.closest("[data-set]");
     if (sb) { setPart(id, JSON.parse(sb.dataset.set)); return; }
+    const pv = e.target.closest("[data-preview]");
+    if (pv) {
+      if (ui.framePrev.open && ui.framePrev.id === id) ui.framePrev.close();
+      else { ui.framePrev.show(id, pv); pv.setAttribute("aria-expanded", "true"); }
+    }
   });
+  ui.framePrev = new partsMod.FramePreview(api, () => {
+    for (const b of list.querySelectorAll("[data-preview]")) b.setAttribute("aria-expanded", "false");
+  });
+  ui.wavePrev = new partsMod.WavePreviews(api);
   list.addEventListener("pointerdown", (e) => {
     const b = e.target.closest(".part-press");
     if (!b || e.button !== 0) return;
@@ -3027,7 +3119,7 @@ function wireControls() {
     $("uartOut").textContent = "";
     $("uartOut")._rawShown = null;
     ui.uartFull = true;
-    ui.uartDrops.clear();
+    ui.uartDrops.clear(); ui.uartErrs.clear();
     showUartDrops();
   });
   $("evClear").addEventListener("click", () => {
@@ -3082,6 +3174,7 @@ function onKey(e) {
   const inDlg = t.closest && t.closest("#partDlg, #boardDlg, #restartPop");
   if (e.key === "Escape") {                          // Esc works everywhere, also from inside dialog fields
     if (!$("restartPop").hidden) { $("restartPop").hidden = true; $("btnRestart").focus(); return; }
+    if (ui.framePrev?.open) { ui.framePrev.close(); return; }
     if (!$("helpPop").hidden) { ui.help(false); return; }
     if (!$("regsPop").hidden) { ui.regs(false); $("btnRegs").focus(); return; }
     if (ui.pickTarget) { e.preventDefault(); pickDone(null); return; }

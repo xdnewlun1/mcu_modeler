@@ -326,3 +326,45 @@ def test_subcul_division_and_flags():
     c.write_mem(0x9000, (10).to_bytes(4, "little") + (50).to_bytes(4, "little"))
     run_to_end(c)
     assert c.p == 5 and c.acc == 0 and c.z == 1 and c.n == 0
+
+
+# ======================================================================== FPU LVF/LUF -> PIE (F2833x INT12.7/12.8)
+def test_fpu_lvf_luf_rising_edges_reach_the_callback():
+    """STF.LVF/LUF 0 -> 1 is reported once per edge (core.fpu_flag_cb, wired to PIE 12.7/12.8 by the arch); a flag
+    that is already latched gives no new edge until MOVST0 / SETFLG clears it; restoring STF with the flag set from
+    memory (ISR epilogue MOV32 STF,mem32) is an edge too."""
+    c, _ = load("""
+        MOVIZ   R0H, #0x7F00         ; 1.7e38
+        MOVIZ   R1H, #0x4000         ; 2.0
+        MPYF32  R2H, R0H, R1H        ; overflow: LVF edge
+        NOP
+        MPYF32  R2H, R0H, R1H        ; LVF already set: no edge
+        NOP
+        MOVST0  LVF                  ; clears LVF
+        MPYF32  R2H, R0H, R1H        ; edge again
+        NOP
+        MOVIZ   R3H, #0x0080         ; 2^-126 (smallest normal)
+        MOVIZ   R4H, #0x3F00         ; 0.5
+        MPYF32  R5H, R3H, R4H        ; underflow: LUF edge, flushed to 0
+        NOP
+        MOV32   *SP++, STF           ; save STF (LVF|LUF set)
+        SETFLG  LVF=0, LUF=0
+        MOV32   STF, *--SP           ; restore: both rise again
+""")
+    seen = []
+    c.fpu_flag_cb = seen.append
+    run_to_end(c)
+    assert seen == [1, 1, 2, 1, 2]
+    assert c.r[2] == 0x7F800000 and c.r[5] == 0 and c.stf & 3 == 3
+
+
+def test_fpu_lvf_raises_pie_12_7_on_the_f28335():
+    from chipem.chip import Chip
+    from chipem.chipdesc import load_chip
+    from pathlib import Path
+    chip = Chip(load_chip(Path(__file__).resolve().parents[1] / "chips" / "tms320f28335.yaml"))
+    chip.reset()
+    chip.core.fpu_flag_cb(1)
+    chip.core.fpu_flag_cb(2)
+    pie = chip.arch.pie
+    assert pie.ifr[12] & 0xC0 == 0xC0                       # INT12.7 LVF, INT12.8 LUF latched

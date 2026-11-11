@@ -67,7 +67,7 @@ peripherals:
   - {name: TIM8, model: stm32.tim, base: 0x40010400, size: 0x400}
   - {name: USART1, model: stm32.usart, base: 0x40011000, size: 0x400, params: {index: 1, kind: usart}}
   - {name: USART6, model: stm32.usart, base: 0x40011400, size: 0x400, params: {index: 6, kind: usart}}
-  - {name: ADC1, model: stm32.adc, base: 0x40012000, size: 0x100}
+  - {name: ADC1, model: stm32.adc, base: 0x40012000, size: 0x100, params: {vbat_div: 4}}   # VBAT/4 on IN18 (RM0090 13.11)
   - {name: ADC2, model: stm32.adc, base: 0x40012100, size: 0x100}
   - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100}
   - {name: C_ADC, model: stm32.adc_common, base: 0x40012300, size: 0x400}   # ADC common registers (SVD extent 0x400)

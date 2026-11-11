@@ -72,7 +72,7 @@ from collections import deque
 from typing import Any
 
 from ... import crypto_algos as ca
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, dma_request, irq_number, make_absent, part_present
 
@@ -124,25 +124,30 @@ class CRYP(GatedBlock):
         self.absent = False
         ro = {"ro_mask": 0xFFFFFFFF}
         ov: dict[str, dict] = {
-            "CR": {"on_write": self._cr_write, "on_read": lambda b, r: self.get("CR") & ~FFLUSH},
-            "SR": {**ro, "on_read": lambda b, r: self._sr()},
-            "DIN": {"on_write": self._din_write, "on_read": self._din_read},
-            "DOUT": {**ro, "on_read": self._dout_read},
+            "CR": {"on_write": self._cr_write, "on_read": pure_read(lambda b, r: self.get("CR") & ~FFLUSH)},
+            "SR": {**ro, "on_read": pure_read(lambda b, r: self._sr())},
+            "DIN": {"on_write": self._din_write, "on_read": self._din_read,
+                    "on_peek": lambda b, r: (0 if self.absent or self._cr() & CRYPEN or not self.infifo
+                                             else swap_word(self.infifo[0], self._datatype()))},
+            "DOUT": {**ro, "on_read": self._dout_read,
+                     "on_peek": lambda b, r: (0 if self.absent or not self.outfifo
+                                              else swap_word(self.outfifo[0], self._datatype()))},
             "DMACR": {"on_write": self._ctl_write},
             "IMSCR": {"on_write": self._ctl_write},
-            "RISR": {**ro, "on_read": lambda b, r: self._ris()},
-            "MISR": {**ro, "on_read": lambda b, r: self._mis()},
+            "RISR": {**ro, "on_read": pure_read(lambda b, r: self._ris())},
+            "MISR": {**ro, "on_read": pure_read(lambda b, r: self._mis())},
         }
         for k in KEYREGS:
-            ov[k] = {"on_write": self._key_write, "on_read": lambda b, r: 0}
+            ov[k] = {"on_write": self._key_write, "on_read": pure_read(lambda b, r: 0)}
         for k in IVREGS:
             ov[k] = {"on_write": self._iv_write}
         for i in range(8):                        # CSGCMCCM0..7R / CSGCM0..7R: STM32F42x/F43x only (23.6.12)
             for k in (f"CSGCMCCM{i}R", f"CSGCM{i}R"):
                 if params.get("gcm", False):
-                    ov[k] = {"on_read": self._cs_read, "on_write": self._cs_write}
+                    ov[k] = {"on_read": self._cs_read, "on_write": self._cs_write,
+                             "on_peek": lambda b, r: self._cs_words()[self._cs_index(r.name)]}
                 else:
-                    ov[k] = {**ro, "on_read": lambda b, r: 0}
+                    ov[k] = {**ro, "on_read": pure_read(lambda b, r: 0)}
         r = build_regs((name, "CRYP"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.gcm = bool(params.get("gcm", False))

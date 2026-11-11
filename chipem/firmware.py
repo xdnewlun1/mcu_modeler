@@ -171,21 +171,33 @@ def load_firmware(path: str | Path, *, load_addr: int | None = None, fmt: str | 
     return img
 
 
-_MAP_LINE = re.compile(r"^\s*([CDIXB]):\s*(?:0[xX])?([0-9A-Fa-f]{4,8})\s+([A-Za-z_?$.][\w?$.]*)\s*$")
-_CDB_LINE = re.compile(r"^L:(?:G|F[^$]*)\$([A-Za-z_]\w*)\$[^:]*:([0-9A-Fa-f]+)\s*$")
+# `C:0x0030 main` (tools/mcs51_asm.py) or `C:   00000030  _main   module` (SDCC aslink map, module column)
+_MAP_LINE = re.compile(r"^\s*([CDIXB]):\s*(?:0[xX])?([0-9A-Fa-f]{4,8})\s+([A-Za-z_?$.][\w?$.]*)(?:\s+[\w.$?-]+)?\s*$")
 _NOI_LINE = re.compile(r"^DEF\s+([A-Za-z_?$.][\w?$.]*)\s+(?:0[xX])?([0-9A-Fa-f]+)\s*$")
 _SPACE_TAG = {"C": 0x00000, "X": 0x10000, "D": 0x20000, "I": 0x20000}      # MCS-51 tagged address spaces
+_ASLINK_SEG = re.compile(r"^[sl]_[A-Z][A-Z0-9_]*$")       # aslink area start/length symbols (s_CSEG, l_DSEG ...)
 
 
 def sidecar_symbols(path: str | Path) -> dict[str, int]:
     """Symbols of an Intel HEX image from files next to it (8051 toolchains keep them apart from the .hex):
-    `<stem>.map` (tools/mcs51_asm.py `C:0x0030 main` lines, or an SDCC/aslink linker map `C:   00000030  _main`),
-    SDCC `<stem>.cdb` (`L:G$main$0$0:30` function/global labels) and `<stem>.noi` (`DEF _main 0x30`).  Code labels
-    (C) keep their address; data (D/I) and XDATA (X) symbols are given the MCS-51 tagged addresses (IDATA 0x20000,
-    XDATA 0x10000; docs/MCS51_CORE.md).  Missing or unreadable files give no symbols."""
+    `<stem>.map` (tools/mcs51_asm.py `C:0x0030 main` lines, or an SDCC/aslink linker map `C:   00000030  _main  mod`;
+    aslink's area start/length symbols s_XXX / l_XXX are skipped), SDCC `<stem>.cdb` (chipem/sdcc_cdb.py
+    `cdb_symbols`: functions and variables tagged by their CDB address space; SFRs and SFR bits are left out) and
+    `<stem>.noi` (`DEF _main 0x30`).  Code labels (C) keep their address; data (D/I) and XDATA (X) symbols are given
+    the MCS-51 tagged addresses (IDATA 0x20000, XDATA 0x10000; docs/MCS51_CORE.md).  Missing or unreadable files
+    give no symbols."""
     p = Path(path)
     out: dict[str, int] = {}
-    for ext in (".map", ".cdb", ".noi"):
+    cdb = p.with_suffix(".cdb")
+    have_cdb = cdb.exists()
+    if have_cdb:
+        # SDCC's CDB is authoritative: it knows each symbol's address space (the aslink map's area letters do not
+        # say XDATA vs DATA reliably, and with --debug the map also lists the CDB-style A$/C$/G$ line labels)
+        from .sdcc_cdb import cdb_symbols
+        for k, v in cdb_symbols(cdb).items():
+            if v < 0x30000:                               # SFRs are named by the chip's register table
+                out.setdefault(k, v)
+    for ext in (".map", ".noi"):
         f = p.with_suffix(ext)
         if not f.exists():
             continue
@@ -196,11 +208,13 @@ def sidecar_symbols(path: str | Path) -> dict[str, int]:
         for line in text.splitlines():
             m = _MAP_LINE.match(line)
             if m:
-                if m.group(1) in _SPACE_TAG:
-                    out.setdefault(m.group(3), _SPACE_TAG[m.group(1)] + int(m.group(2), 16))
+                name = m.group(3)
+                if m.group(1) in _SPACE_TAG and not _ASLINK_SEG.match(name) and "$" not in name \
+                        and (not have_cdb or m.group(1) == "C" or name.lstrip("_") not in out):
+                    out.setdefault(name, _SPACE_TAG[m.group(1)] + int(m.group(2), 16))
                 continue
-            m = _CDB_LINE.match(line) or _NOI_LINE.match(line)
-            if m:
+            m = _NOI_LINE.match(line)
+            if m and not _ASLINK_SEG.match(m.group(1)) and "$" not in m.group(1) and not have_cdb:
                 out.setdefault(m.group(1), int(m.group(2), 16))
     return out
 
@@ -702,7 +716,7 @@ def _pin_roles(pc_: _PinCtx, pdesc: Any, pname: str, off: int, pc: int, val: int
     value are known (val holds them; full mask when the value is an immediate); unknown bits are assumed to keep
     their reset value.  Registers are named from the chip's register table; decoding is per family:
     Kinetis PORTx_PCRn (mux/pull/IRQC) and GPIOx_PDDR/PSOR/...; STM32 GPIOx MODER/PUPDR/OTYPER/AFRL/AFRH/BSRR/ODR;
-    C2000 GPxMUX1/2, GPxDIR, GPxPUD, GPxSET/CLEAR/TOGGLE/DAT."""
+    STM32F1 GPIOx CRL/CRH (MODE/CNF nibbles)/ODR/BSRR/BRR; C2000 GPxMUX1/2, GPxDIR, GPxPUD, GPxSET/CLEAR/TOGGLE/DAT."""
     if pdesc is None:
         return []
     model = str(pdesc.model)
@@ -810,6 +824,53 @@ def _pin_roles(pc_: _PinCtx, pdesc: Any, pname: str, off: int, pc: int, val: int
                 add(gname(port, i), "set" if f.name.startswith("BS") else "reset", None)
             elif n == "ODR":
                 add(gname(port, i), f"output {'high' if v else 'low'}", v)
+        return out
+
+    if fam == "stm32f1" and port is not None:
+        # RM0008 9.2.1/9.2.2 GPIOx_CRL/CRH: one nibble per pin, MODE[1:0] (00 input, 01/10/11 output 10/2/50 MHz) and
+        # CNF[1:0] (Table 20: input analog/floating/pull, output GP/AF push-pull/open-drain); the pull direction of an
+        # input with CNF = 10 is the ODR bit; BSRR/BRR set/reset.
+        n = reg.name
+        if n in ("IDR", "LCKR"):
+            return out
+        if not km:
+            if n in ("CRL", "CRH"):
+                add(f"P{port}", f"{n} (value unknown)")
+            return out
+        if n in ("CRL", "CRH"):
+            base = 8 if n == "CRH" else 0
+            for k in range(8):
+                nm = 0xF << (4 * k)
+                if not km & nm:
+                    continue
+                nib = (eff >> (4 * k)) & 0xF
+                if km == full and nib == (reg.reset >> (4 * k)) & 0xF:
+                    continue
+                mode, cnf = nib & 3, nib >> 2
+                if mode == 0:
+                    note = ("input analog", "input floating", "input pull-up/down", "input (reserved CNF 11)")[cnf]
+                else:
+                    speed = {1: "10 MHz", 2: "2 MHz", 3: "50 MHz"}[mode]
+                    note = ("output push-pull", "output open-drain", "AF push-pull", "AF open-drain")[cnf] + f" {speed}"
+                    if cnf >= 2:
+                        p = pc_.pin(port, base + k)
+                        fns = [p.functions.get(key) for key in ("AF", "REMAP")] if p is not None else []
+                        fns = [f for f in fns if f]
+                        if fns:
+                            note += f" ({'/'.join(fns)})"
+                add(gname(port, base + k), note, nib)
+            return out
+        for f, v in fields_touched():
+            m = re.search(r"(\d+)$", f.name)
+            if not m:
+                continue
+            i = int(m.group(1))
+            if n == "BSRR" and v:
+                add(gname(port, i), "set" if f.name.startswith("BS") else "reset", None)
+            elif n == "BRR" and v:
+                add(gname(port, i), "reset", None)
+            elif n == "ODR":
+                add(gname(port, i), f"output {'high' if v else 'low'} (pull-{'up' if v else 'down'} as input)", v)
         return out
 
     if fam == "ti_c2000":
@@ -990,7 +1051,7 @@ _CONDS = ("eq", "ne", "cs", "hs", "cc", "lo", "mi", "pl", "vs", "vc", "hi", "ls"
 _RE_IMM = re.compile(r"#(-?0x[0-9a-f]+|-?\d+)")
 _RE_REG = re.compile(r"\b(r\d+|sb|sl|fp|ip|lr|sp|pc)\b")
 _RE_MEMOP = re.compile(r"^(?P<rt>r\d+|sb|sl|fp|ip|lr)(?:, (?P<rt2>r\d+|sb|sl|fp|ip|lr))?, "
-                       r"\[(?P<rb>r\d+|sb|sl|fp|ip|sp)(?:, (?:#(?P<off>-?0x[0-9a-f]+|-?\d+)|(?P<ri>r\d+|sb|sl|fp|ip)))?\]"
+                       r"\[(?P<rb>r\d+|sb|sl|fp|ip|lr|sp)(?:, (?:#(?P<off>-?0x[0-9a-f]+|-?\d+)|(?P<ri>r\d+|sb|sl|fp|ip|lr)))?\]"
                        r"(?P<wb>!)?(?:, #(?P<post>-?0x[0-9a-f]+|-?\d+))?$")
 _NOREG = {"cmp", "cmn", "tst", "teq", "nop", "dsb", "isb", "dmb", "cpsid", "cpsie", "wfi", "wfe", "svc", "bkpt",
           "msr", "sev", "yield", "vpush", "vstr", "vstmia", "vstmdb", "pld", "pli"}

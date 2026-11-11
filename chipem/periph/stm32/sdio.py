@@ -40,13 +40,19 @@ card every command that waits for a response ends in CTIMEOUT, as with an empty 
   since_ns, freq_hz, duty 50 %) per 100 ms window / clock change summarises it, as the event log does for dense pins.
   CMD/DAT levels do not follow the bit stream (like UART/SPI frame contents elsewhere).
 * RCC: APB2ENR.SDIOEN gate (a gated-off access logs one `warn`), APB2RSTR.SDIORST resets the block.
+
+STM32F1 high density (params `f1: true`, RM0008 ch. 22): the same SDIO IP (register map 22.9.15 identical, FIFO flags
+22.9.11 at 8 words), but SDIOCLK = HCLK (22.2 "SDIO adapter clock (SDIOCLK = HCLK)", RM0008 Figure 8), the clock gate is
+RCC_AHBENR.SDIOEN (bit 10; stm32f1.rcc GATES "SDIO") and there is no reset bit (no AHBRSTR outside the connectivity
+line).  The F1 DMA has no peripheral flow control: DMA2 channel 4 (request "SDIO", RM0008 13.3.7 Table 79) moves the
+number of words programmed in CNDTR, one word per request.
 """
 from __future__ import annotations
 
 from collections import deque
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ..sdbus import ClockWave, lines_muxed
 from ._util import GatedBlock, build_regs, dma_request, fmt_hz, irq_number
@@ -80,8 +86,22 @@ class SDIO(GatedBlock):
               "STA": {**ro, "on_read": self._sta_read}, "ICR": {"on_write": self._icr_write},
               "MASK": {"on_write": self._mask_write}, "RESPCMD": ro, "RESP1": ro, "RESP2": ro, "RESP3": ro,
               "RESP4": ro, "DCOUNT": ro, "FIFOCNT": ro}
-        r = build_regs((name, "SDIO"), size, ov, params.get("regs_file"), skip=("FIFO",))
+        try:
+            r = build_regs((name, "SDIO"), size, ov, params.get("regs_file"), skip=("FIFO",))
+        except KeyError:        # STM32F446.svd describes another IP ("SDMMC" v2) at this address: use the F405 SDIO
+            r = build_regs((name, "SDIO"), size, ov, None, skip=("FIFO",))     # table (same SDIO_TypeDef in the HAL)
+        for reg in r:           # STM32F103xx.svd spells SDIO_RESP1 "RESPI1" (RM0008 22.9.6: SDIO_RESP1 at 0x14)
+            if reg.name == "RESPI1":
+                reg.name = "RESP1"
+                reg.__init__("RESP1", reg.offset, reg.width, reg._raw[0], 0xFFFFFFFF, reg._raw[2], reg.on_read,
+                             reg.on_write, reg.doc, reg.unit_bits)
         super().__init__(name, base, size, r, log=log, params=params)
+        if params.get("ceata") is False:
+            # STM32F446 (RM0390 29.8.4 / 29.8.11-29.8.13): no CE-ATA bits (CMD 14:12, CEATAEND 23) and no STBITERR
+            # (9): reserved, read 0, writes ignored
+            for rn, bits in (("CMD", 0x7000), ("ICR", 0x00800200), ("MASK", 0x00800200)):
+                if rn in self.regs:
+                    self.regs[rn].ro_mask |= bits
         self.card: Any = None
         self.sig = {"CK": f"{name}_CK", "CMD": f"{name}_CMD", **{f"D{i}": f"{name}_D{i}" for i in range(8)}}
         self._irqn: int | None = None
@@ -150,8 +170,13 @@ class SDIO(GatedBlock):
     def sdioclk_hz(self) -> float:
         """SDIOCLK = PLL48CLK (0 while the main PLL is off)."""
         r = self._rcc
+        if self.params.get("f1") and self.chip is not None:
+            return float(self.chip.clock.hz)             # RM0008 22.2: SDIOCLK = HCLK (= core clock)
         if r is None:
             return float(self.params.get("sdioclk_hz", 48e6))
+        g = getattr(r, "sdio_kernel_hz", None)           # STM32F446 DCKCFGR2.SDIOSEL / CK48MSEL (stm32.rcc_f446)
+        if g is not None:
+            return float(g())
         if not r.get("CR") & (1 << 25):                  # PLLRDY
             return 0.0
         return r.pll_q_hz()
@@ -278,6 +303,7 @@ class SDIO(GatedBlock):
             dma_request(self.chip, "SDIO", False)
             self._dma = False
 
+    @pure_read
     def _sta_read(self, blk, reg):
         return self.status()
 

@@ -21,17 +21,20 @@ auto_stub_ranges: [[0x30080, 0x300FF]]     # undefined SFRs become RAM-like stub
 mcs51:
   sfr: {ie: 0xA8, ip: 0xB8, iph: 0xB7, auxr1: 0xA2}
   reset_sp: 0x07
-  # Table 41 p.53 (vector, enable bit = IE/IP/IPH bit, service priority = polling order).  The table gives
-  # Timer 2 vector 003BH and PCA 0033H (the predecessor P89C51RD2 uses 002BH for Timer 2); Fig. 25 draws
-  # the PCA before the UART in the polling chain, Table 41 lists UART 5, T2 6, PCA 7: the table is used.
+  # Table 41 p.53 (vector, enable bit = IE/IP/IPH bit, service priority = polling order) prints Timer 2 at 003BH,
+  # which contradicts the 80C51 rule vector = 8 x (IE bit) + 3 (ET2 is IE.5 -> 002BH; 003BH would be IE.7 = EA),
+  # Fig. 25 (polling chain INT0, T0, INT1, T1, PCA, UART/SPI, T2) and the predecessor P89V51RB2/RC2/RD2 data sheet
+  # Rev. 05 Table 43 (T2 002BH, PCA 0033H; service priority PCA before UART/SPI before T2).  SDCC's 8052.h and
+  # every 8052 derivative use 002BH (interrupt 5) for Timer 2.  Used: T2 = 002BH, polling order of Fig. 25 /
+  # P89V51 (docs/MCS51_CORE.md "Timer 2 vector").  To follow Table 41 literally: TIMER2 vector 0x003B.
   interrupts:
     - {name: INT0, vector: 0x0003, enable: 0, lines: [IE0], poll: 1, pd_wake: true}
     - {name: TIMER0, vector: 0x000B, enable: 1, lines: [TF0], poll: 2}
     - {name: INT1, vector: 0x0013, enable: 2, lines: [IE1], poll: 3, pd_wake: true}
     - {name: TIMER1, vector: 0x001B, enable: 3, lines: [TF1], poll: 4}
-    - {name: SERIAL, vector: 0x0023, enable: 4, lines: [UART, SPI], poll: 5}
-    - {name: TIMER2, vector: 0x003B, enable: 5, lines: [TF2], poll: 6}
-    - {name: PCA, vector: 0x0033, enable: 6, lines: [PCA], poll: 7}
+    - {name: PCA, vector: 0x0033, enable: 6, lines: [PCA], poll: 5}
+    - {name: SERIAL, vector: 0x0023, enable: 4, lines: [UART, SPI], poll: 6}
+    - {name: TIMER2, vector: 0x002B, enable: 5, lines: [TF2], poll: 7}
 
 memory:
   - {name: FLASH, base: 0x00000, size: 0x10000, kind: flash, fill: 0xFF}   # CODE: 64 KB user flash
@@ -44,7 +47,8 @@ peripherals:   # SFR blocks: base 0x30000 (SFR tag), offsets = SFR addresses (se
   - {name: PORTS, model: mcs51.port, base: 0x30000, size: 0x100}     # P0 P1 P2 P3
   - {name: SYSCTRL, model: mcs51.sysctrl, base: 0x30000, size: 0x100}  # PCON AUXR CKCON
   - {name: FLASHCTL, model: mcs51.flash, base: 0x30000, size: 0x100,  # IAP (FFF0H), boot vector, security
-     params: {boot_vector: 0xFC, status_bit: 0, fx2: false, iap_us_per_byte: 0, page_erase_ms: 0}}
+     params: {boot_vector: 0xFC, status_bit: 0, fx2: false, iap_us_per_byte: 0, page_erase_ms: 30,
+             block_erase_ms: 150}}                                     # sec. 2 "30 ms page erase, 150 ms block erase"
   - {name: TIMER01, model: mcs51.timer01, base: 0x30000, size: 0x100}  # TCON TMOD TL0 TL1 TH0 TH1
   - {name: TIMER2, model: mcs51.timer2, base: 0x30000, size: 0x100}  # T2CON T2MOD RCAP2L/H TL2 TH2
   - {name: UART, model: mcs51.uart, base: 0x30000, size: 0x100}      # SCON SBUF SADDR SADEN
@@ -53,14 +57,14 @@ peripherals:   # SFR blocks: base 0x30000 (SFR tag), offsets = SFR addresses (se
   - {name: WDT, model: mcs51.wdt, base: 0x30000, size: 0x100}        # WDTRST
   - {name: XBUS, model: mcs51.xbus, base: 0x10000, size: 0x10000}    # external data bus (MOVX): P0/P2/RD/WR
 
-irqs:          # interrupt number n: vector 8n+3 (Table 41)
+irqs:          # interrupt number n: vector 8n+3 (= SDCC __interrupt(n))
   0: INT0
   1: TIMER0
   2: INT1
   3: TIMER1
   4: SERIAL
+  5: TIMER2
   6: PCA
-  7: TIMER2
 
 pins:          # PLCC44, Table 3 (PLCC44 column)
   - {num: 1, name: "n.c.", kind: special}

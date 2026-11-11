@@ -37,7 +37,8 @@ class LPTMR(MMIOBlock):
         ov = {"CSR": dict(ro_mask=0xFFFFFF00, w1c_mask=TCF, on_write=self._csr_write),
               "PSR": dict(ro_mask=0xFFFFFF80, on_write=self._psr_write),
               "CMR": dict(ro_mask=0xFFFF0000, on_write=self._cmr_write),
-              "CNR": dict(ro_mask=0xFFFFFFFF, on_read=lambda b, r: self.cnr())}
+              "CNR": dict(ro_mask=0xFFFFFFFF, on_read=lambda b, r: self.cnr(),
+                         on_peek=lambda b, r: self.cnr())}
         fb = [("CSR", 0, 4, 0), ("PSR", 4, 4, 0), ("CMR", 8, 4, 0), ("CNR", 12, 4, 0)]
         for r in regs_from_table("LPTMR0", fb, self.params.get("regs_file"), **ov):
             self.add_reg(r)

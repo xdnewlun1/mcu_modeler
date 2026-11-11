@@ -45,16 +45,22 @@ def build_regs(names: Iterable[str], size: int, overrides: dict[str, dict] | Non
     return out
 
 
+def _is_model(b: Any, model: str) -> bool:
+    """`b` is model `model`, or a variant that stands in for it (class attribute `implements`, e.g. the Piccolo
+    `ti_c2000.piccolo_sysctrl` implements `ti_c2000.sysctrl`)."""
+    return getattr(b, "model", None) == model or model in getattr(b, "implements", ())
+
+
 def find_model(chip: Any, model: str, name: str | None = None) -> MMIOBlock | None:
     if chip is None:
         return None
     periphs = getattr(chip, "peripherals", {}) or {}
     if name is not None:
         b = periphs.get(name)
-        if b is not None and getattr(b, "model", None) == model:
+        if b is not None and _is_model(b, model):
             return b
     for b in periphs.values():
-        if getattr(b, "model", None) == model:
+        if _is_model(b, model):
             return b
     return None
 

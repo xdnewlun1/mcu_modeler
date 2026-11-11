@@ -1,60 +1,71 @@
 """STM32F103 USB full-speed device controller (`stm32f1.usb`, 0x40005C00) and its packet memory (`stm32f1.pma`,
 0x40006000), on a chipem.usbbus cable.
 
-Written from RM0008 ch. 23 "Universal serial bus full-speed device interface (USB)" as remembered and from what ST's
-USB-FS device library / CubeF1 HAL (`stm32f1xx_ll_usb.c`, `PCD_EP_ISR_Handler`) and libopencm3 `st_usbfs` rely on:
-**not verified against RM0008** (ST's server refuses the download).
+Verified against RM0008 Rev 21 ch. 23 "Universal serial bus full-speed device interface (USB)" (23.3-23.5).
 
-Packet memory (USB_CAN_SRAM, 512 bytes shared with bxCAN, DS15060 2.3.x): the USB sees 256 16-bit words at local
-addresses 0..0x1FF; the CPU (APB1) sees each word in the low half of a 32-bit slot: CPU address = 0x40006000 +
-2 * local address.  The upper half of each slot reads 0 and ignores writes; a byte access reaches the low (offset 0)
-or high (offset 1) byte of the word.  The memory is not cleared by a reset (SRAM; zero at power-on here).
+Packet memory (23.3.1, 23.5): 512 bytes = 256 16-bit words, shared with bxCAN on the performance line; the USB sees
+local addresses 0..0x1FF, the CPU (APB1) each word in the low half of a 32-bit slot: CPU address = 0x40006000 +
+2 x local address.  The upper half of each slot reads 0 and ignores writes; a byte access reaches the low (offset 0) or
+high (offset 1) byte of the word.  Not cleared by a reset (SRAM; zero at power-on here).
 
-Registers (16 significant bits at 32-bit stride; bits 31:16 read 0):
-  0x00 + 4n EPnR (n = 0..7): CTR_RX (15, rc_w0), DTOG_RX (14, t), STAT_RX (13:12, t), SETUP (11, r), EP_TYPE (10:9),
-      EP_KIND (8), CTR_TX (7, rc_w0), DTOG_TX (6, t), STAT_TX (5:4, t), EA (3:0).  rc_w0: writing 0 clears, 1 keeps;
-      t (toggle): writing 1 flips, 0 keeps.  A byte write leaves the other byte's bits as "keep" (CTR = 1, t = 0).
-  0x40 CNTR (reset 0x0003: FRES | PDWN), 0x44 ISTR (flags 14:8 rc_w0; CTR (15), DIR (4), EP_ID (3:0) read-only,
-  computed), 0x48 FNR (read-only: FN, LSOF, LCK, RXDM, RXDP), 0x4C DADDR (EF, ADD), 0x50 BTABLE (15:3).
+Registers (23.5; 16 significant bits at 32-bit stride, bits 31:16 read 0):
+  EPnR (n = 0..7, 23.5.2): CTR_RX (15, rc_w0: "only 0 can be written"), DTOG_RX (14, t), STAT_RX (13:12, t), SETUP (11,
+      r), EP_TYPE (10:9), EP_KIND (8), CTR_TX (7, rc_w0), DTOG_TX (6, t), STAT_TX (5:4, t), EA (3:0); t = toggle: writing
+      1 flips, 0 keeps.  A byte write leaves the other byte's bits at their "invariant" values (CTR = 1, t = 0).
+  CNTR (reset 0x0003 FRES | PDWN; bits 7:5 reserved), ISTR (14:8 rc_w0; CTR (15), DIR (4), EP_ID (3:0) read-only,
+  computed), FNR (read-only FN, LSOF, LCK, RXDM, RXDP), DADDR (EF, ADD; 15:8 reserved), BTABLE (15:3; 2:0 forced 0).
+  Buffer descriptor table at BTABLE, 8 bytes per EPnR: ADDRn_TX, COUNTn_TX, ADDRn_RX, COUNTn_RX (BL_SIZE (15): 0 =
+  2-byte blocks, size = 2 x NUM_BLOCK; 1 = 32-byte blocks, size = 32 x (NUM_BLOCK + 1); COUNT (9:0) written by the USB).
 
-Buffer descriptor table at BTABLE (packet memory), 8 bytes per endpoint register n: ADDRn_TX, COUNTn_TX, ADDRn_RX,
-COUNTn_RX (BL_SIZE (15): 0 = 2-byte blocks, size = 2 * NUM_BLOCK; 1 = 32-byte blocks, size = 32 * (NUM_BLOCK + 1);
-NUM_BLOCK (14:10); COUNT (9:0) written by the USB).  Double-buffered bulk (EP_TYPE = bulk, EP_KIND = 1): buffer 0 =
-the TX descriptor pair, buffer 1 = the RX pair, for either direction.
+Verified behaviour (RM0008 section):
+* Tokens are handled only with DADDR.EF = 1 and a matching ADD and EA (23.5.1 DADDR), and not while ISTR.RESET is set
+  ("Reception and transmission are disabled until the RESET bit is cleared", 23.5.1 ISTR).
+* SETUP (23.4.2 "Control transfers", 23.5.2): control endpoints only; accepted (ACK) whatever STAT_RX is unless DISABLED;
+  discarded without a handshake while CTR_RX is still set; data to the RX buffer, COUNT, CTR_RX = SETUP = 1, DTOG_TX = 1,
+  DTOG_RX cleared and toggled by the accepted DATA0 (= 1), STAT_RX = STAT_TX = NAK.
+* OUT (23.4.2): STAT_RX DISABLED -> no answer, STALL -> STALL, NAK -> NAK; VALID: a DATAx PID different from DTOG_RX is
+  ACKed and ignored (no CTR); a packet longer than the RX buffer is copied only up to the end of the buffer and answered
+  STALL without CTR_RX (buffer overrun); a control endpoint with STATUS_OUT (EP_KIND) STALLs an OUT with data
+  (23.5.2 EP_KIND).  Else COUNT, CTR_RX = 1, DTOG_RX toggles, STAT_RX = NAK; SETUP is cleared unless CTR_RX was still 1
+  ("kept frozen while CTR_RX is at 1").
+* IN (23.4.2): STAT_TX DISABLED -> no answer, STALL, NAK; VALID: COUNTn_TX bytes from ADDRn_TX with DATA<DTOG_TX>; on
+  the host's ACK: DTOG_TX toggles, STAT_TX = NAK, CTR_TX = 1.
+* Double-buffered bulk (23.4.3 Tables 169/170): EP_TYPE = bulk + EP_KIND (DBL_BUF); the USB uses buffer DTOG (DTOG_RX
+  for OUT, DTOG_TX for IN; buffer 0 = the ADDRn_TX/COUNTn_TX words, buffer 1 = ADDRn_RX/COUNTn_RX), SW_BUF is the other
+  DTOG bit; DTOG == SW_BUF answers NAK.  The first transaction after DBL_BUF is set ends like a plain one (STAT -> NAK);
+  after it STAT stays VALID and only the DTOG bit toggles.
+* Endpoint reset (23.5.2): a USB reset or FRES clears every EPnR except CTR_RX/CTR_TX, and DADDR; CNTR, BTABLE and the
+  PMA are kept (23.5.1 RESET).  FRES = 1 sets ISTR.RESET and holds the SIE in reset until cleared.
+* Frames (23.5.1 SOF/ESOF, FNR): SOF sets ISTR.SOF, FNR.FN, LCK after two consecutive SOFs, LSOF = 0.  A frame timer
+  expects a SOF 1 ms after the last one (from the end of a USB reset): each missed SOF sets ESOF and counts FNR.LSOF
+  (saturating at 3), the third consecutive one sets SUSP (23.4.5: no traffic for 3 ms) unless FSUSP = 1 (the suspend
+  check is off in suspend mode); ESOF keeps coming every 1 ms (it times the RESUME pulse, 23.4.5).  LCK is lost on suspend
+  and reset.
+* Wakeup (23.5.1 WKUP, 23.4.5): resume or reset signalling while in suspend mode (CNTR.FSUSP = 1) sets ISTR.WKUP, clears
+  LP_MODE and pulses USB_WAKEUP (EXTI line 18).  CNTR.RESUME 0 -> 1 while the bus is suspended = remote wakeup
+  (bus.remote_wakeup()); a RESUME pulse shorter than 1 ms or longer than 15 ms, or RESUME with FSUSP = 0, logs one
+  `warn` (23.5.1 RESUME, 23.4.5 note).  FNR.RXDP/RXDM (Table 172): J (10) idle, SE0 in reset, K while resuming.
+* ISTR (23.5.1): EP_ID is the endpoint register with a pending CTR, isochronous and double-buffered bulk ones first, then
+  the others, lowest register first; DIR = 1 when CTR_RX (or both) is set.
+* Interrupts (23.3.1 "Interrupt Mapper"): USB_LP_CAN1_RX0 (20) = (CTRM and any CTR) or (ISTR[14:8] & CNTR[14:8]);
+  USB_HP_CAN1_TX (19) = CTRM and a CTR on an isochronous or double-buffered bulk endpoint; both shared with bxCAN
+  (`shared_irq` "USB" share).  USBWakeUp (42) through EXTI line 18.
+* PDWN (23.5.1): the transceiver is off; the device needs the RCC USB clock, PDWN = 0 and FRES = 0 to answer.  APB1
+  below 8 MHz while the USB is in use logs one `warn` (23.4.2 note).
 
-Endpoint behaviour (per token, the EPnR whose EA matches the token's endpoint; first match by n):
-* SETUP: control endpoints only, accepted whatever STAT_RX is unless DISABLED (USB 2.0 8.5.3: a SETUP is never
-  NAKed or STALLed); the 8 bytes go to the RX buffer, COUNT = 8, CTR_RX = SETUP = 1, DTOG_RX = DTOG_TX = 1 (the next
-  data/status packets are DATA1), STAT_RX = STAT_TX = NAK until firmware answers.
-* OUT: STAT_RX DISABLED -> no answer, STALL -> STALL, NAK -> NAK; VALID: a DATAx PID different from DTOG_RX is a
-  retransmission (ACKed, ignored, no CTR); more data than the RX buffer holds -> STALL, no CTR (buffer overrun, as
-  ST describes it); a control endpoint with EP_KIND (STATUS_OUT) STALLs an OUT with data.  Else data -> PMA, COUNT,
-  CTR_RX = 1, SETUP = 0, DTOG_RX flips, STAT_RX = NAK.
-* IN: STAT_TX DISABLED -> no answer, STALL, NAK; VALID: COUNTn_TX bytes from ADDRn_TX with PID DATA<DTOG_TX>, read
-  from the PMA at the IN token; on the host's ACK: CTR_TX = 1, DTOG_TX flips, STAT_TX = NAK.
-* Double-buffered bulk: the USB uses buffer DTOG (DTOG_RX for OUT, DTOG_TX for IN), the application owns SW_BUF
-  (DTOG_TX for OUT, DTOG_RX for IN); DTOG == SW_BUF -> NAK.  STAT stays VALID; the CTR is also reported on the
-  high-priority line.  Isochronous endpoints: the usbbus has no isochronous transfers (one `warn`; tokens answered as
-  for bulk).
-* Address: tokens are answered only while DADDR.EF = 1 and for DADDR.ADD.  A USB reset (and CNTR.FRES 0 -> 1) sets
-  ISTR.RESET and clears DADDR and every EPnR (RM0008: "communication is disabled in all endpoint registers"); BTABLE
-  and the PMA are kept.
-* Bus states: SOF -> ISTR.SOF, FNR.FN, LCK after two consecutive SOFs.  3 ms idle -> ISTR.SUSP (+ ESOF, FNR.LSOF = 3:
-  the three missed SOFs reported at once, not 1 ms apart).  Host resume or reset while suspended -> ISTR.WKUP, CNTR.
-  LP_MODE cleared, EXTI line 18 (USBWakeUp) pulsed.  CNTR.RESUME 0 -> 1 while the bus is suspended = remote wakeup
-  (bus.remote_wakeup()).  FNR.RXDP/RXDM: J (10) on an idle bus, SE0 in reset, K while resuming.
-* IRQs: USB_LP_CAN1_RX0 = (CTRM and any CTR) or (ISTR[14:8] & CNTR[14:8]); USB_HP_CAN1_TX = CTRM and a CTR on an
-  isochronous or double-buffered bulk endpoint.  Both vectors are shared with bxCAN (`shared_irq` "USB" share).
-  ERR / PMAOVR never occur (error-free cable, PMA arbitration not modelled).
+Connection (the F103 has no internal D+ pull-up: boards fit 1.5 k to 3.3 V, fixed or switched): attached when the
+transceiver is on (RCC_APB1ENR.USBEN and CNTR.PDWN = 0), CNTR.FRES = 0, USBCLK is 48 MHz +-0.25 % and the pull-up is
+present: param `pullup` = "always" (default, a fixed resistor as on the "blue pill"), "none", or a pin name ("PA8":
+high connects; "!PA8": low connects).  USBCLK not 48 MHz: one `warn`, no connection.  `transceiver_on()` gives
+PA11/PA12 to USBDM/USBDP (stm32f1.gpio).  RCC_APB1RSTR.USBRST resets the block (registers; the PMA keeps its content).
 
-Connection (the F103 has no internal D+ pull-up: boards fit 1.5 k to 3.3 V, fixed or switched): the device is
-attached when the transceiver is on (RCC_APB1ENR.USBEN and CNTR.PDWN = 0), CNTR.FRES = 0, USBCLK is 48 MHz +-0.25 %
-and the pull-up is present: param `pullup` = "always" (default, a fixed resistor as on the "blue pill"), "none", or
-a pin name ("PA8": high connects; "!PA8": low connects, e.g. a PNP switch).  USBCLK not 48 MHz: one `warn`, no
-connection (silicon would not work).  `transceiver_on()` gives PA11/PA12 to USBDM/USBDP (stm32f1.gpio).
-USB and bxCAN share the 512-byte SRAM: when the USB becomes active while the CAN clock is on and the CAN block reports
-`active()`, one `warn` (the PMA content is then undefined on silicon; here both just use it).
-RCC_APB1RSTR.USBRST resets the block (registers; the PMA keeps its content).
+Approximate / not modelled:
+* Isochronous endpoints (23.4.4): the usbbus has no isochronous transfers; tokens are answered as for bulk (one `warn`).
+* ERR and PMAOVR never occur (error-free cable; PMA arbitration and the APB1 bandwidth are not modelled; 23.5.1).
+* The SETUP-with-STAT_RX = NAK case: 23.4.2 says the SETUP is accepted, the EP_TYPE description of 23.5.2 says a control
+  endpoint "defined as NAK" does not answer; the model accepts it (USB 2.0 8.5.3).
+* PMA accesses are not checked against the USB/CAN clock; using USB and bxCAN together only warns (the shared SRAM is not
+  corrupted).  The transceiver start-up time tSTARTUP after PDWN = 0 (23.4.2) is not enforced.
 """
 from __future__ import annotations
 
@@ -62,7 +73,7 @@ from typing import Any
 
 from ..base import MMIOBlock
 from ..registry import register
-from ._util import GatedBlock, build_regs, find_model, fmt_hz, gpio_ports, irq_number, rcc, shared_irq
+from ._util import GatedBlock, apb_hz, build_regs, find_model, fmt_hz, gpio_ports, irq_number, rcc, shared_irq
 from . import _util
 
 # EPnR
@@ -86,6 +97,9 @@ OFF_CNTR, OFF_ISTR, OFF_FNR, OFF_DADDR, OFF_BTABLE = 0x40, 0x44, 0x48, 0x4C, 0x5
 USB_TOL = 0.0025
 PMA_BYTES = 512
 NEP = 8
+FRAME_NS = 1_000_000.0                   # a SOF is expected every 1 ms (23.5.1 ESOF)
+ESOF_SLACK_NS = 2_000.0                  # tolerance before a missing SOF counts as lost
+APB1_MIN_HZ = 8e6                        # 23.4.2 note: APB1 must run above 8 MHz
 
 
 @register("stm32f1.pma")
@@ -155,6 +169,7 @@ class UsbFsDevice(GatedBlock):
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
+        params.setdefault("reserved_zero", True)        # reserved offsets read 0, writes ignored
         hi = 0xFFFF0000
         ov: dict[str, dict] = {f"EP{n}R": {"ro_mask": hi} for n in range(NEP)}
         ov.update({
@@ -176,6 +191,10 @@ class UsbFsDevice(GatedBlock):
         self._bus_suspended = False
         self._sofs = 0
         self._in_pending: dict[int, tuple[int, int]] = {}      # n -> (buffer, dbl)
+        self._dbl_live: set[int] = set()     # double-buffered bulk EPnR whose special flow control is active (23.4.3)
+        self._esof_ev = None                 # frame timer: ESOF when an expected SOF does not come (23.5.1)
+        self._lost = 0                       # consecutive lost SOFs (FNR.LSOF, saturates at 3)
+        self._resume_at: float | None = None
         self._xcvr = False
         self._active = False
         self._pull_pin: str | None = None
@@ -213,10 +232,14 @@ class UsbFsDevice(GatedBlock):
                 pb.input_listeners.setdefault(pin.id, []).append(lambda _p: self._connection())
 
     def reset(self) -> None:
+        self._stop_frame_timer()
         super().reset()
         self._in_pending.clear()
+        self._dbl_live.clear()
         self._bus_suspended = False
         self._sofs = 0
+        self._lost = 0
+        self._resume_at = None
         if self.chip is not None:
             self._update_irq()
             self._connection()
@@ -308,6 +331,11 @@ class UsbFsDevice(GatedBlock):
         a = self.active()
         if a and not self._active:
             self._check_can()
+            if apb_hz(self.chip, 1) < APB1_MIN_HZ * 0.9999:
+                self._warn_once("apb1", f"{self.name}: PCLK1 {fmt_hz(apb_hz(self.chip, 1))} is below 8 MHz: RM0008 "
+                                f"23.4.2 requires APB1 > 8 MHz for the packet memory (data over/underrun)")
+        if not a:
+            self._stop_frame_timer()
         self._active = a
         if self.bus is not None:
             self.bus.device_changed()
@@ -323,6 +351,21 @@ class UsbFsDevice(GatedBlock):
                             f"by the silicon (the packet memory content is undefined)")
 
     # ------------------------------------------------------------------ IRQ
+    def _ctr_endpoint(self) -> int | None:
+        """EP_ID priority of 23.5.1 ISTR: isochronous and double-buffered bulk EPnR first, then the others; the lowest
+        register number within a set."""
+        m = self.mem
+        other = None
+        for n in range(NEP):
+            v = m[4 * n] | m[4 * n + 1] << 8
+            if v & EP_RC:
+                t = (v >> 9) & 3
+                if t == ISO or (t == BULK and v & EP_KIND):
+                    return n
+                if other is None:
+                    other = n
+        return other
+
     def _ctr_state(self) -> tuple[bool, bool]:
         anyc = hp = False
         m = self.mem
@@ -381,6 +424,8 @@ class UsbFsDevice(GatedBlock):
         v = (neutral & ~lane) | (val & lane)
         new = (old & SETUP) | (v & EP_RW) | (old & v & EP_RC) | ((old ^ v) & EP_T)
         self._s(o, new)
+        if (old ^ new) & (EP_TYPE | EP_KIND):
+            self._dbl_live.discard(o >> 2)               # DBL_BUF (re)set: the next transaction is a plain one
         if self.log_all:
             self.emit("mmio", block=self.name, addr=self.base + offset, reg=f"EP{o >> 2}R", size=size, access="w",
                       value=value)
@@ -394,8 +439,19 @@ class UsbFsDevice(GatedBlock):
         if new & FRES and not old & FRES:
             self._usb_reset_state()
             self._flag(I_RESET)
-        if new & RESUME and not old & RESUME and self._bus_suspended and self.bus is not None:
-            self.bus.remote_wakeup()
+        if new & RESUME and not old & RESUME:
+            if not new & FSUSP:
+                self._warn_once("resume_fsusp", f"{self.name}: CNTR.RESUME set while FSUSP = 0; RM0008 23.4.5: use "
+                                "RESUME only after the peripheral was put in suspend mode (FSUSP = 1)")
+            self._resume_at = self.chip.now_ns() if self.chip is not None else None
+            if self._bus_suspended and self.bus is not None:
+                self.bus.remote_wakeup()
+        if old & RESUME and not new & RESUME and self._resume_at is not None and self.chip is not None:
+            d = self.chip.now_ns() - self._resume_at
+            self._resume_at = None
+            if not 1e6 <= d <= 15e6:
+                self._warn_once("resume_len", f"{self.name}: CNTR.RESUME held {d / 1e6:.3g} ms; RM0008 23.5.1 "
+                                "requires 1 to 15 ms")
         if (old ^ new) & (FRES | PDWN):
             self._connection()
         self._update_irq()
@@ -403,14 +459,12 @@ class UsbFsDevice(GatedBlock):
 
     def _istr_read(self, blk, reg) -> int:
         v = self._g(OFF_ISTR) & ISTR_FLAGS
-        m = self.mem
-        for n in range(NEP):
-            e = m[4 * n] | m[4 * n + 1] << 8
-            if e & EP_RC:
-                v |= I_CTR | (e & EA)
-                if e & CTR_RX:
-                    v |= 0x10
-                break
+        n = self._ctr_endpoint()
+        if n is not None:
+            e = self._g(4 * n)
+            v |= I_CTR | n                                   # EP_ID: the endpoint register number
+            if e & CTR_RX:
+                v |= 0x10                                    # DIR = 1: CTR_RX (or both) pending
         return v
 
     def _istr_write(self, blk, reg, old, new):
@@ -434,13 +488,45 @@ class UsbFsDevice(GatedBlock):
         return v
 
     def _usb_reset_state(self) -> None:
-        """USB reset / FRES: DADDR and every EPnR cleared, FNR lock lost."""
+        """USB reset / FRES (23.5.2 EPnR): DADDR and every EPnR cleared except CTR_RX / CTR_TX ("kept unchanged to
+        avoid missing a correct packet notification immediately followed by an USB reset"), FNR lock lost."""
         for n in range(NEP):
-            self._s(4 * n, 0)
+            self._s(4 * n, self._g(4 * n) & EP_RC)
         self._s(OFF_DADDR, 0)
         self._s(OFF_FNR, self._g(OFF_FNR) & 0x7FF)
         self._sofs = 0
+        self._lost = 0
         self._in_pending.clear()
+        self._dbl_live.clear()
+
+    # ------------------------------------------------------------------ frame timer (ESOF / SUSP, 23.5.1)
+    def _stop_frame_timer(self) -> None:
+        if self._esof_ev is not None and self.chip is not None:
+            self.chip.sched.cancel(self._esof_ev)
+        self._esof_ev = None
+
+    def _arm_frame_timer(self, t_ns: float) -> None:
+        self._stop_frame_timer()
+        if self.chip is not None and self._sie_runs():
+            self._esof_ev = self.chip.sched.at_ns(t_ns + FRAME_NS + ESOF_SLACK_NS, self._esof)
+
+    def _esof(self) -> None:
+        """An expected SOF did not come: ESOF, FNR.LSOF + 1; the third consecutive one sets SUSP unless the suspend
+        check is off (FSUSP = 1).  The timer keeps running every 1 ms (ESOF times the RESUME pulse, 23.4.5)."""
+        self._esof_ev = None
+        if not self._sie_runs():
+            return
+        self._lost = min(self._lost + 1, 3)
+        self._s(OFF_FNR, (self._g(OFF_FNR) & ~(3 << 11)) | (self._lost << 11))
+        bits = I_ESOF
+        if self._lost == 3 and not self._g(OFF_CNTR) & FSUSP and not self._g(OFF_ISTR) & I_SUSP and \
+                not getattr(self, "_susp_reported", False):
+            bits |= I_SUSP
+            self._susp_reported = True
+            self._sofs = 0
+            self._s(OFF_FNR, self._g(OFF_FNR) & ~LCK)
+        self._flag(bits)
+        self._esof_ev = self.chip.sched.at_ns(self.chip.now_ns() + FRAME_NS, self._esof)
 
     # ------------------------------------------------------------------ BTABLE / PMA
     def _bd(self, n: int) -> int:
@@ -474,13 +560,18 @@ class UsbFsDevice(GatedBlock):
             self._bus_suspended = False                      # no VBUS sense on the F103: nothing else
 
     def _wake(self) -> None:
+        """23.5.1 WKUP: activity "during suspend mode" (CNTR.FSUSP = 1) clears LP_MODE and pulses USB_WAKEUP."""
+        if not self._g(OFF_CNTR) & FSUSP:
+            return
         self._s(OFF_CNTR, self._g(OFF_CNTR) & ~LP_MODE)
         self._flag(I_WKUP)
         _util.exti_line(self.chip, 18, True)
         _util.exti_line(self.chip, 18, False)
 
     def usb_reset(self, bus, active: bool, t: float) -> None:
-        if not active:
+        if not active:                       # end of the reset: the suspend check starts (23.5.1 SUSP)
+            if self._sie_runs():
+                self._arm_frame_timer(t)
             return
         was = self._bus_suspended
         self._bus_suspended = False
@@ -490,12 +581,17 @@ class UsbFsDevice(GatedBlock):
             self._wake()
         self.stats["resets"] += 1
         self._usb_reset_state()
+        self._susp_reported = False
         self._flag(I_RESET)
+        self._stop_frame_timer()
 
     def usb_suspend(self, bus, t: float) -> None:
         self._bus_suspended = True
-        if self._sie_runs():
+        if self._sie_runs() and self._esof_ev is None and not getattr(self, "_susp_reported", False):
+            # no frame timer running (no SOF / reset seen): report the three missed SOFs at once
             self._sofs = 0
+            self._lost = 3
+            self._susp_reported = True
             self._s(OFF_FNR, (self._g(OFF_FNR) & 0x7FF) | (3 << 11))
             self._flag(I_SUSP | I_ESOF)
 
@@ -503,6 +599,7 @@ class UsbFsDevice(GatedBlock):
         if not self._bus_suspended:
             return
         self._bus_suspended = False
+        self._susp_reported = False
         if self._sie_runs():
             self._wake()
 
@@ -511,15 +608,20 @@ class UsbFsDevice(GatedBlock):
             return
         self.stats["sof"] += 1
         self._sofs += 1
-        self._s(OFF_FNR, (frame & 0x7FF) | (LCK if self._sofs >= 2 else 0))
+        self._lost = 0
+        self._susp_reported = False
+        self._s(OFF_FNR, (frame & 0x7FF) | (LCK if self._sofs >= 2 else 0))     # LSOF cleared
         self._flag(I_SOF)
+        self._arm_frame_timer(t)
 
     def _match(self, x) -> int | None:
         if self.chip is None or getattr(self, "lp_frozen", False) or not self._sie_runs():
             return None                                      # also: USBEN off, powered down, FRES, no 48 MHz
-        da =self._g(OFF_DADDR)
+        da = self._g(OFF_DADDR)
         if not da & 0x80 or x.addr != da & 0x7F:
             return None
+        if self._g(OFF_ISTR) & I_RESET:
+            return None                                      # 23.5.1 RESET: no transfers until RESET is cleared
         if self.pma is None:
             self._warn_once("pma", f"{self.name}: no stm32f1.pma block: the packet memory is missing")
             return None
@@ -544,11 +646,14 @@ class UsbFsDevice(GatedBlock):
         e = self._g(4 * n)
         if (e >> 9) & 3 != CONTROL or (e & STAT_RX) == 0:
             return None
+        if e & CTR_RX:
+            return None          # 23.4.2: CTR_RX still pending -> the SETUP is discarded without a handshake
         addr, cnt = self._buf(n, 1)
         pma = self.pma
         size = self._rx_size(pma.r16(cnt))
         data = bytes(x.data)
         if len(data) > size:
+            pma.write_bytes(addr, data[:size])               # copied up to the last allocated location
             return self._stall()
         pma.write_bytes(addr, data)
         pma.w16(cnt, (pma.r16(cnt) & 0xFC00) | len(data))
@@ -578,23 +683,27 @@ class UsbFsDevice(GatedBlock):
         if typ == CONTROL and e & EP_KIND and data:
             return self._stall()                             # STATUS_OUT: only a zero-length OUT is accepted
         tog = 1 if e & DTOG_RX else 0
-        if dbl and tog == (1 if e & DTOG_TX else 0):
+        live = dbl and n in self._dbl_live
+        if live and tog == (1 if e & DTOG_TX else 0):
             return self._nak()                               # both buffers held by the application
         if typ != ISO and got != tog:
             return "ACK"                                     # retransmission after a lost ACK: ignored
         addr, cnt = self._buf(n, tog if dbl else 1)
         pma = self.pma
         size = self._rx_size(pma.r16(cnt))
-        if len(data) > size:
+        if len(data) > size:                                 # 23.4.2: buffer overrun -> STALL, no CTR, data
+            pma.write_bytes(addr, data[:size])               # copied only up to the last allocated location
             self._warn_once(f"ovr{n}", f"{self.name}: EP{n}R OUT packet of {len(data)} bytes, RX buffer holds "
                             f"{size}: buffer overrun, STALL")
             return self._stall()
         pma.write_bytes(addr, data)
         pma.w16(cnt, (pma.r16(cnt) & 0xFC00) | len(data))
-        new = (e & ~SETUP) | CTR_RX
+        new = (e & ~SETUP) | CTR_RX if not e & CTR_RX else e   # SETUP is frozen while CTR_RX = 1 (23.5.2)
         new ^= DTOG_RX
-        if not dbl and typ != ISO:
+        if not live and typ != ISO:
             new = (new & ~STAT_RX) | (NAK << 12)
+        if dbl:
+            self._dbl_live.add(n)            # 23.4.3: the first transaction after DBL_BUF ends like a plain one
         self._s(o, new)
         self.stats["out"] += 1
         self._update_irq()
@@ -614,14 +723,15 @@ class UsbFsDevice(GatedBlock):
             return self._nak()
         typ = (e >> 9) & 3
         dbl = typ == BULK and bool(e & EP_KIND)
+        live = dbl and n in self._dbl_live
         tog = 1 if e & DTOG_TX else 0
-        if dbl and tog == (1 if e & DTOG_RX else 0):
+        if live and tog == (1 if e & DTOG_RX else 0):
             return self._nak()                               # no buffer filled by the application
         addr, cnt = self._buf(n, tog if dbl else 0)
         pma = self.pma
         count = pma.r16(cnt) & 0x3FF
         data = pma.read_bytes(addr, count)
-        self._in_pending[n] = (tog, int(dbl or typ == ISO))
+        self._in_pending[n] = (tog, int(live or typ == ISO), int(dbl))
         return ("DATA1" if tog else "DATA0", data)
 
     def usb_in_done(self, bus, x, acked: bool, t: float) -> None:
@@ -630,12 +740,14 @@ class UsbFsDevice(GatedBlock):
         n = next((k for k in self._in_pending if self.mem[4 * k] & EA == x.ep), None)
         if n is None:
             return
-        _tog, keep_valid = self._in_pending.pop(n)
+        _tog, keep_valid, dbl = self._in_pending.pop(n)
         o = 4 * n
         e = self._g(o)
         new = (e | CTR_TX) ^ DTOG_TX
         if not keep_valid:
             new = (new & ~STAT_TX) | (NAK << 4)
+        if dbl:
+            self._dbl_live.add(n)
         self._s(o, new)
         self.stats["in"] += 1
         self._update_irq()

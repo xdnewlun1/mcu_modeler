@@ -1,0 +1,21 @@
+# 32F429IDISCOVERY-style board: STM32F429ZI (LQFP144) + 8 MB SDRAM on FMC SDRAM bank 2 (SDNE1 PB6 / SDCKE1 PB5,
+# 0xD0000000; IS42S16400J-like, chipem.devices.sdram) + a 240x320 RGB TFT on the LCD-TFT controller (ILI9341 in RGB
+# mode on the real board: 18 data lines R2..R7, G2..G7, B2..B7, MSB-aligned; HSYNC/VSYNC/DE active low).
+#   A runs firmware/samples_stm32f429/ltdc_sdram.c: 180 MHz, SDRAM init, LCD_CLK 6 MHz (PLLSAI), layer 1 RGB565 colour
+#     bars in SDRAM, layer 2 L8/CLUT/colour-keyed checkerboard with constant alpha 0x80 moved by 8 pixels with
+#     vertical-blanking reloads; PG13 (LD3) toggles every frame (15.307 ms); USART1 (PA9) prints the counts.
+#   LCD (lcd_panel part): keeps the last frame (state(): frames, CRC, centre pixel; frame_rgb() / frame_ppm()).
+# Run:   chipem run --board boards/stm32f429zi_disco_lcd.yaml --for 250ms
+#        chipem serve --board boards/stm32f429zi_disco_lcd.yaml
+# Build: firmware/samples_stm32f429/build.sh
+name: stm32f429zi_disco_lcd
+chips:
+  - {id: A, chip: stm32f429zi, firmware: ../firmware/samples_stm32f429/build/ltdc_sdram.elf}
+devices:
+  - {type: sdram, chip: A, bus: FMC, bank: 2, banks: 4, rows: 4096, cols: 256, width: 16}
+parts:
+  - {id: LCD, type: lcd_panel, width: 240, height: 320, hsync: L, vsync: L, de: L, bits: 6,
+     ports: {clk: A.PG7, hsync: A.PC6, vsync: A.PA4, de: A.PF10,
+             r2: A.PC10, r3: A.PB0, r4: A.PA11, r5: A.PA12, r6: A.PB1, r7: A.PG6,
+             g2: A.PA6, g3: A.PG10, g4: A.PB10, g5: A.PB11, g6: A.PC7, g7: A.PD3,
+             b2: A.PD6, b3: A.PG11, b4: A.PG12, b5: A.PA3, b6: A.PB8, b7: A.PB9}}

@@ -335,6 +335,33 @@ class Camera(Part):
         self._flush_wave(self.now() if self.board is not None else None)
         super().detach()
 
+    # ---------------------------------------------------------------- UI preview (side-effect free)
+    def frame_info(self) -> dict:
+        """Size and sequence number of the frame `frame_view` shows (the UI refetches when `seq` changes)."""
+        return {"w": self.width, "h": self.height, "seq": self.frames, "format": self.fmt}
+
+    def frame_view(self, max_w: int = 320) -> dict:
+        """The last frame sent (frame 0 before the first one) as RGB888, downscaled to <= max_w pixels wide."""
+        w, h = self.width, self.height
+        step = max(1, -(-w // max(1, max_w)))
+        frame = max(0, self.frames - 1)
+        mx = (1 << self.bits) - 1
+        out = bytearray()
+        for y in range(0, h, step):
+            s = self.line_samples(y, frame)
+            for x in range(0, w, step):
+                if self.bpp == 1:
+                    g = s[x] * 255 // mx if x < len(s) else 0
+                    out += bytes((g, g, g))
+                elif self.fmt == "rgb565":
+                    v = (s[2 * x] << 8 | s[2 * x + 1]) if 2 * x + 1 < len(s) else 0
+                    out += bytes(((v >> 11 & 31) * 255 // 31, (v >> 5 & 63) * 255 // 63, (v & 31) * 255 // 31))
+                else:                                      # yuv422: luma only
+                    g = s[2 * x] if 2 * x < len(s) else 0
+                    out += bytes((g, g, g))
+        return {"w": len(range(0, w, step)), "h": len(range(0, h, step)), "src_w": w, "src_h": h,
+                "format": "rgb", "seq": self.frames, "data": bytes(out)}
+
     def state(self) -> dict:
         return {"frames": self.frames, "lines": self.lines, "line": self.line_no, "in_frame": self.in_frame,
                 "size": f"{self.width}x{self.height}", "format": self.fmt, "sync": self.sync,

@@ -110,7 +110,9 @@ def test_rtc_alarm(desc):
     gaps = [b - a for a, b in zip(t, t[1:])]
     assert len(t) == 3 and all(abs(g - 1e9) < 1e3 for g in gaps)   # 32768 / (32767 + 1) = 1 Hz
     alarm = ev["PB1"][-1]
-    assert alarm[1] == "H" and abs(alarm[0] - t[1]) < 50e3        # ALR = 2: with the second tick (CNT 1 -> 2)
+    # ALR = 2: ALRF comes on the last RTCCLK cycle before CNT reaches ALR + 1 (RM0008 18.3.5, Figure 180), i.e. with
+    # the third second flag (CNT 2 -> 3), not when CNT becomes 2
+    assert alarm[1] == "H" and abs(alarm[0] - t[2]) < 50e3
     assert chip.bus.read(0x40006C04, 4) == 1                        # BKP_DR1 boot counter
 
 

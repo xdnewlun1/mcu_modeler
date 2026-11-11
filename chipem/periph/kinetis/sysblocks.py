@@ -69,7 +69,8 @@ class MCM(_WarnOnce, MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {"CR": {"on_write": self._cr_write},
-              "ISCR": {"w1c_mask": 0x6, "on_read": self._iscr_read, "on_write": self._iscr_write},
+              "ISCR": {"w1c_mask": 0x6, "on_read": self._iscr_read, "on_write": self._iscr_write,
+                       "on_peek": lambda b, r: self._iscr_value()},
               "ETBCC": {"on_write": self._etbcc_write},
               "ETBRL": {"on_write": self._etbrl_write},
               "ETBCNT": {"ro_mask": 0xFFFFFFFF},
@@ -282,7 +283,8 @@ class MPU(_WarnOnce, GatedBlock):
             ov[f"RGD{n}_WORD1"] = {"reset": rst1, "ro_mask": 0x1F, "on_write": self._word_write(n, 1)}
             ov[f"RGD{n}_WORD2"] = {"reset": rst2, "on_write": self._word_write(n, 2)}
             ov[f"RGD{n}_WORD3"] = {"reset": rst3, "ro_mask": 0x0000FFFE, "on_write": self._word_write(n, 3)}
-            ov[f"RGDAAC{n}"] = {"reset": rst2, "on_read": self._aac_read(n), "on_write": self._aac_write(n)}
+            ov[f"RGDAAC{n}"] = {"reset": rst2, "on_read": self._aac_read(n), "on_write": self._aac_write(n),
+                               "on_peek": self._aac_read(n)}
         r = build_regs((name, "MPU"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self._warned: set[str] = set()

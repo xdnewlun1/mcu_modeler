@@ -1,55 +1,67 @@
-"""STM32F1 GPIO ports and AFIO (RM0008 ch. 9 layout: CRL/CRH/IDR/ODR/BSRR/BRR/LCKR; AFIO EVCR/MAPR/EXTICR1-4).
+"""STM32F1 GPIO ports and AFIO (RM0008 ch. 9: CRL/CRH/IDR/ODR/BSRR/BRR/LCKR; AFIO EVCR/MAPR/EXTICR1-4/MAPR2).
 
-Not verified against RM0008 (not available when written): register layout from the SVD, behaviour as documented by
-ST for the F1 family (see docs/LIMITATIONS.md "STM32F103T6").
+Verified against RM0008 Rev 21 ch. 9 (9.1 functional description, Tables 20/21, 9.2 GPIO registers, 9.3 remap tables
+34-58, 9.4 AFIO registers) and 31.4 (SWJ debug pins).  This module is the only F1 code that turns pin registers into
+PinBoard state (`mcu_update`) and pin levels into IDR.  There is no per-pin alternate-function number on the F1: a pin
+configured as "alternate function output" is driven by the peripheral output that the AFIO remap routes to it, and
+every peripheral input reads its pin whatever the mode (9.1.4).
 
-This module is the only F1 code that turns pin registers into PinBoard state (`mcu_update`) and pin levels into IDR.
-There is no per-pin alternate-function number on the F1: a pin configured as "alternate function output" is driven by
-the peripheral output that the AFIO remap routes to it, and every peripheral input reads its pin whatever the mode.
-
-Per pin, 4 bits in CRL (pins 0-7) / CRH (8-15): MODE[1:0] (00 input, 01/10/11 output 10/2/50 MHz) and CNF[1:0]:
-* input  CNF 00 analog: owner = the pin's ADC channel ("ADC12_IN0"), else "analog"; direction "analog".
-         CNF 01 floating (reset state), CNF 10 pull-up (ODR bit = 1) / pull-down (ODR bit = 0), CNF 11 reserved
-         (treated as floating, one `warn`).  Owner "GPIO", or the peripheral input routed here when its block is
-         clocked and uses the input: USARTx_RX/CTS, CAN_RX (clock on), SPIx_* (stm32.spi `signal_state` says input),
-         TIMx_CHn in input-capture mode (CCxS != 0), TIMx_ETR (external clock / ETR trigger), TIMx_BKIN (BDTR.BKE).
-* output CNF 00 push-pull / 01 open-drain: owner "GPIO", drive = ODR bit (open-drain 1 = released, direction "in").
+Per pin, 4 bits in CRL (pins 0-7) / CRH (8-15), reset 0x44444444 = floating inputs (9.1.1, 9.2.1/9.2.2, Table 20):
+MODE[1:0] (00 input, 01/10/11 output 10/2/50 MHz, Table 21; the speed only changes edge rates on silicon) and CNF:
+* input  CNF 00 analog: Schmitt trigger off, IDR bit reads 0, no pull (9.1.10); owner = the pin's ADC channel
+         ("ADC12_IN0"), else "analog".  CNF 01 floating, CNF 10 pull-up (ODR bit = 1) / pull-down (ODR bit = 0)
+         (Table 20), CNF 11 reserved (treated as floating, one `warn`).  Owner "GPIO", or the peripheral input routed
+         here when its block is clocked and uses it: USARTx_RX/CTS, CAN_RX, SPIx_* (stm32.spi `signal_state`),
+         TIMx_CHn in input-capture mode, TIMx_ETR, TIMx_BKIN (BDTR.BKE).
+* output CNF 00 push-pull / 01 open-drain (1 = Hi-Z, 9.1.8), pulls off; owner "GPIO", drive = ODR bit.
          CNF 10 AF push-pull / 11 AF open-drain: owner = the routed peripheral output whose block is clocked (the first
-         in Table 5 order when several are; DS15060 note 4: enable only one), direction/idle drive from the F1 signal
-         table (`signals.py`), overridden live like stm32.gpio (stm32.tim `signal_driven`, stm32.spi `signal_state`).
-         No routed output at all: owner "disabled", one `warn`.
+         in the data sheet's order when several are); direction/idle drive from the F1 signal table (`signals.py`),
+         overridden live (stm32.tim `signal_driven`, stm32.spi `signal_state`).  No routed output: owner "disabled"
+         (9.1.4: "its output is not specified"), one `warn`.
 Pins that a system function owns whatever CRL/CRH say:
-* SWJ debug pins (PA13 JTMS/SWDIO, PA14 JTCK/SWCLK, PA15 JTDI, PB3 JTDO, PB4 NJTRST) until AFIO_MAPR.SWJ_CFG releases
-  them (001: NJTRST; 010: JTAG-DP off, SW-DP on (PA15/PB3/PB4 free); 100: all free; SWJ_CFG is write-only and
-  reads 0).  Internal pulls as on silicon: JTMS/JTDI/NJTRST pull-up, JTCK pull-down.
-* OSC_IN/OSC_OUT (PD0/PD1 on the 36/48/64-pin parts): oscillator pins unless AFIO_MAPR.PD01_REMAP = 1 and the HSE is
-  off (the HSE takes them back when HSEON = 1).
-* USBDM/USBDP (PA11/PA12): the USB transceiver as soon as the USB block is clocked and powered (CNTR.PDWN = 0,
-  stm32f1.usb `transceiver_on()`).
-Remap: AFIO_MAPR SPI1/I2C1/USART1/USART2/TIM1/TIM2/TIM3/CAN/PD01 fields move signals between pins (`REMAP` table
-below); a MAPR write re-evaluates every port.
+* SWJ debug pins (Table 36/37, 31.4): PA13 JTMS/SWDIO, PA14 JTCK/SWCLK, PA15 JTDI, PB3 JTDO, PB4 NJTRST until
+  AFIO_MAPR.SWJ_CFG releases them (000 all; 001 NJTRST free; 010 JTAG-DP off, SW-DP on: PA15/PB3/PB4 free; 100 all
+  free; other values: no effect, the previous configuration stays).  Internal pulls JTMS/JTDI/NJTRST up, JTCK down
+  (31.4.3); JTDO is tri-stated without a debugger (31.4.4).  DBGMCU_CR.TRACE_IOEN (31.16.3) takes PB3 as TRACESWO in
+  asynchronous mode even when SWJ_CFG released it (Table 37 note 1), and TRACECK/TRACED0-3 (PE2-PE6) in synchronous
+  mode (1/2/4 data pins).  SWJ_CFG is write-only: it reads 0 here (RM: undefined).
+* OSC_IN/OSC_OUT (PD0/PD1 on the 36/48/64-pin parts, 9.3.2): oscillator pins unless AFIO_MAPR.PD01_REMAP = 1 and the
+  HSE is off.  Their EXTI function is not remapped (stm32f1.exti ignores them).
+* USBDM/USBDP (PA11/PA12): the USB transceiver once the USB block is clocked and powered (stm32f1.usb).
+* WKUP (PA0): input with pull-down while PWR_CSR.EWUP = 1 (RM0008 5.4.2).
+Remap: AFIO_MAPR (and MAPR2 on XL density) fields move signals between pins (`REMAP` tables below, 9.3.3-9.3.12);
+a MAPR write re-evaluates every port.  Pins a package does not bond are simply not routed anywhere.
+Product lines (`params.density` of stm32f1.afio: low / medium / high / xl, default low; `LINES`, `register_line()`):
+the MAPR remap table and writable bits, and whether MAPR2 exists (XL only, 9.4.7; reserved, reads 0, elsewhere).  The
+connectivity line registers its own table (ETH/CAN2/SPI3/MII_RMII_SEL/TIM2ITR1/PTP_PPS fields) with
+`register_line("cl", ...)` from its module.  Internal remaps (TIM5CH4_IREMAP: LSI on TIM5_CH4; ADCx_ETRGINJ/REG_REMAP:
+TIM8 triggers instead of EXTI15/EXTI11, Tables 38-42) are stored and read with `AFIO.internal_remap(name)`.
 
-IDR = resolved levels of all pins (H -> 1, L/X -> 0) except analog-mode pins (read 0); floating reads warn once per
-pin after the firmware configured it.  Cached and invalidated by PinBoard input listeners (IDR polling is one attribute
-read).  ODR, BSRR (bits 0-15 set, 16-31 reset; set wins) and BRR (bits 0-15 reset) drive outputs (and choose the pull
-of pull-mode inputs).  LCKR: write LCKK=1, 0, 1 with the same mask, then read: the CRL/CRH fields of the locked pins
-are frozen until reset (writes ignored, one `warn`).  Pin-report hooks (chipem.pinreport) as in stm32.gpio.
+IDR (9.2.3) = resolved levels of the pins (H -> 1, L/X -> 0) except analog-mode pins (read 0); floating reads warn
+once per pin after the firmware configured it.  Cached and invalidated by PinBoard input listeners.  ODR, BSRR (bits
+0-15 set, 16-31 reset; set wins, 9.2.5) and BRR (bits 0-15 reset, 9.2.6) drive outputs and choose the pull of
+pull-mode inputs.  LCKR (9.2.7): write LCKK=1, 0, 1 with the same LCK[15:0], read (LCKK reads 0), read (LCKK reads 1:
+locked); any other access in between aborts the sequence; locked CRL/CRH fields are frozen until reset (writes ignored,
+one `warn`) and LCK[15:0] can no longer change.  Not modelled: the 32-bit-only access rule (9.2: half-word/byte
+accesses are not allowed; they work here), EVCR's EVENTOUT pulse on the selected pin (stored only), output speed.
+Pin-report hooks (chipem.pinreport) as in stm32.gpio.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
-from ._util import GatedBlock, build_regs, gpio_ports, rcc
+from ._util import GatedBlock, build_regs, find_model, gpio_ports, rcc
 from .signals import TABLE as SIGNALS
 
 _TIM_CH = re.compile(r"(TIM\d+)_CH(\d)(N?)(?:_|$)")
 LCKK = 1 << 16
 
-# AFIO_MAPR remap fields: name -> (lsb, width, {field value: {signal: "Pxn"}})   (RM0008 9.3 remap tables; low-,
-# medium- and high-density pin names; pins absent from a package are simply not routed anywhere)
+# AFIO_MAPR remap fields: name -> (lsb, width, {field value: {signal: "Pxn"}})   (RM0008 9.4.2 bit definitions and
+# the remap tables 34, 43-46, 52-56; low-, medium-, high- and XL-density pin names).  A field value missing from the
+# dict is "not used" (no pin); an empty dict means the signal is routed internally (no pin).
 REMAP: dict[str, tuple[int, int, dict[int, dict[str, str]]]] = {
     "SPI1": (0, 1, {0: {"SPI1_NSS": "PA4", "SPI1_SCK": "PA5", "SPI1_MISO": "PA6", "SPI1_MOSI": "PA7"},
                     1: {"SPI1_NSS": "PA15", "SPI1_SCK": "PB3", "SPI1_MISO": "PB4", "SPI1_MOSI": "PB5"}}),
@@ -59,6 +71,12 @@ REMAP: dict[str, tuple[int, int, dict[int, dict[str, str]]]] = {
                           "USART2_CK": "PA4"},
                       1: {"USART2_CTS": "PD3", "USART2_RTS": "PD4", "USART2_TX": "PD5", "USART2_RX": "PD6",
                           "USART2_CK": "PD7"}}),
+    "USART3": (4, 2, {0: {"USART3_TX": "PB10", "USART3_RX": "PB11", "USART3_CK": "PB12", "USART3_CTS": "PB13",
+                          "USART3_RTS": "PB14"},
+                      1: {"USART3_TX": "PC10", "USART3_RX": "PC11", "USART3_CK": "PC12", "USART3_CTS": "PB13",
+                          "USART3_RTS": "PB14"},
+                      3: {"USART3_TX": "PD8", "USART3_RX": "PD9", "USART3_CK": "PD10", "USART3_CTS": "PD11",
+                          "USART3_RTS": "PD12"}}),
     "TIM1": (6, 2, {0: {"TIM1_ETR": "PA12", "TIM1_CH1": "PA8", "TIM1_CH2": "PA9", "TIM1_CH3": "PA10",
                         "TIM1_CH4": "PA11", "TIM1_BKIN": "PB12", "TIM1_CH1N": "PB13", "TIM1_CH2N": "PB14",
                         "TIM1_CH3N": "PB15"},
@@ -75,14 +93,53 @@ REMAP: dict[str, tuple[int, int, dict[int, dict[str, str]]]] = {
     "TIM3": (10, 2, {0: {"TIM3_CH1": "PA6", "TIM3_CH2": "PA7", "TIM3_CH3": "PB0", "TIM3_CH4": "PB1"},
                      2: {"TIM3_CH1": "PB4", "TIM3_CH2": "PB5", "TIM3_CH3": "PB0", "TIM3_CH4": "PB1"},
                      3: {"TIM3_CH1": "PC6", "TIM3_CH2": "PC7", "TIM3_CH3": "PC8", "TIM3_CH4": "PC9"}}),
+    "TIM4": (12, 1, {0: {"TIM4_CH1": "PB6", "TIM4_CH2": "PB7", "TIM4_CH3": "PB8", "TIM4_CH4": "PB9"},
+                     1: {"TIM4_CH1": "PD12", "TIM4_CH2": "PD13", "TIM4_CH3": "PD14", "TIM4_CH4": "PD15"}}),
     "CAN": (13, 2, {0: {"CAN_RX": "PA11", "CAN_TX": "PA12"}, 2: {"CAN_RX": "PB8", "CAN_TX": "PB9"},
                     3: {"CAN_RX": "PD0", "CAN_TX": "PD1"}}),
+    "TIM5CH4_I": (16, 1, {0: {"TIM5_CH4": "PA3"}, 1: {}}),        # 1: LSI -> TIM5_CH4 internally (Table 42)
 }
+# AFIO_MAPR2 (XL density only, 9.4.7, Tables 47-51)
+REMAP2_XL: dict[str, tuple[int, int, dict[int, dict[str, str]]]] = {
+    "TIM9": (5, 1, {0: {"TIM9_CH1": "PA2", "TIM9_CH2": "PA3"}, 1: {"TIM9_CH1": "PE5", "TIM9_CH2": "PE6"}}),
+    "TIM10": (6, 1, {0: {"TIM10_CH1": "PB8"}, 1: {"TIM10_CH1": "PF6"}}),
+    "TIM11": (7, 1, {0: {"TIM11_CH1": "PB9"}, 1: {"TIM11_CH1": "PF7"}}),
+    "TIM13": (8, 1, {0: {"TIM13_CH1": "PA6"}, 1: {"TIM13_CH1": "PF8"}}),
+    "TIM14": (9, 1, {0: {"TIM14_CH1": "PA7"}, 1: {"TIM14_CH1": "PF9"}}),
+    "FSMC_NADV": (10, 1, {0: {"FSMC_NADV": "PB7"}, 1: {}}),      # 1: NADV not connected, the pin is free
+}
+# internal remaps (no pin): name -> MAPR bit (9.4.2; high/XL density)
+INTERNAL_REMAP = {"TIM5CH4_IREMAP": 16, "ADC1_ETRGINJ_REMAP": 17, "ADC1_ETRGREG_REMAP": 18,
+                  "ADC2_ETRGINJ_REMAP": 19, "ADC2_ETRGREG_REMAP": 20}
+MAPR_RW = 0x001FFFFF | (7 << 24)          # low/medium/high/XL bit map (9.4.2): fields 0-20, SWJ_CFG 24-26
+
+# product line -> remap tables and writable bits (see register_line)
+LINES: dict[str, dict[str, Any]] = {}
+
+
+def register_line(name: str, remap: dict, mapr_rw: int, remap2: dict | None = None, mapr2_rw: int = 0) -> None:
+    """Declare the AFIO layout of a product line: `remap` (MAPR fields as in REMAP), `mapr_rw` (writable MAPR bits,
+    SWJ_CFG included), optional MAPR2 fields `remap2` with their writable bits `mapr2_rw` (0: MAPR2 reserved)."""
+    LINES[name] = {"remap": remap, "mapr_rw": mapr_rw, "remap2": remap2 or {}, "mapr2_rw": mapr2_rw}
+
+
+for _d in ("low", "medium", "high"):
+    register_line(_d, REMAP, MAPR_RW)
+register_line("xl", REMAP, MAPR_RW, REMAP2_XL, 0x7E0)
+
 PD01_REMAP = 1 << 15
 SWJ_RELEASE = {0: (), 1: ("NJTRST",), 2: ("JTDI", "JTDO", "NJTRST"), 4: ("JTMS", "JTCK", "JTDI", "JTDO", "NJTRST")}
 DEBUG_PULL = {"JTMS": "up", "JTDI": "up", "NJTRST": "up", "JTCK": "down"}
-# signal -> remap field it belongs to
+TRACE_SYNC_PINS = {"TRACECK": 1, "TRACED0": 1, "TRACED1": 2, "TRACED2": 3, "TRACED3": 3}   # min TRACE_MODE
+# signal -> remap field it belongs to (low/medium/high density MAPR table; per-instance tables in AFIO)
 SIGNAL_FIELD = {sig: f for f, (_, _, vals) in REMAP.items() for v in vals.values() for sig in v}
+
+
+def _set_ro(reg: Any, ro: int) -> None:
+    """Replace the read-only mask of `reg` (reserved bits read 0)."""
+    reset, _, w1c = reg._raw
+    reg._raw = (reset & ~ro, ro, w1c)
+    reg.set_unit_bits(reg.unit_bits)
 
 
 def _block_of(sig: str) -> str:
@@ -94,16 +151,32 @@ def _block_of(sig: str) -> str:
 
 @register("stm32f1.afio")
 class AFIO(GatedBlock):
-    """AFIO: MAPR (remap, SWJ_CFG), EXTICR1-4 (EXTI line -> port), EVCR (Cortex EVENTOUT pin, stored)."""
+    """AFIO: MAPR (remap, SWJ_CFG), MAPR2 (XL), EXTICR1-4 (EXTI line -> port), EVCR (Cortex EVENTOUT pin, stored)."""
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         self.gate = "AFIO"
+        self.density = str(params.get("density") or params.get("line") or "low").lower()
+        if self.density not in LINES:
+            raise ValueError(f"stm32f1.afio: unknown density/line {self.density!r} (known: {sorted(LINES)})")
+        line = LINES[self.density]
+        self.remap_tables: list[tuple[str, dict]] = [("MAPR", line["remap"])]
+        if line["mapr2_rw"]:
+            self.remap_tables.append(("MAPR2", line["remap2"]))
         ov = {"MAPR": {"on_write": self._mapr_write, "on_read": self._mapr_read}}
+        if line["mapr2_rw"]:
+            ov["MAPR2"] = {"on_write": self._mapr_write}
         for k in range(1, 5):
             ov[f"EXTICR{k}"] = {"on_write": self._exticr_write, "ro_mask": 0xFFFF0000}
         r = build_regs((name, "AFIO"), size, ov, params.get("regs_file"))
+        for reg in r:
+            if reg.name == "MAPR":
+                _set_ro(reg, ~line["mapr_rw"] & 0xFFFFFFFF)
+            elif reg.name == "MAPR2":
+                _set_ro(reg, ~line["mapr2_rw"] & 0xFFFFFFFF)
         super().__init__(name, base, size, r, log=log, params=params)
+        self._sig_field = {sig: (rn, f) for rn, tab in self.remap_tables for f, (_, _, vals) in tab.items()
+                           for v in vals.values() for sig in v}
         self.swj = 0
         self.exti: Any = None              # stm32f1.exti (sets itself here): told about EXTICR changes
         self.listeners: list = []          # cb() after a MAPR change
@@ -116,7 +189,7 @@ class AFIO(GatedBlock):
         # the pin owner depends on how the peripheral uses a signal (USART CR3.CTSE, TIM CCxS, I2C PE ...): re-evaluate
         # the pins of a block after a write to one of its configuration registers (wrapped on_write hooks; config
         # writes are rare, the data/status paths are not touched)
-        blocks = {_block_of(s) for f in REMAP.values() for v in f[2].values() for s in v}
+        blocks = {_block_of(s) for _, tab in self.remap_tables for f in tab.values() for v in f[2].values() for s in v}
         board = getattr(chip, "pins", None)
         if board is not None:
             for p in board.pins:
@@ -158,18 +231,31 @@ class AFIO(GatedBlock):
             self._gate_ok()
         MMIOBlock.write(self, offset, size, value)
 
+    def _field(self, regname: str, field: str) -> int:
+        tab = dict(self.remap_tables)[regname]
+        lsb, width, _ = tab[field]
+        return (self.get(regname) >> lsb) & ((1 << width) - 1)
+
     def remap(self, field: str) -> int:
-        lsb, width, _ = REMAP[field]
-        return (self.get("MAPR") >> lsb) & ((1 << width) - 1)
+        """Current value of remap field `field` (MAPR, or MAPR2 on XL density)."""
+        for rn, tab in self.remap_tables:
+            if field in tab:
+                return self._field(rn, field)
+        raise KeyError(field)
+
+    def internal_remap(self, name: str) -> bool:
+        """Internal remap bit (INTERNAL_REMAP: TIM5CH4_IREMAP, ADCx_ETRGINJ_REMAP / ADCx_ETRGREG_REMAP)."""
+        return bool(self.get("MAPR") >> INTERNAL_REMAP[name] & 1)
 
     def signal_pin(self, sig: str) -> str | None:
-        """GPIO name the remap routes `sig` to now (None: not a remappable signal, or no pin for this value)."""
-        f = SIGNAL_FIELD.get(sig)
-        if f is None:
+        """GPIO name the remap routes `sig` to now (None: not a remappable signal; "": no pin for this value)."""
+        rf = self._sig_field.get(sig)
+        if rf is None:
             return None
-        lsb, width, vals = REMAP[f]
-        v = (self.get("MAPR") >> lsb) & ((1 << width) - 1)
-        if v not in vals:                    # reserved value (e.g. TIM3_REMAP = 01): no pin
+        rn, f = rf
+        lsb, width, vals = dict(self.remap_tables)[rn][f]
+        v = (self.get(rn) >> lsb) & ((1 << width) - 1)
+        if v not in vals:                    # "not used" value (e.g. TIM3_REMAP = 01): no pin
             return ""
         return vals[v].get(sig, "")
 
@@ -178,36 +264,36 @@ class AFIO(GatedBlock):
 
     def released(self, fn: str) -> bool:
         """Is SWJ debug function `fn` (JTMS, JTDO ...) released to GPIO by SWJ_CFG?"""
-        return fn in SWJ_RELEASE.get(self.swj, ("JTMS", "JTCK", "JTDI", "JTDO", "NJTRST"))
+        return fn in SWJ_RELEASE.get(self.swj, ())
 
     def exti_port(self, line: int) -> int:
         """Port index (0 = A) selected for EXTI line 0..15."""
         reg = f"EXTICR{line // 4 + 1}"
         return (self.get(reg) >> (4 * (line % 4))) & 0xF
 
+    @pure_read
     def _mapr_read(self, blk, reg):
-        return self.get("MAPR") & ~(7 << 24)          # SWJ_CFG is write-only
+        return self.get("MAPR") & ~(7 << 24)          # SWJ_CFG is write-only (reads undefined; 0 here)
 
     def _mapr_write(self, blk, reg, old, new):
-        swj = (new >> 24) & 7
-        if swj != self.swj:
-            if swj not in SWJ_RELEASE:
-                self.emit("warn", block=self.name, msg=f"AFIO_MAPR.SWJ_CFG = {swj:03b} is reserved")
-            elif swj:
-                self.emit("info", block=self.name, msg=f"SWJ_CFG = {swj:03b}: " + ", ".join(SWJ_RELEASE[swj])
-                          + " released to GPIO")
-            self.swj = swj
-        new &= ~(7 << 24)
+        if reg.name == "MAPR":
+            swj = (new >> 24) & 7
+            if swj in SWJ_RELEASE and swj != self.swj:         # other values: no effect (9.4.2)
+                if swj:
+                    self.emit("info", block=self.name, msg=f"SWJ_CFG = {swj:03b}: " + ", ".join(SWJ_RELEASE[swj])
+                              + " released to GPIO")
+                self.swj = swj
+            new &= ~(7 << 24)
         self._store(reg, new)
         if old != new:
-            for f, (lsb, width, vals) in REMAP.items():
+            for f, (lsb, width, vals) in dict(self.remap_tables)[reg.name].items():
                 v = (new >> lsb) & ((1 << width) - 1)
                 if v != (old >> lsb) & ((1 << width) - 1):
                     if v not in vals:
-                        self.emit("warn", block=self.name, msg=f"AFIO_MAPR.{f}_REMAP = {v} is reserved: no pin")
+                        self.emit("warn", block=self.name, msg=f"AFIO_{reg.name}.{f}_REMAP = {v} is not used: no pin")
                     else:
-                        self.emit("info", block=self.name, msg=f"{f} remap {v}: " + ", ".join(
-                            f"{s}->{p}" for s, p in vals[v].items()))
+                        self.emit("info", block=self.name, msg=f"{f} remap {v}: " + (", ".join(
+                            f"{s}->{p}" for s, p in vals[v].items()) or "internal / not connected"))
         if self.chip is not None:
             for p in gpio_ports(self.chip):
                 p.resync_all()
@@ -231,11 +317,11 @@ class GPIO(GatedBlock):
         self.port = str(params.get("port") or name[-1]).upper()
         self.gate = f"GPIO{self.port}"
         ov: dict[str, dict] = {"CRL": {"on_write": self._cfg_write}, "CRH": {"on_write": self._cfg_write}}
-        ov["IDR"] = {"on_read": self._idr_read, "ro_mask": 0xFFFFFFFF}
+        ov["IDR"] = {"on_read": self._idr_read, "ro_mask": 0xFFFFFFFF, "on_peek": self._idr_peek}
         ov["ODR"] = {"on_write": self._odr_write, "ro_mask": 0xFFFF0000}
-        ov["BSRR"] = {"on_write": self._bsrr_write, "on_read": lambda b, r: 0}
-        ov["BRR"] = {"on_write": self._brr_write, "on_read": lambda b, r: 0}
-        ov["LCKR"] = {"on_write": self._lckr_write, "on_read": self._lckr_read}
+        ov["BSRR"] = {"on_write": self._bsrr_write, "on_read": pure_read(lambda b, r: 0)}
+        ov["BRR"] = {"on_write": self._brr_write, "on_read": pure_read(lambda b, r: 0)}
+        ov["LCKR"] = {"on_write": self._lckr_write, "on_read": self._lckr_read, "on_peek": self._lckr_peek}
         r = build_regs((name, f"GPIO{self.port}", "GPIOA"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.pins: list[Any] = [None] * 16
@@ -252,6 +338,8 @@ class GPIO(GatedBlock):
         self._state: list[tuple | None] = [None] * 16
         self._cands: list[tuple] = [()] * 16     # (signal, ...) offered by each pin (AF + REMAP columns)
         self._afio: Any = None
+        self._pwr_blk: Any = None
+        self._dbg_blk: Any = None
         self._rep: Any = None
         self.n_idr = 0
         self._rd_acc = [0] * 16
@@ -352,7 +440,8 @@ class GPIO(GatedBlock):
         r = rcc(self.chip) if self.chip is not None else None
         blk = _block_of(sig)
         if blk == "RCC":
-            return r is not None and ((r.get("CFGR") >> 24) & 4) != 0       # MCO selects a clock
+            sel = getattr(r, "mco_enabled", None)                          # connectivity line: MCO[3:0] (8.3.2)
+            return r is not None and (sel() if sel is not None else ((r.get("CFGR") >> 24) & 4) != 0)
         if r is None:
             return True
         if blk not in r.GATES:
@@ -433,6 +522,8 @@ class GPIO(GatedBlock):
             return 0 if inputs else 2
         live = self._signal_state(sig)
         if live is not None:                          # SPI: live direction from the block (master/slave, SPE)
+            if live[0] == "none":                     # signal not in use (stm32f1.eth: the other of MII / RMII)
+                return 0
             return 2 if (live[0] == "in") == inputs else 0
         role = SIGNALS.role(sig)
         if inputs:
@@ -463,9 +554,18 @@ class GPIO(GatedBlock):
         if dbg:
             a = self._afio
             fn0 = dbg.split("/")[0]
-            if a is None or not a.released(fn0):
+            trace = self._trace_mode()
+            if fn0 == "JTDO" and trace == 0:                   # asynchronous trace: PB3 = TRACESWO (Table 37 note 1)
+                return "TRACESWO", "out", "H", None
+            if fn0 in TRACE_SYNC_PINS and trace is not None and trace >= TRACE_SYNC_PINS[fn0]:
+                return fn0, "out", "L", None
+            if fn0 not in TRACE_SYNC_PINS and (a is None or not a.released(fn0)):
                 d, drv = SIGNALS.pin_state(dbg)
                 return dbg, d, drv, DEBUG_PULL.get(fn0)
+        if "WKUP" in str(f.get("additional") or "").split("/"):
+            p = self._pwr()
+            if p is not None and p.get("CSR") & (1 << 8):      # PWR_CSR.EWUP: WKUP forced input pull-down (5.4.2)
+                return "WKUP", "in", None, "down"
         osc = f.get("analog")
         if osc and osc.startswith("OSC"):
             a = self._afio
@@ -474,12 +574,27 @@ class GPIO(GatedBlock):
             if a is None or not a.pd01_remap() or hse:
                 return osc, "analog", None, None
         usb = f.get("additional")
-        if usb in ("USBDM", "USBDP"):
-            u = self._periph("USB")
+        if usb in ("USBDM", "USBDP", "OTG_FS_DM", "OTG_FS_DP"):        # OTG_FS_DM/DP: connectivity line (Table 30)
+            u = self._periph("OTG_FS" if usb.startswith("OTG") else "USB")
             on = getattr(u, "transceiver_on", None)
             if on is not None and on():
                 return usb, "in", None, None
         return None
+
+    def _pwr(self) -> Any:
+        if self._pwr_blk is None and self.chip is not None:
+            self._pwr_blk = find_model(self.chip, "stm32f1.pwr", "PWR") or False
+        return self._pwr_blk or None
+
+    def _trace_mode(self) -> int | None:
+        """DBGMCU_CR trace pin assignment (31.16.3): None with TRACE_IOEN = 0, else TRACE_MODE (0 async)."""
+        if self._dbg_blk is None and self.chip is not None:
+            self._dbg_blk = find_model(self.chip, "stm32f1.dbgmcu", "DBG") or False
+        d = self._dbg_blk
+        if not d:
+            return None
+        cr = d.get("CR")
+        return (cr >> 6) & 3 if cr & (1 << 5) else None
 
     def pin_config(self, i: int) -> tuple[str, str, str | None, str | None]:
         """(owner, direction, drive, pull) of pin i from the current registers."""
@@ -772,13 +887,32 @@ class GPIO(GatedBlock):
             self._lock_val = mask
         return mask
 
+    def _lckr_peek(self, blk, reg):
+        if self._lock_seq == 3:
+            return self._lock_val                 # the read completing the sequence returns LCKK = 0
+        return (self._locked | LCKK) if self._locked else None
+
+    def _idr_peek(self, blk, reg):
+        """IDR from the pin levels, without read counters, pin-report touches, warnings or the cache."""
+        v = 0
+        an = self._an_mask
+        for i, pin in enumerate(self.pins):
+            if pin is not None and not an >> i & 1 and pin.level() == "H":
+                v |= 1 << i
+        return v
+
     def _lckr_read(self, blk, reg):
         if self._lock_seq == 3:
+            # 9.2.7 sequence: write 1, write 0, write 1, read 0, read 1: the first read completes the lock and still
+            # returns LCKK = 0; the following reads return LCKK = 1
             self._lock_seq = 0
             self._locked = self._lock_val
             self.emit("info", block=self.name, msg=f"{self.name}: pins 0x{self._locked:04x} locked (LCKR)")
+            return self._locked
         if self._locked:
             return self._locked | LCKK
+        if self._lock_seq:
+            self._lock_seq = 0                 # a read in the middle of the write sequence aborts it
         return None
 
     # ------------------------------------------------------------ input
@@ -788,6 +922,9 @@ class GPIO(GatedBlock):
         return v if v is not None else self._idr_compute()
 
     def _idr_compute(self) -> int:
+        pb = self.chip.pins if self.chip is not None else None
+        if pb is not None and pb._waves:
+            pb.sync_waves()                 # waveform sources (UART TX frames): the pins' levels at this instruction
         v = 0
         rep = self._rep
         pc = rep.pc() if rep is not None else None
@@ -805,7 +942,7 @@ class GPIO(GatedBlock):
                 self.x_read_mask |= 1 << i
                 self._warn_once(("x", i), f"reading floating pin {pin.id} (no pull, nothing connected): reads 0",
                                 pin)
-        self._idr = v
+        self._idr = v if pb is None or not pb._waves else None      # no cache while a waveform is pending
         o = self.regs["IDR"].boff
         self.mem[o:o + 4] = v.to_bytes(4, "little")
         return v

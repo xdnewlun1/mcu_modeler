@@ -1,0 +1,17 @@
+# STM32F103ZE (high density, LQFP144): SPI2 master to an SPI NOR flash (CS PB12), I2C2 master to a 24C02 EEPROM at 0x50
+# (PB10 SCL / PB11 SDA, open-drain nets), SPI3 (PB3/PB4/PB5 after SWJ_CFG = 010) with MOSI looped back to MISO.
+# The firmware prints "JEDEC EF4016", "EEPROM HD I2C2", "SPI3 A5 3C" and "done" on USART1 (PA9, 115200).
+# Run:   chipem run --board boards/stm32f103ze_spi_i2c.yaml --for 20ms
+# Build: firmware/samples_stm32f1_variants/build.sh
+name: stm32f103ze_spi_i2c
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f103ze, firmware: ../firmware/samples_stm32f1_variants/build/hd_spi_i2c.elf}
+devices:
+  - {type: spi_flash, chip: A, spi: SPI2, cs: PB12, jedec: 0xEF4016}
+nets:
+  - {name: SCL, pins: [A.PB10], open_drain: true}
+  - {name: SDA, pins: [A.PB11], open_drain: true}
+  - {name: SPI3_LOOP, pins: [A.PB5, A.PB4]}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 256, ports: {sda: SDA, scl: SCL}}

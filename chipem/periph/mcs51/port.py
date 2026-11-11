@@ -31,7 +31,7 @@ class Ports(SfrBlock):
     table = ("PORTS",)
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        ov = {p: {"on_read": self._rd, "on_write": self._wr} for p in PORT_SFRS}
+        ov = {p: {"on_read": self._rd, "on_write": self._wr, "on_peek": self._peek} for p in PORT_SFRS}
         super().__init__(name, base, size, regs, params=params, log=log, overrides=ov)
         self.latch = {p: 0xFF for p in range(4)}
         self._val: list[int | None] = [None] * 4
@@ -78,13 +78,25 @@ class Ports(SfrBlock):
         p = (reg.offset >> 4) - 8
         v = self._val[p]
         if v is None:
+            pb = self.chip.pins if self.chip is not None else None
+            if pb is not None and pb._waves:
+                pb.sync_waves()             # waveform sources (UART TXD frames): the pins' levels at this instruction
             v = 0
             for b, pin in enumerate(self._pins.get(p) or ()):
                 if pin is None or pin.level() != "L":
                     v |= 1 << b
-            self._val[p] = v
+            if pb is None or not pb._waves:     # no cache while a waveform is pending
+                self._val[p] = v
         self.reads += 1
         return v
+
+    def _peek(self, blk, reg):
+        """Pin levels for the debugger: the cached value or the pins, without counting or caching."""
+        p = (reg.offset >> 4) - 8
+        v = self._val[p]
+        if v is not None:
+            return v
+        return sum(1 << b for b, pin in enumerate(self._pins.get(p) or ()) if pin is None or pin.level() != "L")
 
     def _wr(self, blk, reg, old, new):
         p = (reg.offset >> 4) - 8

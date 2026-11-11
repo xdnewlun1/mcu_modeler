@@ -80,6 +80,7 @@ from collections import deque
 from typing import Any
 
 from ...canbus import BUS_IDLE_BITS, BUSOFF_RECOVERY_BITS, CanBus, CanErrorCounters, CanFrame, pin_reason
+from ..base import peek_stored as _stored
 from ..registry import register
 from ._util import GatedBlock, build_regs, find_model, irq_number
 from .clockutil import bus_hz
@@ -143,23 +144,25 @@ class FlexCAN(GatedBlock):
             "MCR": dict(ro_mask=MCR_RO, on_write=self._mcr_write),
             "CTRL1": dict(on_write=self._ctrl1_write),
             "CTRL2": dict(on_write=self._frz_guard(0xFFFFFFFF)),
-            "TIMER": dict(ro_mask=0xFFFF0000, on_read=self._timer_read, on_write=self._timer_write),
+            "TIMER": dict(ro_mask=0xFFFF0000, on_read=self._timer_read, on_write=self._timer_write,
+                          on_peek=lambda b, r: self._timer_value(self.now_ns())),
             "RXMGMASK": dict(on_write=self._frz_guard(0xFFFFFFFF)),
             "RX14MASK": dict(on_write=self._frz_guard(0xFFFFFFFF)),
             "RX15MASK": dict(on_write=self._frz_guard(0xFFFFFFFF)),
             "RXFGMASK": dict(on_write=self._frz_guard(0xFFFFFFFF)),
-            "ECR": dict(on_read=self._ecr_read, on_write=self._ecr_write),
+            "ECR": dict(on_read=self._ecr_read, on_write=self._ecr_write, on_peek=self._ecr_read),
             "ESR1": dict(ro_mask=0xFFFFFFFF & ~ESR1_W1C, w1c_mask=ESR1_W1C, on_read=self._esr1_read,
-                         on_write=self._irq_write),
+                         on_write=self._irq_write, on_peek=self._esr1_value),
             "IMASK1": dict(on_write=self._irq_write),
             "IFLAG1": dict(w1c_mask=0xFFFFFFFF, on_write=self._iflag_write),
-            "ESR2": dict(ro_mask=0xFFFFFFFF, on_read=self._esr2_read),
+            "ESR2": dict(ro_mask=0xFFFFFFFF, on_read=self._esr2_read, on_peek=self._esr2_read),
             "CRCR": dict(ro_mask=0xFFFFFFFF),
             "RXFIR": dict(ro_mask=0xFFFFFFFF),
         }
         for n in range(self.num_mb):
             # message buffers are RAM (Rx FIFO filter elements overlay them): no SVD reserved-bit masks
-            ov[f"CS{n}"] = dict(ro_mask=0, on_read=self._cs_reader(n), on_write=self._cs_writer(n))
+            ov[f"CS{n}"] = dict(ro_mask=0, on_read=self._cs_reader(n), on_write=self._cs_writer(n),
+                                on_peek=_stored)     # a read locks the MB: a peek does not
             ov[f"ID{n}"] = dict(ro_mask=0)
             ov[f"WORD0{n}"] = dict(ro_mask=0)
             ov[f"WORD1{n}"] = dict(ro_mask=0)
@@ -579,6 +582,15 @@ class FlexCAN(GatedBlock):
         return 0
 
     def _esr1_read(self, blk, reg):
+        v = self._esr1_value(blk, reg)
+        o = self._o["ESR1"]
+        stored = int.from_bytes(self.mem[o:o + 4], "little")
+        if stored & ESR1_ERRBITS:                  # error bits 15-10 clear on read
+            self.mem[o:o + 4] = (stored & ~ESR1_ERRBITS).to_bytes(4, "little")
+        return v
+
+    def _esr1_value(self, blk, reg):
+        """ESR1 as a read returns it (no clear-on-read: also the debugger peek)."""
         o = self._o["ESR1"]
         stored = int.from_bytes(self.mem[o:o + 4], "little")
         v = stored
@@ -594,8 +606,6 @@ class FlexCAN(GatedBlock):
                 v |= SYNCH
                 act = self._bus().activity(self, now)
                 v |= TX if act == "tx" else RX if act == "rx" else IDLE
-        if stored & ESR1_ERRBITS:                  # error bits 15-10 clear on read
-            self.mem[o:o + 4] = (stored & ~ESR1_ERRBITS).to_bytes(4, "little")
         return v
 
     def _esr2_read(self, blk, reg):

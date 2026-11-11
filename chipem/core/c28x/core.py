@@ -100,6 +100,7 @@ class C28xCore(Core):
         self.stop_info = None
         self.itrap_handler: Callable[..., bool] | None = None
         self.vector_fetch: Callable[[int], int] | None = None
+        self.fpu_flag_cb: Callable[[int], None] | None = None    # STF.LVF/LUF 0 -> 1 (fpu.latch): arch -> PIE
         self.nmi_pending = False
         self.rom_writes = 0
         # registers

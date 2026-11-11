@@ -343,6 +343,12 @@ class ArmV7M:
             scs.cfsr |= CFSR_UNALIGNED
         elif kind == "data_abort":
             scs.cfsr |= CFSR_PRECISERR
+        if kind in ("undefined_instruction", "invalid_state", "nocp", "unaligned") and not self.v6m \
+                and scs.get("SHCSR") >> 18 & 1 and self.group(self.prio[6]) < self.execution_priority():
+            # UsageFault enabled (SHCSR.USGFAULTENA) and able to preempt: taken as UsageFault, the stacked PC is the
+            # faulting instruction; otherwise it escalates to HardFault (HFSR.FORCED)
+            self._enter(6, ret_pc=info.get("pc"))
+            return True
         scs.hfsr |= HFSR_FORCED
         return self._hardfault(kind, info.get("pc"))
 

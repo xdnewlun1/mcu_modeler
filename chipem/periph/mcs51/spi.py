@@ -41,7 +41,7 @@ class Spi(SfrBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         ov = {"SPCR": {"on_write": self._spcr_w},
               "SPSR": {"on_write": self._spsr_w, "ro_mask": 0x3F},
-              "SPDAT": {"on_read": self._spdat_r, "on_write": self._spdat_w}}
+              "SPDAT": {"on_read": self._spdat_r, "on_write": self._spdat_w, "on_peek": self._spdat_r}}
         super().__init__(name, base, size, regs, params=params, log=log, overrides=ov)
         self.responder: Callable[[int, int, int], int] | None = None
         self.frame_end: Callable[[bool, bool], None] | None = None

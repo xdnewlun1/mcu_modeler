@@ -26,6 +26,17 @@ class MCS51DebugSupport:
         return ["pc", "a", "b", "psw", "sp", "dptr", "dptr0", "dptr1", "dps", "r0", "r1", "r2", "r3", "r4", "r5",
                 "r6", "r7", "cy", "ac", "ov", "rs", "f0"]
 
+    def reg_address(self, name: str, value: int) -> int:
+        """A register used as a location (debugger memory view `sp`, `dptr+2`): the address in the chip's tagged
+        address space (core/mcs51: CODE 0x0xxxx, XDATA 0x1xxxx, IDATA 0x2xxxx): SP and R0/R1 point into IDATA, DPTR
+        into XDATA, PC into CODE; other registers stay plain numbers."""
+        from ...core.mcs51.core import IDATA_BASE, XDATA_BASE
+        if name in ("sp", "r0", "r1"):
+            return IDATA_BASE + (value & 0xFF)
+        if name in ("dptr", "dptr0", "dptr1"):
+            return XDATA_BASE + (value & 0xFFFF)
+        return value
+
     def decode(self, addr: int) -> dict | None:
         code = self.core.code
         a = addr & 0xFFFF
@@ -45,8 +56,9 @@ class MCS51DebugSupport:
         core = self.core
         sp = core.sfr[0x81]
         out = [(core.pc, sp, "pc")]
+        irq = {a for a, _r, _n in self.arch.interrupt_frames()} if hasattr(self.arch, "interrupt_frames") else set()
         for s, ret in self.arch.backtrace(max_frames - 1):
-            out.append((ret, s, "scan"))
+            out.append((ret, s, "interrupt" if s in irq else "scan"))
         return out[:max_frames]
 
     def return_address(self) -> int | None:

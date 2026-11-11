@@ -1,0 +1,26 @@
+# NUCLEO-F411RE talking to a NUCLEO-F401RE over a UART cable (the two access-line STM32F4 dies, chips/stm32f411re.yaml
+# and chips/stm32f401re.yaml).
+#   A (STM32F411RE, LQFP64) runs f411_link_requester: HSE 8 MHz bypass -> PLL 100 MHz (scale 1, 3 wait states), USART1
+#                           on PA9 (TX) / PA10 (RX) at 230400 baud from PCLK2 = 100 MHz; every 2 ms (TIM2 IRQ) it sends
+#                           "REQ <n>\r\n" and checks the answer; PA5 (LD2) toggles per correct ACK, PC0 high on a wrong one.
+#   B (STM32F401RE, LQFP64) runs f401_link_responder: PLL 84 MHz (scale 2, 2 wait states), USART6 on PA11 (TX) / PA12
+#                           (RX), AF8, at 230400 baud from PCLK2 = 84 MHz; answers "ACK <n> <n*n>\r\n", toggles PA5.
+# Bauds: A 230415 (100 MHz / BRR 434), B 230137 (84 MHz / BRR 365).
+# Run:   chipem run --board boards/stm32f411re_f401re_uart.yaml --for 20ms
+#        chipem serve --board boards/stm32f411re_f401re_uart.yaml
+# Build: firmware/samples_stm32f4x1/build.sh
+name: stm32f411re_f401re_uart
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f411re, firmware: ../firmware/samples_stm32f4x1/build/f411_link_requester.elf}
+  - {id: B, chip: stm32f401re, firmware: ../firmware/samples_stm32f4x1/build/f401_link_responder.elf}
+nets:
+  - {name: A_TX, pins: [A.PA9, B.PA12]}      # USART1_TX -> USART6_RX
+  - {name: B_TX, pins: [B.PA11, A.PA10]}     # USART6_TX -> USART1_RX
+  - {name: ACK_LED, pins: [A.PA5]}
+  - {name: REQ_LED, pins: [B.PA5]}
+  - {name: ERR, pins: [A.PC0]}
+parts:
+  - {id: LD2_A, type: led, color: green, ports: {in: ACK_LED}}
+  - {id: LD2_B, type: led, color: green, ports: {in: REQ_LED}}
+  - {id: ERR_LED, type: led, color: red, ports: {in: ERR}}

@@ -86,10 +86,10 @@ class SPI(C2000Block):
             "SPICTL": {"on_write": self._ctl_write, "ro_mask": 0xFFE0},
             "SPISTS": {"w1c_mask": OVERRUN, "ro_mask": 0xFF7F, "on_write": lambda b, r, o, n: self._update()},
             "SPIBRR": {"ro_mask": 0xFF80},
-            "SPIRXEMU": {"ro_mask": 0xFFFF, "on_read": self._rxemu_read},
-            "SPIRXBUF": {"ro_mask": 0xFFFF, "on_read": self._rxbuf_read},
+            "SPIRXEMU": {"ro_mask": 0xFFFF, "on_read": self._rxemu_read, "on_peek": self._rxemu_read},
+            "SPIRXBUF": {"ro_mask": 0xFFFF, "on_read": self._rxbuf_read, "on_peek": self._rxbuf_peek},
             "SPITXBUF": {"on_write": self._txbuf_write},
-            "SPIDAT": {"on_write": self._dat_write, "on_read": lambda b, r: self.dat},
+            "SPIDAT": {"on_write": self._dat_write, "on_read": lambda b, r: self.dat, "on_peek": lambda b, r: self.dat},
             "SPIFFTX": {"on_write": self._fftx_write, "ro_mask": 0x1F80},
             "SPIFFRX": {"on_write": self._ffrx_write, "ro_mask": 0x9F80},
             "SPIFFCT": {"ro_mask": 0xFF00},
@@ -97,6 +97,7 @@ class SPI(C2000Block):
         }
         regs = build_regs((name, f"SPI{self.letter}", "SPIA"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
+        self.fifo_depth = int(self.params.get("fifo_depth", FIFO_DEPTH))   # Piccolo: 4 (SPRUI09 8.1/9.1/10.1)
         self.gate = params.get("gate", f"SPI{self.letter}ENCLK")
         self.sig = {k: f"SPI{k}{self.letter}" for k in ("CLK", "SIMO", "SOMI", "STE")}
         self.rx_irq = params.get("irq")
@@ -350,6 +351,11 @@ class SPI(C2000Block):
             self._sts(clr_bits=INT_FLAG)
         return self.get("SPIRXBUF")
 
+    def _rxbuf_peek(self, blk, reg):
+        if self._fifo() and self.rx_fifo:
+            return self.rx_fifo[0]                      # the FIFO head, not popped
+        return None
+
     def _rxemu_read(self, blk, reg):
         if self._fifo():
             return self.rx_fifo[0] if self.rx_fifo else self.get("SPIRXBUF")
@@ -367,7 +373,7 @@ class SPI(C2000Block):
         v = new & 0xFFFF
         if self._fifo():
             tx = self.get("SPIFFTX")
-            if tx & TXFIFO and len(self.tx_fifo) < FIFO_DEPTH:
+            if tx & TXFIFO and len(self.tx_fifo) < self.fifo_depth:
                 self.tx_fifo.append(v)
             elif tx & TXFIFO:
                 self._warn_once("txff", f"{self.name}: SPITXBUF write with the TX FIFO full: word lost")
@@ -443,7 +449,7 @@ class SPI(C2000Block):
         if self._fifo():
             rx = self.get("SPIFFRX")
             if rx & RXFIFORESET:
-                if len(self.rx_fifo) >= FIFO_DEPTH:
+                if len(self.rx_fifo) >= self.fifo_depth:
                     self.rx_fifo.popleft()
                     self.set("SPIFFRX", rx | RXFFOVF)
                     self._warn_once("rxffovf", f"{self.name}: RX FIFO overflow (RXFFOVF): oldest word lost")

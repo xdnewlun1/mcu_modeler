@@ -36,7 +36,8 @@ CALR, TAFCR, ALRMASSR, ALRMBSSR, BKP0R-BKP19R); behaviour hand-written.
   CR.WUCKSEL are writable while WUTWF = 1 (set 2 RTCCLK after WUTE is cleared, cleared when WUTE is set). WUTF & WUTIE drives EXTI line 22 (RTC_WKUP).
 * Backup domain: all RTC registers, the calendar and BKP0R-BKP19R survive system resets (watchdog, SYSRESETREQ, NRST);
   only the first reset (power-on) and RCC_BDCR.BDRST clear them.
-The SVD lacks CR.BYPSHAD (bit 5) and CR.COSEL (bit 19): CR keeps all bits 23:0 (26.6.3).
+The SVD lacks CR.BYPSHAD (bit 5) and CR.COSEL (bit 19): CR keeps all bits 23:0 (26.6.3).  `params.tampers: 1`
+(STM32F401/F411, RM0368/RM0383 17.6.17): TAFCR.TAMP2E/TAMP2TRG are reserved (one tamper input, RTC_AF1 only).
 Not modelled: timestamp (26.3.12: TSE, TSTR/TSDR/TSSSR), tamper (26.3.13: TAFCR TAMPxE; TAMP1F/TAMP2F never set),
 coarse/smooth calibration (26.3.10/26.3.11: CALIBR, CALR stored, RECALPF never set), SHIFTR (26.3.8: stored, one
 `warn`, SHPF never set), the RTC_AF1 outputs (26.3.14/26.3.15: COE, OSEL stored), the reference clock detection
@@ -47,7 +48,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, exti_input, find_model
 
@@ -106,19 +107,23 @@ class RTC(GatedBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov: dict[str, dict] = {
-            "TR": {"on_read": self._tr_read, "on_write": self._cal_write},
-            "DR": {"on_read": self._dr_read, "on_write": self._cal_write},
-            "SSR": {"ro_mask": 0xFFFFFFFF, "on_read": self._ssr_read},
+            "TR": {"on_read": self._tr_read, "on_write": self._cal_write, "on_peek": self._tr_peek},
+            "DR": {"on_read": self._dr_read, "on_write": self._cal_write, "on_peek": self._dr_peek},
+            "SSR": {"ro_mask": 0xFFFFFFFF, "on_read": self._ssr_read, "on_peek": self._ssr_peek},
             # The SVD lacks CR.BYPSHAD (bit 5) and COSEL (bit 19); RM0090 26.6.3 reserves only bits 31:24
             "CR": {"on_write": self._cr_write, "ro_mask": 0xFF000000},
-            "ISR": {"ro_mask": 0, "on_read": self._isr_read, "on_write": self._isr_write},
+            "ISR": {"ro_mask": 0, "on_read": self._isr_read, "on_write": self._isr_write, "on_peek": self._isr_peek},
             "PRER": {"on_write": self._prer_write},
             "WUTR": {"on_write": self._wutr_write},
             "ALRMAR": {"on_write": self._alrm_write}, "ALRMBR": {"on_write": self._alrm_write},
             "ALRMASSR": {"on_write": self._alrm_write}, "ALRMBSSR": {"on_write": self._alrm_write},
-            "WPR": {"on_write": self._wpr_write, "on_read": lambda b, r: 0},
+            "WPR": {"on_write": self._wpr_write, "on_read": pure_read(lambda b, r: 0)},
             "SHIFTR": {"on_write": self._shift_write},
         }
+        if int(params.get("tampers", 2)) < 2:
+            # one tamper input (STM32F401/F411, RM0368/RM0383 17.6.17): TAFCR TAMP2TRG/TAMP2E (bits 4:3) are reserved
+            # ("always read as 0"); the SVD copies the two-tamper F405 field list
+            ov["TAFCR"] = {"ro_mask": ~0x0007FF87 & 0xFFFFFFFF}
         r = build_regs((name, "RTC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.lse_hz = float(params.get("lse_hz", 32768.0))
@@ -455,6 +460,53 @@ class RTC(GatedBlock):
         if self._due(self._rsf_due):
             self._isr_read(None, None)               # sets RSF, ends the stale period
         return self._shadow_rst
+
+    # debugger peeks (MMIOBlock.peek_reg): what a read returns now, without locking the shadow registers or
+    # setting RSF
+    def _stale_peek(self) -> bool:
+        return bool(self._shadow_rst and not self.get("CR") & BYPSHAD and not self._due(self._rsf_due))
+
+    def _tr_peek(self, blk, reg):
+        if self.get("ISR") & INIT:
+            return None
+        if self._stale_peek():
+            return 0
+        if self._shadow is not None and not self.get("CR") & BYPSHAD:
+            return self._enc_tr(self._shadow[0])
+        return self._enc_tr(self.snapshot()[0])
+
+    def _dr_peek(self, blk, reg):
+        if self.get("ISR") & INIT:
+            return None
+        if self._stale_peek():
+            return 0x2101
+        if self._shadow is not None and not self.get("CR") & BYPSHAD:
+            return self._enc_dr(self._shadow[0])
+        return self._enc_dr(self.snapshot()[0])
+
+    def _ssr_peek(self, blk, reg):
+        return 0 if self._stale_peek() else self.snapshot()[1]
+
+    def _isr_peek(self, blk, reg):
+        isr = self.get("ISR")
+        if self.get("CR") & BYPSHAD:
+            isr &= ~RSF
+        elif not isr & RSF and self._rsf_due is not None and self._running() and self._now() >= self._rsf_due:
+            isr |= RSF
+        v = isr & (INIT | RSF | ISR_FLAGS)
+        if isr & INIT and self._due(self._initf_due):
+            v |= INITF
+        if not isr & INIT:
+            if self._wf(ALRAWF):
+                v |= ALRAWF
+            if self._wf(ALRBWF):
+                v |= ALRBWF
+        if self._wf(WUTWF):
+            v |= WUTWF
+        c = self._dec(self.get("TR"), self.get("DR")) if isr & INIT else self.snapshot()[0]
+        if c.yy:
+            v |= INITS
+        return v
 
     def _tr_read(self, blk, reg):
         if self.get("ISR") & INIT:

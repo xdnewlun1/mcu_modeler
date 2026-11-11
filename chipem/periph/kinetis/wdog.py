@@ -45,6 +45,7 @@ class WDOG(MMIOBlock):
         ov["RSTCNT"] = {"w1c_mask": 0xFFFF}                  # w1c at any time; cleared only by POR
         ov["TMROUTH"]["on_read"] = self._tmrout_read
         ov["TMROUTL"]["on_read"] = self._tmrout_read
+        ov["TMROUTH"]["on_peek"] = ov["TMROUTL"]["on_peek"] = self._tmrout_read     # computed from the time
         ov["REFRESH"] = {"on_write": self._refresh_write}
         ov["UNLOCK"] = {"on_write": self._unlock_write}
         r = build_regs((name, "WDOG"), size, ov, params.get("regs_file"))

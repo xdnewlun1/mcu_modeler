@@ -28,6 +28,8 @@ def part(type_name: str) -> Callable[[type], type]:
 def _load() -> None:
     from . import encoder, i2c_eeprom, i2c_register_device, i2s_codec, std  # noqa: F401  (standard types)
     from . import camera  # noqa: F401  (parallel camera, DVP hook)
+    from . import spdif_source  # noqa: F401  (S/PDIF transmitter, spdif_subframes hook)
+    from . import lcd_panel  # noqa: F401  (RGB TFT panel, LCD-TFT controller hook)
     from . import serial  # noqa: F401  (serial cable chain: adapter, transceiver, connectors, cable)
     from . import script  # noqa: F401  (scripted part: custom component written in Python)
 

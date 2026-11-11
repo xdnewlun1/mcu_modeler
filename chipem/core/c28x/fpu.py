@@ -25,6 +25,32 @@ _pack_I = struct.Struct("<I").pack
 _unpack_I = struct.Struct("<I").unpack
 
 
+def latch(c, bits: int) -> None:
+    """Set latched STF flags (LVF/LUF).  A 0 -> 1 change of LVF or LUF is reported to `c.fpu_flag_cb(bit)` (the
+    arch pulses PIE 12.7 LVF / 12.8 LUF on F2833x parts, SPRS439Q Table 8-32; SPRUEO2B 2.1.1: the flags "may also be
+    connected to the PIE")."""
+    new = bits & ~c.stf
+    c.stf |= bits
+    if new & (STF_LVF | STF_LUF):
+        cb = getattr(c, "fpu_flag_cb", None)
+        if cb is not None:
+            for b in (STF_LVF, STF_LUF):
+                if new & b:
+                    cb(b)
+
+
+def _stf_store(c, value: int) -> None:
+    """STF := value (MOV32 STF,mem32 / RESTORE / SETFLG), reporting LVF/LUF rising edges like `latch`."""
+    rise = value & ~c.stf & (STF_LVF | STF_LUF)
+    c.stf = value
+    if rise:
+        cb = getattr(c, "fpu_flag_cb", None)
+        if cb is not None:
+            for b in (STF_LVF, STF_LUF):
+                if rise & b:
+                    cb(b)
+
+
 def fval(b: int) -> float:
     """Value of a register bit pattern; denormals read as signed zero."""
     if not b & 0x7F800000:
@@ -39,22 +65,22 @@ def fbits(c, x: float) -> int:
     ax = abs(x)
     if ax == math.inf or ax > _F32_MAX:
         if ax != math.inf or True:
-            c.stf |= STF_LVF
+            latch(c, STF_LVF)
         return 0xFF800000 if x < 0 else 0x7F800000
     if ax != 0.0 and ax < _F32_MIN_NORMAL:
-        c.stf |= STF_LUF
+        latch(c, STF_LUF)
         return 0x80000000 if x < 0 else 0
     try:
         b = _unpack_I(_pack_f(x))[0]
     except OverflowError:
-        c.stf |= STF_LVF
+        latch(c, STF_LVF)
         return 0xFF800000 if x < 0 else 0x7F800000
     if not c.stf & STF_RND32:
         y = _unpack_f(_pack_I(b))[0]
         if abs(y) > ax:
             b -= 1
     if (b & 0x7F800000) == 0x7F800000:
-        c.stf |= STF_LVF
+        latch(c, STF_LVF)
     return b & M32
 
 
@@ -178,7 +204,7 @@ def sem_f_stf(c, o, pc, npc):
         get = loc_get(c, o["loc"], True)
 
         def h():
-            c.stf = get() & (0x7F | STF_RND32 | STF_SHDWS)
+            _stf_store(c, get() & (0x7F | STF_RND32 | STF_SHDWS))
             return npc
     return h
 
@@ -421,13 +447,13 @@ def sem_f_cvt(c, o, pc, npc):
                 _flags_nz(c, res)
         elif k == "inv":
             if x == 0.0:
-                c.stf |= STF_LVF
+                latch(c, STF_LVF)
                 res = 0xFF800000 if v & 0x80000000 else 0x7F800000
             else:
                 res = fbits(c, 1.0 / x)
         else:  # isqrt
             if x <= 0.0:
-                c.stf |= STF_LVF
+                latch(c, STF_LVF)
                 res = 0x7F800000
             else:
                 res = fbits(c, 1.0 / math.sqrt(x))
@@ -465,7 +491,7 @@ def sem_f_restore(c, o, pc, npc):
         if c.fshadow is not None:
             regs, stf = c.fshadow
             c.r[:] = regs
-            c.stf = stf & ~STF_SHDWS
+            _stf_store(c, stf & ~STF_SHDWS)
         else:
             c.stf &= ~STF_SHDWS
         return npc
@@ -480,7 +506,7 @@ def _setflg_apply(c, mask: int, val: int) -> None:
     for bit in _SETFLG_BITS:
         if mask >> bit & 1:
             s = (s | (1 << bit)) if val >> bit & 1 else (s & ~(1 << bit))
-    c.stf = s
+    _stf_store(c, s)
 
 
 def sem_f_setflg(c, o, pc, npc):

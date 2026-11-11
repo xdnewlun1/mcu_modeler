@@ -66,15 +66,15 @@ class ECAP(C2000Block):
         self.signal = params.get("signal", f"ECAP{self.index}")
         zero = lambda b, r: 0                                         # noqa: E731
         ov = {
-            "TSCTR": {"on_read": self._tsctr_read, "on_write": self._tsctr_write},
+            "TSCTR": {"on_read": self._tsctr_read, "on_peek": self._tsctr_read, "on_write": self._tsctr_write},
             "CAP1": {"on_write": self._cap_write}, "CAP2": {"on_write": self._cap_write},
             "CAP3": {"on_write": self._cap_write}, "CAP4": {"on_write": self._cap_write},
             "ECCTL1": {"on_write": self._ecctl1_write},
             "ECCTL2": {"on_write": self._ecctl2_write},
             "ECEINT": {"on_write": self._eceint_write},
             "ECFLG": {"ro_mask": 0xFFFF},
-            "ECCLR": {"on_write": self._ecclr_write, "on_read": zero},
-            "ECFRC": {"on_write": self._ecfrc_write, "on_read": zero},
+            "ECCLR": {"on_write": self._ecclr_write, "on_read": zero, "on_peek": zero},
+            "ECFRC": {"on_write": self._ecfrc_write, "on_read": zero, "on_peek": zero},
         }
         regs_ = build_regs((name, "ECAP1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs_, params=params, log=log)
@@ -92,7 +92,7 @@ class ECAP(C2000Block):
         self._frozen = False                # one-shot stop reached
         self._ps_cnt = 0                    # prescaler: rising edges counted ...
         self._ps_out = False                # ... and the prescaled signal
-        self._last: dict[str, str] = {}     # last input level per pin
+        self._in: str | None = None         # effective ECAPx input level (SPRU712H Table 4-8: one muxed pin)
         self._pins: list[Any] = []
         self._pin_ids: set[str] = set()
         self._int_line = None
@@ -118,7 +118,7 @@ class ECAP(C2000Block):
             self._pin_ids = {p.id for p in self._pins}
             for p in self._pins:
                 listen_input(chip, p, self._pin_changed)
-                self._last[p.id] = p.level()
+            self._in = self._input()
             if self._pins:
                 board.subscribe(self._pin_event)
 
@@ -142,8 +142,7 @@ class ECAP(C2000Block):
         self._frozen = False
         self._ps_cnt, self._ps_out = 0, False
         self._int_lvl = False
-        for p in self._pins:
-            self._last[p.id] = p.level()
+        self._in = self._input()
 
     # ------------------------------------------------------------ time base
     def _clock_on(self) -> bool:
@@ -280,6 +279,8 @@ class ECAP(C2000Block):
             return
         if ev.pin in self._pin_ids and not self._fixing:
             self._fix_dir(self.chip.pins.get(ev.pin))
+            if ev.field == "owner":
+                self._pin_changed(None)
 
     def _fix_dir(self, pin: Any) -> None:
         board = self.chip.pins
@@ -316,13 +317,22 @@ class ECAP(C2000Block):
             self._reschedule(self._now(), inclusive=False)
 
     # ------------------------------------------------------------ capture
+    def _input(self) -> str | None:
+        """The level the capture logic sees: the pin when exactly one pin is muxed to ECAPx, else the default 1 of
+        SPRU712H Table 4-8 / SPRUI07 Table 1-46 (no pin, or two pins such as GPIO5 and GPIO24 both on ECAP1)."""
+        board = getattr(self.chip, "pins", None) if self.chip is not None else None
+        if board is None:
+            return None
+        own = [p for p in self._pins if board.signal_matches(p.owner, self.signal)]
+        return own[0].level() if len(own) == 1 else "H"
+
     def _pin_changed(self, pin: Any) -> None:
-        lvl = pin.level()
-        old = self._last.get(pin.id)
-        self._last[pin.id] = lvl
-        if old == lvl or lvl == "X" or old == "X" or old is None:
+        lvl = self._input()
+        old = self._in
+        self._in = lvl
+        if old == lvl or lvl == "X" or old == "X" or old is None or lvl is None:
             return
-        if self._apwm or not self.chip.pins.signal_matches(pin.owner, self.signal):
+        if self._apwm:
             return
         if not self._clock_on():
             return

@@ -1,0 +1,564 @@
+# Generic 80C52 SFR table, HAND-WRITTEN from the classic Intel MCS-51 / 80C52 SFR map (Intel "MCS-51 Microcontroller
+# Family User's Manual", 8XC52 SFRs): the P89CV51 table (chips/p89cv51_regs.yaml) reduced to the 80C52 set by a
+# script: core registers, IE/IP (two priority levels, no IPH), P0-P3, PCON (SMOD SMOD0 - - GF1 GF0 PD IDL),
+# TCON/TMOD/TL0/TL1/TH0/TH1, T2CON/T2MOD/RCAP2L/RCAP2H/TL2/TH2, SCON/SBUF/SADDR/SADEN.  NOT from a data sheet:
+# a stand-in to run arbitrary 8051/8052 firmware (chips/i80c52.yaml).
+device: 80C52 (generic)
+svd_version: hand-written
+address_unit_bits: 8
+cpu:
+  name: 80C52
+  fpu: false
+interrupts:
+  0: INT0
+  1: TIMER0
+  2: INT1
+  3: TIMER1
+  4: SERIAL
+  5: TIMER2
+peripherals:
+  CPU:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: CPU registers kept in the core (arch-owned block)
+    group: CPU
+    registers:
+    - name: SP
+      offset: 129
+      width: 1
+      reset: 7
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: DPL
+      offset: 130
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: DPH
+      offset: 131
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: PSW
+      offset: 208
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: CY
+        lsb: 7
+        width: 1
+      - name: AC
+        lsb: 6
+        width: 1
+      - name: F0
+        lsb: 5
+        width: 1
+      - name: RS1
+        lsb: 4
+        width: 1
+      - name: RS0
+        lsb: 3
+        width: 1
+      - name: OV
+        lsb: 2
+        width: 1
+      - name: F1
+        lsb: 1
+        width: 1
+      - name: P
+        lsb: 0
+        width: 1
+        access: read-only
+    - name: ACC
+      offset: 224
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: B
+      offset: 240
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+  INTC:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: Interrupt enable / priority (arch-owned block)
+    group: INTC
+    registers:
+    - name: IE
+      offset: 168
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: EA
+        lsb: 7
+        width: 1
+      - name: ET2
+        lsb: 5
+        width: 1
+      - name: ES
+        lsb: 4
+        width: 1
+      - name: ET1
+        lsb: 3
+        width: 1
+      - name: EX1
+        lsb: 2
+        width: 1
+      - name: ET0
+        lsb: 1
+        width: 1
+      - name: EX0
+        lsb: 0
+        width: 1
+    - name: IP
+      offset: 184
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: PT2
+        lsb: 5
+        width: 1
+      - name: PS
+        lsb: 4
+        width: 1
+      - name: PT1
+        lsb: 3
+        width: 1
+      - name: PX1
+        lsb: 2
+        width: 1
+      - name: PT0
+        lsb: 1
+        width: 1
+      - name: PX0
+        lsb: 0
+        width: 1
+  PORTS:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: Ports 0-3 (quasi-bidirectional; P0 open drain)
+    group: PORTS
+    registers:
+    - name: P0
+      offset: 128
+      width: 1
+      reset: 255
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: AD7
+        lsb: 7
+        width: 1
+      - name: AD6
+        lsb: 6
+        width: 1
+      - name: AD5
+        lsb: 5
+        width: 1
+      - name: AD4
+        lsb: 4
+        width: 1
+      - name: AD3
+        lsb: 3
+        width: 1
+      - name: AD2
+        lsb: 2
+        width: 1
+      - name: AD1
+        lsb: 1
+        width: 1
+      - name: AD0
+        lsb: 0
+        width: 1
+    - name: P1
+      offset: 144
+      width: 1
+      reset: 255
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: CEX4
+        lsb: 7
+        width: 1
+      - name: CEX3
+        lsb: 6
+        width: 1
+      - name: CEX2
+        lsb: 5
+        width: 1
+      - name: CEX1
+        lsb: 4
+        width: 1
+      - name: CEX0
+        lsb: 3
+        width: 1
+      - name: ECI
+        lsb: 2
+        width: 1
+      - name: T2EX
+        lsb: 1
+        width: 1
+      - name: T2
+        lsb: 0
+        width: 1
+    - name: P2
+      offset: 160
+      width: 1
+      reset: 255
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: A15
+        lsb: 7
+        width: 1
+      - name: A14
+        lsb: 6
+        width: 1
+      - name: A13
+        lsb: 5
+        width: 1
+      - name: A12
+        lsb: 4
+        width: 1
+      - name: A11
+        lsb: 3
+        width: 1
+      - name: A10
+        lsb: 2
+        width: 1
+      - name: A9
+        lsb: 1
+        width: 1
+      - name: A8
+        lsb: 0
+        width: 1
+    - name: P3
+      offset: 176
+      width: 1
+      reset: 255
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: RD
+        lsb: 7
+        width: 1
+      - name: WR
+        lsb: 6
+        width: 1
+      - name: T1
+        lsb: 5
+        width: 1
+      - name: T0
+        lsb: 4
+        width: 1
+      - name: INT1
+        lsb: 3
+        width: 1
+      - name: INT0
+        lsb: 2
+        width: 1
+      - name: TXD
+        lsb: 1
+        width: 1
+      - name: RXD
+        lsb: 0
+        width: 1
+  SYSCTRL:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: Power control, auxiliary function and clock control
+    group: SYSCTRL
+    registers:
+    - name: PCON
+      offset: 135
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: SMOD
+        lsb: 7
+        width: 1
+      - name: SMOD0
+        lsb: 6
+        width: 1
+      - name: GF1
+        lsb: 3
+        width: 1
+      - name: GF0
+        lsb: 2
+        width: 1
+      - name: PD
+        lsb: 1
+        width: 1
+      - name: IDL
+        lsb: 0
+        width: 1
+  TIMER01:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: Timer/counters 0 and 1, external interrupts 0/1 (TCON)
+    group: TIMER01
+    registers:
+    - name: TCON
+      offset: 136
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: TF1
+        lsb: 7
+        width: 1
+      - name: TR1
+        lsb: 6
+        width: 1
+      - name: TF0
+        lsb: 5
+        width: 1
+      - name: TR0
+        lsb: 4
+        width: 1
+      - name: IE1
+        lsb: 3
+        width: 1
+      - name: IT1
+        lsb: 2
+        width: 1
+      - name: IE0
+        lsb: 1
+        width: 1
+      - name: IT0
+        lsb: 0
+        width: 1
+    - name: TMOD
+      offset: 137
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: T1GATE
+        lsb: 7
+        width: 1
+      - name: T1C_T
+        lsb: 6
+        width: 1
+      - name: T1M1
+        lsb: 5
+        width: 1
+      - name: T1M0
+        lsb: 4
+        width: 1
+      - name: T0GATE
+        lsb: 3
+        width: 1
+      - name: T0C_T
+        lsb: 2
+        width: 1
+      - name: T0M1
+        lsb: 1
+        width: 1
+      - name: T0M0
+        lsb: 0
+        width: 1
+    - name: TL0
+      offset: 138
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: TL1
+      offset: 139
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: TH0
+      offset: 140
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: TH1
+      offset: 141
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+  TIMER2:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: Timer/counter 2
+    group: TIMER2
+    registers:
+    - name: T2CON
+      offset: 200
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: TF2
+        lsb: 7
+        width: 1
+      - name: EXF2
+        lsb: 6
+        width: 1
+      - name: RCLK
+        lsb: 5
+        width: 1
+      - name: TCLK
+        lsb: 4
+        width: 1
+      - name: EXEN2
+        lsb: 3
+        width: 1
+      - name: TR2
+        lsb: 2
+        width: 1
+      - name: C_T2
+        lsb: 1
+        width: 1
+      - name: CP_RL2
+        lsb: 0
+        width: 1
+    - name: T2MOD
+      offset: 201
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: T2OE
+        lsb: 1
+        width: 1
+      - name: DCEN
+        lsb: 0
+        width: 1
+    - name: RCAP2L
+      offset: 202
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: RCAP2H
+      offset: 203
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: TL2
+      offset: 204
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: TH2
+      offset: 205
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+  UART:
+    base: 196608
+    size: 256
+    derived_from: null
+    description: Enhanced UART (framing error, automatic address recognition)
+    group: UART
+    registers:
+    - name: SCON
+      offset: 152
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+      fields:
+      - name: SM0_FE
+        lsb: 7
+        width: 1
+      - name: SM1
+        lsb: 6
+        width: 1
+      - name: SM2
+        lsb: 5
+        width: 1
+      - name: REN
+        lsb: 4
+        width: 1
+      - name: TB8
+        lsb: 3
+        width: 1
+      - name: RB8
+        lsb: 2
+        width: 1
+      - name: TI
+        lsb: 1
+        width: 1
+      - name: RI
+        lsb: 0
+        width: 1
+    - name: SBUF
+      offset: 153
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: SADDR
+      offset: 169
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)
+    - name: SADEN
+      offset: 185
+      width: 1
+      reset: 0
+      reset_mask: 255
+      access: read-write
+      description: 80C52 (Intel MCS-51 user's manual SFR map; not from a vendor data sheet)

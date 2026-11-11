@@ -55,6 +55,15 @@ svg.bv#pkg.panning { cursor: grabbing; }
 .bv .pin.analog .lbl-name { fill: var(--fg-2); }
 .bv .pin.in-net .lbl-name { font-weight: 700; }
 .bv .package.lod-nolabel .pin-label { display: none; }
+/* level of detail: kept names (nets, selected, peripheral owners; package.js lodKeep) and the hovered / focused pin
+   stay readable at the minimum on-screen size (--pfk); owners are left out at this zoom */
+.bv .package.lod-nolabel .pin.lod-keep .pin-label,
+.bv .package.lod-nolabel .pin:hover .pin-label,
+.bv .package.lod-nolabel .pin:focus .pin-label,
+.bv .package.lod-nolabel .pin.find-cur .pin-label,
+.bv .package.lod-nolabel .pin.net-hl .pin-label { display: inline; font-size: var(--pfk, 9px); stroke-width: calc(var(--pfk, 9px) * .3); }
+.bv .package.lod-nolabel .pin .lbl-owner { display: none; }
+.bv .package.lod-nolabel .pin:hover .pin-label, .bv .package.lod-nolabel .pin:focus .pin-label { font-weight: 700; }
 .bv .package.lod-nonum .pin-num { display: none; }
 
 /* pin interaction: one accent */

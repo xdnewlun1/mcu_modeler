@@ -5,7 +5,16 @@ One class, two instances: `stm32.otg_fs` (0x50000000, 4 bidirectional endpoints,
 embedded FS PHY) and `stm32.otg_hs` (0x40040000, 6 endpoints, 4 KB FIFO RAM, internal DMA; run with its embedded
 FS PHY only: selecting the ULPI PHY logs a `warn` and the core never connects, since no external high-speed PHY is
 modelled).  Params: `endpoints`, `fifo_words`, `dma`, `prefix` (signal / IRQ name prefix "OTG_FS" / "OTG_HS"),
-`gate` (RCC clock gate), `exti_line` (wakeup line: 18 FS, 20 HS), `clk48_hz` (48 MHz clock when there is no RCC).
+`gate` (RCC clock gate), `exti_line` (wakeup line: 18 FS, 20 HS), `clk48_hz` (48 MHz clock when there is no RCC),
+`channels` (host channels, storage), `core: otg2`.
+
+`core: otg2` (STM32F446, RM0390 ch. 31, OTG 2.0 core with LPM; chip YAML 6 FS / 9 HS endpoints, 12 / 16 channels,
+Table 221): GCCFG has only PWRDWN (16) and VBDEN (21, VBUS sensing on PA9 / PB13) (31.15.15); GOTGCTL adds the
+session-valid overrides BVALOEN/BVALOVAL (B-valid in device mode), AVALOEN/AVALOVAL, VBVALOEN/VBVALOVAL, EHEN, OTGVER
+and CURMOD / DBCT status (31.15.1); the B-session is valid when BVALOEN = 1 and BVALOVAL = 1, or with VBDEN = 1 and
+VBUS on the pin; GINTMSK LPMINTM / RSTDETM writable; GUSBCFG bit 31 reserved; CID 0x2000 (HS 0x2100, 31.15.16);
+GLPMCFG (0x54, 31.15.17: storage, LPMEN logs one `warn`: the host model sends no LPM tokens) and GDFIFOCFG (0x5C,
+31.15.18, storage).  No battery charging detection on the F446 (Table 221: BCD not supported).
 
 Register file (offsets in the 256 KB window; reset values and writable bits from the RM0090 register descriptions
 34.16 / 35.12, checked by tests/test_stm32_usb.py; where they differ from the SVD the RM wins: GOTGCTL 0x00010000,
@@ -92,7 +101,7 @@ import re
 from typing import Any
 
 from ...canbus import pin_reason
-from ..base import Reg
+from ..base import Reg, pure_read
 from ..registry import register
 from ._util import GatedBlock, exti_input, fmt_hz, irq_number, rcc
 
@@ -212,6 +221,10 @@ class OtgCore(GatedBlock):
         self.prefix = str(p["prefix"])
         self.gate = str(p["gate"])
         self.exti_line = int(p["exti_line"]) if p.get("exti_line") is not None else None
+        # `core: otg2` = the OTG 2.0 core revision of the STM32F446 (RM0390 31.15): GCCFG.VBDEN instead of
+        # NOVBUSSENS/VBUSxSEN, GOTGCTL session-valid overrides, LPM registers, CID 0x2000/0x2100
+        self.otg2 = str(p.get("core", "")).lower() == "otg2"
+        self.n_channels = int(p.get("channels", 12 if self.has_dma else 8))
         self.usb_name = re.sub(r"_GLOBAL$", "", name)
         self.ram = [0] * self.fifo_words
         self.rx = _Ring(self.ram, 0, 0)
@@ -258,24 +271,29 @@ class OtgCore(GatedBlock):
         R = Reg
         hs = self.has_dma
         out = [
-            R("GOTGCTL", 0x000, ro_mask=~0x00000E02, on_read=self._gotgctl_read),      # CIDSTS (live) = 1: 0x10000
+            R("GOTGCTL", 0x000, ro_mask=~(0x00101EFE if self.otg2 else 0x00000E02), on_read=self._gotgctl_read,
+              on_write=self._gotgctl_write),                                              # CIDSTS (live) = 1
             R("GOTGINT", 0x004, ro_mask=~0x000E0304, w1c_mask=0x000E0304, on_write=self._irq_write),
             R("GAHBCFG", 0x008, ro_mask=~(0x1BF if hs else 0x181), on_write=self._irq_write),
             R("GUSBCFG", 0x00C, reset=0x00001440 if hs else 0x00000A40,
-              ro_mask=~(0xE3FEBF47 if hs else 0xE0003F47), on_write=self._gusbcfg_write),
+              ro_mask=~((0xE3FEBF47 if hs else 0xE0003F47) & (0x7FFFFFFF if self.otg2 else 0xFFFFFFFF)),
+              on_write=self._gusbcfg_write),                    # otg2: bit 31 reserved (RM0390 31.15.4)
             R("GRSTCTL", 0x010, reset=AHBIDL, ro_mask=~(0x7C0 | 0x37), on_write=self._grstctl_write,
-              on_read=self._grstctl_read),
+              on_read=self._grstctl_read, on_peek=self._grstctl_peek),
             R("GINTSTS", 0x014, reset=0x04000020, ro_mask=GINTSTS_LIVE, w1c_mask=GINTSTS_W1C,
               on_read=self._gintsts_read, on_write=self._irq_write),
-            R("GINTMSK", 0x018, ro_mask=0x08C30301, on_write=self._irq_write),
-            R("GRXSTSR", 0x01C, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._rx_status(pop=False)),
-            R("GRXSTSP", 0x020, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._rx_status(pop=True)),
+            R("GINTMSK", 0x018, ro_mask=0x00430301 if self.otg2 else 0x08C30301,    # otg2: LPMINTM, RSTDETM
+              on_write=self._irq_write),
+            R("GRXSTSR", 0x01C, ro_mask=0xFFFFFFFF, on_read=pure_read(lambda b, r: b._rx_status(pop=False))),
+            R("GRXSTSP", 0x020, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._rx_status(pop=True), on_peek=lambda b, r: b._rx_status(pop=False)),
             R("GRXFSIZ", 0x024, reset=0x00000400 if hs else 0x00000200, ro_mask=0xFFFF0000,
               on_write=self._fifo_cfg_write),
             R("DIEPTXF0", 0x028, reset=0x00000200, on_write=self._fifo_cfg_write),
             R("HNPTXSTS", 0x02C, reset=0x00080400 if hs else 0x00080200, ro_mask=0xFFFFFFFF),
-            R("GCCFG", 0x038, ro_mask=~(0x003F0000 if hs else 0x003D0000), on_write=self._gccfg_write),
-            R("CID", 0x03C, reset=0x00001100 if hs else 0x00001200),
+            R("GCCFG", 0x038, ro_mask=~(0x00210000 if self.otg2 else 0x003F0000 if hs else 0x003D0000),
+              on_write=self._gccfg_write),                      # otg2: PWRDWN, VBDEN only (RM0390 31.15.15)
+            R("CID", 0x03C, reset=(0x00002100 if hs else 0x00002000) if self.otg2 else
+              (0x00001100 if hs else 0x00001200)),
             R("GSNPSID", 0x040, reset=GSNPSID, ro_mask=0xFFFFFFFF),
             R("HPTXFSIZ", 0x100, reset=0x02000800 if hs else 0x02000400),
         ]
@@ -289,7 +307,10 @@ class OtgCore(GatedBlock):
                              ("HPTXSTS", 0x410, 0x00080100), ("HAINT", 0x414, 0), ("HAINTMSK", 0x418, 0),
                              ("HPRT", 0x440, 0)):
             out.append(R(nm, off, reset=rst))
-        for c in range(8 if not self.has_dma else 12):
+        if self.otg2:                                       # RM0390 31.15.17 / 31.15.18
+            out += [R("GLPMCFG", 0x054, ro_mask=~0x11FE1F83, on_write=self._glpmcfg_write),
+                    R("GDFIFOCFG", 0x05C, reset=0x03EE0400 if hs else 0x03F40140)]
+        for c in range(self.n_channels):
             b = 0x500 + 0x20 * c
             out += [R(f"HCCHAR{c}", b), R(f"HCINT{c}", b + 8), R(f"HCINTMSK{c}", b + 0xC), R(f"HCTSIZ{c}", b + 0x10)]
             if self.has_dma:
@@ -300,7 +321,7 @@ class OtgCore(GatedBlock):
             R("DSTS", 0x808, reset=0x00000010, ro_mask=0xFFFFFFFF),
             R("DIEPMSK", 0x810, ro_mask=~(0x217F if hs else 0x207B), on_write=self._irq_write),
             R("DOEPMSK", 0x814, ro_mask=~(0x717F if hs else 0x313B), on_write=self._irq_write),
-            R("DAINT", 0x818, ro_mask=0xFFFFFFFF, on_read=lambda b, r: b._daint()),
+            R("DAINT", 0x818, ro_mask=0xFFFFFFFF, on_read=pure_read(lambda b, r: b._daint())),
             R("DAINTMSK", 0x81C, on_write=self._irq_write),
             R("DVBUSDIS", 0x828, reset=0x000017D7, ro_mask=0xFFFF0000),
             R("DVBUSPULSE", 0x82C, reset=0x000005B8, ro_mask=0xFFFFF000),
@@ -415,6 +436,7 @@ class OtgCore(GatedBlock):
         return self.has_dma and bool(self._r(0x008) & DMAEN)
 
     # ------------------------------------------------------------------ live register values
+    @pure_read
     def _gintsts_read(self, blk, reg) -> int:
         v = self._r(0x014) & ~GINTSTS_LIVE
         v |= self._cmod
@@ -434,13 +456,31 @@ class OtgCore(GatedBlock):
         v |= NPTXFE | PTXFE
         return v
 
+    def _gotgctl_write(self, blk, reg, old, new):
+        if self.otg2 and (old ^ new) & 0xFC:
+            self._store(reg, new)
+            self._after_cfg()                                # session-valid override changed
+        return None
+
+    def _glpmcfg_write(self, blk, reg, old, new):
+        if new & 1 and not old & 1:
+            self._warn_once("lpm", f"{self.name}: GLPMCFG.LPMEN = 1: LPM (L1 sleep) is not modelled; the USB host "
+                            "model sends no LPM tokens, so the device never enters L1")
+        return None
+
+    @pure_read
     def _gotgctl_read(self, blk, reg) -> int:
-        v = self._r(0x000) & ~0x000F0000
+        v = self._r(0x000) & ~(0x003F0000 if self.otg2 else 0x000F0000)
         v |= 1 << 16                                         # CIDSTS: B-device (ID pin floating / pulled up)
+        if self.otg2:
+            v |= 1 << 17                                     # DBCT (debounce done) as soon as the core is up
+            if self._cmod:
+                v |= 1 << 21                                 # CURMOD: host
         if self._session:
             v |= (1 << 18) if self._cmod else (1 << 19)      # ASVLD (host mode) / BSVLD (device mode)
         return v
 
+    @pure_read
     def _dctl_read(self, blk, reg) -> int:
         v = self._r(0x804) & ~(GINSTS | GONSTS)
         if self._ginak:
@@ -462,11 +502,13 @@ class OtgCore(GatedBlock):
         def rd(blk, reg):
             v = self._r(self._ictl(n) + 8) & ~TXFE
             return v | (TXFE if self._txfe(n) else 0)
+        rd.pure_read = True
         return rd
 
     def _dtxfsts_reader(self, n: int):
         def rd(blk, reg):
             return self.tx[self._txfnum(n)].free & 0xFFFF
+        rd.pure_read = True
         return rd
 
     def _daint(self) -> int:
@@ -519,6 +561,12 @@ class OtgCore(GatedBlock):
             self._gint(MMIS)
             return True
         return False
+
+    def peek_reg(self, reg):
+        off = reg.offset
+        if (0x400 <= off < 0x800 and not self._cmod) or (0x800 <= off < 0xE00 and self._cmod):
+            return 0, True                               # host register in device mode (or the reverse): reads 0
+        return super().peek_reg(reg)
 
     def read(self, offset: int, size: int) -> int:
         if 0x400 <= offset < 0xE00 and self._mode_mismatch(offset):
@@ -598,6 +646,14 @@ class OtgCore(GatedBlock):
         hclk = getattr(r, "core_hz", 0) if r is not None else 0
         f = min(48e6, hclk) if hclk else 48e6
         return n * 1e9 / f
+
+    def _grstctl_peek(self, blk, reg) -> int:
+        v = (self._r(0x010) & ~0x37) | AHBIDL
+        now = self.chip.now_ns() if self.chip is not None else 0.0
+        for bit, t in self._grst_busy.items():
+            if now < t:
+                v |= bit
+        return v
 
     def _grstctl_read(self, blk, reg) -> int:
         v = (self._r(0x010) & ~0x37) | AHBIDL
@@ -840,6 +896,9 @@ class OtgCore(GatedBlock):
         r = rcc(self.chip)
         if r is None or not hasattr(r, "pll_q_hz"):
             return float(self.params.get("clk48_hz", 48e6))
+        g = getattr(r, "clk48_hz", None)                 # STM32F446 DCKCFGR2.CK48MSEL (stm32.rcc_f446)
+        if g is not None:
+            return float(g())
         return r.pll_q_hz() if r.get("CR") & (1 << 25) else 0.0
 
     def _clock_ok(self) -> bool:
@@ -888,6 +947,13 @@ class OtgCore(GatedBlock):
 
     def _session_valid(self) -> bool:
         g = self._r(0x038)
+        if self.otg2:
+            # RM0390 31.15.1 / 31.15.15: BVALOEN overrides B-valid with BVALOVAL; otherwise VBDEN enables the VBUS
+            # comparators (no sensing: no valid session)
+            o = self._r(0x000)
+            if o & (1 << 6):
+                return bool(o & (1 << 7))
+            return bool(g & (1 << 21)) and self._vbus_present()
         if g & NOVBUSSENS:
             return True
         if g & (VBUSBSEN | VBUSASEN):
@@ -921,7 +987,9 @@ class OtgCore(GatedBlock):
         if sess != self._session:
             self._session = sess
             g = self._r(0x038)
-            if g & (VBUSBSEN | VBUSASEN) and not g & NOVBUSSENS and not self._cmod:
+            sensing = (g & (1 << 21) and not self._r(0x000) & (1 << 6)) if self.otg2 else \
+                (g & (VBUSBSEN | VBUSASEN) and not g & NOVBUSSENS)
+            if sensing and not self._cmod:
                 if sess:
                     self._set_bits(0x014, SRQINT)
                 else:

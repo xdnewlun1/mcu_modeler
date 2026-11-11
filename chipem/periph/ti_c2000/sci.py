@@ -40,6 +40,7 @@ These clear only by SW RESET (reading SCIRXBUF clears RXRDY and RXWAKE only). FI
 FE/PE in SCIRXBUF bits 15/14 (SCIFFFE/SCIFFPE). SLEEP: only address frames (address bit = 1, or the first character
 after >= 10 idle bits in idle-line mode) set RXRDY / flags (RXWAKE = 1); others are dropped (reason sleep).
 The F2823x SCI cannot transmit a break (no send-break control; a break needs the pin as a GPIO).
+Autobaud (SCIFFCT.CDC / ABD / ABDCLR, used by the boot ROM SCI loader): see `_rx_frame`; FFTXDLY is stored only.
 """
 from __future__ import annotations
 
@@ -69,6 +70,8 @@ TXFFIENA, TXFFINTCLR, TXFFINT, TXFIFOXRESET, SCIFFENA, SCIRST = 1 << 5, 1 << 6, 
 # SCIFFRX
 RXFFIENA, RXFFINTCLR, RXFFINT, RXFIFORESET, RXFFOVRCLR, RXFFOVF = 1 << 5, 1 << 6, 1 << 7, 1 << 13, 1 << 14, 1 << 15
 FIFO_DEPTH = 16
+# SCIFFCT (autobaud)
+ABD, ABDCLR, CDC = 1 << 15, 1 << 14, 1 << 13
 
 
 @register("ti_c2000.sci")
@@ -79,23 +82,26 @@ class SCI(UartRx, C2000Block):
         ov = {
             "SCICTL1": {"on_write": self._ctl1_write},
             "SCICTL2": {"on_write": self._ctl2_write, "ro_mask": 0xFFFC},
-            "SCIRXBUF": {"on_read": self._rxbuf_read},
-            "SCIRXEMU": {"on_read": self._rxemu_read},
+            "SCIRXBUF": {"on_read": self._rxbuf_read, "on_peek": self._rxbuf_peek},
+            "SCIRXEMU": {"on_read": self._rxemu_read, "on_peek": self._rxemu_read},
             "SCITXBUF": {"on_write": self._txbuf_write},
             "SCIFFTX": {"on_write": self._fftx_write},
             "SCIFFRX": {"on_write": self._ffrx_write},
             "SCICCR": {"on_write": self._ccr_write},
             "SCIHBAUD": {"on_write": self._baud_write},
             "SCILBAUD": {"on_write": self._baud_write},
+            "SCIFFCT": {"on_write": self._ffct_write},
         }
         regs = build_regs((name, f"SCI{self.letter}", "SCIA"), size, ov, params.get("regs_file"))
         self._rx_init()
         self._loop_evs: list = []
         super().__init__(name, base, size, regs, params=params, log=log)
+        self.fifo_depth = int(self.params.get("fifo_depth", FIFO_DEPTH))   # Piccolo: 4 (SPRUI09 8.1/9.1/10.1)
         self.gate = f"SCI{self.letter}ENCLK"
         self.output = bytearray()
         self.tx_listeners: list = []
         self.rx_signal = f"SCIRXD{self.letter}"
+        self.tx_signal = f"SCITXD{self.letter}"          # bit-level waveform on the TX pin (uartwire._tx_emit)
         self.rx_fifo: deque[int] = deque()
         self.tx_fifo: deque[int] = deque()
         self._txbuf: int | None = None          # non-FIFO TXBUF holding a byte
@@ -308,7 +314,7 @@ class SCI(UartRx, C2000Block):
         if self.fifo_mode():
             if not self.get("SCIFFTX") & TXFIFOXRESET:
                 return b
-            if len(self.tx_fifo) >= FIFO_DEPTH:
+            if len(self.tx_fifo) >= self.fifo_depth:
                 self.emit("warn", block=self.name, msg=f"{self.name}: TX FIFO overflow, byte 0x{b:02X} lost")
                 return b
             self.tx_fifo.append(b)
@@ -373,6 +379,38 @@ class SCI(UartRx, C2000Block):
             self._loop_evs.pop(0)               # loopback characters arrive in order
         self._rx_frame(fr, "loop")
 
+    # ------------------------------------------------------------------ autobaud (SPRU051 2.7, SCIFFCT)
+    def _ffct_write(self, blk, reg, old, new):
+        """ABD (bit 15) is read-only, ABDCLR (bit 14) writes 1 to clear ABD and reads 0; CDC (13), FFTXDLY stored."""
+        val = (new & 0x20FF) | (old & ABD)
+        if new & ABDCLR:
+            val &= ~ABD
+        return val
+
+    def _rx_frame(self, fr: Frame, src: str, t_end: float | None = None) -> None:
+        """With SCIFFCT.CDC = 1 the autobaud logic watches the line: an 'A' or 'a' (the only characters it can lock
+        on) sets SCIHBAUD/SCILBAUD to the sender's bit rate (BRR = LSPCLK / (8 x baud) - 1) and SCIFFCT.ABD, and is
+        then received normally (TI's boot ROM reads and echoes it).  Frames carry their bit rate, so the lock is
+        exact to the BRR rounding.  Any other character while CDC = 1 is discarded (`uart` drop, reason
+        autobaud): on silicon it would lock on a wrong rate."""
+        if (self.get("SCIFFCT") & CDC and src != "loop" and not fr.brk
+                and self._rx_block_reason() is None):
+            if fr.data & 0xFF not in (0x41, 0x61):
+                self._rx_drop(fr.data, "autobaud")
+                return
+            baud = fr.baud or self.baud()
+            hz = self.module_hz()
+            if baud > 0 and hz > 0:
+                brr = max(1, min(0xFFFF, int(round(hz / (8.0 * baud))) - 1))
+                self.set("SCIHBAUD", brr >> 8)
+                self.set("SCILBAUD", brr & 0xFF)
+                if self._ln is not None:
+                    self._ln.reset()
+                self.emit("info", block=self.name, msg=f"{self.name}: autobaud lock on 0x{fr.data & 0xFF:02X} at "
+                          f"{baud:.0f} baud -> BRR {brr} ({self.baud():.0f} baud)")
+            self.set("SCIFFCT", self.get("SCIFFCT") | ABD)
+        super()._rx_frame(fr, src, t_end)
+
     def _rx_block_reason(self) -> str | None:
         sc = self._sysctrl
         if self.gate is not None and sc is not None and not sc.clock_enabled(self.gate):
@@ -416,7 +454,7 @@ class SCI(UartRx, C2000Block):
             return
         err = (FE if ch.fe else 0) | (PE if ch.pe else 0) | (BRKDT if brkdt else 0)
         if self.fifo_mode():
-            if len(self.rx_fifo) >= FIFO_DEPTH:
+            if len(self.rx_fifo) >= self.fifo_depth:
                 self._rx_drop(b, "overrun")
                 self.set("SCIFFRX", self.get("SCIFFRX") | RXFFOVF)
                 return
@@ -449,6 +487,11 @@ class SCI(UartRx, C2000Block):
         if st & (RXRDY | RXWAKE):
             self.set("SCIRXST", st & ~(RXRDY | RXWAKE))   # BRKDT and the error flags stay until SW RESET
             self._update_lines()
+        return self._rx_byte
+
+    def _rxbuf_peek(self, blk, reg):
+        if self.fifo_mode() and self.rx_fifo:
+            return self.rx_fifo[0]                      # the FIFO head, not popped
         return self._rx_byte
 
     def _rxemu_read(self, blk, reg):

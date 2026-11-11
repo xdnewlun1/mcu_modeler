@@ -154,9 +154,12 @@ class I2SEngine:
         self.lp_owner = blk                       # the PWR freezer holds our events with the block's
         self.ext = ext
         self.idx = idx
-        self.sig = {"CK": f"I2S{idx}_CK", "WS": f"I2S{idx}_WS", "MCK": f"I2S{idx}_MCK",
-                    "SD": f"I2S{idx}ext_SD" if ext else f"I2S{idx}_SD"}
         p = blk.params
+        # serial clock pin function: I2Sx_CK (DS8626, STM32F4) or I2Sx_SCK (`params.i2s_ck: SCK`, the STM32F2 data
+        # sheets DS15818 / DS17050 spelling)
+        ck = str(p.get("i2s_ck", "CK"))
+        self.sig = {"CK": f"I2S{idx}_{ck}", "WS": f"I2S{idx}_WS", "MCK": f"I2S{idx}_MCK",
+                    "SD": f"I2S{idx}ext_SD" if ext else f"I2S{idx}_SD"}
         self.event_frames = int(p.get("event_frames", 64))
         self.mck_edges_max_hz = float(p.get("mck_edges_max_hz", 1e6))
         self.tx_frames: deque = deque(maxlen=100_000)
@@ -282,6 +285,18 @@ class I2SEngine:
 
     def i2sclk_hz(self) -> float:
         r = self._rcc()
+        g = getattr(r, "i2s_kernel_hz", None)        # per-APB I2S clock mux (STM32F446 I2S1SRC/I2S2SRC: stm32.rcc_f446)
+        if g is not None:
+            return float(g(self.blk.name))
+        if (self.blk.params or {}).get("i2s_clock") == "sysclk":
+            # STM32F1 high/XL density (RM0008 25.4.3): I2SxCLK is the system clock (SYSCLK = HCLK x AHB prescaler)
+            s = getattr(r, "sysclk_hz", None)
+            if s is not None:
+                return float(s() if callable(s) else s)
+            chip = self.blk.chip
+            hpre = getattr(r, "hpre", 1)              # stm32f1.rcc: AHB prescaler (property)
+            hpre = hpre() if callable(hpre) else hpre
+            return float(chip.clock.hz) * float(hpre or 1) if chip is not None else 0.0
         return float(r.i2s_clk_hz()) if r is not None and hasattr(r, "i2s_clk_hz") else 0.0
 
     def mck_out_hz(self) -> float:

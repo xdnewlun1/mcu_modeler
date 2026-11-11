@@ -55,6 +55,14 @@ class PinBoard:
                                                        #   input: net / pull / X). PinEvent field "od" (old, new bools)
                                                        #   after the "level" event; mcu_update re-applies it on re-mux
     def signal_level(self, name) -> Level | None       # wired-AND level of the pins owned by `name` (None: not muxed)
+    # drive_signal / drive_open_drain take an optional `t` (ns): the event timestamp (waveform sources)
+    # waveform sources (UART TX frames; 2026-11-11): a whole frame's edges at once, applied lazily
+    def drive_wave(self, name, edges: list[(t_ns, Level)], *, od=False) -> bool   # False: no pin owned (not muxed)
+    def end_wave(self, name, level=None)               # drop pending edges (transmitter reset); optionally drive `level`
+    def sync_waves(self, now=None)                     # apply pending edges <= now, each with its own timestamp
+    def wave_pending(self) -> bool                     # GPIO models: do not cache input levels while True
+    sched                                              # the chip's Scheduler (set by Chip): realtime wave edges
+    wave_rt_hook: Callable[[Pin], bool] | None         # board: does this pin's net need its edges live?
     @staticmethod
     def signal_matches(owner, name) -> bool            # owner carries name: equal, a '/'-part equal, or a '/'-part
                                                        #   "<name>_<LETTERS>[_<LETTERS>]" ("TIM2_CH1_ETR" carries "TIM2_CH1";
@@ -86,10 +94,22 @@ any `/`-part of the name; `TABLE.pin_state(fn) -> (direction, drive)`). It does 
 | JTAG/SWD `TCK`/`TMS`/`TDI`/`TRST` / `TDO`/`SWO` | in / out | pull / H |
 | anything else | none | X |
 
-The level does not follow serial traffic (UART bytes, SPI frames): it is the signal's idle state. Timer/PWM
-models are the exception: they call `PinBoard.drive_signal` at every output edge, and a pin owned by that signal
-shows the live level (see the drive override above) until `release_signal`. Nets treat a peripheral output like any
-driven output.
+The level does not follow SPI frames or other serial traffic: it is the signal's idle state. Timer/PWM models call
+`PinBoard.drive_signal` at every output edge, and a pin owned by that signal shows the live level (see the drive
+override above) until `release_signal`. UART transmitters (every `uartwire.UartRx` model: kinetis.uart, stm32.usart
+incl. F1/F2, ti_c2000.sci, mcs51.uart modes 1-3) hand each frame to `drive_wave(tx_signal, frame_edges(frame, now))`
+when its start bit begins. Nets treat a peripheral output like any driven output.
+
+**Waveform sources (`drive_wave`).** Edges are applied with their exact timestamps, lazily: before any other PinEvent
+of the board is published (subscribers still see time order), by `sync_waves()` (GPIO models call it on an input
+cache miss and do not cache while `wave_pending()`; the Chip calls it after every slice and sleep step), and by
+`end_wave`. One scheduler event per edge is used only when a pin of the signal needs them live: an input listener
+with attribute `wave_rt` (bool or `callable(pin) -> bool`, e.g. an armed Kinetis PORT IRQC, an armed STM32 EXTI line,
+C2000 qualification / XINT / peripheral inputs) or `wave_rt_hook(pin)` true (Board: the pin's net has a part input
+or a member pin that is not a UART RX, disabled or analog). Input listeners without `wave_rt` are assumed to ignore
+pins owned by another peripheral. A board net gets lazily published edges at their own time (`Board._src_t`): a chip
+behind the source receives each change at its time. `od=True`: L pulls the pin low, H releases (STM32 half duplex /
+smartcard). PinBoard.reset() drops pending waves.
 
 STM32 GPIO hooks (`stm32.gpio`, AF/analog pins; the block is found by the signal's prefix, "SPI1" for "SPI1_MISO"):
 a peripheral may define `signal_driven(n, neg=False) -> bool | None` (stm32.tim: is TIMx_CHn[N] driven now; False
@@ -101,8 +121,12 @@ which re-evaluates the AF (and analog) pins carrying `sig`, then `drive_signal`/
 ## chipem/periph/base.py — MMIO blocks
 ```python
 class Reg:  # descriptor; width in bytes (1/2/4); masks are over the register width
-    def __init__(self, name, offset, width=4, reset=0, ro_mask=0, w1c_mask=0, on_read=None, on_write=None)
+    def __init__(self, name, offset, width=4, reset=0, ro_mask=0, w1c_mask=0, on_read=None, on_write=None, doc="",
+                 unit_bits=8, on_peek=None)
     # on_read(block, reg) -> int|None  (return value overrides stored); on_write(block, reg, old, new) -> int|None (return value stored instead of new)
+    # on_peek(block, reg) -> int|None  the value a read would return now WITHOUT its side effects (debugger peek;
+    #                                  None = stored). Required for a non-pure on_read and for registers that a
+    #                                  fast-path read() override serves (tests/test_peek.py checks every chip)
 class MMIOBlock:
     name: str; base: int; size: int
     def __init__(self, name, base, size, regs: list[Reg] = (), *, ram_like=True, log=None)
@@ -127,8 +151,18 @@ class Bus:
     def map_mmio(self, block: MMIOBlock)
     def read(self, addr, size) -> int ; def write(self, addr, size, value) ; def read_bytes(addr, n) -> bytes ; def write_bytes(addr, data)
     def lookup(self, addr) -> (MMIOBlock | MemoryRegion | None)
+    def map_window(self, name, base, size, *, buffer=None, period=None, writable=True, read=None, write=None)
+    def unmap_window(self, name)
 ```
 Unicorn-backed implementation lives in core/unicorn_cm.py (the Bus calls `core.map_memory`/`core.map_mmio`).
+
+**Mapping changes from callbacks (2026-11-11).** `Bus.map_window`/`unmap_window`/`map_mmio`/`map_memory` (and the core's
+`map_memory`/`map_mmio`/`map_shared`/`unmap`) may be called from MMIO callbacks and scheduler events. The Bus
+bookkeeping (`lookup`, debugger reads) changes at once; while the Unicorn core runs, the core queues the mapping
+change, ends the slice after the accessing instruction (`end_slice_at`) and applies the queue once emu_start has
+returned, so the next instruction sees the new mapping. (Root cause: Unicorn 2.1.4 survives `uc_mem_unmap` inside a
+memory hook until that emu_start ends, then raises a spurious UC_HOOK_INTR intno 3 = prefetch abort.) Mapping from
+the unmapped-access hook (auto stubs) stays immediate. Models need no deferral of their own.
 
 ## chipem/core/base.py
 ```python
@@ -136,6 +170,16 @@ class StopReason(Enum): COUNT, WFI, EXC_RETURN, SVC, FAULT, BREAKPOINT, USER, DE
 class Core(ABC):
     def reset(self, pc: int, sp: int)
     def run(self, max_insns: int) -> (StopReason, insns_executed: int)   # insns_executed may be approximate for early stops
+    def request_stop(self, from_mmio=False) -> bool     # from_mmio: from this core's callbacks: end after the current
+                                                        #   instruction (never abort/repeat it); else from another thread
+    def set_fp_enabled(self, on: bool) -> bool          # optional (Unicorn): FP unit usable (CPACR CP10/CP11); when off
+                                                        #   (or no FPU) VFP instructions raise NOCP. armv7m SCS calls it
+    def end_slice_at(self, n: int) -> bool              # optional (Unicorn): lower the running slice's budget to n
+                                                        #   instructions from its start (>= the current one); run() then
+                                                        #   returns COUNT with n. Chip._early_event uses it for events
+                                                        #   scheduled from MMIO callbacks (reads and writes, any
+                                                        #   instruction form): they fire exactly when due. Interpreters
+                                                        #   (C28x, MCS-51) stop after the current instruction instead.
     def read_reg(self, name: str) -> int ; def write_reg(self, name, value)   # names: r0..r15, sp, lr, pc, xpsr, msp, psp, primask, basepri, faultmask, control, fpscr, s0..s31
     pc: property ; sp: property
     def read_mem(addr, n) -> bytes ; def write_mem(addr, data)
@@ -697,8 +741,11 @@ class Core:
 instruction at PC even if a breakpoint is on it.
 
 MMIO peek (chipem/periph/base.py): `MMIOBlock.pure_reads: frozenset[str]` (registers whose `on_read` has no side
-effects), `peek_reg(reg) -> (value, exact)`, `peek_bytes(offset, n_units) -> (bytes, [exact per unit])`: never run a
-read hook with side effects (exact=False: the stored value).
+effects; or decorate the hook with `@pure_read`), `Reg.on_peek(block, reg)` (live value computed without the read's
+side effects), `peek_reg(reg) -> (value, exact)`, `peek_bytes(offset, n_units) -> (bytes, [exact per unit])`: never run
+a read hook with side effects (exact=False: the stored value). tests/test_peek.py walks every register of
+representative chips with a sample running: two peeks change no state, an exact peek equals a CPU read at that
+instant, and only the registers listed there (and in docs/LIMITATIONS.md) are not exact.
 
 ```python
 Session.debug -> SessionDebug                 # created on first use; Session._run calls debug.after_run(reason)

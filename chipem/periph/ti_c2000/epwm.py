@@ -132,8 +132,8 @@ class EPWM(C2000Block):
         cfg = {"on_write": self._cfg_write}
         ov = {
             "TBCTL": {"on_write": self._tbctl_write},
-            "TBSTS": {"on_read": self._tbsts_read, "on_write": self._tbsts_write},
-            "TBCTR": {"on_read": self._tbctr_read, "on_write": self._tbctr_write},
+            "TBSTS": {"on_read": self._tbsts_read, "on_write": self._tbsts_write, "on_peek": self._tbsts_peek},
+            "TBCTR": {"on_read": self._tbctr_read, "on_peek": self._tbctr_read, "on_write": self._tbctr_write},
             "TBPRD": {"on_write": self._tbprd_write},
             "CMPA": {"on_write": self._cmp_write("A")}, "CMPB": {"on_write": self._cmp_write("B")},
             "CMPCTL": {"on_write": self._cmpctl_write, "ro_mask": SHDWAFULL | SHDWBFULL},
@@ -141,12 +141,12 @@ class EPWM(C2000Block):
             "TZSEL": {"on_write": self._tzsel_write},
             "TZEINT": cfg, "ETSEL": cfg,
             "AQSFRC": {"on_write": self._aqsfrc_write}, "AQCSFRC": cfg,
-            "TZFLG": {"ro_mask": 0xFFFF}, "TZCLR": {"on_write": self._tzclr_write, "on_read": lambda b, r: 0},
-            "TZFRC": {"on_write": self._tzfrc_write, "on_read": lambda b, r: 0},
-            "ETPS": {"on_read": self._etps_read, "on_write": self._cfg_write, "ro_mask": 0xCC0C},
+            "TZFLG": {"ro_mask": 0xFFFF}, "TZCLR": {"on_write": self._tzclr_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
+            "TZFRC": {"on_write": self._tzfrc_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
+            "ETPS": {"on_read": self._etps_read, "on_peek": self._etps_read, "on_write": self._cfg_write, "ro_mask": 0xCC0C},
             "ETFLG": {"ro_mask": 0xFFFF},
-            "ETCLR": {"on_write": self._etclr_write, "on_read": lambda b, r: 0},
-            "ETFRC": {"on_write": self._etfrc_write, "on_read": lambda b, r: 0},
+            "ETCLR": {"on_write": self._etclr_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
+            "ETFRC": {"on_write": self._etfrc_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
             "PCCTL": {"on_write": self._pcctl_write},
         }
         self.hr = bool(params.get("hrpwm", False))
@@ -852,10 +852,7 @@ class EPWM(C2000Block):
         ob: Any = (self._fed ^ bool(pol & 2)) if om & 1 else b
         if self._pc_on:
             oa, ob = self._chop(oa, ob)
-        if self._cbc_act or self.get("TZFLG") & TZ_OST:
-            ctl = self.get("TZCTL")
-            oa = {0: None, 1: True, 2: False}.get(ctl & 3, oa)
-            ob = {0: None, 1: True, 2: False}.get((ctl >> 2) & 3, ob)
+        oa, ob = self._trip_actions(oa, ob)
         pins = self.chip.pins
         if pins is None:
             return
@@ -872,6 +869,15 @@ class EPWM(C2000Block):
                     pins.drive_signal(sig, v)
                     if old == "Z":
                         self._repin(sig)
+
+    def _trip_actions(self, oa: Any, ob: Any) -> tuple[Any, Any]:
+        """Trip-zone action on the chopper outputs (None = high impedance).  The Piccolo ePWM with digital compare
+        (`ti_c2000.epwm_dc`, epwm_dc.py) overrides this with the DCAEVTx/DCBEVTx actions."""
+        if self._cbc_act or self.get("TZFLG") & TZ_OST:
+            ctl = self.get("TZCTL")
+            oa = {0: None, 1: True, 2: False}.get(ctl & 3, oa)
+            ob = {0: None, 1: True, 2: False}.get((ctl >> 2) & 3, ob)
+        return oa, ob
 
     def signal_driven(self, side: str) -> bool:
         """Does the module drive EPWMx`side` now?  False only while tripped to high impedance (TZCTL = 00): the
@@ -1091,6 +1097,14 @@ class EPWM(C2000Block):
         if self.running and was and not changed:          # a fresh start was just scheduled by _update_run
             self._reschedule(first=False)
         return new & ~SWFSYNC
+
+    def _tbsts_peek(self, blk, reg):
+        v = self.get("TBSTS") & ~1
+        if self.running and self.chip is not None:
+            mt = self._max_tick()
+            if mt is not None and mt <= self._now_tick()[0]:
+                v |= CTRMAX                              # what _latch_ctrmax would latch (not stored by a peek)
+        return v | int(self._state_now()[1])
 
     def _tbsts_read(self, blk, reg):
         self._latch_ctrmax()

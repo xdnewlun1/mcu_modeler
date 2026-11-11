@@ -86,6 +86,8 @@ class SfrBlock(MMIOBlock):
         """Run one of our events at its due cycle: `now()`, our log events and the pin edges it causes are stamped
         with the due time, not with the end of the instruction the slice finished on."""
         prev, self._at = self._at, due
+        arch = self.chip.arch
+        prev_due, arch.event_due = getattr(arch, "event_due", None), due    # flag-set time for the polling cycle
         pb = self.chip.pins
         tf = pb.time_fn if pb is not None else None
         if pb is not None:
@@ -95,6 +97,7 @@ class SfrBlock(MMIOBlock):
             cb(*args)
         finally:
             self._at = prev
+            arch.event_due = prev_due
             if pb is not None:
                 pb.time_fn = tf
 

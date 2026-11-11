@@ -69,6 +69,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from ..base import pure_read
 from ..registry import register
 from ..sdbus import ClockWave
 from ._util import GatedBlock, build_regs, dma_request, gpio_resync, irq_number, rcc
@@ -163,8 +164,8 @@ class _Sub:
         o = 0 if x == "A" else 0x20
         self.r = {k: f"{x}{k}" for k in ("CR1", "CR2", "FRCR", "SLOTR", "IM", "SR", "CLRFR", "DR")}
         self.off_dr = 0x20 + o
-        self.sig = {k: f"SAI1_{k}_{x}" for k in ("SCK", "FS", "SD", "MCLK")}
-        self.dma_name = f"SAI1_{x}"
+        self.sig = {k: f"{sai.name}_{k}_{x}" for k in ("SCK", "FS", "SD", "MCLK")}   # SAI1_SCK_A / SAI2_... (F446)
+        self.dma_name = f"{sai.name}_{x}"
         self.tx_frames: deque = deque(maxlen=100_000)
         self.rx_frames: deque = deque(maxlen=100_000)
         self.drv: dict[str, str] = {}
@@ -423,6 +424,14 @@ class _Sub:
             return False
         if (c >> PRTCFG_SH) & 3 == 2:
             self.sai._warn_once("ac97", "SAI1: AC'97 protocol is not modelled: free protocol used")
+        if (c >> PRTCFG_SH) & 3 == 1:
+            # STM32F446 (RM0390 28.3.11): SPDIF output protocol; "not used" on the STM32F42x (RM0090 SAI_xCR1)
+            self.sai._warn_once("spdif", f"{self.sai.name}: SPDIF protocol (PRTCFG = 01) is not modelled: free "
+                                "protocol used")
+        if (c >> SYNCEN_SH) & 3 == 2:
+            # STM32F446 (RM0390 28.3.4, SAI_GCR SYNCIN/SYNCOUT, Table 176): synchronous with the other SAI
+            self.sai._warn_once("extsync", f"{self.sai.name} block {self.x}: external synchronisation with another "
+                                "SAI (SYNCEN = 10, SAI_GCR) is not modelled: the block runs on its own clock")
         if (self.cr2() >> COMP_SH) & 3 >= 2:
             self.sai._warn_once("comp", "SAI1: companding (u-law / A-law) is not modelled: data are not companded")
         if g.fboff + g.ds > g.slotsz or g.nslot * g.slotsz > g.F + (g.F if g.fsdef else 0):
@@ -801,8 +810,10 @@ class SAI(GatedBlock):
             ov[f"{x}SLOTR"] = {"on_write": self._cfg_write(x), "ro_mask": 0x0000F020}
             ov[f"{x}IM"] = {"on_write": self._im_write(x), "ro_mask": 0xFFFFFF80}
             ov[f"{x}SR"] = {"reset": FREQ, "ro_mask": 0xFFFFFFFF, "on_read": self._sr_read(x)}
-            ov[f"{x}CLRFR"] = {"on_write": self._clrfr_write(x), "on_read": lambda b, r: 0}
-            ov[f"{x}DR"] = {"on_write": self._dr_write(x), "on_read": self._dr_read(x)}
+            ov[f"{x}CLRFR"] = {"on_write": self._clrfr_write(x), "on_read": pure_read(lambda b, r: 0)}
+            ov[f"{x}DR"] = {"on_write": self._dr_write(x), "on_read": self._dr_read(x),
+                             "on_peek": lambda b, r, _x=x: (self.subs[_x].fifo[0] if self.subs[_x].is_rx()
+                                                            and self.subs[_x].fifo else 0)}
         r = build_regs((name, "SAI1", "SAI"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.event_frames = int(params.get("event_frames", 64))
@@ -880,6 +891,9 @@ class SAI(GatedBlock):
 
     def sai_ck_hz(self, x: str) -> float:
         r = rcc(self.chip) if self.chip is not None else None
+        g = getattr(r, "sai_kernel_hz", None)        # per-instance kernel clock (STM32F446 SAI1/SAI2: stm32.rcc_f446)
+        if g is not None:
+            return float(g(self.name, x))
         f = getattr(r, "sai_clk_hz", None)
         if f is not None:
             return float(f(x))
@@ -921,6 +935,7 @@ class SAI(GatedBlock):
             s = self.subs[x]
             v = self.get(reg.name) & ~SAIEN
             return v | (SAIEN if s.running else 0)
+        rd.pure_read = True
         return rd
 
     def _cr1_write(self, x: str):
@@ -974,7 +989,7 @@ class SAI(GatedBlock):
         return wr
 
     def _sr_read(self, x: str):
-        return lambda blk, reg: self.subs[x].sr()
+        return pure_read(lambda blk, reg: self.subs[x].sr())
 
     def _clrfr_write(self, x: str):
         def wr(blk, reg, old, new):

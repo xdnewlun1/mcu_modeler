@@ -1,0 +1,9 @@
+# TMS320F28027 SPI-A master and a SPI NOR flash (W25Q32-style, JEDEC ID 0xEF4016) with GPIO19 as a GPIO chip select.
+#   firmware/samples_c2000/f28027_spi_flash.asm: RDID -> spi_id0..2 = EF 40 16; READ 0x000000 -> spi_data0..3 = FF.
+# Run:  chipem run --board boards/f28027_spi_flash.yaml --for 10ms
+name: f28027_spi_flash
+quantum: 1us
+chips:
+  - {id: A, chip: tms320f28027, firmware: ../firmware/samples_c2000/build/f28027_spi_flash.c28img}
+devices:
+  - {type: spi_flash, chip: A, spi: SPIA, cs: GPIO19, jedec: 0xEF4016}

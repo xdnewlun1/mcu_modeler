@@ -20,12 +20,17 @@ the compiler is not part of the repository).
 | `f2808_blinky.c` | F2808: GPIO34 toggles every 1 ms (CPU timer 0, TIF polled) |
 | `f2808_adc.c` | F2808: ePWM1 SOCA every 500 us → ADC SEQ1 (ADCINA0/A1) → `interrupt void seq1_isr` (PIE 1.1); prints `ADC <n> <a0> <a1>` on SCI-A every 10 samples |
 | `f2808_can.c` | F2808: eCAN-B (GPIO8/GPIO10, 500 kbit/s from the 100 MHz eCAN clock) sends `100#00<n>4B32` every 10 ms and prints the `202#...` answers of the STM32 `can_echo` (`boards/f2808_stm32_can.yaml`); tests in `tests/test_c2000_f2808_samples.py` |
+| `f28335.h`, `f28335.cmd`, `f28335_fpu_asm.asm` | TMS320F28335: register definitions (`f28232.h` + ePWM/ADC: same die, same addresses), linker file (flash 0x300000-0x33FF7F, BEGIN 0x33FFF6, M0/M1, L0-L7), and hand-written FPU32 helpers for `f28335_fpu` (STF.RND32 = 0, STF/MOVST0 flags, RPTB #imm). `build.sh` compiles `f28335_*.c` with `--float_support=fpu32` and `rts2800_fpu32[_eabi].lib`, and links `<name>_asm.asm` when it exists |
+| `f28335_fpu.c` | F28335: 44 FPU32 results (arithmetic, conversions with rounding ties, compares via MOVST0, MIN/MAXF32, RPTB + RPT‖MACF32 dot product and FIR, RPTB Horner, truncation mode, LVF/LUF flags) checked against host IEEE single precision by `tests/test_c2000_f2833x_fpu.py` |
+| `f28335_pid.c` | F28335 at 150 MHz: ePWM1 20 kHz SOCA → ADC SEQ1 → `__interrupt adc_isr` float PI loop (RPTB average, FPU context save) driving CMPA; main repeats float work and counts differences; status lines on SCI-A; `boards/f28335_fpu_loop.yaml` (RC plant script part) |
+| `f28335_can.c` | F28335 at 150 MHz: eCAN-A (GPIO30/31, 500 kbit/s from the SYSCLKOUT/2 eCAN clock) sends `100#00<n>4B32` every 10 ms and prints the STM32 `can_echo` answers (`202#...`) on SCI-A; `boards/f28335_stm32_can.yaml` |
 
 ## Building
 
 ```sh
 firmware/samples_c2000_c/build.sh                 # EABI + COFF
 ABI=eabi firmware/samples_c2000_c/build.sh        # one ABI only (ABI=coff likewise; the output is then <name>.out)
+firmware/samples_c2000_c/build.sh f28335_fpu f28335_pid   # only these samples (other outputs untouched)
 TI_CGT=/opt/ti/ti-cgt-c2000_25.11.1.LTS firmware/samples_c2000_c/build.sh
 ```
 

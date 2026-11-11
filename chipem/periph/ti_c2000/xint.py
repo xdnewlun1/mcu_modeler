@@ -26,9 +26,9 @@ class XInt(C2000Block):
         params = dict(params or {})
         ov = {f"XINT{n}CR": {"on_write": self._cr_write} for n in range(1, 8)}
         ov["XNMICR"] = {"on_write": self._cr_write}
-        ov["XINT1CTR"] = {"on_read": self._ctr_read}
-        ov["XINT2CTR"] = {"on_read": self._ctr_read}
-        ov["XNMICTR"] = {"on_read": self._ctr_read}
+        ov["XINT1CTR"] = {"on_read": self._ctr_read, "on_peek": self._ctr_read}
+        ov["XINT2CTR"] = {"on_read": self._ctr_read, "on_peek": self._ctr_read}
+        ov["XNMICTR"] = {"on_read": self._ctr_read, "on_peek": self._ctr_read}
         regs = build_regs((name, "XINT"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self._gpio: Any = None

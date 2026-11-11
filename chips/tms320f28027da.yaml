@@ -1,0 +1,49 @@
+# TI TMS320F28027 in the 38-pin TSSOP "DA" (SPRS523P Table 5-1 / Figure 5-2 DA columns, Table 9-33 analog mux):
+# the die of chips/tms320f28027.yaml with the DA pin table (20 GPIOs: no GPIO32/33; 7 ADC channels; no crystal pins X1/X2;
+# COMP1 only: COMP2A/B and COMP2OUT are not bonded out, so COMP2 is dropped), PARTID 0x00CE (Table 9-11).
+# Pin table cross-checked like the PT one (chips/README.md "Piccolo").
+include: tms320f28027.yaml
+name: TMS320F28027
+package: TSSOP38 (DA)
+drop: [COMP2]
+peripheral_params:
+  PARTID: {value: 0x00CE}
+pins:
+  - {num: 1, name: "VDD", kind: power}
+  - {num: 2, name: "VSS", kind: power}
+  - {num: 3, name: "VREGENZ", kind: special}
+  - {num: 4, name: "VDDIO", kind: power}
+  - {num: 5, name: "GPIO2/EPWM2A", kind: gpio, port: A, bit: 2, default: GPIO, functions: {GPIO: "GPIO2", MUX1: "EPWM2A"}}
+  - {num: 6, name: "GPIO3/EPWM2B", kind: gpio, port: A, bit: 3, default: GPIO, functions: {GPIO: "GPIO3", MUX1: "EPWM2B"}}
+  - {num: 7, name: "GPIO4/EPWM3A", kind: gpio, port: A, bit: 4, default: GPIO, functions: {GPIO: "GPIO4", MUX1: "EPWM3A"}}
+  - {num: 8, name: "GPIO5/EPWM3B/ECAP1", kind: gpio, port: A, bit: 5, default: GPIO, functions: {GPIO: "GPIO5", MUX1: "EPWM3B", MUX3: "ECAP1"}}
+  - {num: 9, name: "GPIO6/EPWM4A/EPWMSYNCI/EPWMSYNCO", kind: gpio, port: A, bit: 6, default: GPIO, functions: {GPIO: "GPIO6", MUX1: "EPWM4A", MUX2: "EPWMSYNCI", MUX3: "EPWMSYNCO"}}
+  - {num: 10, name: "GPIO7/EPWM4B/SCIRXDA", kind: gpio, port: A, bit: 7, default: GPIO, functions: {GPIO: "GPIO7", MUX1: "EPWM4B", MUX2: "SCIRXDA"}}
+  - {num: 11, name: "VDD", kind: power}
+  - {num: 12, name: "VSS", kind: power}
+  - {num: 13, name: "GPIO12/TZ1/SCITXDA", kind: gpio, port: A, bit: 12, default: GPIO, functions: {GPIO: "GPIO12", MUX1: "TZ1", MUX2: "SCITXDA"}}
+  - {num: 14, name: "GPIO28/SCIRXDA/SDAA/TZ2", kind: gpio, port: A, bit: 28, default: GPIO, functions: {GPIO: "GPIO28", MUX1: "SCIRXDA", MUX2: "SDAA", MUX3: "TZ2"}}
+  - {num: 15, name: "GPIO29/SCITXDA/SCLA/TZ3", kind: gpio, port: A, bit: 29, default: GPIO, functions: {GPIO: "GPIO29", MUX1: "SCITXDA", MUX2: "SCLA", MUX3: "TZ3"}}
+  - {num: 16, name: "TRST", kind: special}
+  - {num: 17, name: "XRS", kind: special}
+  - {num: 18, name: "ADCINA6/AIO6", kind: analog, functions: {ANALOG: "ADCINA6", AIO: "AIO6"}}
+  - {num: 19, name: "ADCINA4/AIO4", kind: analog, functions: {ANALOG: "ADCINA4", AIO: "AIO4"}}
+  - {num: 20, name: "ADCINA2/COMP1A/AIO2", kind: analog, functions: {ANALOG: "ADCINA2/COMP1A", AIO: "AIO2"}}
+  - {num: 21, name: "ADCINA0/VREFHI", kind: analog, functions: {ANALOG: "ADCINA0/VREFHI"}}
+  - {num: 22, name: "VDDA", kind: power}
+  - {num: 23, name: "VSSA/VREFLO", kind: special}
+  - {num: 24, name: "ADCINB2/COMP1B/AIO10", kind: analog, functions: {ANALOG: "ADCINB2/COMP1B", AIO: "AIO10"}}
+  - {num: 25, name: "ADCINB4/AIO12", kind: analog, functions: {ANALOG: "ADCINB4", AIO: "AIO12"}}
+  - {num: 26, name: "ADCINB6/AIO14", kind: analog, functions: {ANALOG: "ADCINB6", AIO: "AIO14"}}
+  - {num: 27, name: "GPIO34", kind: gpio, port: B, bit: 2, default: GPIO, functions: {GPIO: "GPIO34"}}
+  - {num: 28, name: "GPIO35/TDI", kind: gpio, port: B, bit: 3, default: GPIO, functions: {GPIO: "GPIO35"}}
+  - {num: 29, name: "GPIO36/TMS", kind: gpio, port: B, bit: 4, default: GPIO, functions: {GPIO: "GPIO36"}}
+  - {num: 30, name: "GPIO37/TDO", kind: gpio, port: B, bit: 5, default: GPIO, functions: {GPIO: "GPIO37"}}
+  - {num: 31, name: "GPIO38/XCLKIN/TCK", kind: gpio, port: B, bit: 6, default: GPIO, functions: {GPIO: "GPIO38"}}
+  - {num: 32, name: "GPIO18/SPICLKA/SCITXDA/XCLKOUT", kind: gpio, port: A, bit: 18, default: GPIO, functions: {GPIO: "GPIO18", MUX1: "SPICLKA", MUX2: "SCITXDA", MUX3: "XCLKOUT"}}
+  - {num: 33, name: "GPIO19/XCLKIN/SPISTEA/SCIRXDA/ECAP1", kind: gpio, port: A, bit: 19, default: GPIO, functions: {GPIO: "GPIO19", MUX1: "SPISTEA", MUX2: "SCIRXDA", MUX3: "ECAP1"}}
+  - {num: 34, name: "GPIO17/SPISOMIA/TZ3", kind: gpio, port: A, bit: 17, default: GPIO, functions: {GPIO: "GPIO17", MUX1: "SPISOMIA", MUX3: "TZ3"}}
+  - {num: 35, name: "GPIO16/SPISIMOA/TZ2", kind: gpio, port: A, bit: 16, default: GPIO, functions: {GPIO: "GPIO16", MUX1: "SPISIMOA", MUX3: "TZ2"}}
+  - {num: 36, name: "GPIO1/EPWM1B/COMP1OUT", kind: gpio, port: A, bit: 1, default: GPIO, functions: {GPIO: "GPIO1", MUX1: "EPWM1B", MUX3: "COMP1OUT"}}
+  - {num: 37, name: "GPIO0/EPWM1A", kind: gpio, port: A, bit: 0, default: GPIO, functions: {GPIO: "GPIO0", MUX1: "EPWM1A"}}
+  - {num: 38, name: "TEST", kind: special}

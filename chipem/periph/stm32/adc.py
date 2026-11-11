@@ -43,7 +43,9 @@ Regular group (registers from the SVD; behaviour hand-written):
   not bonded on the package is stored under "ADCn_INm".  ADC1 internal channels (CCR.TSVREFE / VBATE; 0 V while
   disabled): IN16 temperature sensor V25 + Avg_Slope x (T - 25 degC) = 0.76 V + 2.5 mV/degC (T: "TEMP", degC,
   default 25), IN17 VREFINT 1.21 V, IN18 VBAT / 2 ("VBAT", volts, default 3.3) (DS8626 Tables 69-71).  On ADC2/3
-  channels 16-18 read 0.
+  channels 16-18 read 0.  `params.vbat_div` / `params.temp_channels` rewire them per die: STM32F401/F411 (RM0368 /
+  RM0383 11.3.3, 11.9, 11.10) VBAT / 4 and the sensor on IN16 and IN18; IN18 is shared, with VBATE = 1 it converts
+  VBAT (VBATE wins over TSVREFE).
 
 Injected group (RM0090 §13.3.3, §13.3.9, §13.3.10, §13.13.9-13.13.13):
 * JSQR.JL + 1 channels; the sequence is the last JL + 1 of JSQ1..JSQ4 (JL = 0: JSQ4 alone, JL = 3: JSQ1..JSQ4), the
@@ -95,7 +97,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, apb_hz, build_regs, find_model, irq_number
 from .tim import _dma_request
@@ -162,7 +164,7 @@ class ADC(GatedBlock):
             "CR2": {"on_write": self._cr2_write},
             "SQR1": {"on_write": self._sqr_write}, "SQR2": {"on_write": self._sqr_write},
             "SQR3": {"on_write": self._sqr_write},
-            "DR": {"on_read": self._dr_read, "ro_mask": 0xFFFFFFFF},
+            "DR": {"on_read": self._dr_read, "ro_mask": 0xFFFFFFFF, "on_peek": lambda b, r: None},
         }
         for k in range(1, 5):
             ov[f"JDR{k}"] = {"ro_mask": 0xFFFFFFFF}
@@ -170,6 +172,10 @@ class ADC(GatedBlock):
         super().__init__(name, base, size, r, log=log, params=params)
         self.vref = float(params.get("vref", 3.3))
         self.default = float(params.get("default", 0.0))
+        # internal channel wiring: VBAT bridge ratio and the channels the temperature sensor feeds (F401/F411: VBAT/4,
+        # sensor on IN16 and IN18, IN18 shared with VBAT where VBATE wins; RM0368/RM0383 11.3.3, 11.9, 11.10)
+        self.vbat_div = float(params.get("vbat_div", VBAT_DIV))
+        self.temp_channels = tuple(int(c) for c in params.get("temp_channels", (16,)))
         self._ev = None
         self._pos = 0                # next position in the regular sequence
         self._burst: int | None = None   # discontinuous mode: conversions left in this subgroup
@@ -296,11 +302,13 @@ class ADC(GatedBlock):
             if self.index != 1:
                 return 0.0
             ccr = self._ccr()
-            if ch == 16:
-                return V25 + AVG_SLOPE * (self.vals.get("TEMP", 25.0) - 25.0) if ccr & TSVREFE else 0.0
             if ch == 17:
                 return self.vals.get("VREFINT", VREFINT_V) if ccr & TSVREFE else 0.0
-            return self.vals.get("VBAT", 3.3) / VBAT_DIV if ccr & VBATE else 0.0
+            if ch == 18 and ccr & VBATE:             # VBATE wins over TSVREFE on a shared channel
+                return self.vals.get("VBAT", 3.3) / self.vbat_div
+            if ch in self.temp_channels:
+                return V25 + AVG_SLOPE * (self.vals.get("TEMP", 25.0) - 25.0) if ccr & TSVREFE else 0.0
+            return 0.0
         key = self._ch_key.get(ch) or f"ADC{self.index}_IN{ch}"
         v = self.vals.get(key)
         if v is not None:
@@ -619,8 +627,10 @@ class ADC(GatedBlock):
         blk = self.chip.peripherals.get(blk_name)
         if blk_name == "EXTI" or not hasattr(blk, "add_trigger_listener"):
             sel = self.get("CR2") >> (16 if inj else 24) & 0xF
+            why = ("is reserved on this part (no such timer)" if blk is None and blk_name != "EXTI"
+                   else "is not modelled")
             self._warn_once(f"trig{blk_name}{sig}", f"{self.name}: external {'injected ' if inj else ''}trigger "
-                            f"{blk_name}_{sig} ({'J' if inj else ''}EXTSEL={sel}) is not modelled: no conversions are "
+                            f"{blk_name}_{sig} ({'J' if inj else ''}EXTSEL={sel}) {why}: no conversions are "
                             "triggered")
             return
         cb = self._ext_jtrig if inj else self._ext_trig
@@ -725,13 +735,21 @@ class ADC(GatedBlock):
 @register("stm32.adc_common")
 class ADCCommon(MMIOBlock):
     """ADC common registers: CSR (read-only mirror of the ADCx SR flags), CCR (prescaler, internal channels, multi-ADC
-    mode, DMA mode), CDR (multi-mode data)."""
+    mode, DMA mode), CDR (multi-mode data).  `params.multi: false` (single-ADC dies): CSR/CDR read 0 and only
+    CCR.ADCPRE/VBATE/TSVREFE are writable."""
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {"CSR": {"on_read": self._csr_read, "ro_mask": 0xFFFFFFFF},
               "CCR": {"on_write": self._ccr_write},
-              "CDR": {"on_read": self._cdr_read, "ro_mask": 0xFFFFFFFF}}
+              "CDR": {"on_read": self._cdr_read, "ro_mask": 0xFFFFFFFF, "on_peek": self._cdr_peek}}
+        if not params.get("multi", True):
+            # single-ADC dies (STM32F401/F411, RM0368/RM0383 11.12.15-11.12.16 Table 48/47): only CCR exists, with
+            # ADCPRE, VBATE and TSVREFE; offsets 0x00 (CSR) and 0x08 (CDR) and CCR MULTI/DELAY/DDS/DMA are reserved
+            zero = pure_read(lambda b, r: 0)
+            ov["CSR"] = {"on_read": zero, "ro_mask": 0xFFFFFFFF}
+            ov["CDR"] = {"on_read": zero, "ro_mask": 0xFFFFFFFF}
+            ov["CCR"]["ro_mask"] = ~0x00C30000 & 0xFFFFFFFF
         r = build_regs((name, "C_ADC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self._warned: set[int] = set()
@@ -753,6 +771,7 @@ class ADCCommon(MMIOBlock):
         a = self.chip.peripherals.get(f"ADC{i}") if self.chip is not None else None
         return a if a is not None and getattr(a, "model", None) == "stm32.adc" else None
 
+    @pure_read
     def _csr_read(self, blk, reg):
         v = 0
         for i, sh in ((1, 0), (2, 8), (3, 16)):
@@ -841,6 +860,12 @@ class ADCCommon(MMIOBlock):
             if self._req:
                 self._req = False
                 _dma_request(self.chip, "ADC1", False)
+
+    def _cdr_peek(self, blk, reg):
+        if self._items:
+            return self._items[0]                    # DMA mode 2/3 queue: the head, not popped
+        a1, a2 = self._adc(1), self._adc(2)
+        return ((a2.get("DR") & 0xFFFF) << 16 if a2 is not None else 0) | (a1.get("DR") & 0xFFFF if a1 else 0)
 
     def _cdr_read(self, blk, reg):
         if self._items:

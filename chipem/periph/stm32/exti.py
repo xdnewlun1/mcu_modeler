@@ -17,6 +17,8 @@ EXTI (RM0090 ch. 12), lines 0-22:
 * NVIC lines (level, asserted while PR & IMR has a bit of the group): EXTI0..EXTI4 (lines 0-4), EXTI9_5 (5-9),
   EXTI15_10 (10-15), PVD (16), RTC_Alarm (17), OTG_FS_WKUP (18), ETH_WKUP (19), OTG_HS_WKUP (20),
   TAMP_STAMP (21), RTC_WKUP (22); numbers are looked up by name in the chip YAML.
+* `params.reserved_lines`: lines the die does not implement (STM32F401/F411: 19 and 20, RM0368/RM0383 10.2.5 and
+  10.3): their bits read 0 and ignore writes in IMR/EMR/RTSR/FTSR/SWIER/PR.
 Pin discovery: `pin_stats()` reports the edge mode and the number of PR sets per selected pin.
 """
 from __future__ import annotations
@@ -81,6 +83,26 @@ class EXTI(MMIOBlock):
               "PR": {"w1c_mask": LINE_MASK, "on_write": self._pr_write}}
         r = build_regs((name, "EXTI"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        # Lines a die does not implement (e.g. 19/20 on the STM32F401/F411, RM0368/RM0383 10.3.1-10.3.6: reserved
+        # bits): read 0, writes ignored in every EXTI register.
+        self.reserved_lines = 0
+        for ln in params.get("reserved_lines", ()) or ():
+            self.reserved_lines |= 1 << int(ln)
+        if self.reserved_lines:
+            for rn in ("IMR", "EMR", "RTSR", "FTSR", "SWIER", "PR"):
+                rg = self.regs.get(rn)
+                if rg is not None:
+                    rg.ro_mask |= self.reserved_lines
+                    rg.w1c_mask &= ~self.reserved_lines
+        # Lines whose edge selection bits alone are reserved (STM32F446: RTSR/FTSR bit 19, RM0390 10.3.3/10.3.4,
+        # while IMR/EMR/SWIER/PR keep bits 22:0)
+        edge_res = 0
+        for ln in params.get("reserved_edge_lines", ()) or ():
+            edge_res |= 1 << int(ln)
+        for rn in ("RTSR", "FTSR") if edge_res else ():
+            rg = self.regs.get(rn)
+            if rg is not None:
+                rg.ro_mask |= edge_res
         self._syscfg: Any = None
         self._pins: dict[tuple[int, int], Any] = {}         # (port index, line) -> Pin
         self._last: dict[tuple[int, int], int] = {}
@@ -103,7 +125,10 @@ class EXTI(MMIOBlock):
                     pin = board.gpio(port, ln)
                     if pin is not None:
                         self._pins[(pi, ln)] = pin
-                        board.input_listeners[pin.id].append(partial(self._on_level, pi, ln))
+                        cb = partial(self._on_level, pi, ln)
+                        # an armed line must see a waveform source's edges live (PinBoard.drive_wave)
+                        cb.wave_rt = partial(self._line_armed, pi, ln)
+                        board.input_listeners[pin.id].append(cb)
 
     def reset(self) -> None:
         super().reset()
@@ -167,6 +192,9 @@ class EXTI(MMIOBlock):
                 self._lines[n] = lvl
                 if self.chip is not None:
                     self.irq(n, lvl)
+
+    def _line_armed(self, pi: int, line: int, pin: Any = None) -> bool:
+        return self.port_of(line) == pi and bool((self.get("RTSR") | self.get("FTSR")) >> line & 1)
 
     def _on_level(self, pi: int, line: int, pin: Any) -> None:
         lvl = pin.level()

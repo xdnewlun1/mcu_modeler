@@ -1,0 +1,13 @@
+# STM32F207ZG (Nucleo-F207ZG: RMII, LAN8742A at MDIO address 0) running the bare-metal eth_ping sample at the STM32F2
+# 120 MHz clock tree (firmware/samples_stm32f2/build/eth_ping.elf); the board's host node pings 192.168.0.10 four times.
+name: stm32f207_eth_ping
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f207zg, firmware: ../firmware/samples_stm32f2/build/eth_ping.elf}
+links:
+  - type: eth
+    name: LAN
+    nodes: [A.ETH]
+    phy: {model: lan8742, addr: 0, aneg: 1ms}
+    host: {name: HOST, mac: "02:00:00:00:00:01", ip: 192.168.0.1, ping: 192.168.0.10, count: 4, interval: 2ms,
+           start: 5ms}

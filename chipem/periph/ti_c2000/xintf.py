@@ -87,10 +87,11 @@ class Xintf(C2000Block):
         params = dict(params or {})
         ro = 0xFFFFFFFF & ~_XT_RW
         ov = {f"XTIMING{z}": {"ro_mask": ro, "on_write": self._cfg_write} for z in ZONES}
-        ov["XINTCNF2"] = {"ro_mask": 0xFFFFFFFF & ~_CNF_RW, "on_write": self._cfg_write, "on_read": self._cnf_read}
+        ov["XINTCNF2"] = {"ro_mask": 0xFFFFFFFF & ~_CNF_RW, "on_write": self._cfg_write, "on_read": self._cnf_read,
+                          "on_peek": self._cnf_peek}
         ov["XBANK"] = {"ro_mask": 0xFFC0, "on_write": self._cfg_write}
         ov["XREVISION"] = {"ro_mask": 0xFFFF, "reset": int(params.get("revision", 0)) & 0xFFFF}
-        ov["XRESET"] = {"ro_mask": 0xFFFE, "on_write": self._xreset_write, "on_read": lambda b, r: 0}
+        ov["XRESET"] = {"ro_mask": 0xFFFE, "on_write": self._xreset_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0}
         regs = build_regs((name, "XINTF"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self.zones: dict[int, "XintfZone"] = {}
@@ -156,6 +157,15 @@ class Xintf(C2000Block):
         v = self.get("XINTCNF2") & ~(0xC0 | HOLDS | HOLDAS)
         self._drain()
         v |= min(len(self._wbuf), 3) << 6
+        v |= HOLDAS
+        if not self._xhold_low():
+            v |= HOLDS
+        return v
+
+    def _cnf_peek(self, blk, reg):
+        v = self.get("XINTCNF2") & ~(0xC0 | HOLDS | HOLDAS)
+        now = self.chip.now_cycles() if self.chip is not None else 0
+        v |= min(sum(1 for t in self._wbuf if t > now), 3) << 6     # writes still buffered (not drained)
         v |= HOLDAS
         if not self._xhold_low():
             v |= HOLDS

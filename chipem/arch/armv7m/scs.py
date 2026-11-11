@@ -45,10 +45,14 @@ class SCSBlock(MMIOBlock):
         # --- SysTick
         R(Reg("ICTR", 0x004, reset=max(nw - 1, 0), ro_mask=0xFFFFFFFF))
         R(Reg("ACTLR", 0x008))
-        R(Reg("SYST_CSR", 0x010, ro_mask=CSR_COUNTFLAG, on_read=self._csr_read, on_write=self._csr_write))
+        R(Reg("SYST_CSR", 0x010, ro_mask=CSR_COUNTFLAG, on_read=self._csr_read, on_write=self._csr_write,
+              on_peek=lambda b, r: None))      # peek: the stored value, COUNTFLAG not cleared
         R(Reg("SYST_RVR", 0x014, on_write=self._rvr_write))
         R(Reg("SYST_CVR", 0x018, on_read=self._cvr_read, on_write=self._cvr_write))
         R(Reg("SYST_CALIB", 0x01C, reset=0x40000000, ro_mask=0xFFFFFFFF))
+        # debugger peeks: these hooks only compute the value (live counter, NVIC/SCB state)
+        self.pure_reads = frozenset({"SYST_CVR", "ICSR", "VTOR", "AIRCR"} | {
+            f"NVIC_{n}{k}" for n in ("ISER", "ICER", "ISPR", "ICPR", "IABR") for k in range(nw)})
         # --- NVIC
         for k in range(nw):
             R(Reg(f"NVIC_ISER{k}", 0x100 + 4 * k, on_read=self._en_read(k), on_write=self._iser_write(k, True)))
@@ -75,12 +79,22 @@ class SCSBlock(MMIOBlock):
         R(Reg("MMFAR", 0xD34))
         R(Reg("BFAR", 0xD38))
         R(Reg("AFSR", 0xD3C))
-        R(Reg("CPACR", 0xD88))
+        # CPACR CP10/CP11 gate the FP unit (core.set_fp_enabled: VFP instructions raise NOCP while denied). Without an
+        # FPU (Cortex-M3, M4 without F, M0) CPACR and the FP extension registers are RAZ/WI: the core always raises NOCP.
+        fpu = bool(getattr(arch, "fpu", True))
+        self.cpacr_reset = 0                 # Session: a raw image started after a bootloader gets 0x00F00000
+        R(Reg("CPACR", 0xD88, ro_mask=0 if fpu else 0xFFFFFFFF, on_write=self._cpacr_write))
         R(Reg("MPU_TYPE", 0xD90, ro_mask=0xFFFFFFFF))
         R(Reg("STIR", 0xF00, on_write=self._stir_write))
-        R(Reg("FPCCR", 0xF34, reset=0xC0000000, on_write=self._fpccr_write))
-        R(Reg("FPCAR", 0xF38))
-        R(Reg("FPDSCR", 0xF3C))
+        if fpu:
+            R(Reg("FPCCR", 0xF34, reset=0xC0000000, on_write=self._fpccr_write))
+            R(Reg("FPCAR", 0xF38))
+            R(Reg("FPDSCR", 0xF3C))
+            R(Reg("MVFR0", 0xF40, reset=0x10110021, ro_mask=0xFFFFFFFF))      # single precision FPv4-SP (M4F)
+            R(Reg("MVFR1", 0xF44, reset=0x11000011, ro_mask=0xFFFFFFFF))
+        else:
+            for nm, off in (("FPCCR", 0xF34), ("FPCAR", 0xF38), ("FPDSCR", 0xF3C), ("MVFR0", 0xF40), ("MVFR1", 0xF44)):
+                R(Reg(nm, off, ro_mask=0xFFFFFFFF))                         # not implemented: RAZ/WI
 
     # ------------------------------------------------------------------ lifecycle
     def attach(self, chip: Any) -> None:
@@ -114,6 +128,22 @@ class SCSBlock(MMIOBlock):
     def reset(self) -> None:
         self._st_stop()
         super().reset()
+        if getattr(self.arch, "fpu", True) and self.cpacr_reset:
+            self.set("CPACR", self.cpacr_reset)
+        self._fp_apply(self.get("CPACR"))
+
+    def _fp_apply(self, cpacr: int) -> None:
+        """FP usable when CP10 and CP11 both grant access (privileged-only access is treated like full access)."""
+        f = getattr(getattr(getattr(self.arch, "chip", None), "core", None), "set_fp_enabled", None)
+        if f is not None:
+            f(bool(getattr(self.arch, "fpu", True)) and bool(cpacr >> 20 & 3) and bool(cpacr >> 22 & 3))
+
+    def _cpacr_write(self, blk, reg, old, new):
+        if not getattr(self.arch, "fpu", True):
+            return 0
+        if (old ^ new) & 0xF00000:
+            self._fp_apply(new)
+        return None
 
     # convenience properties used by the exception model
     @property

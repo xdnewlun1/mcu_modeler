@@ -1,0 +1,9 @@
+# K22 FlexCAN0 <-> STM32F207ZG bxCAN1 at 500 kbit/s: the K22 sends 100#<n>4B32 every 10 ms, the STM32F207 echoes each
+# frame as 0x202 (firmware/samples_stm32f2/build/can_echo.elf = the STM32F405 can_echo sample for the Cortex-M3).
+name: k22_stm32f207_can
+quantum: 10us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/can_echo.elf, clock_hz: 120000000}
+  - {id: B, chip: stm32f207zg, firmware: ../firmware/samples_stm32f2/build/can_echo.elf}
+links:
+  - {type: can, name: CANBUS, nodes: [A.CAN0, B.CAN1]}

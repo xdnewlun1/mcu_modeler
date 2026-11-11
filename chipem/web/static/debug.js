@@ -6,7 +6,7 @@
 //
 // Keys (any tab; F5 / F9 / F4 only while this tab is shown): F5 continue, Shift+F5 pause, F10 step over (next line;
 // one instruction in asm mode), F11 step into, Shift+F11 step out, F4 run to cursor, F9 breakpoint at the cursor row.
-import { esc, hex32 } from "./fmt.js";
+import { esc, fmtReg } from "./fmt.js";
 
 const MODES = ["mixed", "asm", "source"];
 
@@ -27,6 +27,12 @@ export class DebugPane {
     this.toastErr = opts.toastErr || ((m) => console.error(m));
     this.chip = opts.chip || null;
     this.isBoard = !!opts.isBoard;
+    this.regMeta = opts.regMeta || (() => ({}));
+    this.sideTab = this.pref("side", "regs");     // regs | locals | watch | globals
+    this.frame = 0;                               // call stack frame whose locals are shown
+    this.watches = [];                            // watch expressions of this chip (localStorage per chip)
+    this.globals = null;                          // /api/debug/globals of this chip (fetched on demand)
+    this.openVars = new Set();                    // expanded struct / array paths in locals and watch
     this.visible = false;
     this.st = null;               // last /api/debug/state
     this.prevRegs = new Map();    // values at the previous stop (changed highlighting)
@@ -42,6 +48,7 @@ export class DebugPane {
     this.again = false;
     this.lastRunRefresh = 0;
     this.build();
+    this.loadWatches();
   }
 
   pref(k, d) { try { return localStorage.getItem(`chipem.dbg.${k}`) ?? d; } catch { return d; } }
@@ -49,6 +56,8 @@ export class DebugPane {
   q(sel) { return this.box.querySelector(sel); }
   chipQ() { return this.isBoard && this.chip ? `chip=${encodeURIComponent(this.chip)}` : ""; }
   chipB() { return this.isBoard && this.chip ? { chip: this.chip } : {}; }
+  // a code address, as wide as the chip's PC (register metadata from the server: 32-bit ARM, 22-bit C28x, 16-bit 8051)
+  fa(a) { return fmtReg(a, { bits: this.regMeta(this.chip).pc?.bits ?? 32, fmt: "hex" }); }
 
   // ---------------------------------------------------------------- DOM
   build() {
@@ -76,9 +85,22 @@ export class DebugPane {
         <div class="split-dbg" aria-hidden="true"></div>
         <div class="dbg-side">
           <section class="dbg-sec dbg-regs-sec">
-            <div class="dbg-h"><b>registers</b><span class="dbg-hint">double-click a value to edit (paused)</span>
-              <button type="button" class="btn small ghost" data-a="regcopy" title="Copy as tab-separated text">copy</button></div>
-            <div class="dbg-scroll"><table class="dbg-regs"></table></div>
+            <div class="dbg-h dbg-tabs" role="tablist" aria-label="Debugger data">
+              <button type="button" role="tab" class="dtab" data-t="regs" title="CPU registers: double-click a value to edit (paused)">registers</button>
+              <button type="button" role="tab" class="dtab" data-t="locals" title="Arguments and local variables of the selected call stack frame (DWARF)">locals</button>
+              <button type="button" role="tab" class="dtab" data-t="watch" title="Watch expressions, re-evaluated at every stop: symbol, a.b, p->x, a[3], *0x20000000, PERIPH.REG.FIELD">watch</button>
+              <button type="button" role="tab" class="dtab" data-t="globals" title="Global and static variables (DWARF, else the symbol table): click one to watch it">globals</button>
+              <span class="dbg-hint dbg-tab-hint"></span>
+              <button type="button" class="btn small ghost" data-a="regcopy" title="Copy the shown table as tab-separated text">copy</button></div>
+            <div class="dbg-scroll" data-p="regs"><table class="dbg-regs"></table></div>
+            <div class="dbg-scroll" data-p="locals" hidden><table class="dbg-vars dbg-locals"></table></div>
+            <div class="dbg-scroll dbg-watch-p" data-p="watch" hidden>
+              <form class="dbg-watch-add"><input type="text" spellcheck="false" list="dbgGlobalsList" placeholder="add: counter · buf[2] · p->x · *0x20000000 · USART1.SR.TXE" aria-label="Add watch expression"><button class="btn small" type="submit">add</button></form>
+              <datalist id="dbgGlobalsList"></datalist>
+              <table class="dbg-vars dbg-watch"></table></div>
+            <div class="dbg-scroll dbg-glob-p" data-p="globals" hidden>
+              <input type="search" class="dbg-glob-filter pane-filter" spellcheck="false" placeholder="filter globals  /re/" aria-label="Filter globals">
+              <table class="dbg-vars dbg-globals"></table></div>
           </section>
           <section class="dbg-sec dbg-stack-sec">
             <div class="dbg-h"><b>call stack</b><span class="dbg-hint dbg-stack-how"></span></div>
@@ -94,7 +116,7 @@ export class DebugPane {
         </div>
       </div>
       <div class="dbg-mem">
-        <div class="dbg-h"><b>memory</b>
+        <div class="dbg-h"><button type="button" class="pane-tog dbg-mem-tog" aria-expanded="true" title="collapse / expand the memory view"></button><b>memory</b>
           <input class="dbg-mem-addr" type="text" spellcheck="false" aria-label="Memory address" title="Address or expression: 0x20000000, sp, buffer, sp+16">
           <select class="dbg-mem-follow" aria-label="Follow register" title="Follow a register: the address is re-read from it at every stop"><option value="">follow: —</option></select>
           <button type="button" class="btn small ghost" data-a="memgo">show</button>
@@ -114,8 +136,7 @@ export class DebugPane {
       if (e.key !== "Enter") return;
       const v = e.target.value.trim();
       if (!v) return;
-      this.follow = false; this.q('[data-a="follow"]').checked = false;
-      this.viewAddr = v; this.refreshCode();
+      this.viewAddr = v; this.refreshCode();            // shown until the next stop (follow pc) or the next go to
     });
     this.code.addEventListener("click", (e) => this.codeClick(e));
     this.code.addEventListener("keydown", (e) => {
@@ -129,12 +150,51 @@ export class DebugPane {
     });
     this.q(".dbg-regs").addEventListener("dblclick", (e) => this.editReg(e));
     this.q('[data-a="regcopy"]').addEventListener("click", () => this.copyRegs());
+    // a call stack row selects that frame: its code is shown (until the next stop) and its locals listed
     this.q(".dbg-stack").addEventListener("click", (e) => {
       const tr = e.target.closest("tr[data-pc]");
       if (!tr) return;
-      this.follow = false; this.q('[data-a="follow"]').checked = false;
-      this.viewAddr = `0x${(+tr.dataset.pc).toString(16)}`; this.refreshCode();
+      this.frame = +tr.dataset.level || 0;
+      this.viewAddr = `0x${(+tr.dataset.pc).toString(16)}`;
+      this.renderStack();
+      this.refreshCode();
+      this.refreshVars();
     });
+    this.q(".dbg-tabs").addEventListener("click", (e) => {
+      const t = e.target.closest(".dtab")?.dataset.t;
+      if (t) this.setSideTab(t);
+    });
+    this.setSideTab(this.sideTab, false);
+    for (const sel of [".dbg-locals", ".dbg-watch"]) {
+      this.q(sel).addEventListener("click", (e) => {
+        const tr = e.target.closest("tr[data-path]");
+        if (!tr) return;
+        if (e.target.closest("[data-b=del]")) { this.removeWatch(+tr.dataset.w); return; }
+        if (e.target.closest("[data-b=mem]") && tr.dataset.addr) { this.showMem(`0x${(+tr.dataset.addr).toString(16)}`); return; }
+        if (tr.classList.contains("has-kids")) {
+          const k = tr.dataset.path;
+          if (this.openVars.has(k)) this.openVars.delete(k); else this.openVars.add(k);
+          this.renderVars();
+        }
+      });
+    }
+    this.q(".dbg-watch-add").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const inp = this.q(".dbg-watch-add input");
+      const t = inp.value.trim();
+      if (t) { this.addWatch(t); inp.value = ""; }
+    });
+    this.q(".dbg-glob-filter").addEventListener("input", () => this.renderGlobals());
+    this.q(".dbg-globals").addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-name]");
+      if (tr) { this.addWatch(tr.dataset.name); this.setSideTab("watch"); }
+    });
+    this.q(".dbg-mem-tog").addEventListener("click", () => {
+      const on = this.q(".dbg-mem").classList.toggle("collapsed");
+      this.q(".dbg-mem-tog").setAttribute("aria-expanded", String(!on));
+      this.savePref("memShut", on ? "1" : "");
+    });
+    if (this.pref("memShut", "")) { this.q(".dbg-mem").classList.add("collapsed"); this.q(".dbg-mem-tog").setAttribute("aria-expanded", "false"); }
     this.q('[data-a="memgo"]').addEventListener("click", () => this.memGo());
     this.q(".dbg-mem-addr").addEventListener("keydown", (e) => { if (e.key === "Enter") this.memGo(); });
     this.q(".dbg-mem-follow").addEventListener("change", (e) => {
@@ -153,6 +213,9 @@ export class DebugPane {
     this.chip = cid;
     this.prevRegs = new Map(); this.curRegs = new Map();
     this.viewAddr = null;
+    this.st = null; this.frame = 0; this.globals = null; this.openVars.clear(); this.cursor = null;
+    this._memPrev = null;
+    this.loadWatches();
     if (this.visible) this.refresh(true);
   }
 
@@ -261,7 +324,6 @@ export class DebugPane {
       const v = prompt(`Condition for breakpoint ${id} (empty: none). e.g. r0 == 3, counter > 10, mem32[0x20000000] & 1`, cur);
       if (v !== null) { await this.post("/api/debug/bp", { id, cond: v }); this.refresh(false); }
     } else if (a === "go") {
-      this.follow = false; this.q('[data-a="follow"]').checked = false;
       this.viewAddr = `0x${(+tr.dataset.addr).toString(16)}`; this.refreshCode();
     }
   }
@@ -310,7 +372,11 @@ export class DebugPane {
     try {
       const st = await this.api(`/api/debug/state?${this.chipQ()}`);
       const newStop = !this.st || st.stops !== this.st.stops || st.pc !== this.st.pc;
-      if (newStop && !st.running) { this.prevRegs = this.curRegs; }
+      if (newStop && !st.running) {
+        this.prevRegs = this.curRegs;
+        this.frame = 0;
+        if (this.follow) this.viewAddr = null;           // every stop shows the PC again (follow pc)
+      }
       this.curRegs = new Map(st.regs);
       this.st = st;
       this.renderRegs();
@@ -320,6 +386,7 @@ export class DebugPane {
       this.fillFollow();
       await this.refreshCode();
       await this.refreshMem();
+      if (!st.running || this.sideTab === "watch") await this.refreshVars();
     } catch (e) {
       this.q(".dbg-msg").textContent = `debugger: ${e.message}`;
     } finally {
@@ -330,7 +397,7 @@ export class DebugPane {
 
   async refreshCode() {
     if (!this.st) return;
-    const addr = this.follow || this.viewAddr == null ? null : this.viewAddr;
+    const addr = this.viewAddr;
     let r;
     try {
       r = await this.api(`/api/debug/listing?${this.chipQ()}&mode=${this.mode}&before=14&after=48` +
@@ -340,8 +407,7 @@ export class DebugPane {
   }
 
   renderCode(r) {
-    const c28 = this.st?.arch === "c28x";
-    const fa = (a) => c28 ? `0x${a.toString(16).toUpperCase().padStart(6, "0")}` : hex32(a);
+    const fa = (a) => this.fa(a);
     const out = [];
     const head = r.mode === "source" ? (r.path || r.file || "") : (r.func ? `${r.func}` : "");
     if (r.mode !== this.mode && this.mode === "source") out.push(`<div class="note">no source for this address: ${r.has_dwarf ? "source file not found (--source-dir)" : "no line info (symbols + assembly)"}</div>`);
@@ -364,8 +430,15 @@ export class DebugPane {
     }
     this.code.innerHTML = out.join("") || `<div class="empty">no code</div>`;
     const pc = this.code.querySelector(".r.pc") || this.code.querySelector(".r.cur");
-    if (pc && (this.follow || !this.viewAddr)) pc.scrollIntoView({ block: "center" });
-    else if (!this.follow) this.code.querySelector(".r")?.scrollIntoView({ block: "nearest" });
+    if (pc && !this.viewAddr) pc.scrollIntoView({ block: "center" });
+    else {
+      // a 'go to' / stack frame / breakpoint target: its source line (or instruction) centred and marked
+      let tgt = null;
+      if (r.mode !== "asm" && r.file && r.line != null) tgt = [...this.code.querySelectorAll(".r.src")].find((x) => +x.dataset.line === r.line && r.file.endsWith(x.dataset.file || "\0"));
+      if (!tgt && r.addr != null) tgt = this.code.querySelector(`.r.asm[data-addr="${r.addr}"]`);
+      if (tgt) { tgt.classList.add("tgt"); tgt.scrollIntoView({ block: "center" }); }
+      else this.code.querySelector(".r")?.scrollIntoView({ block: "nearest" });
+    }
   }
 
   renderMsg() {
@@ -385,25 +458,24 @@ export class DebugPane {
 
   renderRegs() {
     const st = this.st;
-    const w = st.arch === "c28x" ? 8 : 8;
+    const meta = this.regMeta(this.chip);           // widths / formats from the server (chipem/regmeta.py)
     const rows = st.regs.map(([n, v]) => {
       const prev = this.prevRegs.get(n);
       const chg = prev !== undefined && prev !== v ? " chg" : "";
-      const hx = (v >>> 0).toString(16).toUpperCase().padStart(w, "0");
+      const hx = fmtReg(v, meta[n]);
       let extra = "";
       if (n === "xpsr") extra = ["N", "Z", "C", "V", "Q"].map((f, i) => (v >>> (31 - i)) & 1 ? f : "-").join("") + ` ipsr ${v & 0x1ff}`;
       else if (/^s\d+$/.test(n)) { const f = new Float32Array(new Uint32Array([v >>> 0]).buffer)[0]; extra = `${+f.toPrecision(7)}`; }
-      else if (v > 9 && v < 100000) extra = String(v);
-      return `<tr data-r="${esc(n)}" class="${chg}"><th>${esc(n)}</th><td class="v" title="double-click to edit (paused)">0x${hx}</td><td class="x">${esc(extra)}</td></tr>`;
+      else if (meta[n]?.fmt !== "flag" && meta[n]?.fmt !== "dec" && v > 9 && v < 100000) extra = String(v);
+      return `<tr data-r="${esc(n)}" class="${chg}"><th>${esc(n)}</th><td class="v" title="double-click to edit (paused)">${hx}</td><td class="x">${esc(extra)}</td></tr>`;
     });
     this.q(".dbg-regs").innerHTML = rows.join("");
   }
 
   renderStack() {
     const st = this.st;
-    const c28 = st.arch === "c28x";
-    const rows = (st.stack || []).map((f) => `<tr data-pc="${f.pc}" title="${esc(f.how === "scan" ? "found by a stack scan (a guess)" : f.how === "exception" ? "hardware exception frame" : f.how)}">` +
-      `<td class="n">#${f.level}</td><td class="ad">${c28 ? "0x" + f.pc.toString(16).toUpperCase() : hex32(f.pc)}</td><td>${esc(f.desc || f.func)}</td><td class="how">${f.how === "pc" || f.how === "cfi" ? "" : esc(f.how)}</td></tr>`);
+    const rows = (st.stack || []).map((f) => `<tr data-pc="${f.pc}" data-level="${f.level}"${f.level === this.frame ? ' class="sel"' : ""} title="${esc(f.how === "scan" ? "found by a stack scan (a guess)" : f.how === "exception" ? "hardware exception frame" : f.how)} · click: show this frame's code and locals">` +
+      `<td class="n">#${f.level}</td><td class="ad">${this.fa(f.pc)}</td><td>${esc(f.desc || f.func)}</td><td class="how">${f.how === "pc" || f.how === "cfi" ? "" : esc(f.how)}</td></tr>`);
     this.q(".dbg-stack").innerHTML = rows.join("");
     const hows = new Set((st.stack || []).map((f) => f.how));
     this.q(".dbg-stack-how").textContent = hows.has("cfi") ? "DWARF CFI" : hows.has("scan") ? "stack scan (guess)" : "";
@@ -411,8 +483,7 @@ export class DebugPane {
 
   renderBps() {
     const bps = this.st.bps || [];
-    const c28 = this.st.arch === "c28x";
-    const fa = (a) => c28 ? "0x" + a.toString(16).toUpperCase() : hex32(a);
+    const fa = (a) => this.fa(a);
     this.q(".dbg-bps").innerHTML = bps.length ? bps.map((b) => {
       const typ = b.kind === "watch" ? ({ w: "watch", r: "rwatch", rw: "awatch" }[b.access]) : (b.temp ? "tbreak" : "break");
       return `<tr data-id="${b.id}" data-addr="${b.addr}" data-cond="${esc(b.cond || "")}">` +
@@ -465,7 +536,7 @@ export class DebugPane {
         hx += (cls ? `<span class="${cls.trim()}">${bytes[k]}</span>` : bytes[k]) + (k % 16 === 7 ? "  " : " ");
         asc += b >= 32 && b < 127 ? esc(String.fromCharCode(b)) : ".";
       }
-      const fa = ub === 2 ? a.toString(16).toUpperCase().padStart(6, "0") : a.toString(16).toUpperCase().padStart(8, "0");
+      const fa = this.fa(a).slice(2);
       lines.push(`${fa}  ${hx.padEnd(49)} ${asc}`);
     }
     if (!this.st?.running) this._memPrev = { key: prevKey, addr: r.addr, bytes };
@@ -494,7 +565,131 @@ export class DebugPane {
   }
 
   copyRegs() {
-    const t = (this.st?.regs || []).map(([n, v]) => `${n}\t0x${(v >>> 0).toString(16).toUpperCase()}`).join("\n");
-    navigator.clipboard?.writeText(t).then(() => this.toast(`copied ${this.st.regs.length} registers`), () => this.toastErr("clipboard not available"));
+    const tab = this.q(`.dbg-scroll[data-p="${this.sideTab}"] table`);
+    const rows = [...(tab?.rows || [])].filter((r) => !r.classList.contains("hdr"))
+      .map((r) => [...r.cells].map((c) => c.textContent.replace(/^[▸▾×]\s*/, "").trim()).filter(Boolean).join("\t")).filter(Boolean);
+    navigator.clipboard?.writeText(rows.join("\n")).then(() => this.toast(`copied ${rows.length} rows (${this.sideTab})`), () => this.toastErr("clipboard not available"));
+  }
+
+  // ---------------------------------------------------------------- locals / watch / globals (DWARF: chipem/dwarfvars.py)
+  setSideTab(t, refresh = true) {
+    this.sideTab = t;
+    this.savePref("side", t);
+    for (const b of this.box.querySelectorAll(".dtab")) { const on = b.dataset.t === t; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); }
+    for (const p of this.box.querySelectorAll(".dbg-regs-sec > .dbg-scroll")) p.hidden = p.dataset.p !== t;
+    this.q(".dbg-tab-hint").textContent = t === "regs" ? "double-click a value to edit (paused)" : "";
+    if (!refresh || !this.st) return;
+    if (t === "globals") this.refreshGlobals();
+    else if (t !== "regs") this.refreshVars();
+  }
+
+  watchKey() { return `watch.${this.chip || "A"}`; }
+  loadWatches() {
+    let w = [];
+    try { w = JSON.parse(this.pref(this.watchKey(), "[]")) || []; } catch { w = []; }
+    this.watches = w.filter((x) => typeof x === "string").map((expr) => ({ expr, r: null }));
+  }
+  saveWatches() { this.savePref(this.watchKey(), JSON.stringify(this.watches.map((w) => w.expr))); }
+  addWatch(expr) {
+    if (!this.watches.some((w) => w.expr === expr)) { this.watches.push({ expr, r: null }); this.saveWatches(); }
+    this.refreshVars();
+  }
+  removeWatch(i) { this.watches.splice(i, 1); this.saveWatches(); this.renderVars(); }
+
+  async refreshVars() {
+    if (!this.st) return;
+    const q = this.chipQ();
+    if (this.sideTab === "locals") {
+      try { this.locals = await this.api(`/api/debug/locals?${q}${q ? "&" : ""}frame=${this.frame}`); }
+      catch (e) { this.locals = { error: e.message }; }
+    } else if (this.sideTab === "watch") {
+      await Promise.all(this.watches.map(async (w) => {
+        try { w.r = await this.api("/api/debug/eval", { ...this.chipB(), expr: w.expr, frame: this.frame }); }
+        catch (e) { w.r = { error: e.message }; }
+      }));
+      if (!this.globals) this.refreshGlobals(true);
+    }
+    this.renderVars();
+  }
+
+  // one value row (+ children when expanded); path = expansion key
+  varRows(v, path, depth, out, extra = "") {
+    const kids = v.children && v.children.length;
+    const open = kids && this.openVars.has(path);
+    const val = v.avail === false ? `<span class="na" title="${esc(v.reason || "")}">&lt;${esc(v.reason || "unavailable")}&gt;</span>` : esc(v.text ?? (v.value ?? ""));
+    const prev = this._prevVals?.get(path);
+    const chg = prev !== undefined && v.text !== undefined && prev !== v.text ? " chg" : "";
+    out.push(`<tr data-path="${esc(path)}"${v.addr != null ? ` data-addr="${v.addr}"` : ""}${extra} class="${kids ? "has-kids" : ""}${chg}">` +
+      `<td class="nm" style="padding-left:${4 + depth * 12}px">${kids ? (open ? "▾ " : "▸ ") : ""}${esc(v.name ?? "")}${v.kind === "arg" ? ' <i class="dim">arg</i>' : ""}</td>` +
+      `<td class="v">${val}</td><td class="ty" title="${esc(v.type || "")}">${esc(v.type || "")}</td>` +
+      `<td class="lc" title="${esc(v.loc || "")}">${v.addr != null ? `<span data-b="mem" title="show in the memory view">${esc(v.loc || "")}</span>` : esc(v.loc || "")}</td></tr>`);
+    this._newVals.set(path, v.text);
+    if (open) for (const [i, c] of v.children.entries()) this.varRows(c, `${path}/${c.name ?? i}`, depth + 1, out);
+  }
+
+  renderVars() {
+    this._newVals = new Map();
+    const hdr = `<tr class="hdr"><th>name</th><th>value</th><th>type</th><th>location</th></tr>`;
+    if (this.sideTab === "locals") {
+      const L = this.locals;
+      const out = [];
+      if (!L) out.push(`<tr><td class="dim">—</td></tr>`);
+      else if (L.error) out.push(`<tr><td class="dim" colspan="4">${esc(L.error)}</td></tr>`);
+      else {
+        out.push(`<tr class="hdr"><th colspan="4" class="fr">frame #${L.frame ?? this.frame} ${esc(L.func || "")}${L.reason ? ` · ${esc(L.reason)}` : ""}</th></tr>`);
+        if (!(L.vars || []).length) out.push(`<tr><td class="dim" colspan="4">${esc(L.reason || "no arguments or locals")}</td></tr>`);
+        else { out.push(hdr); for (const v of L.vars) this.varRows(v, `L/${L.func}/${v.name}`, 0, out); }
+      }
+      this.q(".dbg-locals").innerHTML = out.join("");
+    } else if (this.sideTab === "watch") {
+      const out = [];
+      if (!this.watches.length) out.push(`<tr><td class="dim" colspan="4">no watch expressions: type one above, or click a global</td></tr>`);
+      else out.push(hdr.replace("<th>name</th>", "<th>expression</th>").replace("<th>location</th>", "<th>location</th><th></th>"));
+      this.watches.forEach((w, i) => {
+        const r = w.r;
+        const before = out.length;
+        if (!r) out.push(`<tr data-path="W/${i}" data-w="${i}"><td class="nm">${esc(w.expr)}</td><td class="v dim">…</td><td></td><td></td></tr>`);
+        else if (r.error) out.push(`<tr data-path="W/${i}" data-w="${i}"><td class="nm">${esc(w.expr)}</td><td class="v err" colspan="3" title="${esc(r.error)}">${esc(r.error)}</td></tr>`);
+        else this.varRows({ ...r, name: w.expr }, `W/${w.expr}`, 0, out, ` data-w="${i}"`);
+        out[before] = out[before].replace(/<\/tr>$/, `<td><button type="button" class="btn small ghost" data-b="del" title="remove">×</button></td></tr>`);
+      });
+      this.q(".dbg-watch").innerHTML = out.join("");
+    }
+    this._prevVals = this._newVals;
+  }
+
+  async refreshGlobals(quiet = false) {
+    try {
+      const r = await this.api(`/api/debug/globals?${this.chipQ()}`);
+      this.globals = r.vars || [];
+    } catch (e) { this.globals = []; if (!quiet) this.q(".dbg-globals").innerHTML = `<tr><td class="dim">${esc(e.message)}</td></tr>`; return; }
+    const dl = this.box.querySelector("#dbgGlobalsList");
+    if (dl) dl.innerHTML = this.globals.slice(0, 2000).map((g) => `<option value="${esc(g.name)}">${esc(g.type || "")}</option>`).join("");
+    if (!quiet) this.renderGlobals();
+  }
+
+  renderGlobals() {
+    const f = this.q(".dbg-glob-filter").value.trim();
+    let m = null;
+    if (f) {
+      const rx = /^\/(.+)\/([a-z]*)$/.exec(f);
+      try { m = rx ? new RegExp(rx[1], rx[2] || "i") : null; } catch { m = /$^/; }
+      if (!rx) { const low = f.toLowerCase(); m = { test: (s) => s.toLowerCase().includes(low) }; }
+    }
+    const g = (this.globals || []).filter((x) => !m || m.test(x.name) || m.test(x.type || ""));
+    const ub = this.st?.unit_bytes || 1;
+    const fa = (a) => (a == null ? "" : "0x" + a.toString(16).toUpperCase().padStart(ub === 2 ? 6 : 8, "0"));
+    this.q(".dbg-globals").innerHTML = g.length
+      ? `<tr class="hdr"><th>name</th><th>type</th><th>address</th><th>size</th><th>file</th></tr>` + g.slice(0, 1000).map((x) =>
+        `<tr data-name="${esc(x.name)}" title="click: watch ${esc(x.name)}"><td class="nm">${esc(x.name)}</td><td class="ty">${esc(x.type || "?")}</td>` +
+        `<td class="lc">${fa(x.addr)}</td><td class="n">${x.size ?? ""}</td><td class="dim" title="${esc(x.file || "")}">${esc((x.file || "").split(/[\\/]/).pop())}</td></tr>`).join("") +
+        (g.length > 1000 ? `<tr><td class="dim" colspan="5">${g.length - 1000} more: filter</td></tr>` : "")
+      : `<tr><td class="dim">${this.globals ? "no globals" + (f ? " match" : "") : "loading…"}</td></tr>`;
+  }
+
+  showMem(expr) {
+    this.q(".dbg-mem").classList.remove("collapsed");
+    this.q(".dbg-mem-addr").value = expr;
+    this.memGo();
   }
 }

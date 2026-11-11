@@ -93,7 +93,7 @@ class I2C(GatedBlock):
         self.gate = f"I2C{self.index}"
         ov = {"C1": {"on_write": self._c1_write},
               "S": {"w1c_mask": IICIF | ARBL, "ro_mask": 0xFF & ~(IICIF | ARBL), "on_write": self._s_write},
-              "D": {"on_read": self._d_read, "on_write": self._d_write},
+              "D": {"on_read": self._d_read, "on_write": self._d_write, "on_peek": lambda b, r: self._rx},
               "F": {"on_write": self._f_write},
               "FLT": {"w1c_mask": STOPF | STARTF, "on_write": self._flt_write},
               "SMB": {"w1c_mask": 0x0A, "ro_mask": 0x04}}

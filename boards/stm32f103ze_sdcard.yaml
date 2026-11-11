@@ -1,0 +1,10 @@
+# STM32F103ZE SDIO host (PC8-PC11 D0-D3, PC12 CK, PD2 CMD; SDIOCLK = HCLK = 72 MHz, RM0008 22.2) + a 64 MB SDHC card.
+# The firmware identifies the card at 400 kHz, switches to a 4-bit bus at 12 MHz, writes block 2, reads it back (FIFO
+# polled) and reads blocks 2-3 with CMD18 + CMD12 through DMA2 channel 4; USART1 prints the steps and "done".
+# Run:   chipem run --board boards/stm32f103ze_sdcard.yaml --for 30ms
+# Build: firmware/samples_stm32f1_variants/build.sh
+name: stm32f103ze_sdcard
+chips:
+  - {id: A, chip: stm32f103ze, firmware: ../firmware/samples_stm32f1_variants/build/hd_sdio.elf}
+devices:
+  - {type: sd_card, chip: A, host: SDIO, size: 64M, kind: sdhc}

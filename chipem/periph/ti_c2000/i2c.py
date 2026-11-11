@@ -21,9 +21,9 @@ none available XSMT = 0 and SCL is held low until I2CDXR is written.  Receive: t
 the last of a non-repeat transfer, any byte while STP = 1 in repeat mode, and the byte after NACKMOD = 1 (cleared
 once sent; NACKSNT set); a byte arriving while I2CDRR (or the RX FIFO) is full stays in I2CRSR, RSFULL = 1 and SCL is
 held low until I2CDRR is read.  A NACK received (address or data) sets NACK; the master then generates STOP if
-STP = 1, else holds SCL low until STP/STT.  STT/STP clear when their condition has been generated; MST clears after
-STOP.  DLB = 1 (digital loopback, master only): no pin activity; each byte written to I2CDXR appears in I2CDRR one
-byte time (9 SCL periods) later, with the same count/ARDY/STOP sequencing.
+STP = 1, else sets ARDY and holds SCL low until STP/STT.  STT/STP clear when their condition has been generated;
+MST clears after STOP.  DLB = 1 (digital loopback, master only): no pin activity; each byte written to I2CDXR
+appears in I2CDRR one byte time (9 SCL periods) later, with the same count/ARDY/STOP sequencing.
 Slave (MST = 0): 7-bit I2COAR match (or general call 0: AD0) -> AAS, SDIR = R/W; received bytes are ACKed (NACKMOD
 -> NACK) and stored; a byte arriving with I2CDRR full -> RSFULL and SCL stretched until I2CDRR is read; slave
 transmit takes I2CDXR (none: XSMT = 0, SCL stretched until written); the master's NACK sets NACK.
@@ -74,8 +74,9 @@ class I2C(C2000Block):
             "I2CSTR": {"w1c_mask": STR_W1C, "ro_mask": 0xFFFF & ~STR_W1C, "on_write": self._str_write},
             "I2CIER": {"ro_mask": 0xFF80, "on_write": lambda b, r, o, n: self._update()},
             "I2CDXR": {"on_write": self._dxr_write, "ro_mask": 0xFF00},
-            "I2CDRR": {"on_read": self._drr_read, "ro_mask": 0xFFFF},
-            "I2CISRC": {"on_read": self._isrc_read, "ro_mask": 0xF0FF},
+            "I2CDRR": {"on_read": self._drr_read, "ro_mask": 0xFFFF, "on_peek": self._drr_peek},
+            "I2CISRC": {"on_read": self._isrc_read, "ro_mask": 0xF0FF,
+                        "on_peek": lambda b, r: (self.get("I2CISRC") & 0x0F00) | self._pending_code()},
             "I2CFFTX": {"on_write": self._fftx_write, "ro_mask": 0x9F80},
             "I2CFFRX": {"on_write": self._ffrx_write, "ro_mask": 0xDF80},
             "I2CPSC": {"ro_mask": 0xFF00},
@@ -84,6 +85,7 @@ class I2C(C2000Block):
         }
         regs = build_regs((name, f"I2C{self.letter}", "I2CA"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
+        self.fifo_depth = int(self.params.get("fifo_depth", FIFO_DEPTH))   # Piccolo: 4 (SPRUI09 8.1/9.1/10.1)
         self.sda_sig, self.scl_sig = f"SDA{self.letter}", f"SCL{self.letter}"
         self.port: I2CPort | None = None
         self.int1 = params.get("irq")
@@ -181,8 +183,8 @@ class I2C(C2000Block):
             self._txffint = True
         if self._rx_fifo_on() and len(self.rx_fifo) >= (rx & 0x1F):
             self._rxffint = True
-        tx = (tx & ~(0x1F00 | FFINT)) | (min(len(self.tx_fifo), 16) << 8) | (FFINT if self._txffint else 0)
-        rx = (rx & ~(0x1F00 | FFINT)) | (min(len(self.rx_fifo), 16) << 8) | (FFINT if self._rxffint else 0)
+        tx = (tx & ~(0x1F00 | FFINT)) | (min(len(self.tx_fifo), self.fifo_depth) << 8) | (FFINT if self._txffint else 0)
+        rx = (rx & ~(0x1F00 | FFINT)) | (min(len(self.rx_fifo), self.fifo_depth) << 8) | (FFINT if self._rxffint else 0)
         self.set("I2CFFTX", tx)
         self.set("I2CFFRX", rx)
         st = self.get("I2CSTR")
@@ -227,7 +229,7 @@ class I2C(C2000Block):
     def _rx_put(self, byte: int) -> bool:
         """Deliver a received byte; False if the receiver is full (byte kept in I2CRSR, RSFULL)."""
         if self._rx_fifo_on():
-            if len(self.rx_fifo) >= FIFO_DEPTH:
+            if len(self.rx_fifo) >= self.fifo_depth:
                 self._rsr = byte
                 self._str(RSFULL)
                 return False
@@ -302,7 +304,7 @@ class I2C(C2000Block):
             return None
         byte = new & 0xFF
         if self._tx_fifo_on():
-            if len(self.tx_fifo) < FIFO_DEPTH:
+            if len(self.tx_fifo) < self.fifo_depth:
                 self.tx_fifo.append(byte)
             self._txffint = len(self.tx_fifo) <= (self.get("I2CFFTX") & 0x1F) and self._txffint
         else:
@@ -319,6 +321,11 @@ class I2C(C2000Block):
             self._next()
         self._update()
         return None
+
+    def _drr_peek(self, blk, reg):
+        if self._rx_fifo_on():
+            return self.rx_fifo[0] if self.rx_fifo else 0     # the FIFO head, not popped
+        return self.get("I2CDRR") & 0xFF
 
     def _drr_read(self, blk, reg):
         if self._rx_fifo_on():
@@ -472,6 +479,11 @@ class I2C(C2000Block):
         self._phase = "hold"
         if self.get("I2CMDR") & STP:
             self._stop()
+        elif master:
+            # with STP = 0 the master holds SCL and its registers are ready for the next command: ARDY as well.
+            # TI's own code depends on it: the 280x boot ROM's I2C loader (SPRU722C I2C_CheckKeyVal waits for ARDY,
+            # then tests NACK) and the DSP280x/2833x I2C EEPROM example (NACK handled in the ARDY interrupt).
+            self._str(ARDY)
 
     def _tx_done(self, byte: int, ack: bool) -> None:
         self.transfers.append(("w", byte, ack))

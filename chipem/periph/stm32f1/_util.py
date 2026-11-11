@@ -29,6 +29,14 @@ def build_regs(names: Iterable[str], size: int, overrides: dict[str, dict] | Non
     return _f4.build_regs(names, size, overrides, regs_file or DEFAULT_REGS, skip)
 
 
+def add_ro(reg: Reg, bits: int) -> None:
+    """Make `bits` of `reg` read-only (reserved on the F1 although the SVD lists a field there); keeps the SVD's
+    reserved-bit mask, unlike a `ro_mask` override."""
+    reset, ro, w1c = reg._raw
+    reg._raw = (reset, ro | bits, w1c)
+    reg.set_unit_bits(reg.unit_bits)
+
+
 def apb_hz(chip: Any, bus: int) -> float:
     return _f4.apb_hz(chip, bus)
 

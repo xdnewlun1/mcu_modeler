@@ -92,10 +92,11 @@ class ADC(C2000Block):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {"ADCTRL1": {"on_write": self._ctrl1_write}, "ADCTRL2": {"on_write": self._ctrl2_write},
-              "ADCST": {"on_write": self._st_write, "on_read": self._catch_read, "ro_mask": 0x00CF},
-              "ADCASEQSR": {"on_read": self._aseqsr_read}}
+              "ADCST": {"on_write": self._st_write, "on_read": self._catch_read, "ro_mask": 0x00CF,
+                        "on_peek": lambda b, r: None},
+              "ADCASEQSR": {"on_read": self._aseqsr_read, "on_peek": self._aseqsr_peek}}
         for k in range(16):
-            ov[f"ADCRESULT{k}"] = {"on_read": self._catch_read}
+            ov[f"ADCRESULT{k}"] = {"on_read": self._catch_read, "on_peek": self._result_peek}
         regs = build_regs((name, "ADC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self.gate = "ADCENCLK"
@@ -115,6 +116,9 @@ class ADC(C2000Block):
         self.conversions = 0
         self.soc_lost = 0
         self._soc_warned = False
+        mx = params.get("adcclk_max_hz")    # data sheet ADCCLK limit of the part (F2833x / F2809 25 MHz, 280x 12.5 MHz,
+        self.adcclk_max_hz = float(mx) if mx else None      # 60-MHz F2801x 7.5 MHz)
+        self._adcclk_warned = False
         self.dma_listeners: list = []       # cb(seq, sync) on every SEQ1INT/SEQ2INT pulse (DMA triggers, ADCSYNC)
 
     def attach(self, chip: Any) -> None:
@@ -334,6 +338,8 @@ class ADC(C2000Block):
         else:
             n = ((mx >> 4) & 7) + 1
         first, step, simul, db = self._timing()
+        if self.adcclk_max_hz and not self._adcclk_warned:
+            self._check_adcclk(db)
         if fresh or prev_last is None:
             t_first = t + first
         else:                                            # continuous: the pipeline runs on
@@ -345,6 +351,16 @@ class ADC(C2000Block):
         self.set("ADCTRL2", self.get("ADCTRL2") & ~SOC_BIT[seq])
         self.set("ADCST", self.get("ADCST") | (1 << (seq + 1)))       # SEQx_BSY
         self._ev = self.chip.sched.at_cycles(max(s.t_last(), self.chip.now_cycles()), self._eos)
+
+    def _check_adcclk(self, d: int) -> None:
+        """One `warn` when a conversion starts with ADCCLK above the part's limit (`params.adcclk_max_hz`); the
+        conversion still runs with the programmed timing (silicon would give unreliable results)."""
+        hz = float(self.chip.clock.hz) / max(d, 1)
+        if hz > self.adcclk_max_hz * 1.0001:
+            self._adcclk_warned = True
+            self.emit("warn", block=self.name, msg=f"{self.name}: ADCCLK {hz / 1e6:.3f} MHz exceeds the "
+                      f"{self.adcclk_max_hz / 1e6:g} MHz maximum of this part (HISPCP / ADCCLKPS / CPS); results "
+                      "are converted anyway")
 
     def _result_slots(self, s: _Session, i: int) -> tuple[int, int | None]:
         """(state, B-result register or None) of the session's i-th state; the A result goes to RESULT[state] in
@@ -390,6 +406,55 @@ class ADC(C2000Block):
             changed = True
         if changed and self._mirror is not None:
             self._mirror.refresh(self)
+
+    def _due_results(self) -> tuple[dict[int, int], int]:
+        """What _catch_up would write now, without writing it (debugger peek): ({slot: value}, session.done after)."""
+        s = self._sess
+        out: dict[int, int] = {}
+        if s is None or self.chip is None:
+            return out, 0
+        now = self.chip.now_cycles()
+        done = s.done
+        if now < s.t_first:
+            return out, done
+        lo, size = self._seq_range(s.seq)
+        while done < s.n:
+            i = done
+            ta = s.t_first + i * s.step
+            k = lo + (s.k0 - lo + i) % size
+            if ta > now or (s.simul and ta + s.dt_b > now):
+                if s.simul and ta <= now:
+                    out[self._result_slots(s, i)[0]] = self.values[self._conv_channel(k) & 7]
+                break
+            ch = self._conv_channel(k)
+            if s.simul:
+                ra, rb = self._result_slots(s, i)
+                out[ra] = self.values[ch & 7]
+                out[rb] = self.values[8 + (ch & 7)]
+            else:
+                out[k] = self.values[ch]
+            done += 1
+        return out, done
+
+    def result_peek(self, k: int) -> int | None:
+        """RESULTk (raw, right-justified) of a conversion done but not written yet (None: nothing pending)."""
+        return self._due_results()[0].get(k)
+
+    def _result_peek(self, blk, reg):
+        k = int(reg.name[9:])
+        due = self._due_results()[0]
+        return due[k] << 4 if k in due else None
+
+    def _aseqsr_peek(self, blk, reg):
+        s = self._sess
+        if s is None:
+            return None
+        done = self._due_results()[1]
+        lo, size = self._seq_range(s.seq)
+        st = dict(self._state)
+        st[s.seq] = lo + (s.k0 - lo + done) % size
+        cntr = max(s.n - 1 - done, 0)
+        return (st[1] & 0xF) | (((st[2] - 8) & 7) << 4) | (cntr << 8)
 
     def _write(self, k: int, v: int) -> None:
         self.results[k] = v
@@ -477,7 +542,7 @@ class ADCMirror(C2000Block):
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
-        ov = {f"ADCRESULT{k}": {"on_read": self._catch_read} for k in range(16)}
+        ov = {f"ADCRESULT{k}": {"on_read": self._catch_read, "on_peek": self._result_peek} for k in range(16)}
         regs = build_regs((name, "ADCMIRROR"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self._adc = None
@@ -490,6 +555,10 @@ class ADCMirror(C2000Block):
         if self._adc is not None:
             self._adc._catch_up()
         return self.get(reg.name)
+
+    def _result_peek(self, blk, reg):
+        a = self._adc
+        return a.result_peek(int(reg.name[9:])) if a is not None else None
 
     def refresh(self, adc: ADC) -> None:
         for k in range(16):

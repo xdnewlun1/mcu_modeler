@@ -1,0 +1,1179 @@
+ASxxxx Linker V03.00/V05.40 + sdld,  page 1.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CABS                                00000000    00000000 =           0. bytes (ABS,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000000  l_BIT_BANK                      
+C:   00000000  l_CABS                          
+C:   00000000  l_GSINIT1                       
+C:   00000000  l_GSINIT5                       
+C:   00000000  l_IABS                          
+C:   00000000  l_ISEG                          
+C:   00000000  l_PSEG                          
+C:   00000000  l_REG_BANK_1                    
+C:   00000000  l_REG_BANK_2                    
+C:   00000000  l_REG_BANK_3                    
+C:   00000000  l_RSEG                          
+C:   00000000  l_RSEG0                         
+C:   00000000  l_RSEG1                         
+C:   00000000  l_XABS                          
+C:   00000000  l_XINIT                         
+C:   00000000  l_XISEG                         
+C:   00000000  l__CODE                         
+C:   00000000  s_BSEG                          
+C:   00000000  s_CABS                          
+C:   00000000  s_DSEG                          
+C:   00000000  s_HOME                          
+C:   00000000  s_IABS                          
+C:   00000000  s_ISEG                          
+C:   00000000  s_REG_BANK_0                    
+C:   00000000  s_RSEG                          
+C:   00000000  s_RSEG0                         
+C:   00000000  s_RSEG1                         
+C:   00000000  s_XABS                          
+C:   00000001  l_BSEG_BYTES                    
+C:   00000001  s_PSEG                          
+C:   00000001  s_XSEG                          
+C:   00000002  l_BSEG                          
+C:   00000003  l_GSFINAL                       
+C:   00000003  l_GSINIT0                       
+C:   00000008  l_REG_BANK_0                    
+C:   00000008  s_REG_BANK_1                    
+C:   0000000A  l_GSINIT2                       
+C:   0000000B  l_OSEG                          
+C:   00000010  s_REG_BANK_2                    
+C:   00000018  s_BIT_BANK                      
+C:   00000018  s_REG_BANK_3                    
+C:   00000020  s_BSEG_BYTES                    
+C:   00000020  s__CODE                         
+C:   00000022  l_GSINIT3                       
+C:   0000002A  l_GSINIT4                       
+C:   0000002F  l_GSINIT                        
+C:   00000040  s_OSEG                          
+C:   0000004B  s_SSEG                          
+C:   0000004C  l_HOME                          
+C:   0000004C  s_GSINIT0                       
+ASxxxx Linker V03.00/V05.40 + sdld,  page 2.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CABS                                00000000    00000000 =           0. bytes (ABS,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000004F  s_GSINIT1                       
+C:   0000004F  s_GSINIT2                       
+C:   00000050  l_XSEG                          
+C:   00000051  s_XISEG                         
+C:   00000059  s_GSINIT3                       
+C:   0000007B  s_GSINIT4                       
+C:   00000080  l_DSEG                          
+C:   00000088  l_CONST                         
+C:   000000A5  s_GSINIT                        
+C:   000000A5  s_GSINIT5                       
+C:   000000B5  l_SSEG                          
+C:   000000D4  s_GSFINAL                       
+C:   000000D7  s_CSEG                          
+C:   00000100  l_IRAM                          
+C:   00001AB4  l_CSEG                          
+C:   00001B8B  s_CONST                         
+C:   00001C13  s_XINIT                         
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 3.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000000  .__.ABS.                           _startup
+     000000A0  __XPAGE                            
+     000000F5  _B_5                               _gptrput
+     000000F6  _B_6                               _gptrput
+     000000F7  _B_7                               _gptrput
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 4.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+BSEG_BYTES                          00000020    00000001 =           1. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 5.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+REG_BANK_0                          00000000    00000008 =           8. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 6.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+DSEG                                00000000    00000080 =         128. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000008  G$done$0_0$0                       math
+     00000008  _done                              math
+     00000009  G$la$0_0$0                         math
+     00000009  _la                                math
+     0000000D  G$lb$0_0$0                         math
+     0000000D  _lb                                math
+     00000011  G$fa$0_0$0                         math
+     00000011  _fa                                math
+     00000015  G$fb$0_0$0                         math
+     00000015  _fb                                math
+     0000001D  _bp                                _bp
+     0000001E  _errno                             errno
+     00000026  _sincosf_PARM_2                    sincosf
+     0000003C  _powf_PARM_2                       powf
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 7.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+OSEG                                00000040    0000000B =          11. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000040  __divsint_PARM_2                   _divuint
+     00000040  __divslong_PARM_2                  _divulong
+     00000040  __divuint_PARM_2                   _divuint
+     00000040  __divulong_PARM_2                  _divulong
+     00000040  __gptrput_PARM_2                   _gptrput
+     00000040  __modslong_PARM_2                  _modulong
+     00000040  __modulong_PARM_2                  _modulong
+     00000040  __mullong_PARM_2                   _mullong
+     00000040  _frexpf_PARM_2                     frexpf
+     00000040  _ldexpf_PARM_2                     ldexpf
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 8.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+SSEG                                0000004B    000000B5 =         181. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     0000004B  __start__stack                     math
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 9.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+XSEG                                00000001    00000050 =          80. bytes (REL,CON,XDATA)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+D:   00000001  G$out$0_0$0                        math
+D:   00000001  _out                               math
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 10.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+HOME                                00000000    0000004C =          76. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000000  A$math$117                         math
+C:   00000008  A$math$121                         math
+C:   00000008  sdcc_atomic_exchange_rollback_st   math
+C:   00000009  A$math$122                         math
+C:   0000000A  A$math$124                         math
+C:   0000000B  A$math$125                         math
+C:   0000000C  A$math$126                         math
+C:   0000000D  A$math$127                         math
+C:   0000000E  A$math$128                         math
+C:   00000010  A$math$129                         math
+C:   00000011  A$math$130                         math
+C:   00000012  A$math$132                         math
+C:   00000013  A$math$133                         math
+C:   00000014  A$math$134                         math
+C:   00000015  A$math$135                         math
+C:   00000016  A$math$136                         math
+C:   00000018  A$math$138                         math
+C:   00000019  A$math$139                         math
+C:   0000001C  A$math$140                         math
+C:   0000001D  A$math$141                         math
+C:   0000001E  A$math$142                         math
+C:   0000001F  A$math$143                         math
+C:   00000020  A$math$145                         math
+C:   00000021  A$math$146                         math
+C:   00000024  A$math$147                         math
+C:   00000025  A$math$148                         math
+C:   00000026  A$math$149                         math
+C:   00000027  A$math$150                         math
+C:   00000028  A$math$152                         math
+C:   00000029  A$math$153                         math
+C:   0000002C  A$math$154                         math
+C:   0000002D  A$math$155                         math
+C:   0000002E  A$math$156                         math
+C:   0000002F  A$math$160                         math
+C:   0000002F  sdcc_atomic_exchange_gptr_impl     math
+C:   0000002F  sdcc_atomic_exchange_rollback_en   math
+C:   00000032  A$math$161                         math
+C:   00000034  A$math$162                         math
+C:   00000037  A$math$164                         math
+C:   00000038  A$math$165                         math
+C:   00000039  A$math$166                         math
+C:   0000003B  A$math$167                         math
+C:   0000003C  A$math$169                         math
+C:   0000003E  A$math$170                         math
+C:   0000003F  A$math$172                         math
+C:   0000003F  sdcc_atomic_compare_exchange_gpt   math
+C:   00000042  A$math$173                         math
+C:   00000044  A$math$174                         math
+C:   00000047  A$math$175                         math
+C:   00000049  A$math$222                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 11.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+HOME                                00000000    0000004C =          76. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000049  __sdcc_program_startup             math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 12.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT0                             0000004C    00000003 =           3. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000004C  __sdcc_gsinit_startup              
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 13.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT2                             0000004F    0000000A =          10. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 14.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT3                             00000059    00000022 =          34. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000059  __mcs51_genXINIT                   
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 15.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT4                             0000007B    0000002A =          42. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000007B  __mcs51_genRAMCLEAR                
+C:   00000081  __mcs51_genXRAMCLEAR               
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 16.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT                              000000A5    0000002F =          47. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000A5  A$math$191                         math
+C:   000000A8  A$math$192                         math
+C:   000000AB  A$math$193                         math
+C:   000000AE  A$math$194                         math
+C:   000000B1  A$math$197                         math
+C:   000000B1  C$math.c$10$1_0$29                 math
+C:   000000B4  A$math$198                         math
+C:   000000B7  A$math$199                         math
+C:   000000BA  A$math$200                         math
+C:   000000BD  A$math$203                         math
+C:   000000C0  A$math$204                         math
+C:   000000C3  A$math$205                         math
+C:   000000C6  A$math$206                         math
+C:   000000C9  A$math$209                         math
+C:   000000C9  C$math.c$11$1_0$29                 math
+C:   000000CA  A$math$210                         math
+C:   000000CC  A$math$211                         math
+C:   000000CE  A$math$212                         math
+C:   000000D1  A$math$213                         math
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 17.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSFINAL                             000000D4    00000003 =           3. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000D4  A$math$215                         math
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 18.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000D7  A$math$247                         math
+C:   000000D7  C$math.c$13$0_0$27                 math
+C:   000000D7  G$finish$0$0                       math
+C:   000000D7  _finish                            math
+C:   000000D9  A$math$252                         math
+C:   000000D9  C$math.c$17$2_0$27                 math
+C:   000000D9  XG$finish$0$0                      math
+C:   000000DA  A$math$265                         math
+C:   000000DA  C$math.c$19$2_0$29                 math
+C:   000000DA  C$math.c$21$1_0$29                 math
+C:   000000DA  G$main$0$0                         math
+C:   000000DA  _main                              math
+C:   000000DD  A$math$266                         math
+C:   000000E0  A$math$267                         math
+C:   000000E3  A$math$268                         math
+C:   000000E6  A$math$269                         math
+C:   000000E9  A$math$270                         math
+C:   000000EC  A$math$271                         math
+C:   000000EF  A$math$272                         math
+C:   000000F1  A$math$273                         math
+C:   000000F4  A$math$274                         math
+C:   000000F6  A$math$275                         math
+C:   000000F8  A$math$276                         math
+C:   000000FA  A$math$277                         math
+C:   000000FB  A$math$278                         math
+C:   000000FE  A$math$279                         math
+C:   000000FF  A$math$280                         math
+C:   00000100  A$math$281                         math
+C:   00000101  A$math$282                         math
+C:   00000102  A$math$283                         math
+C:   00000103  A$math$284                         math
+C:   00000104  A$math$285                         math
+C:   00000105  A$math$286                         math
+C:   00000106  A$math$287                         math
+C:   00000107  A$math$288                         math
+C:   00000108  A$math$289                         math
+C:   00000109  A$math$292                         math
+C:   00000109  C$math.c$22$1_0$29                 math
+C:   0000010C  A$math$293                         math
+C:   0000010F  A$math$294                         math
+C:   00000112  A$math$295                         math
+C:   00000115  A$math$296                         math
+C:   00000118  A$math$297                         math
+C:   0000011B  A$math$298                         math
+C:   0000011E  A$math$299                         math
+C:   00000120  A$math$300                         math
+C:   00000123  A$math$301                         math
+C:   00000125  A$math$302                         math
+C:   00000127  A$math$303                         math
+C:   00000129  A$math$304                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 19.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000012A  A$math$305                         math
+C:   0000012D  A$math$306                         math
+C:   0000012E  A$math$307                         math
+C:   0000012F  A$math$308                         math
+C:   00000130  A$math$309                         math
+C:   00000131  A$math$310                         math
+C:   00000132  A$math$311                         math
+C:   00000133  A$math$312                         math
+C:   00000134  A$math$313                         math
+C:   00000135  A$math$314                         math
+C:   00000136  A$math$315                         math
+C:   00000137  A$math$316                         math
+C:   00000138  A$math$319                         math
+C:   00000138  C$math.c$23$1_0$29                 math
+C:   0000013B  A$math$320                         math
+C:   0000013E  A$math$321                         math
+C:   00000141  A$math$322                         math
+C:   00000144  A$math$323                         math
+C:   00000147  A$math$324                         math
+C:   0000014A  A$math$325                         math
+C:   0000014D  A$math$326                         math
+C:   0000014F  A$math$327                         math
+C:   00000152  A$math$328                         math
+C:   00000154  A$math$329                         math
+C:   00000156  A$math$330                         math
+C:   00000158  A$math$331                         math
+C:   00000159  A$math$332                         math
+C:   0000015C  A$math$333                         math
+C:   0000015D  A$math$334                         math
+C:   0000015E  A$math$335                         math
+C:   0000015F  A$math$336                         math
+C:   00000160  A$math$337                         math
+C:   00000161  A$math$338                         math
+C:   00000162  A$math$339                         math
+C:   00000163  A$math$340                         math
+C:   00000164  A$math$341                         math
+C:   00000165  A$math$342                         math
+C:   00000166  A$math$343                         math
+C:   00000167  A$math$346                         math
+C:   00000167  C$math.c$24$1_0$29                 math
+C:   00000169  A$math$347                         math
+C:   0000016B  A$math$348                         math
+C:   0000016D  A$math$349                         math
+C:   0000016F  A$math$350                         math
+C:   00000172  A$math$351                         math
+C:   00000175  A$math$352                         math
+C:   00000176  A$math$353                         math
+C:   00000178  A$math$354                         math
+C:   0000017A  A$math$355                         math
+C:   0000017C  A$math$356                         math
+C:   0000017E  A$math$357                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 20.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000180  A$math$358                         math
+C:   00000181  A$math$359                         math
+C:   00000184  A$math$360                         math
+C:   00000186  A$math$361                         math
+C:   00000188  A$math$362                         math
+C:   0000018A  A$math$363                         math
+C:   0000018B  A$math$364                         math
+C:   0000018E  A$math$365                         math
+C:   0000018F  A$math$366                         math
+C:   00000190  A$math$367                         math
+C:   00000191  A$math$368                         math
+C:   00000192  A$math$369                         math
+C:   00000193  A$math$370                         math
+C:   00000194  A$math$371                         math
+C:   00000195  A$math$372                         math
+C:   00000196  A$math$373                         math
+C:   00000197  A$math$374                         math
+C:   00000198  A$math$375                         math
+C:   00000199  A$math$378                         math
+C:   00000199  C$math.c$25$1_0$29                 math
+C:   0000019C  A$math$379                         math
+C:   0000019E  A$math$380                         math
+C:   0000019F  A$math$381                         math
+C:   000001A1  A$math$382                         math
+C:   000001A2  A$math$383                         math
+C:   000001A3  A$math$384                         math
+C:   000001A5  A$math$385                         math
+C:   000001A6  A$math$386                         math
+C:   000001A7  A$math$387                         math
+C:   000001A9  A$math$388                         math
+C:   000001AA  A$math$389                         math
+C:   000001AB  A$math$392                         math
+C:   000001AB  C$math.c$26$1_0$29                 math
+C:   000001AC  A$math$393                         math
+C:   000001AD  A$math$394                         math
+C:   000001AF  A$math$395                         math
+C:   000001B0  A$math$396                         math
+C:   000001B1  A$math$397                         math
+C:   000001B3  A$math$398                         math
+C:   000001B4  A$math$399                         math
+C:   000001B5  A$math$400                         math
+C:   000001B7  A$math$401                         math
+C:   000001B8  A$math$402                         math
+C:   000001B9  A$math$403                         math
+C:   000001BB  A$math$404                         math
+C:   000001BC  A$math$405                         math
+C:   000001BD  A$math$406                         math
+C:   000001BE  A$math$407                         math
+C:   000001BF  A$math$408                         math
+C:   000001C0  A$math$409                         math
+C:   000001C1  A$math$410                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 21.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000001C2  A$math$411                         math
+C:   000001C4  A$math$412                         math
+C:   000001C5  A$math$413                         math
+C:   000001C6  A$math$414                         math
+C:   000001C8  A$math$415                         math
+C:   000001C9  A$math$416                         math
+C:   000001CA  A$math$417                         math
+C:   000001CB  A$math$418                         math
+C:   000001CC  A$math$419                         math
+C:   000001CD  A$math$420                         math
+C:   000001CE  A$math$421                         math
+C:   000001CF  A$math$422                         math
+C:   000001D1  A$math$423                         math
+C:   000001D2  A$math$424                         math
+C:   000001D3  A$math$425                         math
+C:   000001D4  A$math$426                         math
+C:   000001D5  A$math$427                         math
+C:   000001D6  A$math$428                         math
+C:   000001D7  A$math$429                         math
+C:   000001D8  A$math$430                         math
+C:   000001D9  A$math$431                         math
+C:   000001DB  A$math$432                         math
+C:   000001DC  A$math$433                         math
+C:   000001DD  A$math$434                         math
+C:   000001DF  A$math$435                         math
+C:   000001E0  A$math$436                         math
+C:   000001E1  A$math$437                         math
+C:   000001E2  A$math$438                         math
+C:   000001E5  A$math$439                         math
+C:   000001E7  A$math$441                         math
+C:   000001E8  A$math$442                         math
+C:   000001EB  A$math$443                         math
+C:   000001EC  A$math$444                         math
+C:   000001ED  A$math$445                         math
+C:   000001EE  A$math$446                         math
+C:   000001EF  A$math$447                         math
+C:   000001F0  A$math$448                         math
+C:   000001F1  A$math$449                         math
+C:   000001F2  A$math$450                         math
+C:   000001F3  A$math$451                         math
+C:   000001F4  A$math$452                         math
+C:   000001F5  A$math$453                         math
+C:   000001F6  A$math$456                         math
+C:   000001F6  C$math.c$27$1_0$29                 math
+C:   000001F8  A$math$457                         math
+C:   000001FA  A$math$458                         math
+C:   000001FC  A$math$459                         math
+C:   000001FE  A$math$460                         math
+C:   00000201  A$math$461                         math
+C:   00000204  A$math$462                         math
+C:   00000207  A$math$463                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 22.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000209  A$math$464                         math
+C:   0000020C  A$math$465                         math
+C:   0000020E  A$math$466                         math
+C:   00000210  A$math$467                         math
+C:   00000212  A$math$468                         math
+C:   00000213  A$math$469                         math
+C:   00000215  A$math$470                         math
+C:   00000217  A$math$471                         math
+C:   00000219  A$math$472                         math
+C:   0000021C  A$math$473                         math
+C:   0000021D  A$math$474                         math
+C:   0000021E  A$math$475                         math
+C:   0000021F  A$math$476                         math
+C:   00000220  A$math$477                         math
+C:   00000221  A$math$478                         math
+C:   00000222  A$math$479                         math
+C:   00000223  A$math$480                         math
+C:   00000224  A$math$481                         math
+C:   00000225  A$math$482                         math
+C:   00000226  A$math$483                         math
+C:   00000227  A$math$486                         math
+C:   00000227  C$math.c$28$1_0$29                 math
+C:   00000229  A$math$487                         math
+C:   0000022B  A$math$488                         math
+C:   0000022D  A$math$489                         math
+C:   0000022F  A$math$490                         math
+C:   00000232  A$math$491                         math
+C:   00000235  A$math$492                         math
+C:   00000238  A$math$493                         math
+C:   0000023A  A$math$494                         math
+C:   0000023D  A$math$495                         math
+C:   0000023F  A$math$496                         math
+C:   00000241  A$math$497                         math
+C:   00000243  A$math$498                         math
+C:   00000244  A$math$499                         math
+C:   00000246  A$math$500                         math
+C:   00000248  A$math$501                         math
+C:   0000024A  A$math$502                         math
+C:   0000024D  A$math$503                         math
+C:   0000024E  A$math$504                         math
+C:   0000024F  A$math$505                         math
+C:   00000250  A$math$506                         math
+C:   00000251  A$math$507                         math
+C:   00000252  A$math$508                         math
+C:   00000253  A$math$509                         math
+C:   00000254  A$math$510                         math
+C:   00000255  A$math$511                         math
+C:   00000256  A$math$512                         math
+C:   00000257  A$math$513                         math
+C:   00000258  A$math$516                         math
+C:   00000258  C$math.c$29$1_0$29                 math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 23.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000025A  A$math$517                         math
+C:   0000025C  A$math$518                         math
+C:   0000025E  A$math$519                         math
+C:   00000260  A$math$520                         math
+C:   00000263  A$math$521                         math
+C:   00000266  A$math$522                         math
+C:   00000269  A$math$523                         math
+C:   0000026B  A$math$524                         math
+C:   0000026E  A$math$525                         math
+C:   00000270  A$math$526                         math
+C:   00000272  A$math$527                         math
+C:   00000274  A$math$528                         math
+C:   00000275  A$math$529                         math
+C:   00000277  A$math$530                         math
+C:   00000279  A$math$531                         math
+C:   0000027B  A$math$532                         math
+C:   0000027E  A$math$533                         math
+C:   0000027F  A$math$534                         math
+C:   00000280  A$math$535                         math
+C:   00000281  A$math$536                         math
+C:   00000282  A$math$537                         math
+C:   00000283  A$math$538                         math
+C:   00000284  A$math$539                         math
+C:   00000285  A$math$540                         math
+C:   00000286  A$math$541                         math
+C:   00000287  A$math$542                         math
+C:   00000288  A$math$543                         math
+C:   00000289  A$math$546                         math
+C:   00000289  C$math.c$30$1_0$29                 math
+C:   0000028B  A$math$547                         math
+C:   0000028D  A$math$548                         math
+C:   0000028F  A$math$549                         math
+C:   00000291  A$math$550                         math
+C:   00000294  A$math$551                         math
+C:   00000297  A$math$552                         math
+C:   0000029A  A$math$553                         math
+C:   0000029C  A$math$554                         math
+C:   0000029F  A$math$555                         math
+C:   000002A1  A$math$556                         math
+C:   000002A3  A$math$557                         math
+C:   000002A5  A$math$558                         math
+C:   000002A6  A$math$559                         math
+C:   000002A8  A$math$560                         math
+C:   000002AA  A$math$561                         math
+C:   000002AC  A$math$562                         math
+C:   000002AF  A$math$563                         math
+C:   000002B0  A$math$564                         math
+C:   000002B1  A$math$565                         math
+C:   000002B2  A$math$566                         math
+C:   000002B3  A$math$567                         math
+C:   000002B4  A$math$568                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 24.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000002B5  A$math$569                         math
+C:   000002B6  A$math$570                         math
+C:   000002B7  A$math$571                         math
+C:   000002B8  A$math$572                         math
+C:   000002B9  A$math$573                         math
+C:   000002BA  A$math$576                         math
+C:   000002BA  C$math.c$31$1_0$29                 math
+C:   000002BD  A$math$577                         math
+C:   000002C0  A$math$578                         math
+C:   000002C3  A$math$579                         math
+C:   000002C5  A$math$580                         math
+C:   000002C8  A$math$581                         math
+C:   000002CA  A$math$582                         math
+C:   000002CC  A$math$583                         math
+C:   000002CE  A$math$584                         math
+C:   000002CF  A$math$585                         math
+C:   000002D2  A$math$586                         math
+C:   000002D3  A$math$587                         math
+C:   000002D4  A$math$588                         math
+C:   000002D5  A$math$589                         math
+C:   000002D6  A$math$590                         math
+C:   000002D7  A$math$591                         math
+C:   000002D8  A$math$592                         math
+C:   000002D9  A$math$593                         math
+C:   000002DA  A$math$594                         math
+C:   000002DB  A$math$595                         math
+C:   000002DC  A$math$596                         math
+C:   000002DD  A$math$599                         math
+C:   000002DD  C$math.c$32$1_0$29                 math
+C:   000002DE  A$math$600                         math
+C:   000002E0  A$math$601                         math
+C:   000002E2  A$math$602                         math
+C:   000002E4  A$math$603                         math
+C:   000002E6  A$math$604                         math
+C:   000002E8  A$math$605                         math
+C:   000002EA  A$math$606                         math
+C:   000002ED  A$math$607                         math
+C:   000002F0  A$math$608                         math
+C:   000002F3  A$math$609                         math
+C:   000002F5  A$math$610                         math
+C:   000002F8  A$math$611                         math
+C:   000002FA  A$math$612                         math
+C:   000002FC  A$math$613                         math
+C:   000002FE  A$math$614                         math
+C:   000002FF  A$math$615                         math
+C:   00000301  A$math$616                         math
+C:   00000303  A$math$617                         math
+C:   00000305  A$math$618                         math
+C:   00000307  A$math$619                         math
+C:   00000309  A$math$620                         math
+C:   0000030B  A$math$621                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 25.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000030C  A$math$622                         math
+C:   0000030F  A$math$623                         math
+C:   00000311  A$math$624                         math
+C:   00000313  A$math$625                         math
+C:   00000315  A$math$626                         math
+C:   00000316  A$math$627                         math
+C:   00000319  A$math$628                         math
+C:   0000031A  A$math$629                         math
+C:   0000031B  A$math$630                         math
+C:   0000031C  A$math$631                         math
+C:   0000031D  A$math$632                         math
+C:   0000031E  A$math$633                         math
+C:   0000031F  A$math$634                         math
+C:   00000320  A$math$635                         math
+C:   00000321  A$math$636                         math
+C:   00000322  A$math$637                         math
+C:   00000323  A$math$638                         math
+C:   00000324  A$math$641                         math
+C:   00000324  C$math.c$33$1_0$29                 math
+C:   00000327  A$math$642                         math
+C:   0000032A  A$math$643                         math
+C:   0000032C  A$math$644                         math
+C:   0000032F  A$math$645                         math
+C:   00000331  A$math$646                         math
+C:   00000333  A$math$647                         math
+C:   00000335  A$math$648                         math
+C:   00000336  A$math$649                         math
+C:   00000339  A$math$650                         math
+C:   0000033A  A$math$651                         math
+C:   0000033B  A$math$652                         math
+C:   0000033C  A$math$653                         math
+C:   0000033D  A$math$654                         math
+C:   0000033E  A$math$655                         math
+C:   0000033F  A$math$656                         math
+C:   00000340  A$math$657                         math
+C:   00000341  A$math$658                         math
+C:   00000342  A$math$659                         math
+C:   00000343  A$math$660                         math
+C:   00000344  A$math$663                         math
+C:   00000344  C$math.c$34$1_0$29                 math
+C:   00000347  A$math$664                         math
+C:   0000034A  A$math$665                         math
+C:   0000034C  A$math$666                         math
+C:   0000034F  A$math$667                         math
+C:   00000351  A$math$668                         math
+C:   00000353  A$math$669                         math
+C:   00000355  A$math$670                         math
+C:   00000356  A$math$671                         math
+C:   00000359  A$math$672                         math
+C:   0000035A  A$math$673                         math
+C:   0000035B  A$math$674                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 26.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000035C  A$math$675                         math
+C:   0000035D  A$math$676                         math
+C:   0000035E  A$math$677                         math
+C:   0000035F  A$math$678                         math
+C:   00000360  A$math$679                         math
+C:   00000361  A$math$680                         math
+C:   00000362  A$math$681                         math
+C:   00000363  A$math$682                         math
+C:   00000364  A$math$685                         math
+C:   00000364  C$math.c$35$1_0$29                 math
+C:   00000366  A$math$686                         math
+C:   00000368  A$math$687                         math
+C:   0000036A  A$math$688                         math
+C:   0000036C  A$math$689                         math
+C:   0000036F  A$math$690                         math
+C:   00000372  A$math$691                         math
+C:   00000374  A$math$692                         math
+C:   00000377  A$math$693                         math
+C:   00000379  A$math$694                         math
+C:   0000037B  A$math$695                         math
+C:   0000037D  A$math$696                         math
+C:   0000037E  A$math$697                         math
+C:   00000380  A$math$698                         math
+C:   00000382  A$math$699                         math
+C:   00000384  A$math$700                         math
+C:   00000386  A$math$701                         math
+C:   00000388  A$math$702                         math
+C:   0000038A  A$math$703                         math
+C:   0000038B  A$math$704                         math
+C:   0000038E  A$math$705                         math
+C:   00000390  A$math$706                         math
+C:   00000392  A$math$707                         math
+C:   00000394  A$math$708                         math
+C:   00000395  A$math$709                         math
+C:   00000398  A$math$710                         math
+C:   00000399  A$math$711                         math
+C:   0000039A  A$math$712                         math
+C:   0000039B  A$math$713                         math
+C:   0000039C  A$math$714                         math
+C:   0000039D  A$math$715                         math
+C:   0000039E  A$math$716                         math
+C:   0000039F  A$math$717                         math
+C:   000003A0  A$math$718                         math
+C:   000003A1  A$math$719                         math
+C:   000003A2  A$math$720                         math
+C:   000003A3  A$math$723                         math
+C:   000003A3  C$math.c$36$1_0$29                 math
+C:   000003A6  A$math$724                         math
+C:   000003A9  A$math$725                         math
+C:   000003AC  A$math$726                         math
+C:   000003AE  A$math$727                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 27.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000003B1  A$math$728                         math
+C:   000003B3  A$math$729                         math
+C:   000003B5  A$math$730                         math
+C:   000003B7  A$math$731                         math
+C:   000003B8  A$math$732                         math
+C:   000003BB  A$math$733                         math
+C:   000003BC  A$math$734                         math
+C:   000003BD  A$math$735                         math
+C:   000003BE  A$math$736                         math
+C:   000003BF  A$math$737                         math
+C:   000003C0  A$math$738                         math
+C:   000003C1  A$math$739                         math
+C:   000003C2  A$math$740                         math
+C:   000003C3  A$math$741                         math
+C:   000003C4  A$math$742                         math
+C:   000003C5  A$math$743                         math
+C:   000003C6  A$math$746                         math
+C:   000003C6  C$math.c$37$1_0$29                 math
+C:   000003C9  A$math$747                         math
+C:   000003CC  A$math$748                         math
+C:   000003CF  A$math$749                         math
+C:   000003D1  A$math$750                         math
+C:   000003D4  A$math$751                         math
+C:   000003D6  A$math$752                         math
+C:   000003D8  A$math$753                         math
+C:   000003DA  A$math$754                         math
+C:   000003DB  A$math$755                         math
+C:   000003DD  A$math$756                         math
+C:   000003DF  A$math$757                         math
+C:   000003E1  A$math$758                         math
+C:   000003E3  A$math$759                         math
+C:   000003E6  A$math$760                         math
+C:   000003E9  A$math$761                         math
+C:   000003EB  A$math$762                         math
+C:   000003EE  A$math$763                         math
+C:   000003F0  A$math$764                         math
+C:   000003F2  A$math$765                         math
+C:   000003F4  A$math$766                         math
+C:   000003F5  A$math$767                         math
+C:   000003F7  A$math$768                         math
+C:   000003F9  A$math$769                         math
+C:   000003FB  A$math$770                         math
+C:   000003FE  A$math$771                         math
+C:   000003FF  A$math$772                         math
+C:   00000400  A$math$773                         math
+C:   00000401  A$math$774                         math
+C:   00000402  A$math$775                         math
+C:   00000403  A$math$776                         math
+C:   00000404  A$math$777                         math
+C:   00000405  A$math$778                         math
+C:   00000406  A$math$779                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 28.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000407  A$math$780                         math
+C:   00000408  A$math$781                         math
+C:   00000409  A$math$784                         math
+C:   00000409  C$math.c$38$1_0$29                 math
+C:   0000040C  A$math$785                         math
+C:   0000040F  A$math$786                         math
+C:   00000411  A$math$787                         math
+C:   00000414  A$math$788                         math
+C:   00000416  A$math$789                         math
+C:   00000418  A$math$790                         math
+C:   0000041A  A$math$791                         math
+C:   0000041B  A$math$792                         math
+C:   0000041D  A$math$793                         math
+C:   0000041F  A$math$794                         math
+C:   00000421  A$math$795                         math
+C:   00000423  A$math$796                         math
+C:   00000426  A$math$797                         math
+C:   00000429  A$math$798                         math
+C:   0000042B  A$math$799                         math
+C:   0000042E  A$math$800                         math
+C:   00000430  A$math$801                         math
+C:   00000432  A$math$802                         math
+C:   00000434  A$math$803                         math
+C:   00000435  A$math$804                         math
+C:   00000437  A$math$805                         math
+C:   00000439  A$math$806                         math
+C:   0000043B  A$math$807                         math
+C:   0000043E  A$math$808                         math
+C:   0000043F  A$math$809                         math
+C:   00000440  A$math$810                         math
+C:   00000441  A$math$811                         math
+C:   00000442  A$math$812                         math
+C:   00000443  A$math$813                         math
+C:   00000444  A$math$814                         math
+C:   00000445  A$math$815                         math
+C:   00000446  A$math$816                         math
+C:   00000447  A$math$817                         math
+C:   00000448  A$math$818                         math
+C:   00000449  A$math$821                         math
+C:   00000449  C$math.c$39$1_0$29                 math
+C:   0000044C  A$math$822                         math
+C:   0000044E  A$math$823                         math
+C:   0000044F  A$math$824                         math
+C:   00000450  A$math$825                         math
+C:   00000451  A$math$826                         math
+C:   00000452  A$math$827                         math
+C:   00000453  A$math$828                         math
+C:   00000454  A$math$829                         math
+C:   00000455  A$math$832                         math
+C:   00000455  C$math.c$40$1_0$29                 math
+C:   00000456  A$math$833                         math
+ASxxxx Linker V03.00/V05.40 + sdld,  page 29.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000458  A$math$834                         math
+C:   0000045A  A$math$835                         math
+C:   0000045D  A$math$836                         math
+C:   00000460  A$math$837                         math
+C:   00000463  A$math$838                         math
+C:   00000465  A$math$839                         math
+C:   00000467  A$math$840                         math
+C:   0000046A  A$math$841                         math
+C:   0000046C  A$math$842                         math
+C:   0000046E  A$math$843                         math
+C:   00000470  A$math$844                         math
+C:   00000471  A$math$845                         math
+C:   00000474  A$math$846                         math
+C:   00000475  A$math$847                         math
+C:   00000476  A$math$848                         math
+C:   00000477  A$math$849                         math
+C:   00000478  A$math$850                         math
+C:   00000479  A$math$851                         math
+C:   0000047A  A$math$852                         math
+C:   0000047B  A$math$853                         math
+C:   0000047C  A$math$854                         math
+C:   0000047D  A$math$855                         math
+C:   0000047E  A$math$856                         math
+C:   0000047F  A$math$859                         math
+C:   0000047F  C$math.c$41$1_0$29                 math
+C:   00000482  A$math$862                         math
+C:   00000482  C$math.c$42$1_0$29                 math
+C:   00000485  A$math$867                         math
+C:   00000485  C$math.c$43$1_0$29                 math
+C:   00000485  XG$main$0$0                        math
+C:   00000486  ___fssub                           _fssub
+C:   00000491  __modulong                         _modulong
+C:   00000514  __divulong                         _divulong
+C:   00000579  ___fsmul                           _fsmul
+C:   0000061C  fsgetargs                          _fsget2args
+C:   0000064A  _logf                              logf
+C:   00000713  fs_rshift_a                        _fsrshift
+C:   00000756  __fs_cordic_rshift_r765_unsigned   _logexpf
+C:   00000797  fs_normalize_a                     _fsnormalize
+C:   000007CA  ___fs2slong                        _fs2slong
+C:   00000825  ___slong2fs                        _slong2fs
+C:   0000082E  slong2fs_doit                      _slong2fs
+C:   00000852  _sqrtf                             sqrtf
+C:   00000AA1  _sinf                              sinf
+C:   00000ACB  _expf                              expf
+C:   00000C41  fs_lshift_a                        expf
+C:   00000C58  fsgetarg                           _fsget1arg
+C:   00000C6A  _sincosf                           sincosf
+C:   0000109D  ___fslt                            _fslt
+C:   000010CD  _powf                              powf
+C:   0000119E  __mullong                          _mullong
+ASxxxx Linker V03.00/V05.40 + sdld,  page 30.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000D7    00001AB4 =        6836. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000119E  __mullong_dummy                    _mullong
+C:   0000120C  __divuint                          _divuint
+C:   00001235  ___fsadd                           _fsadd
+C:   00001238  fsadd_direct_entry                 _fsadd
+C:   0000128E  _fabsf                             fabsf
+C:   000012E7  __modslong                         _modslong
+C:   00001336  _ldexpf                            ldexpf
+C:   000013CA  fs_compare_uint32                  _fscmp
+C:   000013E8  fs_check_negative_zeros            _fscmp
+C:   00001413  __divslong                         _divslong
+C:   00001465  ___fs2sint                         _fs2sint
+C:   00001499  ___sint2fs                         _sint2fs
+C:   000014A6  _atanf                             atanf
+C:   00001915  _frexpf                            frexpf
+C:   000019AA  fs_round_and_return                _fsreturnval
+C:   000019C2  fs_zerocheck_return                _fsreturnval
+C:   000019CB  fs_return_zero                     _fsreturnval
+C:   000019D3  fs_direct_return                   _fsreturnval
+C:   000019E1  fs_return_inf                      _fsreturnval
+C:   000019EE  fs_return_nan                      _fsreturnval
+C:   000019F9  fs_swap_a_b                        _fsswapargs
+C:   00001A13  ___fsdiv                           _fsdiv
+C:   00001AD6  ___fs2uchar                        _fs2uchar
+C:   00001ADE  ___uchar2fs                        _uchar2fs
+C:   00001AE9  ___ulong2fs                        _ulong2fs
+C:   00001AF2  ulong2fs_doit                      _ulong2fs
+C:   00001AFC  __divsint                          _divsint
+C:   00001B34  ___fseq                            _fseq
+C:   00001B45  ___fs2ulong                        _fs2ulong
+C:   00001B47  fs2ulong_begin                     _fs2ulong
+C:   00001B6C  __gptrput                          _gptrput
+C:   00001B87  ___sdcc_external_startup           _startup
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 31.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CONST                               00001B8B    00000088 =         136. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00001B8B  __fs_natural_log_table             _logexpf
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 32.
+
+Files Linked                              [ module(s) ]
+
+build/obj_math_small/math.rel             [  ]
+
+
+Libraries Linked                          [ object file ]
+
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fssub.rel ]
+/usr/share/sdcc/lib/small/liblong.lib     [ _modulong.rel ]
+/usr/share/sdcc/lib/small/liblong.lib     [ _divulong.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsmul.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsget2args.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ logf.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtclear.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsrshift.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _logexpf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsnormalize.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fs2slong.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _slong2fs.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtxinit.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ sqrtf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ sinf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ expf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsget1arg.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ sincosf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fslt.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ powf.rel ]
+/usr/share/sdcc/lib/small/liblong.lib     [ _mullong.rel ]
+/usr/share/sdcc/lib/small/libint.lib      [ _divuint.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtxclear.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsadd.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ fabsf.rel ]
+/usr/share/sdcc/lib/small/liblong.lib     [ _modslong.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ ldexpf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fscmp.rel ]
+/usr/share/sdcc/lib/small/liblong.lib     [ _divslong.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fs2sint.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _sint2fs.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ atanf.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ frexpf.rel ]
+/usr/share/sdcc/lib/small/libsdcc.lib     [ _bp.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsreturnval.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtpagesfr.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsswapargs.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fsdiv.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtstart.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fs2uchar.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _uchar2fs.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _ulong2fs.rel ]
+/usr/share/sdcc/lib/small/libint.lib      [ _divsint.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ errno.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fseq.rel ]
+/usr/share/sdcc/lib/small/libfloat.lib    [ _fs2ulong.rel ]
+/usr/share/sdcc/lib/small/libsdcc.lib     [ _gptrput.rel ]
+/usr/share/sdcc/lib/small/libsdcc.lib     [ _startup.rel ]
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 33.
+
+User Base Address Definitions
+
+HOME = 0x0000
+XSEG = 0x0001
+PSEG = 0x0001
+ISEG = 0x0000
+BSEG = 0x0000
+
+

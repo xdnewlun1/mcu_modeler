@@ -1,0 +1,11 @@
+# NUCLEO-F446RE-style board: STM32F446RE (LQFP64) with a 16 MB W25Q128-style quad-SPI NOR flash
+# (chipem.devices.qspi_flash) on QUADSPI bank 1: CLK PB2, BK1_NCS PB6, IO0 PC9, IO1 PC10. The LQFP64 package has no
+# QUADSPI_BK1_IO2 pin, so the firmware uses dual I/O (0xBB) and dual output (0x3B, memory-mapped) reads. It clocks the
+# chip to 180 MHz (SYSCLK = PLL_R, over-drive), prints the JEDEC ID, erases sector 1 (automatic status polling, SMF
+# interrupt; 45 ms = the device's t_se_us), programs and reads it back three ways (indirect, DMA2 stream 7 channel 3,
+# memory-mapped window 0x90000000) on USART2 (115200 baud) and lights LD2 (PA5).
+name: stm32f446re_qspi_flash
+chips:
+  - {id: A, chip: stm32f446re, firmware: ../firmware/samples_stm32f446/build/qspi_flash.elf}
+devices:
+  - {type: spi_flash, chip: A, spi: QUADSPI, jedec: 0xEF4018, size: 16M, t_se_us: 45000, t_pp_us: 400}

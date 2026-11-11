@@ -10,9 +10,14 @@ New here? Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 Three families are supported: NXP/Freescale Kinetis K22F (Cortex-M4F, LQFP100: `MK22FN1M0VLL12`,
 `MK22FX512VLL12`), ST STM32F405xx/STM32F407xx (Cortex-M4F: every part and package of data sheet DS8626, from the
 64-pin STM32F405RG to the 176-pin STM32F407IG/IE in LQFP176 and UFBGA176; the 180 MHz STM32F427xx/STM32F437xx die in
-LQFP100, LQFP144, LQFP176, UFBGA169 and UFBGA176), ST STM32F103T6 (Cortex-M3 low-density STM32F1, VFQFPN36; family
-`stm32f1`, RM0008 register layout), TI C2000 TMS320F28232 (C28x, LQFP176) and TMS320F2808 (280x,
-LQFP100), and the NXP P89CV51RB2/RC2/RD2 (80C51, PLCC44/TQFP44, family `mcs51`). ARM
+LQFP100, LQFP144, LQFP176, UFBGA169 and UFBGA176; STM32F429xx/STM32F439xx with the LCD-TFT controller up to LQFP208
+and TFBGA216; the STM32F401/STM32F411 access line, verified against RM0368/RM0383; the STM32F446 with QUADSPI, FMPI2C, HDMI-CEC and SPDIFRX, verified against RM0390), ST STM32F205/F207/F215/F217 (Cortex-M3 STM32F2, 120 MHz, 1 MB:
+LQFP64, WLCSP64+2, LQFP100, LQFP144, LQFP176, UFBGA176), ST STM32F1 (Cortex-M3, family `stm32f1`, verified against
+RM0008: STM32F103 low/medium/high density T4-T6, C4-CB ("Blue Pill" C8), R4-RE, V8-VE, ZC/ZE in VFQFPN36/LQFP48/
+LQFP64/LQFP100/LQFP144, and the connectivity line STM32F105RC/VC, STM32F107RC/VC with Ethernet, OTG_FS and two CANs), TI C2000 F2833x/F2823x (TMS320F28335 with FPU32, F28334, F28333, F28332,
+F28235, F28234, F28232; LQFP176, F28335 also ZHH/ZJZ BGA), F280x/F2801x (TMS320F2809, F2808, F2806, F2802, F2801,
+F28016, F28015; LQFP100) and the Piccolo F2802x / F2806x LaunchPad parts (TMS320F28027 in LQFP48 / TSSOP38 with
+F28026/23/22/21/20/200; TMS320F28069 / F28069M with FPU32 in LQFP100 / LQFP80 with F28067/66/65/64/63/62), and the NXP P89CV51RB2/RC2/RD2 (80C51, PLCC44/TQFP44, family `mcs51`). ARM
 instructions run on [Unicorn](https://www.unicorn-engine.org/) (QEMU TCG); the C28x and the 8051 run on pure-Python
 interpreters (`chipem/core/c28x`, `chipem/core/mcs51`). CHIP_EM itself implements the ARMv7-M exception model
 (SysTick/NVIC/SCB), the C28x PIE and 8051 IE/IP interrupt architectures and the vendor peripherals. Several chips can share a board (nets and UART links),
@@ -50,15 +55,43 @@ Requires Python 3.12 or newer (developed on 3.14). Run from the repository check
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -e '.[test]'      # the test extra adds pytest and keystone-engine
+.venv/bin/pip install -e '.[test]'      # the test extra adds pytest and keystone-engine; '.[dev]' adds pyserial too
+.venv/bin/chipem doctor                 # checks everything below and lists what is available
 ```
 
-`pyproject.toml` declares `unicorn`, `capstone`, `pyelftools` and `pyyaml` as dependencies, plus `pytest` and
-`keystone-engine` (imported by `tests/engine_util.py` to assemble test programs) in the `test` extra. The versions in use are unicorn 2.1.4, capstone
-5.0.9, keystone-engine 0.9.2, pyelftools 0.33, PyYAML 6.0.3 and pytest 9.2.0.
+A non-editable `pip install .` does not copy `chips/` or the web assets, so `chipem` would not find any chip:
+always install with `-e` and run from the checkout. The sample firmware is prebuilt and checked in
+(`firmware/*/build/`), so none of the build tools below are needed to run the samples or the test suite.
 
-Rebuilding the sample firmware needs `clang` and `ld.lld`. `llvm-objcopy` is optional: without it,
-`firmware/samples/elf2bin.py` is used.
+### Requirements
+
+| purpose | requirement | Fedora (`dnf`) | Debian / Ubuntu (`apt`) | macOS (`brew`) | on the dev machine | without it |
+|---|---|---|---|---|---|---|
+| run | Python >= 3.12 | `python3` | `python3 python3-venv` | `python@3.12` (or newer) | 3.14.8 | nothing runs |
+| run | `unicorn` 2.1.x (pip; pinned `>=2.1,<2.2`) | pip | pip | pip | 2.1.4 | nothing on ARM runs. Exact fast-mode instruction counts depend on Unicorn 2.1 internals (`_calibrate_counter` in `chipem/core/unicorn_cm.py`); with another version calibration may fail and early stops are charged half a slice (`chipem doctor` shows it) |
+| run | `capstone`, `pyelftools`, `pyyaml` (pip) | pip | pip | pip | 5.0.9, 0.33, 6.0.3 | nothing runs |
+| optional | `pyserial` (pip, extra `serial` or `dev`) | pip | pip | pip | 3.5 | no `--uart-port` and no `serial:` ports on `usb_serial_adapter` (`chipem/hostserial.py`); `--uart-pty` and `--uart-tcp` still work |
+| optional | an OS with PTYs (Linux, macOS) | | | | yes | no `--uart-pty` (Windows: use a virtual COM pair with `--uart-port`) |
+| optional | a gdb that knows ARM: `gdb-multiarch`, `arm-none-eabi-gdb` or a multi-arch `gdb` | `gdb` | `gdb-multiarch` | | gdb 17.2 | no debugger client for `--gdb PORT` (the GDB server itself is built in) |
+| optional | a current web browser | | | | Firefox 158 | no `chipem serve` UI |
+| tests | `pytest`, `keystone-engine` (pip, extra `test`) | pip | pip | pip | 9.2.0, 0.9.2 | no test suite (keystone assembles the test programs) |
+| build samples | `clang` + `ld.lld` (targets `thumbv7em-none-eabi` Cortex-M4F, `thumbv7m-none-eabi` Cortex-M3); `llvm-objcopy` optional | `clang lld` | `clang lld` | `llvm lld` | clang / LLD 22.1.8 | cannot rebuild `firmware/samples*/` ARM samples (`firmware/samples/elf2bin.py` stands in for `llvm-objcopy`) |
+| build samples | TI C2000 code generation tools, `cl2000` 25.11.1.LTS | TI installer | TI installer | | 25.11.1.LTS in `toolchains/` | cannot rebuild `firmware/samples_c2000_c/`. `build.sh` uses `$TI_CGT`, else `toolchains/ti-cgt-c2000`, else the newest `toolchains/**/ti-cgt-c2000*/bin/cl2000`. The C28x assembler samples need no TI tools (`tools/c28x_asm.py`) |
+| build samples | SDCC >= 4 (8051 C) | `sdcc` (binaries `sdcc-sdcc`, `sdcc-sdas8051`, `sdcc-s51`) | `sdcc` (`sdcc`, `sdas8051`; `s51` in `sdcc-ucsim`) | `sdcc` | 4.5.0 | cannot rebuild `firmware/samples_mcs51/c/` (the built `.ihx`/`.cdb` are tracked; `build.sh` looks for `sdcc` and `sdcc-sdcc`). The assembler samples need no SDCC (`tools/mcs51_asm.py`). SDCC's simulator ucsim (`s51`, `sdcc-s51`, `ucsim_51`) is the reference for the 8051 differential tests (`tests/test_mcs51_ucsim.py`, `tools/mcs51_ucsim_diff.py`; skipped without it) |
+| adding chips | poppler `pdftotext`, `pdfinfo`; network access for SVD and datasheet downloads | `poppler-utils` | `poppler-utils` | `poppler` | 26.01.0 | datasheets must be read some other way |
+| UI development | `node` (`node --check` on `chipem/web/static/*.js`) | `nodejs` | `nodejs` | `node` | v22.23.1 | the UI syntax tests in `test_web` / `test_web_board` are skipped |
+| UI development | Firefox (headless) for `tools/ui_shots.py` (WebDriver BiDi over Firefox's own `--remote-debugging-port`, Python stdlib only; no geckodriver, no Chromium; `CHIPEM_UI_BROWSER` overrides the binary) | `firefox` | `firefox` (`firefox-esr` on Debian) | `--cask firefox` | 158.0 | no UI screenshots |
+
+`.venv/bin/chipem doctor` checks the required packages, runs the Unicorn counter calibration, looks for each
+optional tool (both SDCC naming schemes, `cl2000` the way `build.sh` finds it) and prints which features are
+available. It needs no network, takes a fraction of a second and exits non-zero only when a required piece
+(Python version, a required package, `chips/`) is missing; `--json` gives the same report as JSON.
+`chipem --version` prints the version.
+
+Tests skip themselves when an optional piece is missing: `test_gdb_end_to_end` (no gdb with ARM), the
+`node --check` UI tests, the pyserial port test (`importorskip("serial")`), the PTY tests (no `os.openpty`). Tests on sample firmware or on the Withings image
+(`s1_off000084_503080.bin` at the root) skip when the file is missing, and the `svd2chip --check` tests skip without the vendor SVDs under `svd/`; neither
+happens in a full checkout.
 
 ## Quick start
 
@@ -375,7 +408,9 @@ Every front end has a debugger (chipem/debug.py) for ARM (Unicorn) and C28x chip
   lockstep; a stop leaves the other chips at most one board quantum ahead (the skew is reported).
 - **Source and disassembly** from DWARF line info (`--source-dir DIR` if the sources moved): mixed listings,
   call stacks from DWARF CFI (exception frames included), registers, side-effect-free memory (MMIO registers are
-  *peeked*: a register whose read would pop a FIFO shows its stored value, marked). TI's C2000 ELF `.out` carries
+  *peeked*: the live value without the read's side effects, e.g. the head of a FIFO without popping it, status flags
+  without clear-on-read, the current timer count; the few registers that cannot be peeked show their stored value,
+  marked). TI's C2000 ELF `.out` carries
   DWARF too; TI COFF `.out`, `.c28img` and raw `.bin` images get symbols + assembly.
 - Nothing is hooked while no breakpoint or watchpoint is set: blinky and the C2000 samples run at full speed.
 
@@ -498,6 +533,12 @@ measured speeds are in [docs/USER_GUIDE.md](docs/USER_GUIDE.md#48-making-it-fast
 8051 (P89CV51RD2): `firmware/samples_mcs51/*.asm` (blinky, uart_hello, uart_t2, timer_irq, ext_int, pca_pwm,
 spi_flash, iap_flash, wdt_reset, idle_pd, uart_ping, uart_console), built by `firmware/samples_mcs51/build.sh` with
 `tools/mcs51_asm.py` into Intel HEX; boards `boards/p89cv51_{stm32_uart,rs232_console,spi_flash,pca_loopback}.yaml`.
+SDCC C: `firmware/samples_mcs51/c/*.c` (blinky, uart_console with printf and interrupt-driven RX/TX rings, timer_tick
+with `__interrupt`/`__using`, pca_pwm, spi_flash, iap_flash, xram_test, power_down, models in small/medium/large and
+`--stack-auto`, math with the long/float runtime), built by `firmware/samples_mcs51/c/build.sh` (SDCC 4.x) into `.ihx`
++ `.cdb` (source-level debugging: `break main`, `file.c:line`, `list`, mixed `dis`, `bt`); boards
+`boards/p89cv51_{spi_flash,pca_loopback}_c.yaml`.  The core is checked instruction by instruction against SDCC's
+ucsim (docs/MCS51_CORE.md "Verification status").
 
 `firmware/samples/` contains small bare-metal C programs for the MK22FN1M0 (no libc). Prebuilt `.elf`,
 `.bin` and `.map` files are in `firmware/samples/build/` and are used by the tests.
@@ -602,7 +643,14 @@ Board files in `boards/`:
 | `c2000_k22_uart.yaml` | K22 + TMS320F28232 | K22 UART0 → F28232 SCI-A echo |
 | `f2808_k22_uart.yaml` | K22 + TMS320F2808 | K22 UART0 → F2808 SCI-B (GPIO18/19) uppercase echo |
 | `f2808_stm32_can.yaml` | TMS320F2808 + STM32F405ZG | F2808 eCAN-B (`f2808_can`, TI C) sends `100#00<n>4B32` every 10 ms, the STM32 `can_echo` answers `202#...`; 500 kbit/s |
+| `f28335_stm32_can.yaml` | TMS320F28335 + STM32F405ZG | F28335 eCAN-A (`f28335_can`, TI C, fpu32 build, 75 MHz eCAN clock) sends `100#00<n>4B32` every 10 ms, the STM32 `can_echo` answers `202#...`; 500 kbit/s |
+| `f28335_stm32_uart.yaml` | TMS320F28335 + STM32F405ZG | `f28335_uart_link_sender` at 150 MHz (SCI-A BRR 40 from LSPCLK 37.5 MHz) → STM32 `uart_link_echo`, as `c2000_stm32_uart.yaml` |
 | `f2808_spi_flash.yaml` | TMS320F2808 | `f2808_spi_flash`: SPI-B on GPIO24-27 reads the JEDEC ID and four bytes of a SPI NOR flash (chip select SPISTEB) |
+| `f28027_k22_uart.yaml` | K22 + TMS320F28027 | K22 UART0 → F28027 SCI-A on the LaunchPad backchannel pins GPIO28/29, uppercase echo (`f28027_sci_echo`) |
+| `f28027_comp_adc.yaml` | TMS320F28027 + script part | COMP1 (DAC 1.652 V) + ePWM digital compare: a `ramp_source` script part ramps COMP1A, the trip forces EPWM1A low at ~9.15 ms (`f28027_comp_trip`) |
+| `f28027_ecap_loopback.yaml` | TMS320F28027 | eCAP1 (GPIO5) measures ePWM1A (GPIO0): period 3000 / high 900 cycles at 60 MHz (`f28027_ecap`) |
+| `f28027_spi_flash.yaml` | TMS320F28027 | SPI-A + SPI NOR flash, GPIO19 as a GPIO chip select (4-word Piccolo FIFO): JEDEC ID and four bytes (`f28027_spi_flash`) |
+| `f28069_stm32_can.yaml` | TMS320F28069 + STM32F405ZG | F28069 eCAN-A on the LaunchPad pins GPIO30/31 (`f28069_can`, TI C, fpu32; eCAN clock SYSCLKOUT/2 = 45 MHz) ↔ STM32 `can_echo`, 500 kbit/s |
 | `k22_stm32_can.yaml` | K22 + STM32F405ZG | CAN bus at 500 kbit/s: K22 FlexCAN0 `can_echo` sends `100#<n>4B32` every 10 ms, the STM32 bxCAN1 `can_echo` (filter bank 0 → FIFO 0, CAN1_RX0 interrupt) echoes it as `202#...` (`chipem run --board boards/k22_stm32_can.yaml --for 50ms`) |
 | `k22_c2000_stm32_can.yaml` | K22 + F28232 + STM32F405ZG | three CAN families on one bus: the F28232 echoes as `201#...`, the STM32 as `202#...`, the K22 prints both |
 | `k22_c2000_can.yaml` | K22 + TMS320F28232 | one CAN bus at 500 kbit/s (`links: [{type: can, nodes: [A.CAN0, B.ECANA]}]`): K22 FlexCAN0 `can_echo` sends `100#<n>4B32` every 10 ms, the F28232 eCAN-A `can_echo` (TI C) echoes it as `201#...`; both print the frames (`chipem run --board boards/k22_c2000_can.yaml --for 100ms`) |
@@ -621,6 +669,13 @@ Board files in `boards/`:
 | `stm32f427vg_f405rg_uart7.yaml` | STM32F405RG (LQFP64) + STM32F427VG (LQFP100) | the F405RG `link_requester` on USART2 talks to `f42x_link_responder` on the F427VG's UART7 (PE8/PE7) at 180 MHz with over-drive, 230400 baud (see "STM32F427xx / STM32F437xx") |
 | `stm32f437ai_sdram.yaml` | STM32F437AI (UFBGA169) | `f42x_sdram`: 180 MHz, FMC SDRAM controller init (clock enable, PALL, auto-refresh, load mode register) on bank 2 (PB5/PB6) with an 8 MB `sdram` device, memory test, `SDRAM OK 8192 KB` on USART1 |
 | `stm32f427vg_sai_codec.yaml` | STM32F427VG (LQFP100) | `f42x_sai_tone`: SAI1 block A master I2S tone (PE2-PE6, PLLSAI) into the `i2s_codec` part |
+| `stm32f429zi_disco_lcd.yaml` | STM32F429ZI (LQFP144) | 32F429IDISCOVERY style: `ltdc_sdram` (or the HAL sample) drives a 240x320 RGB `lcd_panel` from frame buffers in 8 MB SDRAM on FMC bank 2 (see "STM32F429xx / STM32F439xx") |
+| `stm32f411re_f401re_uart.yaml` | STM32F411RE (LQFP64) + STM32F401RE (LQFP64) | `f411_link_requester` on USART1 (PA9/PA10, 100 MHz) sends `REQ n` every 2 ms, `f401_link_responder` on USART6 (PA11/PA12 AF8, 84 MHz) answers `ACK n n²` at 230400 baud (see "STM32F401xx / STM32F411xx") |
+| `stm32f411_i2s5_codec.yaml` | STM32F411RE | `f411_i2s5_tone`: SPI5 as I2S5 master (PB0/PB1/PB8), PLLI2S with the F411's PLLI2SM, 32 kHz into the `i2s_codec` part |
+| `stm32f446re_qspi_flash.yaml` | STM32F446RE (LQFP64) | NUCLEO-F446RE + W25Q128 on QUADSPI (dual I/O): read ID, erase with automatic status polling, program, indirect / DMA / memory-mapped reads (see "STM32F446xx") |
+| `stm32f446re_fmpi2c_eeprom.yaml` | STM32F446RE | `fmpi2c_eeprom`: FMPI2C1 Fast-mode Plus (1 MHz, HSI kernel clock) + 24C02 `i2c_eeprom`: page writes with acknowledge polling, random read (`--for 20ms`) |
+| `stm32f446re_cec_pair.yaml` | 2x STM32F446RE | `cec_ping` + `cec_tv`: HDMI-CEC ping / Get CEC Version / reply / broadcast on PB6, one open-drain net (`--for 400ms`); `stm32f446re_cec_hal.yaml`: the follower runs HAL_CEC |
+| `stm32f446re_spdifrx.yaml` | STM32F446RE + `spdif_source` | `spdifrx_rx`: SPDIFRX synchronisation, channel status, DMA samples from an IEC 60958 source part (`--for 30ms`) |
 | `three_chip_demo.yaml` | K22 + STM32F405ZG + TMS320F28232 | one K22 TX net fans out to the STM32 and C2000 RX pins (two automatic links), replies over explicit links, GPIO nets, LEDs on the activity nets and a switch |
 | `logic_demo.yaml` | K22 + K22 | board parts: a switch and LED around `button_mirror`, a 1 kHz clock through an inverter into `port_irq`, an AND gate, a D flip-flop, probes and a counter (see "Parts" below) |
 | `k22_ftm_capture.yaml` | K22 | `ftm_capture` measuring its own PWM: a net from PTC1 (FTM0 CH0 PWM) to PTA12 (FTM1 CH0 input capture), prints `period 6000` (100 us at 60 MHz) |
@@ -634,6 +689,9 @@ Board files in `boards/`:
 | `k22_ftm_qd_encoder.yaml` | K22 | `ftm_qd`: the same encoder part (600 rpm, no index) on PTB0/PTB1 = FTM1_QD_PHA/PHB; the FTM1 quadrature decoder counts, the sample prints `qd 40 up`, `qd 80 up`, ... every 10 ms and counts down after the board stimulus reverses the encoder at 30 ms |
 | `stm32_i2c_eeprom.yaml` | STM32F405ZG | `i2c_eeprom` with an `i2c_eeprom` part: USART1 `EEPROM: Hello I2C!` |
 | `k22_stm32_i2c.yaml` | K22 + STM32F405ZG | one I2C bus, two vendors: K22 `i2c_reg_master` (I2C0) writes and reads back `Hello over I2C!` through the STM32 `i2c_slave` (I2C1 at 0x42, SCL stretched by its ISR); K22 UART0 `PASS`, STM32 USART1 `SLAVE RX 00:48656C…` / `SLAVE TX 10` |
+| `k22_stm32f207_uart.yaml` | K22 + STM32F207ZG | K22 UART0 `uart_link_sender` → STM32F207 USART1 `uart_link_echo` (the F405 sample rebuilt for the Cortex-M3) |
+| `k22_stm32f207_can.yaml` | K22 + STM32F207ZG | 500 kbit/s CAN: K22 FlexCAN0 sends `100#<n>4B32`, the F207 bxCAN1 `can_echo` answers `202#...` |
+| `stm32f207_eth_ping.yaml` | STM32F207ZG | `eth_ping` at the F2 120 MHz clock tree (RMII, LAN8742A, MDC range CR=001) answering the host's 4 pings |
 | `stm32f407_eth_ping.yaml` | STM32F407ZG | `eth_ping`: bare-metal Ethernet (RMII, LAN8742A PHY over MDIO, gratuitous ARP, answers ARP and ping) on an `eth` segment with a host node that pings it 4 times; `--eth-pcap lan.pcap` for Wireshark |
 | `stm32f407_eth_hal.yaml` | STM32F407ZG | `eth_hal`: ST's HAL ETH driver (`HAL_ETH_Init`/`ReadData`/`Transmit`, enhanced descriptors, checksum insertion) answering the host's pings (`firmware/samples_stm32_hal_eth`) |
 | `stm32_i2s_codec.yaml` | STM32F405ZG | `i2s_tone`: SPI2 I2S master (PLLI2S, MCK) + I2S2ext full-duplex receiver against an `i2s_codec` part; USART1 `I2S 8000 Hz: tx .. rx .. ok` |
@@ -657,6 +715,7 @@ push-pull pin); an input port reads the net level (H/L/X). Gates propagate with 
 | inputs | `switch` (out; `level` H/L/X/Z), `button` (out; `pressed_level` L, `released_level` H, `pressed`), `const` (out; `level`), `vcc`, `gnd`, `pulse` (out; `period` 1ms, `duty` 0.5, `start` L, `phase`), `pattern` (out; `steps` [[TIME, LEVEL], ...], `repeat`, `period`), `quadrature_encoder` (a, b, i; `ppr` 100, `rpm` 60 or `hz` = edge rate, `direction` cw/ccw, `index` true: A and B 90 degrees apart, cw = A leads, 4 x ppr edges per revolution, index high for one A period per revolution; `ENC=ccw`/`stop`/`600rpm`/`40khz`/`restart` at run time) |
 | I2C devices | `i2c_eeprom` (sda, scl open drain; `address` 0x50, `size` 256, `page` auto, `twr` 5ms, `init`, `fill`, `pullup` true): 24Cxx EEPROM, NACKs during the write cycle; `i2c_register_device` (sda, scl; `address` 0x48, `regs` {reg: value}, `readonly`, `default`): register pointer + auto-increment. Nets for I2C: `open_drain: true` (wired-AND, pulled up) |
 | Audio | `i2s_codec` (bclk, ws, sdin in, sdout out; `bits` 16, `format` i2s / left_justified, `edge` rising, `pattern`, `wav`, `echo`): I2S slave codec, records the frames it receives (`frames`) and plays back a sample pattern, a 16-bit WAV file or what it received |
+| S/PDIF | `spdif_source` (out; rate, signal sine/ramp/counter/silence, channel status, parity / coding error injection): IEC 60958 transmitter for SPDIFRX; sub-frames reach the receiver through a hook, the net shows a `wave` summary |
 | Camera | `camera` (pixclk, hsync, vsync, d0..d13 out; `width`, `height`, `bits` 8..14, `format` gray/raw/rgb565/yuv422, `pixclk`, `hblank`, `vblank`, `fps`, `pattern` bars/gradient/counter/checker or `image` PGM/raw, `sync` hardware/embedded): parallel (DVP) camera; HSYNC/VSYNC toggle on the nets, pixel data reach the camera interface line by line, PIXCLK is summarised as a `wave` |
 | indicators | `led` (in; `active` H/L, `color`): on/off + change count; `probe` (in): level, rises, falls, last change, frequency; `counter` (in; `edge` rise/fall/both) |
 | logic | `not`, `buf` (in, out); `and`, `nand`, `or`, `nor`, `xor`, `xnor` (in0..in{n-1}, out; `inputs` 2); `mux2` (a, b, sel, out); `dff` (d, clk, rst, q, qn; `edge`, `init`, `rst_active`); `latch` (d, en, q) |
@@ -804,7 +863,9 @@ How it runs:
   muxes pins at runtime: before the RX pin is muxed nothing is delivered, and re-muxing the pin to GPIO
   removes the link. The reverse direction needs its own net (RX ← TX). One TX net can feed several RX pins.
   An explicit `links:` entry that already covers a direction suppresses the automatic link, so bytes are never
-  delivered twice. `boards/two_k22_uart_pins.yaml` uses nets only. I2C needs no link: its pins toggle with the
+  delivered twice. `boards/two_k22_uart_pins.yaml` uses nets only. The TX pin itself carries every frame's bit
+  waveform (start, data, parity, stop, breaks), so the Logic tab, VCD files, a timer capture or a part on the net see
+  the bits; the receiver still gets the frame through the link. I2C needs no link: its pins toggle with the
   traffic, so an I2C bus is just two nets (`open_drain: true`, quantum 1 us).
 
 Front ends. `run` prefixes live events with the chip id, prints one summary per chip (lines prefixed `A| `)
@@ -824,15 +885,49 @@ selects chip B at start. Each event has a `chip` field.
 | STM32F405OE, STM32F407VE/ZE/IE/IEH | `chips/stm32f405oe.yaml`, ... (table below) | 512 KB flash @0x08000000; RAM as the STM32F405ZG |
 | STM32F427VG/ZG/IG/IGH | `chips/stm32f427vg.yaml` (base), ... (table below) | 1 MB flash @0x08000000 (single or dual bank, DB1M); SRAM1/2/3 192 KB @0x20000000; CCM 64 KB @0x10000000; backup SRAM 4 KB @0x40024000 |
 | STM32F437AI/ZI/II | `chips/stm32f437ai.yaml`, ... (table below) | 2 MB dual-bank flash @0x08000000; RAM as the STM32F427VG |
+| STM32F429VI/ZI/II/IIH/AI/BI/NI, STM32F439ZI/II/AI/BI/NI | `chips/stm32f429zi.yaml` (base), `chips/stm32f4[23]9*.yaml` | 2 MB dual-bank flash @0x08000000; RAM as the STM32F427VG |
+| STM32F401RE/VE | `chips/stm32f401re.yaml` (base), `stm32f401ve.yaml` | 512 KB flash @0x08000000 (sectors 0-7); SRAM 96 KB @0x20000000 |
+| STM32F401CC | `chips/stm32f401cc.yaml` | 256 KB flash (sectors 0-5); SRAM 64 KB @0x20000000 |
+| STM32F411RE/CE/VE | `chips/stm32f411re.yaml` (base), `stm32f411ce.yaml`, `stm32f411ve.yaml` | 512 KB flash (sectors 0-7); SRAM 128 KB @0x20000000 |
+| STM32F446RE/VE/ZE/ME | `chips/stm32f446re.yaml` (base), `stm32f446{ve,ze,me}.yaml` | 512 KB flash @0x08000000 (sectors 0-7); SRAM 128 KB @0x20000000; QUADSPI window 0x90000000 |
+| STM32F205RG/RGY/VG/ZG, STM32F207VG/ZG/IG/IGH, STM32F215RG/VG/ZG, STM32F217VG/ZG/IG/IGH | `chips/stm32f207zg.yaml` (base), `chips/stm32f2*.yaml` (see "STM32F2" below) | 1 MB flash @0x08000000; SRAM 128 KB @0x20000000 (no CCM); backup SRAM 4 KB @0x40024000 |
 | STM32F103T6 | `chips/stm32f103t6.yaml` | 32 KB flash @0x08000000 (32 pages of 1 KB); SRAM 10 KB @0x20000000; system memory (signature) @0x1FFFF000; option bytes @0x1FFFF800 |
+| STM32F103C8 / CB / RB / VB | `chips/stm32f103{c8,cb,r8,rb,t8,tb,v8,vb}.yaml` | 64 or 128 KB flash (1 KB pages); SRAM 20 KB |
+| STM32F103RC / RE / VE / ZE | `chips/stm32f103{rc,re,vc,ve,zc,ze}.yaml` | 256 or 512 KB flash (2 KB pages); SRAM 48 or 64 KB; FSMC banks @0x60000000 |
+| STM32F105/F107 RC/VC | `chips/stm32f10[57]{rc,vc}.yaml` | 256 KB flash (2 KB pages); SRAM 64 KB |
 | TMS320F28232 | `chips/tms320f28232.yaml` | 16-bit words: flash 64K @0x330000; M0/M1 1K+1K @0x0; L0-L5 SARAM 24K @0x8000 (L0-L3 also @0x3F8000); OTP @0x380400; boot ROM @0x3FE000 |
 | P89CV51RD2 / RC2 / RB2 | `chips/p89cv51rd2.yaml` (PLCC44), `p89cv51rd2fbc.yaml` (TQFP44), `p89cv51r{c,b}2[fbc].yaml` | tagged 8051 spaces: CODE 64/32/16 KB @0x00000; IDATA 256 B @0x20000; SFR @0x30080; XRAM 768 B @0x40000; external XDATA @0x10000 (docs/MCS51_CORE.md) |
+| 80C52 (generic, not from a data sheet) | `chips/i80c52.yaml` (DIP40) | classic 8052: CODE 64 KB, IDATA 256 B, Timers 0/1/2, UART, no PCA/SPI/WDT/XRAM; for arbitrary 8051/8052 firmware |
 | TMS320F2808 | `chips/tms320f2808.yaml` | 16-bit words: flash 64K @0x3E8000 (sectors A-D); M0/M1 1K+1K @0x0; L0/L1 4K+4K + H0 8K SARAM @0x8000 (also @0x3F8000); OTP 1K @0x3D7800; boot ROM 4K @0x3FF000 |
+| TMS320F28335 (+ ZHH / ZJZ BGA), F28334, F28333, F28332, F28235, F28234 | `chips/tms320f28335.yaml` (superset base), `tms320f28335zhh.yaml`, `tms320f28335zjz.yaml`, `tms320f2833[2-4].yaml`, `tms320f2823[45].yaml` | 16-bit words: flash 256K @0x300000 (F28335/F28333/F28235), 128K @0x320000 (F28334/F28234), 64K @0x330000 (F28332); M0/M1; L0-L7 32K @0x8000 (F28332: L0-L5); OTP @0x380000; boot ROM 8K @0x3FE000 (table in `chips/README.md`) |
+| TMS320F2809, F2806, F2802, F2801, F28016, F28015 | `chips/tms320f2809.yaml`, ... (include `tms320f2808.yaml`) | 16-bit words: flash 128K @0x3D8000 (F2809), 32K @0x3F0000 (F2806/F2802), 16K @0x3F4000 (F2801/F2801x); L0/L1/H0 (F2809), L0/L1 (F2806), L0 (others) @0x8000; OTP, boot ROM as the F2808 |
+| TMS320F28027 (PT, DA) and F28026/23/22/21/20, F280200 | `chips/tms320f28027.yaml` (base), `tms320f28027da.yaml`, `tms320f2802{6,3,2,1,0}.yaml`, `tms320f280200.yaml` | 16-bit words: flash 32K @0x3F0000 (16K @0x3F4000, 8K @0x3F6000); M0/M1 1K+1K @0x0; L0 4K (3K, 1K) @0x8000 (also @0x3F8000); OTP 1K @0x3D7800 + TI calibration (Device_cal 0x3D7C80, PARTID 0x3D7FFF); boot ROM 8K @0x3FE000 |
+| TMS320F28069 (PZ, PN), F28069M and F28067/66/65/64/63/62 | `chips/tms320f28069.yaml` (base), `tms320f28069pn.yaml`, `tms320f28069m.yaml`, `tms320f2806{7,6,5,4,3,2}.yaml` | 16-bit words: flash 128K @0x3D8000 (64K @0x3E8000); M0/M1; L0-L8 48K @0x8000 (L0-L6 / L0-L5 on the 34K / 26K parts); CLA message RAMs @0x1480; OTP 1K @0x3D7800 + TI calibration (PARTID 0x3D7E80); boot ROM 32K @0x3F8000 |
 
 The two K22 parts are 120 MHz Cortex-M4F parts in LQFP100. `mk22fx512vll12.yaml` includes the FN1M0 file and overrides
 the name and memory map. All 100 pins are transcribed from datasheet section 5.1 (ALT0–ALT7 and EzPort),
 with IRQ numbers 0–81 in MK22F12 header order. Register offsets, widths and reset values come from NXP's
 `MK22F12.svd` via `tools/svd2chip.py` → `chips/mk22_regs.yaml`; `chips/README.md` records the provenance.
+
+### STM32F2 (STM32F205 / F207 / F215 / F217)
+
+Cortex-M3 (no FPU) at up to 120 MHz, the predecessor die of the STM32F405/407 (DEV_ID 0x411). `chips/stm32f207zg.yaml`
+(LQFP144, the Nucleo-144 part) is the base file; `stm32f205rg` (LQFP64), `stm32f205rgy` (WLCSP64+2), `stm32f205vg`,
+`stm32f207vg` (LQFP100), `stm32f205zg` (LQFP144), `stm32f207ig` (LQFP176), `stm32f207igh` (UFBGA176+25) and the crypto
+parts `stm32f215rg/vg/zg`, `stm32f217vg/zg/ig/igh` include it. Ethernet / DCMI exist on the F207/F217 and CRYP / HASH
+on the F215/F217 (`only:` gating). Register table `chips/stm32f2xx_regs.yaml` (STM32F21x.svd); pins from DS15818 Rev 15
+Tables 8 / 10, cross-checked against ST's open pin data (chips/README.md). F2-specific models: `stm32.rcc_f2` (120 / 30 /
+60 MHz limits, PLL 192-432 MHz VCO, flash wait states per RM0033 Table 3), `stm32.pwr_f2` (no VOS), `stm32.rtc_f2`
+(no sub-seconds / shift / smooth calibration, no BYPSHAD); everything else is the F4 model on the F2 register table.
+Samples: `firmware/samples_stm32f2/build.sh` (clang `thumbv7m`, `-mcpu=cortex-m3 -mfloat-abi=soft`): the F405
+samples that use common blocks, the 168 MHz ones regenerated for 120 MHz (`tim_irq`, `stop_rtc_wakeup`, `eth_ping`,
+`usb_cdc`), `clock120_uart` and `cryp_hash` (F215/F217). Tests: `tests/test_stm32f2_{chip,system,samples}.py`.
+Differences and gaps: docs/LIMITATIONS.md "STM32F2".
+
+```sh
+.venv/bin/chipem run firmware/samples_stm32f2/build/clock120_uart.elf --chip stm32f207zg --for 10ms
+.venv/bin/chipem run --board boards/stm32f207_eth_ping.yaml --for 20ms
+```
 
 ### STM32F405ZG
 
@@ -991,7 +1086,125 @@ STM32F437 adds CRYP (with GCM/GMAC/CCM) and HASH (with SHA-224/256). `chips/stm3
   `tools/svd2chip.py svd/dl-stm32f427/STM32F427.svd --check chips/stm32f427vg.yaml` (0 mismatches). Tests:
   `tests/test_stm32f427_*.py`, `tests/test_stm32f437_crypto.py`.
 
-### STM32F103T6
+### STM32F429xx / STM32F439xx
+
+The STM32F427/F437 die with the LCD-TFT controller (LTDC) bonded out (DS9405 / DS9484, RM0090 Rev 22 ch. 16).
+`chips/stm32f429zi.yaml` (LQFP144, 2 MB: the 32F429IDISCOVERY / NUCLEO-F429ZI part) is the base file; the others
+`include:` it. Shared blocks use `chips/stm32f427_regs.yaml`; the LTDC registers come from
+`chips/stm32f429_ltdc_regs.yaml` (STM32F429.svd, LTDC block only). The F439 files activate CRYP/HASH.
+
+| `--chip` | part | package | pins / GPIOs | flash | CRYP/HASH |
+|---|---|---|---|---|---|
+| `stm32f429vi` | STM32F429VI | LQFP100 | 100 / 82 | 2 MB | no |
+| `stm32f429zi` / `stm32f439zi` | STM32F429ZI / F439ZI | LQFP144 | 144 / 114 | 2 MB | F439 |
+| `stm32f429ii` / `stm32f439ii` | STM32F429II / F439II | LQFP176 | 176 / 140 | 2 MB | F439 |
+| `stm32f429iih` | STM32F429II (H suffix = BGA) | UFBGA176+25 | 201 / 140 | 2 MB | no |
+| `stm32f429ai` / `stm32f439ai` | STM32F429AI / F439AI | UFBGA169 | 169 / 130 | 2 MB | F439 |
+| `stm32f429bi` / `stm32f439bi` | STM32F429BI / F439BI | LQFP208 | 208 / 168 | 2 MB | F439 |
+| `stm32f429ni` / `stm32f439ni` | STM32F429NI / F439NI | TFBGA216 | 216 / 168 | 2 MB | F439 |
+
+- **LTDC** (`stm32.ltdc`): SSCR/BPCR/AWCR/TWCR timings, GCR polarities, SRCR immediate / vertical-blanking shadow
+  reload, two layers with windowing, the 8 pixel formats, CLUT, colour keying, constant / pixel alpha blending over the
+  background colour, default colour, LIPCR line interrupt, CPSR/CDSR computed from time (no per-pixel events), FIFO
+  underrun / transfer error flags, IRQs 88/89, pixel clock PLLSAI_R / DCKCFGR.PLLSAIDIVR (`ltdc_clk_hz()` in
+  `stm32.rcc_f42x`); LCD_CLK/HSYNC/VSYNC/DE as `wave` pin summaries.
+- **`lcd_panel` part** (`chipem/parts/lcd_panel.py`): takes the composed frame at the end of each active area, checks
+  clock/sync/DE muxing, polarities and the wired data lines; `state()` (frames, fps, CRC, centre pixel), `frame_rgb()`,
+  `pixel(x, y)`, `frame_ppm()`.
+- **Pins**: the F427/F437 tables plus the LCD_* AFs (DS9405 Table 12 = open pin data, 0 differences); LQFP208 and
+  TFBGA216 are new (DS9405 Table 10 and open pin data agree; PI12-15, PJ, PK0-7 carry only LCD_* and EVENTOUT).
+- **Samples**: `firmware/samples_stm32f429/ltdc_sdram.c` (`build.sh`: 180 MHz, SDRAM on FMC bank 2, 240x320 RGB565
+  colour bars + a CLUT/colour-keyed checkerboard layer at half alpha moved by vertical-blanking reloads);
+  `firmware/samples_stm32_hal_f429/ltdc_sdram_hal.c` (HAL clock, SDRAM, DMA2D and LTDC).
+- **Board**: `chipem run --board boards/stm32f429zi_disco_lcd.yaml --for 250ms` (Discovery wiring: 8 MB SDRAM + 18-bit
+  240x320 panel; about 65 fps).
+- Checks: `tools/pin_table_check.py chips/stm32f429ni.yaml --strict`, `tools/svd2chip.py svd/dl-stm32f429/STM32F429.svd
+  --check chips/stm32f429zi.yaml` (0 mismatches). Tests: `tests/test_stm32f429_{pins,ltdc,samples}.py`.
+
+### STM32F401xx / STM32F411xx (access line)
+
+The small STM32F4 dies of the Nucleo / Black Pill boards: Cortex-M4F at 84 MHz (STM32F401, DEV_ID 0x423 for xB/C,
+0x433 for xD/E) or 100 MHz (STM32F411, DEV_ID 0x431), no CCM RAM, no backup SRAM, TIM1-5 and TIM9-11 only, USART1/2/6,
+I2C1-3, SPI1-4 (F411: SPI1-5, I2S on all five), one ADC, SDIO, OTG FS; no DAC, CAN, Ethernet, FSMC, RNG, DCMI, TIM6/7/8/12-14,
+USART3/UART4/5. `chips/stm32f401re.yaml` and `chips/stm32f411re.yaml` are the base files (register tables
+`chips/stm32f401_regs.yaml` / `chips/stm32f411_regs.yaml` from ST's STM32F401.svd / STM32F411.svd); the other files
+`include:` them.
+
+| `--chip` | part | package | pins / GPIOs | flash / SRAM | board |
+|---|---|---|---|---|---|
+| `stm32f401re` | STM32F401RE | LQFP64 | 64 / 50 | 512 KB / 96 KB | NUCLEO-F401RE |
+| `stm32f401cc` | STM32F401CC | UFQFPN48 | 48 / 36 | 256 KB / 64 KB | "Black Pill" V1.x |
+| `stm32f401ve` | STM32F401VE | LQFP100 | 100 / 81 | 512 KB / 96 KB | |
+| `stm32f411re` | STM32F411RE | LQFP64 | 64 / 50 | 512 KB / 128 KB | NUCLEO-F411RE |
+| `stm32f411ce` | STM32F411CE | UFQFPN48 | 48 / 36 | 512 KB / 128 KB | WeAct "Black Pill" V2/V3 |
+| `stm32f411ve` | STM32F411VE | LQFP100 | 100 / 81 | 512 KB / 128 KB | STM32F411E-DISCO |
+
+- **Verified against the reference manuals** RM0368 Rev 6 (F401) and RM0383 Rev 4 (F411) (`docs/datasheets/st/`): memory
+  map, vectors, EXTI, DMA request maps, RCC/PWR/FLASH registers and reset values, DBGMCU, electronic signature and the
+  shared peripheral models as these dies use them; one regression test per correction (`tests/test_stm32f4x1_rm_*.py`).
+  Still missing: the data sheets DS9716 / DS10086 / DS10314 (pin tables are from ST's STM32_open_pin_data and the HAL AF
+  definitions). What remains approximate: docs/LIMITATIONS.md "STM32F401 / STM32F411".
+- **Clock / power** (`stm32.rcc_f4x1`, `stm32.pwr_f4x1`, `params.line: f401|f411`): HCLK/APB limits per regulator
+  scale (F401 60/84 MHz, F411 64/84/100 MHz; APB1 42/50, APB2 84/100 MHz), PLL/PLLI2S ranges (F401 VCO 192-432 MHz, F411
+  100-432 MHz) and the fields locked while a PLL runs, RCC_DCKCFGR.TIMPRE, the F411 PLLI2S input divider PLLI2SM, a flash
+  wait-state check per supply range (PWR `vdd`), VOS locked while the PLL runs, VOSRDY, PVD levels 2.2-2.9 V,
+  LPLVDS/MRLVDS, ADCDC1 and the F411 FISSR/FMSSR bits (not settable from flash). Flash (`stm32.flash_f4x1`): sectors 0-5
+  (256 KB) / 0-6 (384 KB) / 0-7 (512 KB), 4-bit LATENCY, OPTCR with OPTKEYR unlock and option programming.
+- **DMA** (`stm32.dma` with `params.requests: f401|f411`): RM0368 Tables 28/29 and RM0383 Tables 27/28, cell by cell.
+- **Samples** (`firmware/samples_stm32f4x1/`, own startup / linker script / header, `build.sh`): `f401_clock_uart` /
+  `f411_clock_uart` (HSE 8 MHz → 84 / 100 MHz, USART2 PA2/PA3 banner + upper-case echo, TIM2 1 ms on PA5 = LD2),
+  `f411_link_requester` + `f401_link_responder` (USART1 ↔ USART6 PA11/PA12 at 230400), `f411_i2s5_tone` (I2S5 on SPI5,
+  PLLI2SM). `firmware/samples_stm32_hal_f4x1/` builds ST's HAL for STM32F401xE and STM32F411xE (clock, TIMPRE,
+  F411 PLLI2S with PLLI2SM, HAL UART2).
+- **Boards**: `boards/stm32f411re_f401re_uart.yaml` (F411RE USART1 ↔ F401RE USART6), `boards/stm32f411_i2s5_codec.yaml`
+  (F411 I2S5 → I2S codec part).
+- Checks: `tools/pin_table_check.py chips/stm32f411ce.yaml --strict`,
+  `tools/svd2chip.py svd/dl-stm32f411/STM32F411.svd --check chips/stm32f411re.yaml` (0 mismatches). Tests:
+  `tests/test_stm32f4x1_pins.py`, `tests/test_stm32f4x1_system.py`, `tests/test_stm32f4x1_samples.py`,
+  `tests/test_stm32f4x1_rm_system.py`, `tests/test_stm32f4x1_rm_map.py`, `tests/test_stm32f4x1_rm_periph.py`.
+
+### STM32F446xx
+
+DEV_ID 0x421: Cortex-M4F, 180 MHz with over-drive, 512 KB flash (one bank, sectors 0-7), 128 KB SRAM, no CCM; new
+against the F42x: QUADSPI, SAI2, SPDIFRX, HDMI-CEC, FMPI2C1, PLL_R as SYSCLK, PLLSAI/PLLI2S with own M/P dividers,
+DCKCFGR2. `chips/stm32f446re.yaml` (LQFP64, NUCLEO-F446RE) is the base file (register table `chips/stm32f446_regs.yaml`
+from ST's STM32F446.svd); `stm32f446ve` (LQFP100, 81 GPIOs), `stm32f446ze` (LQFP144, 114, NUCLEO-F446ZE) and
+`stm32f446me` (WLCSP81, 63) `include:` it. **Checked against RM0390 Rev 9** chapter by chapter (memory map, vectors,
+DMA tables, RCC/PWR/FLASH/SYSCFG/EXTI, FMC, QUADSPI, SAI, SDIO, OTG, signature; `tests/test_stm32f446_rm0390.py`); the
+data sheet DS10693 is still missing, so the pin tables come from ST's open pin data (docs/LIMITATIONS.md "STM32F446").
+
+- **QUADSPI** (`stm32.quadspi`, IRQ 92, RM0390 ch. 12): indirect write/read with phase timing from PRESCALER and the
+  line counts, 32-byte FIFO (FTHRES/FLEVEL, read restart with 4 free bytes), TEF/TCF/FTF/SMF/TOF/BUSY, automatic status
+  polling (one event from the flash's busy timeline; FTF per status read), ABORT, DMA request, dual-flash mode, SIOO,
+  memory-mapped mode at 0x90000000 (executable when TCEN = 0; TOF after the prefetch + LPTR). The flash is the board
+  `spi_flash` device: on a QUADSPI block it becomes `chipem/devices/qspi_flash.py` (dual/quad reads 0x3B/0xBB/0x6B/
+  0xEB, quad program 0x32, QE bit, W25Q128JV timings; `bank: 2` for flash 2). The LQFP64 has no QUADSPI_BK1_IO2: quad
+  I/O needs VE/ZE/ME.
+- **FMPI2C1** (`stm32.fmpi2c`, IRQs 95/96, RM0390 ch. 23): the I2C "v2" IP -- TIMINGR timing, controller with
+  NBYTES/RELOAD/AUTOEND, target with OA1/OA2/OA2MSK/GCEN, ISR/ICR flags, DMA (FMPI2C1_RX/TX), Fast-mode Plus, on the
+  pins through `periph/i2cwire.py` (talks to the board `i2c_eeprom` parts and other chips).
+- **HDMI-CEC** (`stm32.cec`, IRQ 93, RM0390 ch. 32): bit-level single-wire open-drain bus on a board net: start / data
+  bits, header and data blocks with EOM / ACK, own address and broadcast, listen mode, arbitration with signal free
+  time, every TX / RX error flag.
+- **SPDIFRX** (`stm32.spdifrx`, IRQ 94, RM0390 ch. 27): synchronisation state machine, data / channel-status flows,
+  three data formats, DMA (SPDIFRX_DT / SPDIFRX_CS); IEC 60958 sub-frames come from the `spdif_source` board part
+  (the biphase line is summarised, not toggled edge by edge).
+- **Clocks / system** (`stm32.rcc_f446`, `stm32.pwr_f446`, `stm32.flash_f446`, `stm32.syscfg_f446`, `stm32.fmc_f446`,
+  `stm32.sysmem_f446`, DMA map `requests: f446`): PLL_R as SYSCLK, PLLSAI / PLLI2S with own M dividers, the DCKCFGR /
+  DCKCFGR2 kernel clock muxes, PLL range / flash wait-state / frequency-limit warnings, WKUP2 = PC13, UID / F_SIZE /
+  package data; SAI1/SAI2 (per-SAI kernel clock), two bxCANs, SDIO (`ceata: false`) and OTG (`core: otg2`) use the
+  shared models.
+- **Samples**: `firmware/samples_stm32f446/` (`qspi_flash`: F446RE dual I/O, 180 MHz on PLL_R, USART2, read ID, erase
+  with SMF polling, program, indirect / DMA / memory-mapped reads; `qspi_quad`: F446ZE quad I/O; `fmpi2c_eeprom`;
+  `cec_ping` / `cec_tv`; `spdifrx_rx`), `firmware/samples_stm32_hal_f446/` (`qspi_hal.c`: HAL_QSPI command / receive /
+  transmit / auto-polling / memory-mapped; `fmpi2c_hal.c`: HAL_FMPI2C with a 24C02; `cec_hal.c`: HAL_CEC follower).
+- **Boards**: `stm32f446re_qspi_flash.yaml` (`--for 70ms`), `stm32f446re_fmpi2c_eeprom.yaml` (`--for 20ms`),
+  `stm32f446re_cec_pair.yaml` / `stm32f446re_cec_hal.yaml` (`--for 400ms`), `stm32f446re_spdifrx.yaml` (`--for 30ms`).
+- Checks: `tools/pin_table_check.py chips/stm32f446me.yaml --strict`, `tools/svd2chip.py svd/dl-stm32f446/STM32F446.svd
+  --check chips/stm32f446re.yaml` (0 mismatches). Tests: `tests/test_stm32f446_{pins,system,rm0390,quadspi,fmpi2c,
+  cec,spdifrx,samples}.py`.
+
+### STM32F103T6 and the STM32F1 line
 
 ST Cortex-M3, 72 MHz, low-density performance line, VFQFPN36 (6 x 6 mm QFN; `family: stm32f1`, models in
 `chipem/periph/stm32f1/`). The F1 has its own register generation (RM0008): GPIO CRL/CRH with AFIO remaps instead of
@@ -1023,8 +1236,26 @@ banks and the F1 vector names), IWDG (LSI 40 kHz), WWDG, CRC.
 - **Boards**: `stm32f103_stm32f405_uart.yaml` (F103 USART1 ↔ F405 USART1 on nets), `stm32f103_stm32f405_can.yaml`
   (500 kbit/s CAN with the F405 `can_echo`), `stm32f103_usb_cdc.yaml` (USB CDC on an emulated host),
   `stm32f103_i2c_eeprom.yaml`, `stm32f103_pwm_capture.yaml`.
-- RM0008 could not be obtained: every `stm32f1.*` model is written from the data sheet, the SVD and ST's documented
-  F1 behaviour and is marked "not verified against RM0008" (docs/LIMITATIONS.md).
+- **Verified against RM0008 Rev 21** (`docs/datasheets/st/RM0008_stm32f1_reference_manual.pdf`): every `stm32f1.*`
+  model and the F1 parameters of the reused models, with a regression test per fix (`tests/test_stm32f1_rm_system.py`,
+  `tests/test_stm32f1_rm_periph.py`); what remains approximate is in docs/LIMITATIONS.md "STM32F1".
+- **More STM32F103 parts** (generated by `tools/gen_stm32f103_variants.py` from ST's open pin data, `--check`
+  compares): low density T4/C4/C6/R4/R6 (variants of the T6 die), medium density T8/TB/C8 ("Blue Pill")/CB/R8/RB/V8
+  (base `stm32f103vb.yaml`: TIM4, USART3, SPI2, I2C2, 128 KB / 20 KB), high density RC/RE/VC/VE/ZC (base
+  `stm32f103ze.yaml`: TIM5-8, UART4/5, SPI3 + I2S2/3 (`i2s_clock: sysclk`), ADC3, DAC (`f1: true`), SDIO (`f1: true`),
+  FSMC, DMA2 (5 channels, shared `DMA2_Channel4_5` vector), GPIOE-G, BKP DR1-42, 2 KB flash pages). Samples in
+  `firmware/samples_stm32f1_variants/` (`bluepill`, `hd_uart_tim`, `hd_dac_adc`, `hd_spi_i2c`, `hd_sdio`, `hd_fsmc`);
+  boards `stm32f103c8_stm32f405_uart.yaml`, `stm32f103ze_spi_i2c.yaml`, `stm32f103ze_sdcard.yaml`,
+  `stm32f103ze_fsmc_sram.yaml`.
+- **Connectivity line** STM32F105RC/VC, STM32F107RC/VC (base `stm32f107vc.yaml`, `stm32f107_regs.yaml`, Ethernet gated
+  with `only: [STM32F107]`): `stm32f1.rcc_cl` (PREDIV1/2, PLL2/PLL3, x6.5, OTGFSPRE, I2S clock sources, 4-bit MCO),
+  `stm32f1.eth` (the F407 MAC without enhanced descriptors, MII/RMII from AFIO, PHY clock from MCO with
+  `phy: {clock: mco}`), `stm32f1.otg_fs` (DWC2 device), two bxCANs with 28 filter banks (`stm32f1.can_cl`), the CL
+  AFIO remaps, EXTI line 19, 68 vectors. Samples in `firmware/samples_stm32f1_cl/` (`uart_echo`, `eth_ping`, `usb_cdc`,
+  `can_dual`, `dma2_m2m`; 72 MHz from 25 MHz through PLL2, the ST reference clock tree); boards
+  `stm32f107vc_eth_ping.yaml`, `stm32f105rc_usb_cdc.yaml`, `stm32f105rc_dual_can.yaml`.
+- **Static analysis**: `chipem info` decodes GPIOx_CRL/CRH (mode/CNF per pin, AF outputs named from the pin's
+  functions), ODR, BSRR, BRR.
 - Checks: `tools/pin_table_check.py chips/stm32f103t6.yaml --strict`, `tools/svd2chip.py
   svd/dl-stm32f103/STM32F103xx.svd --check chips/stm32f103t6.yaml` (0 mismatches). Tests:
   `tests/test_stm32f103t6_chip.py`, `tests/test_stm32f1_*.py`.
@@ -1125,6 +1356,42 @@ TI C2000 280x, fixed-point C28x at 100 MHz, 100-pin LQFP "PZ" (`chips/tms320f280
   chipem run --board boards/f2808_spi_flash.yaml --for 8ms --pin-report
   ```
 
+### Piccolo: TMS320F28027 / TMS320F28069 (LaunchPad parts)
+
+TI C2000 Piccolo: the F2802x (TMS320F28027, 60 MHz, no FPU; LQFP48 "PT" and TSSOP38 "DA"; LAUNCHXL-F28027) and the
+F2806x (TMS320F28069 / F28069M, 90 MHz, FPU32; LQFP100 "PZ" and LQFP80 "PN"; LAUNCHXL-F28069M), with their siblings
+as `include:` variants.  Sources: SPRS523P / SPRS698J data sheets, SPRUI09A / SPRUH18I TRMs, the LaunchPad guides
+(chips/README.md "Piccolo").
+
+- **Pins / registers**: verified pin tables (figure, signal table, data sheet and TRM mux tables agree; AIO pins carry
+  an `AIO` function); register tables generated by `tools/gen_piccolo_regs.py` and checked against the data sheets
+  (`--check-ds`: 379 / 798 registers, 0 mismatches).
+- **Clocks** (`ti_c2000.piccolo_sysctrl`): INTOSC1 / INTOSC2 / crystal / XCLKIN selection (CLKCTL), DIVSEL /4 /2 /1,
+  PLLLOCKPRD lock time, missing-clock detection with CLOCKFAIL, the NMI and the NMI watchdog (`ti_c2000.nmiwd`), the
+  CPU watchdog on INTOSC1 or OSCCLKSRC2.  10 MHz after reset (the boot ROM's DIVSEL = 3); TI's InitSysCtrl sequence
+  gives 60 / 90 MHz.
+- **New models**: the SOC-based type-3 ADC (`ti_c2000.adc_soc`: 16 SOCs, round robin / high priority, ONESHOT,
+  sequential and simultaneous sampling with the TRM timing, 9 ADCINTs with continuous mode and overflow, ePWM / timer /
+  XINT2 / ADCINT triggers, temperature sensor, VREFLO, internal / external reference, offset trim), the comparators with
+  10-bit DAC and (2806x) ramp generator (`ti_c2000.comp`), the ePWM digital compare + type-1 HRPWM (`ti_c2000.epwm_dc`:
+  DCAEVT/DCBEVT trips, blanking window, counter capture, SOC / sync, SWAPAB / SELOUTB / AUTOCONV, mirror registers),
+  AIO and XINT3 (`ti_c2000.piccolo_gpio`), CLA register storage (`ti_c2000.cla`, tasks never run), the PARTID OTP page.
+  Reused by parameter: SCI / SPI / I2C with 4-word FIFOs, eCAN (eCAN-A at SYSCLKOUT/2 on the 2806x), DMA (2806x
+  trigger map), McBSP, eCAP, eQEP, CPU timers, PIE.
+- **Boot**: boot ROM / TI OTP stand-ins (`chips/tms320f280{2,6}x_bootrom.asm`): CSM dummy read, Device_cal, DIVSEL = 3,
+  GPIO37/GPIO34 GetMode (flash, or OTP per OTP_KEY/OTP_BMODE) / wait; the serial and parallel loaders are not
+  implemented.
+- **Samples**: `firmware/samples_c2000/f28027_*.asm` (`blinky` on the LaunchPad LEDs with the InitSysCtrl clock setup,
+  `sci_echo`, `adc_epwm`, `comp_trip`, `ecap`, `spi_flash`); TI C (`firmware/samples_c2000_c/`, `piccolo.h`,
+  `f2802x.cmd` / `f2806x.cmd`): `f28027_launchpad` (temperature sensor through the OTP getters, CPU-timer LEDs, FIFO
+  console), `f28069_can` (eCAN-A + FPU32).
+  ```sh
+  chipem run firmware/samples_c2000/build/f28027_blinky.c28img --chip tms320f28027 --for 12ms
+  chipem run firmware/samples_c2000/build/f28027_adc_epwm.c28img --chip tms320f28027 --for 10ms --adc ADCINA1=1.0V
+  chipem run --board boards/f28027_comp_adc.yaml --for 12ms
+  chipem run --board boards/f28069_stm32_can.yaml --for 40ms
+  ```
+
 ### Peripheral coverage
 
 Modelled (behaviour beyond register storage):
@@ -1189,13 +1456,19 @@ Modelled (behaviour beyond register storage):
 | STM32F42x RCC, PWR, FLASH | `stm32.rcc_f42x`, `stm32.pwr_f42x`, `stm32.flash_f42x` | as the F405 models plus PLLSAI (PLLSAIN/Q/R), DCKCFGR (PLLI2SDIVQ/PLLSAIDIVQ, SAI1A/BSRC, TIMPRE), F42x clock gates; over-drive ODEN → ODRDY, ODSWEN → ODSWRDY with DS9405 Table 23 times, only with HSI/HSE as SYSCLK, cleared by Stop; VOS scales (writable only with the PLL off), UDEN/UDRDY; frequency-limit warnings per scale/over-drive; 2 MB / DB1M dual-bank sector map, MER1, option bytes (OPTKEYR, OPTSTRT, applied at reset); IDCODE 0x419 |
 | STM32F42x FMC | `stm32.fmc` | the FSMC NOR/PSRAM model (gate FMCEN) plus the SDRAM controller: SDCR/SDTR, SDCMR command modes with BUSY time, init sequence gating (clock enable, ≥100 µs, PALL, auto-refresh, load mode register checked against CAS/burst), refresh timer SDRTR with RE/REIE (IRQ FMC), self-refresh/power-down MODES, write protect, bank windows 0xC0000000/0xD0000000 mapped into the core; board `sdram` device loses its data without refresh (64 ms) |
 | STM32F42x SAI1 | `stm32.sai` | blocks A/B (RM0090 ch. 29), bit level on the pins: kernel clock from RCC_DCKCFGR (PLLSAI / PLLI2S / I2S_CKIN), MCKDIV/NODIV, MCLK output; master/slave TX/RX, free protocol frames (FRL, FSALL, FSDEF, FSPOL, FSOFF), slots (NBSLOT, SLOTSZ, SLOTEN, FBOFF), DS 8-32, LSBFIRST, CKSTR, MONO, TRIS; synchronous A/B (SYNCEN); 8-word FIFOs with FLVL/FREQ/FTH, FFLUSH; OVRUDR, AFSDET/LFSDET (slave), WCKCFG, MUTE/MUTEVAL/MUTECNT/MUTEDET; SAIxEN disable at frame end; IRQ SAI1, DMA requests SAI1_A/SAI1_B; works with the `i2s_codec` part |
+| STM32F446 QUADSPI | `stm32.quadspi` | RM0390 ch. 12: indirect / automatic polling / memory-mapped modes, 32-byte FIFO, every SR flag, ABORT, DFM, SIOO, DMA; flash = board `spi_flash` device as `devices/qspi_flash.QspiNorFlash` |
+| STM32F446 FMPI2C1 | `stm32.fmpi2c` | RM0390 ch. 23 (I2C v2 IP): TIMINGR timing, controller (NBYTES/RELOAD/AUTOEND, 7/10-bit) and target (OA1/OA2/OA2MSK, GCEN, SBC, NOSTRETCH) on the pins via `periph/i2cwire.py`, ISR/ICR, Fast-mode Plus, DMA FMPI2C1_RX/TX, IRQs 95/96 |
+| STM32F446 HDMI-CEC | `stm32.cec` | RM0390 ch. 32: bit-level single-wire open-drain bus on a board net, own address / broadcast / listen mode, arbitration with SFT, ACK, every TX/RX error flag, IRQ 93 |
+| STM32F446 SPDIFRX | `stm32.spdifrx` | RM0390 ch. 27: synchronisation state machine, data / channel-status flows, DRFMT 00/01/10, OVR/PERR/FERR/SERR/TERR, DMA SPDIFRX_DT/CS, IRQ 94; fed by the `spdif_source` part (line summarised) |
 | STM32F42x DMA2D | `stm32.dma2d` | Chrom-ART: R2M fill, M2M copy, M2M with PFC and blending, 11 input / 5 output formats, alpha modes, CLUT (auto load via START, CPU access, CAEIF), configuration (CEIF) and transfer (TEIF) errors, line watermark TWIF, SUSP/ABORT, IRQ DMA2D; per-line timing on HCLK with AMTCR dead time |
 | STM32F1 RCC | `stm32f1.rcc` | HSI 8 MHz / HSE / PLL (HSI/2 or HSE[/2] x 2..16), SW/SWS, HPRE/PPRE1/PPRE2, ADCPRE, USBPRE, ready bits mirrored with CIR ready flags and the RCC vector, AHB/APB2/APB1 gates (F1 bit positions, also used by the reused `stm32.*` models), APBxRSTR resets, CSR reset flags, BDCR (DBP protection, LSE, RTCSEL, BDRST), frequency-limit warnings |
 | STM32F1 GPIO, AFIO | `stm32f1.gpio`, `stm32f1.afio` | CRL/CRH modes (analog, floating, pull via ODR, push-pull/open-drain, AF), IDR cache, ODR/BSRR/BRR, LCKR; pin owner from the AFIO_MAPR remap and the peripheral's configuration; SWJ_CFG, PD01_REMAP, USB transceiver pins; EXTICR |
 | STM32F1 EXTI, PWR, BKP, RTC | `stm32f1.exti`, `stm32f1.pwr`, `stm32f1.bkp`, `stm32f1.rtc` | EXTI = `stm32.exti` wired to AFIO (lines 16-18 PVD/RTC alarm/USB wakeup); PWR Sleep/Stop (HSE/PLL off, frozen blocks, EXTI wake-up)/Standby (WKUP, RTC alarm), PVD, DBP; BKP DR1-10 survive resets, tamper; RTC 20-bit prescaler + 32-bit counter on LSE/LSI/HSE÷128, CNF/RTOFF write operation, RSF resync, SECF/ALRF/OWF, alarm on EXTI 17 |
 | STM32F1 FLASH, option bytes, signature | `stm32f1.flash`, `stm32f1.optbytes`, `stm32f1.sysmem`, `stm32f1.dbgmcu` | KEYR/OPTKEYR unlock, page/mass erase with BSY time, half-word programming checked (PGERR, WRPRTERR), EOP/ERR interrupt, option bytes (RDP, USER: hardware watchdog, nRST_STOP/STDBY; WRP) applied at reset, OBR/WRPR, F_SIZE and UID, IDCODE 0x412 |
-| STM32F1 DMA1, ADC1/2 | `stm32f1.dma`, `stm32f1.adc` | 7 channels with the fixed RM0008 request map (same request API as `stm32.dma`), PL arbitration, packing, circular, MEM2MEM, HT/TC/TE/GIF; ADC power-up, calibration timing, regular/injected groups, scan/continuous/discontinuous, EXTSEL timer triggers, (SMP + 12.5) ADCCLK, AWD, DMA, temperature sensor/VREFINT, dual modes |
+| STM32F1 DMA1/DMA2, ADC1/2/3 | `stm32f1.dma`, `stm32f1.adc` | DMA1 7 / DMA2 5 channels (Tables 78/79, APB byte-lane replication) with the fixed RM0008 request map (same request API as `stm32.dma`), PL arbitration, packing, circular, MEM2MEM, HT/TC/TE/GIF; ADC power-up, calibration timing, regular/injected groups, scan/continuous/discontinuous, EXTSEL timer triggers, (SMP + 12.5) ADCCLK, AWD, DMA, temperature sensor/VREFINT, dual modes |
 | STM32F1 USB, PMA | `stm32f1.usb`, `stm32f1.pma` | full-speed device on a `chipem.usbbus` cable: EPnR toggle/rc_w0 semantics, BTABLE descriptors in the 512-byte packet memory (16 bits per 32-bit slot), control/bulk/interrupt, double-buffered bulk, LP/HP vectors, suspend/resume/remote wakeup (EXTI 18), D+ pull-up option, 48 MHz check, CAN shared-SRAM warning |
+| STM32F1 connectivity line | `stm32f1.rcc_cl`, `stm32f1.eth`, `stm32f1.otg_fs`, `stm32f1.can_cl` | RM0008 ch. 8 RCC (PREDIV1/PREDIV2, PLL2/PLL3, PLLMUL x4..x9/x6.5, OTGFSPRE, I2S2/3 clock source, 4-bit MCO, CL gates and AHBRSTR); Ethernet MAC/DMA = `stm32.eth` without enhanced descriptors, MII/RMII from AFIO_MAPR, PHY clock from MCO; OTG_FS device = `stm32.otg_fs` (no NOVBUSSENS); bxCAN1/2 with 28 filter banks and CAN2SB |
+| STM32F1 reused STM32 models | `stm32.tim/usart/spi/i2c` (`reserved_zero: true`), `stm32.i2s` (`i2s_clock: sysclk`), `stm32.dac`/`stm32.sdio` (`f1: true`), `stm32.fsmc`, `stm32.iwdg/wwdg/crc` | F1 register masks from the F1 SVD, checked against RM0008; registers the F1 lacks read 0 |
 | STM32F42x UART7/8, SPI4-6, I2C FLTR | `stm32.usart`, `stm32.spi`, `stm32.i2c` | existing models; DMA requests per RM0090 Tables 43/44 (F42x rows); I2C_FLTR writable only with PE = 0 |
 
 Stubs (RAM-like storage, first access to each word logged): AIPS0/1, AXBS, FB, MPU, FMC, I2S0, CRC,
@@ -1497,6 +1770,8 @@ firmware/samples/     Kinetis sample C programs, startup, linker script, build.s
 firmware/samples_stm32/  STM32 samples (C, clang); firmware/samples_c2000/  C28x samples (assembly, tools/c28x_asm.py)
 firmware/samples_stm32_variants/  STM32F405/F407 package-variant samples (port walk, two-chip UART link)
 firmware/samples_stm32f1/  STM32F103T6 samples (C, clang thumbv7m)
+firmware/samples_stm32f1_variants/  STM32F103 Blue Pill / high-density samples
+firmware/samples_stm32f1_cl/  STM32F105/F107 connectivity-line samples
 firmware/samples_stm32_hal/  STM32 sample on ST's STM32CubeF4 HAL; firmware/vendor/  fetched vendor sources (HAL, CMSIS)
 tests/                pytest suite
 docs/                 design and reference documents
@@ -1521,7 +1796,7 @@ tests are skipped if the `build/` outputs are missing.
 - [docs/ADDING_A_CHIP.md](docs/ADDING_A_CHIP.md): adding another Cortex-M3/M4 chip, a new vendor family, or a peripheral model.
 - [docs/AI_NEW_CHIP_PLAYBOOK.md](docs/AI_NEW_CHIP_PLAYBOOK.md): procedure for an AI agent adding a chip from a data sheet (`/new-chip`, `tools/new_chip.py`, `tools/pin_table_check.py`).
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md): what is approximate or missing.
-- [docs/C2000_ROADMAP.md](docs/C2000_ROADMAP.md): TI C2000 (TMS320F28232, TMS320F2808) status, design notes and remaining work.
+- [docs/C2000_ROADMAP.md](docs/C2000_ROADMAP.md): TI C2000 (TMS320F28232, TMS320F2808, Piccolo F2802x / F2806x) status, design notes and remaining work.
 - [docs/C28X_CORE.md](docs/C28X_CORE.md): the C28x interpreter, its ISA table and its verification against TI's cl2000 25.11.1 tools.
 - [docs/PLAN.md](docs/PLAN.md): original design plan and findings from analysing the Withings boot path.
 - [docs/CONTRACTS.md](docs/CONTRACTS.md): module interface contracts.

@@ -35,8 +35,9 @@ class RNG(GatedBlock):
         params = dict(params or {})
         self.gate = "RNG"
         ov = {"CR": {"on_write": self._cr_write},
-              "SR": {"ro_mask": 0xFFFFFFFF & ~(CEIS | SEIS), "on_write": self._sr_write, "on_read": self._sr_read},
-              "DR": {"ro_mask": 0xFFFFFFFF, "on_read": self._dr_read}}
+              "SR": {"ro_mask": 0xFFFFFFFF & ~(CEIS | SEIS), "on_write": self._sr_write, "on_read": self._sr_read,
+                     "on_peek": self._peek_stored},
+              "DR": {"ro_mask": 0xFFFFFFFF, "on_read": self._dr_read, "on_peek": self._peek_stored}}
         r = build_regs((name, "RNG"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.seed = int(params.get("seed", 0x5EED))
@@ -140,6 +141,9 @@ class RNG(GatedBlock):
                 self.chip.sched.cancel(self._ev)
                 self._ev = None
         self._update()
+        return None
+
+    def _peek_stored(self, blk, reg):
         return None
 
     def _sr_read(self, blk, reg):

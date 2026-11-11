@@ -1,35 +1,41 @@
-"""STM32F1 RTC (RM0008 ch. 18 layout: CRH/CRL, 20-bit prescaler PRL, divider DIV, 32-bit counter CNT, alarm ALR).
+"""STM32F1 RTC (RM0008 ch. 18: CRH/CRL, 20-bit prescaler PRL, divider DIV, 32-bit counter CNT, alarm ALR).
 
-Not the F4 calendar RTC.  Not verified against RM0008 (not available when written); behaviour as documented for the
-F1 family and used by ST's HAL/SPL drivers.
-
-* Clock: RTCCLK = rcc.rtc_clock_hz() (BDCR.RTCSEL: LSE 32.768 kHz, LSI 40 kHz, HSE/128) while BDCR.RTCEN = 1.  The
-  divider DIV counts RTCCLK down from PRL to 0; on the next RTCCLK edge it reloads PRL and the time base TR_CLK ticks:
-  CNT += 1, CRL.SECF is set, CNT == ALR sets CRL.ALRF, CNT wrapping to 0 sets CRL.OWF.  Counting is lazy (CNT/DIV are
-  computed from the time) and only the interesting ticks are scheduled (every tick when SECIE, else the alarm and the
-  overflow).  The backup-domain core (PRL, DIV, CNT, ALR) keeps counting over system resets and Standby; only a
-  backup domain reset (RCC_BDCR.BDRST) resets it.  CRH/CRL are reset by every system reset (CRL = 0x0020).
-* Configuration: PRL/CNT/ALR can only be written with CRL.CNF = 1 (else the write is ignored, one `warn`); the
-  values are latched when CNF goes back to 0 (the "write operation"), which keeps CRL.RTOFF = 0 for 3 RTCCLK
-  periods; a write to any RTC register while RTOFF = 0 is ignored (one `warn`).  PRLH/PRLL and ALRH/ALRL are
-  write-only (read 0).  All RTC writes also need PWR_CR.DBP = 1 (backup domain write protection).
-* CRL.SECF/ALRF/OWF are rc_w0 (write 0 clears).  CRL.RSF (rc_w0) is set by hardware at the next RTCCLK edge after
-  software cleared it (firmware waits for it after a reset before reading CNT).
-* Interrupts: the RTC vector = (SECF & SECIE) | (ALRF & ALRIE) | (OWF & OWIE) (level); the alarm also pulses EXTI
-  line 17 (RTC_Alarm vector when EXTI is configured; Stop/Standby wake-up), whatever ALRIE says.
-* BKP_RTCCR calibration (CAL) is not applied (no pulse masking).
+Not the F4 calendar RTC.  Verified against RM0008 Rev 21 ch. 18 (18.3.1-18.3.5, Figures 179-181, 18.4.1-18.4.7).
+* Clock: RTCCLK = rcc.rtc_clock_hz() (BDCR.RTCSEL: LSE, LSI, HSE/128, 7.2.8) while BDCR.RTCEN = 1.  The divider DIV
+  counts RTCCLK down from PRL to 0 and reloads; the time base TR_CLK = RTCCLK / (PRL + 1) increments CNT (18.4.3).
+* Flags (18.3.5, Figures 180/181): SECF is set on the last RTCCLK cycle before each CNT update (DIV = 0); OWF on the
+  last cycle before CNT wraps from 0xFFFFFFFF to 0; ALRF (and the RTC_Alarm signal, 1 RTCCLK wide) on the last cycle
+  before CNT reaches ALR + 1, i.e. at the end of the second during which CNT = ALR.  Counting is lazy (CNT/DIV are
+  computed from the time) and only the interesting flag moments are scheduled (every one with SECIE, else the alarm
+  and the overflow); a CRL read brings SECF up to date.
+* Resets (18.3.2): the RTC core (PRL, DIV, CNT, ALR) is reset only by a backup domain reset (RCC_BDCR.BDRST) and keeps
+  counting over system resets and Standby; CRH/CRL are reset by every system reset (CRL = 0x0020: RTOFF = 1, RSF = 0).
+* Configuration (18.3.4): PRL/CNT/ALR can only be written with CRL.CNF = 1 (else ignored, one `warn`); the values are
+  latched when CNF goes back to 0 (the write operation), which keeps CRL.RTOFF = 0 for 3 RTCCLK periods ("at least
+  three RTCCLK cycles"); a write to any RTC register while RTOFF = 0 is ignored (one `warn`).  A CNT or PRL write
+  reloads the prescaler (DIV = PRL, 18.4.4/18.4.5).  PRLH/PRLL and ALRH/ALRL are write-only (read 0).  All RTC writes
+  also need PWR_CR.DBP = 1 (18.1).
+* CRL.SECF/ALRF/OWF/RSF are rc_w0 (write 0 clears, 1 has no effect).  RSF is set by hardware at the next RTCCLK edge
+  after software cleared it, and is 0 after a system reset (18.3.3: firmware waits for it before reading CNT/DIV).
+* Interrupts: the RTC vector = (SECF & SECIE) | (ALRF & ALRIE) | (OWF & OWIE) (level, 18.4.2); the alarm also pulses
+  EXTI line 17 (RTC_Alarm vector when EXTI is configured; Stop wake-up) and is a PWR wake-up event (Standby exit),
+  whatever ALRIE says.
+Not modelled: BKP_RTCCR.CAL pulse masking, the corrupted first read right after the APB1 interface is re-enabled
+(18.3.3; firmware has to wait for RSF anyway), the flags not updating while the APB1 clock is stopped, the
+RTCCLK < PCLK1 / 4 requirement.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, exti_line, find_model, irq_number, rcc
 
 SECIE, ALRIE, OWIE = 1, 2, 4
 SECF, ALRF, OWF, RSF, CNF, RTOFF = 1, 2, 4, 8, 16, 32
 CORE = ("PRLH", "PRLL", "CNTH", "CNTL", "ALRH", "ALRL")
+M32 = 0xFFFFFFFF
 
 
 @register("stm32f1.rtc")
@@ -37,10 +43,11 @@ class RTC(GatedBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         self.gate = None                    # on APB1, no own enable bit (needs PWR/BKP clocks + DBP)
-        z = lambda b, r: 0                  # noqa: E731
+        z = pure_read(lambda b, r: 0)       # noqa: E731
         ov: dict[str, dict] = {
             "CRH": {"on_write": self._crh_write, "ro_mask": 0xFFFFFFF8},
-            "CRL": {"on_write": self._crl_write, "on_read": self._crl_read, "ro_mask": 0xFFFFFFC0},
+            "CRL": {"on_write": self._crl_write, "on_read": self._crl_read, "ro_mask": 0xFFFFFFC0,
+                    "on_peek": self._crl_peek},
             "PRLH": {"on_write": self._core_write, "on_read": z, "ro_mask": 0xFFFFFFF0},
             "PRLL": {"on_write": self._core_write, "on_read": z, "ro_mask": 0xFFFF0000},
             "DIVH": {"on_read": self._div_read(True), "ro_mask": 0xFFFFFFFF},
@@ -69,7 +76,7 @@ class RTC(GatedBlock):
         self._warned: set[str] = set()
         self._pwr: Any = None
         self.alarms = 0
-        self._sec_cnt = 0                   # CNT when SECF was last brought up to date
+        self._sec_j = 0                     # flag moments (TR_CLK ticks) already reflected in SECF
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -94,7 +101,7 @@ class RTC(GatedBlock):
             self.irq(self._irqn, False)
         self._line = False
         self._clock_changed()
-        self._sec_cnt = self.state()[0] if self.chip is not None else 0
+        self._sec_j = self._flag_ticks() if self.chip is not None else 0
         self._schedule()
 
     def backup_domain_reset(self) -> None:
@@ -110,6 +117,7 @@ class RTC(GatedBlock):
         self._div0 = 0x8000
         self._t0 = self.chip.now_ns() if self.chip is not None else 0.0
         self._hz = 0.0
+        self._sec_j = 0
 
     def _cancel(self) -> None:
         if self._ev is not None and self.chip is not None:
@@ -146,7 +154,14 @@ class RTC(GatedBlock):
         return r.rtc_clock_hz()
 
     def _ticks(self, now: float) -> int:
-        return int((now - self._t0) * self._hz / 1e9) if self._hz > 0 else 0
+        """RTCCLK periods elapsed since the anchor."""
+        return int((now - self._t0) * self._hz / 1e9 + 1e-6) if self._hz > 0 else 0     # + eps: float edges
+
+    def _done(self, n: int) -> int:
+        """TR_CLK ticks (CNT updates) completed after n RTCCLK periods from the anchor."""
+        if n <= self._div0:
+            return 0
+        return 1 + (n - self._div0 - 1) // (self.prl + 1)
 
     def state(self, now: float | None = None) -> tuple[int, int]:
         """(CNT, DIV) at `now` (default: the current instruction)."""
@@ -157,22 +172,29 @@ class RTC(GatedBlock):
             return self._cnt0, self._div0 - n
         m = n - (self._div0 + 1)
         p = self.prl + 1
-        return (self._cnt0 + 1 + m // p) & 0xFFFFFFFF, self.prl - (m % p)
+        return (self._cnt0 + 1 + m // p) & M32, self.prl - (m % p)
 
-    def _tick_time(self, k: int) -> float:
-        """Time of the k-th TR_CLK tick after the anchor (k >= 1)."""
-        ticks = self._div0 + 1 + (k - 1) * (self.prl + 1)
+    def _flag_ticks(self, now: float | None = None) -> int:
+        """Flag moments passed: tick j's flags (SECF/ALRF/OWF) come one RTCCLK before tick j itself (18.3.5)."""
+        if self._hz <= 0:
+            return 0
+        if now is None:
+            now = self.chip.now_ns() if self.chip is not None else 0.0
+        return self._done(self._ticks(now) + 1)
+
+    def _tick_time(self, j: int) -> float:
+        """Time of the j-th TR_CLK tick (CNT update) after the anchor (j >= 1)."""
+        ticks = self._div0 + 1 + (j - 1) * (self.prl + 1)
         return self._t0 + ticks * 1e9 / self._hz
 
     def _reanchor(self, cnt: int | None = None, div: int | None = None) -> None:
         now = self.chip.now_ns() if self.chip is not None else 0.0
         c, d = self.state(now)
-        self._cnt0 = c if cnt is None else cnt & 0xFFFFFFFF
+        self._cnt0 = c if cnt is None else cnt & M32
         self._div0 = d if div is None else div
         self._t0 = now
         self._hz = self.rtcclk_hz()
-        if cnt is not None:
-            self._sec_cnt = self._cnt0
+        self._sec_j = 0
 
     def _clock_changed(self) -> None:
         if self.chip is None:
@@ -187,22 +209,20 @@ class RTC(GatedBlock):
         self._cancel()
         if self.chip is None or self._hz <= 0:
             return
-        cnt, _ = self.state()
-        crh = self.get("CRH")
-        if crh & SECIE:
-            k = 1
-        else:
-            to_alarm = (self.alr - cnt) & 0xFFFFFFFF or 0x100000000
-            to_ovf = (0 - cnt) & 0xFFFFFFFF or 0x100000000
-            k = min(to_alarm, to_ovf)
-        k_abs = (cnt - self._cnt0) & 0xFFFFFFFF
-        t = self._tick_time(k_abs + k)
-        self._ev = self.chip.sched.at_ns(t, self._tick)
+        j = max(self._flag_ticks(), self._sec_j) + 1     # next flag moment not yet processed
+        if not self.get("CRH") & SECIE:
+            before = (self._cnt0 + j - 1) & M32          # CNT during the second that ends with tick j
+            to_alarm = (self.alr - before) & M32
+            to_ovf = (M32 - before) & M32
+            j += min(to_alarm, to_ovf)
+        t = self._tick_time(j) - 1e9 / self._hz
+        self._ev = self.chip.sched.at_ns(max(t, self.chip.now_ns()), self._tick, j)
 
-    def _tick(self) -> None:
+    def _tick(self, j: int) -> None:
+        """Flag moment of tick j: the last RTCCLK cycle with CNT = cnt0 + j - 1 (DIV = 0)."""
         self._ev = None
-        cnt, _ = self.state()
-        self._sec_cnt = cnt
+        cnt = (self._cnt0 + j - 1) & M32
+        self._sec_j = max(self._sec_j, j)
         crl = self.get("CRL") | SECF
         if cnt == self.alr:
             crl |= ALRF
@@ -210,7 +230,7 @@ class RTC(GatedBlock):
             exti_line(self.chip, 17, True)
             exti_line(self.chip, 17, False)
             self.emit("info", block=self.name, msg=f"RTC alarm (CNT = {cnt})", cnt=cnt)
-        if cnt == 0:
+        if cnt == M32:
             crl |= OWF
         self.set("CRL", crl)
         self._update_irq()
@@ -231,13 +251,28 @@ class RTC(GatedBlock):
             self._schedule()
         return None
 
+    def _crl_peek(self, blk, reg):
+        """CRL as read now, without recording SECF / RSF."""
+        now = self.chip.now_ns() if self.chip is not None else 0.0
+        v = self.get("CRL")
+        if self._hz > 0 and self._flag_ticks(now) > self._sec_j:
+            v |= SECF
+        if not v & RSF:
+            hz = self.rtcclk_hz()
+            if hz > 0 and (self._rsf_at is None or now >= self._rsf_at + 1e9 / hz):
+                v |= RSF
+        v &= ~RTOFF
+        if now >= self._busy_until:
+            v |= RTOFF
+        return v
+
     def _crl_read(self, blk, reg):
         now = self.chip.now_ns() if self.chip is not None else 0.0
         v = self.get("CRL")
         if self._hz > 0:
-            cnt, _ = self.state(now)
-            if cnt != self._sec_cnt:                 # ticks not scheduled one by one (SECIE = 0) still set SECF
-                self._sec_cnt = cnt
+            f = self._flag_ticks(now)
+            if f > self._sec_j:                      # flag moments not scheduled one by one (SECIE = 0) still set SECF
+                self._sec_j = f
                 v |= SECF
                 self.set("CRL", v)
         if not v & RSF:                              # set by the next RTCCLK resynchronisation after a clear
@@ -273,12 +308,14 @@ class RTC(GatedBlock):
         def rd(blk, reg):
             cnt, _ = self.state()
             return (cnt >> 16) & 0xFFFF if high else cnt & 0xFFFF
+        rd.pure_read = True
         return rd
 
     def _div_read(self, high: bool):
         def rd(blk, reg):
             _, div = self.state()
             return (div >> 16) & 0xF if high else div & 0xFFFF
+        rd.pure_read = True
         return rd
 
     def _commit(self) -> None:
@@ -292,6 +329,7 @@ class RTC(GatedBlock):
             div = self.prl                       # the divider restarts from the new reload value
         if "CNTH" in p or "CNTL" in p:
             cnt = (p.get("CNTH", cnt >> 16) << 16) | p.get("CNTL", cnt & 0xFFFF)
+            div = self.prl                       # a counter write reloads the prescaler (18.4.5)
         if "ALRH" in p or "ALRL" in p:
             self.alr = (p.get("ALRH", self.alr >> 16) << 16) | p.get("ALRL", self.alr & 0xFFFF)
         p.clear()

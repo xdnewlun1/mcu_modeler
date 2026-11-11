@@ -1,0 +1,22 @@
+# STM32F103C8 "Blue Pill" (medium density, LQFP48) <-> STM32F405ZG over a UART cable (TX/RX nets: the board creates
+# the byte link once both pins are muxed).
+#   A (STM32F103C8) runs bluepill: 72 MHz (HSE 8 MHz x 9), USART1 PA9/PA10 at 115200 (BRR 625), banner with
+#                   DBGMCU_IDCODE / F_SIZE, then "ping N\r\n" every 2 ms; PB0 toggles per reply line, PC13 (the board
+#                   LED, active low) blinks every 5 ms, TIM4 counts 1 ms updates.
+#   B (STM32F405ZG) runs uart_link_echo: 16 MHz HSI, USART1 PA9/PA10 at 115200, echoes every byte uppercased.
+# Run:   chipem run --board boards/stm32f103c8_stm32f405_uart.yaml --for 20ms
+#        chipem serve --board boards/stm32f103c8_stm32f405_uart.yaml
+# Build: firmware/samples_stm32f1_variants/build.sh; firmware/samples_stm32/build.sh
+name: stm32f103c8_stm32f405_uart
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f103c8, firmware: ../firmware/samples_stm32f1_variants/build/bluepill.elf}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/uart_link_echo.elf}
+nets:
+  - {name: A_TX, pins: [A.PA9, B.PA10]}
+  - {name: B_TX, pins: [B.PA9, A.PA10]}
+  - {name: REPLY_LED, pins: [A.PB0]}
+  - {name: PILL_LED, pins: [A.PC13]}
+parts:
+  - {id: LED_REPLY, type: led, color: green, ports: {in: REPLY_LED}}
+  - {id: LED_PC13, type: led, color: blue, active: low, ports: {in: PILL_LED}}

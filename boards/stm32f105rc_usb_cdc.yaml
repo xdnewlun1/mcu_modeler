@@ -1,0 +1,12 @@
+# STM32F105RC USB OTG FS (PA11 DM / PA12 DP, VBUS sensed on PA9) plugged into an emulated PC (chipem/usbbus.py).
+# The bare-metal CDC-ACM firmware runs at 72 MHz from the connectivity-line clock tree (HSE 25 MHz -> PLL2 -> PLL x9)
+# with OTGFSCLK = PLL VCO / 3 = 48 MHz.  The host drives VBUS (PA9 high: the F105 needs VBUS sensing, it has no
+# NOVBUSSENS), waits the 100 ms attach debounce, resets the port, enumerates, binds its CDC-ACM driver and polls bulk IN;
+# the firmware answers DTR with "F105 CDC ready" and echoes what the host types ("hello" at 200 ms).  Run:
+#   chipem run --board boards/stm32f105rc_usb_cdc.yaml --for 300ms
+# Build: firmware/samples_stm32f1_cl/build.sh
+name: stm32f105rc_usb_cdc
+chips:
+  - {id: A, chip: stm32f105rc, firmware: ../firmware/samples_stm32f1_cl/build/usb_cdc.elf}
+links:
+  - {type: usb, name: USB1, device: A.OTG_FS, host: {debounce: 100ms, cdc_send: "hello\r\n", cdc_send_at: 200ms}}

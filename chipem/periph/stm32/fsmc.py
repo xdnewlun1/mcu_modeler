@@ -23,6 +23,10 @@ bus-fault, and the FSMC interrupt (NAND/PC Card IRQ flags) is never raised.
   pins (FSMC_A*, FSMC_D*, FSMC_NE*, NOE, NWE, NBL*) are not toggled; they keep their static table role.
 * RCC: AHB3ENR.FSMCEN gate (register access while gated: one `warn`; the windows close), AHB3RSTR.FSMCRST resets the
   block (all windows close; BCR1 MBKEN = 1 then reopens NE1 if a memory is attached and the clock is on).
+* STM32F1 high density (RM0008 ch. 21): the same bank 1 NOR/PSRAM controller (register map 21.6.9, reset values
+  BCR1 0x30DB / BCR2-4 0x30D2 / BTRx, BWTRx 0x0FFFFFFF as in RM0008 21.5.6), control registers at 0xA0000000,
+  gate RCC_AHBENR.FSMCEN (bit 8; read from the stm32f1.rcc GATES table), no reset bit.  The LQFP100 packages bond
+  out NE1 only (no PG9/PG10/PG12 for NE2-NE4); the window still opens, the memory simply is not wired.
 """
 from __future__ import annotations
 
@@ -100,7 +104,8 @@ class FSMC(GatedBlock):
         return r is None or r.clock_enabled(self.gate)
 
     def _gate_changed(self, enr: str, old: int, new: int) -> None:
-        if enr == "AHB3ENR":
+        g = getattr(self._rcc, "GATES", {}).get(self.gate)       # stm32f1.rcc: FSMC gate in AHBENR (RM0008 7.3.6)
+        if enr == "AHB3ENR" or (g is not None and enr == g[0]):
             for b in range(1, 5):
                 self._sync(b)
 
@@ -163,9 +168,20 @@ class FSMC(GatedBlock):
         bus = self.chip.bus
         self.open[bank] = (dev, writable)
         if dev is None:
-            self._warn_once(f"none{bank}", f"{self.name}: NE{bank} enabled with no external memory attached: reads "
-                            "return 0 (floating data bus), writes are lost")
-            bus.map_window(name, base, size, read=lambda off, n: 0, write=self._no_write(bank, writable))
+            # BCR1.MBKEN resets to 1, so an open window alone is no mistake: warn on the first access only
+            def none() -> None:
+                self._warn_once(f"none{bank}", f"{self.name}: NE{bank} accessed with no external memory attached: "
+                                "reads return 0 (floating data bus), writes are lost")
+
+            def rd(off: int, n: int) -> int:
+                none()
+                return 0
+            nowr = self._no_write(bank, writable)
+
+            def wr(off: int, n: int, v: int) -> None:
+                none()
+                nowr(off, n, v)
+            bus.map_window(name, base, size, read=rd, write=wr)
             return
         self._check_width(bank)
         nb = dev.width // 8

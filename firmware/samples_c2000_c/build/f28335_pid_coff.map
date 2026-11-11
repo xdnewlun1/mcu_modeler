@@ -1,0 +1,272 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Tue Nov 10 22:46:57 2026
+
+OUTPUT FILE NAME:   <build/f28335_pid_coff.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00300000   0003ff80  0000041f  0003fb61  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  0000009e  00000f62  RWIX
+  RAML5                 0000d000   00001000  00000000  00001000  RWIX
+  RAML6                 0000e000   00001000  00000000  00001000  RWIX
+  RAML7                 0000f000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00300000    000003c0     
+                  00300000    000001b6     f28335_pid.obj (.text)
+                  003001b6    00000099     f28335_pid.obj (.text:retain)
+                  0030024f    00000088     rts2800_fpu32.lib : fs_div28.asm.obj (.text)
+                  003002d7    00000056                       : boot28.asm.obj (.text)
+                  0030032d    00000029                       : exit.c.obj (.text)
+                  00300356    00000024                       : cpy_tbl.c.obj (.text)
+                  0030037a    00000020                       : memcpy.c.obj (.text)
+                  0030039a    00000012                       : args_main.c.obj (.text)
+                  003003ac    00000009                       : _lock.c.obj (.text)
+                  003003b5    00000008     codestart.obj (.text)
+                  003003bd    00000002     rts2800_fpu32.lib : pre_init.c.obj (.text)
+                  003003bf    00000001                       : startup.c.obj (.text)
+
+.cinit     0    003003c0    00000031     
+                  003003c0    00000017     f28335_pid.obj (.cinit)
+                  003003d7    0000000e     rts2800_fpu32.lib : exit.c.obj (.cinit)
+                  003003e5    00000005                       : _lock.c.obj (.cinit:__lock)
+                  003003ea    00000005                       : _lock.c.obj (.cinit:__unlock)
+                  003003ef    00000002     --HOLE-- [fill = 0]
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000002     DSECT
+                  003fffc0    00000002     rts2800_fpu32.lib : boot28.asm.obj (.reset)
+
+.pinit     0    00300000    00000000     UNINITIALIZED
+
+.econst    0    003003f2    0000002e     
+                  003003f2    00000021     f28335_pid.obj (.econst:.string)
+                  00300413    00000001     --HOLE-- [fill = 0]
+                  00300414    0000000c     f28335_pid.obj (.econst:_poly)
+
+.ebss      1    0000c000    0000009e     UNINITIALIZED
+                  0000c000    00000030     f28335_pid.obj (.ebss:_xs)
+                  0000c030    00000010     f28335_pid.obj (.ebss:_hist)
+                  0000c040    00000030     f28335_pid.obj (.ebss:_ys)
+                  0000c070    00000010     f28335_pid.obj (.ebss:_wavg)
+                  0000c080    00000014     f28335_pid.obj (.ebss)
+                  0000c094    00000006     rts2800_fpu32.lib : exit.c.obj (.ebss)
+                  0000c09a    00000002                       : _lock.c.obj (.ebss:__lock)
+                  0000c09c    00000002                       : _lock.c.obj (.ebss:__unlock)
+
+MODULE SUMMARY
+
+       Module             code   initialized data   uninitialized data
+       ------             ----   ----------------   ------------------
+    build/obj_coff/f28335_pid/
+       f28335_pid.obj     591    68                 148               
+       codestart.obj      10     0                  0                 
+    +--+------------------+------+------------------+--------------------+
+       Total:             601    68                 148               
+                                                                      
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_fpu32.lib
+       fs_div28.asm.obj   136    0                  0                 
+       boot28.asm.obj     86     0                  0                 
+       exit.c.obj         41     14                 6                 
+       cpy_tbl.c.obj      36     0                  0                 
+       memcpy.c.obj       32     0                  0                 
+       _lock.c.obj        9      10                 4                 
+       args_main.c.obj    18     0                  0                 
+       pre_init.c.obj     2      0                  0                 
+       startup.c.obj      1      0                  0                 
+    +--+------------------+------+------------------+--------------------+
+       Total:             361    24                 10                
+                                                                      
+       Stack:             0      0                  768               
+    +--+------------------+------+------------------+--------------------+
+       Grand Total:       962    92                 926               
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c000     300 (0000c000)     _xs
+0000c030     300 (0000c000)     _hist
+
+0000c040     301 (0000c040)     _ys
+0000c070     301 (0000c040)     _wavg
+
+0000c080     302 (0000c080)     _navg
+0000c081     302 (0000c080)     _nmain
+0000c082     302 (0000c080)     _setpoint
+0000c084     302 (0000c080)     _kp
+0000c086     302 (0000c080)     _ki_ts
+0000c088     302 (0000c080)     _y_avg
+0000c08a     302 (0000c080)     _u_out
+0000c08c     302 (0000c080)     _integ
+0000c08e     302 (0000c080)     _isr_count
+0000c090     302 (0000c080)     _chk_pass
+0000c092     302 (0000c080)     _chk_bad
+0000c094     302 (0000c080)     ___TI_enable_exit_profile_output
+0000c096     302 (0000c080)     ___TI_cleanup_ptr
+0000c098     302 (0000c080)     ___TI_dtors_ptr
+0000c09a     302 (0000c080)     __lock
+0000c09c     302 (0000c080)     __unlock
+
+00300414    c010 (00300400)     _poly
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                            
+----  -------   ----                            
+0     00300000  .text                           
+0     0030032d  C$$EXIT                         
+0     0030024f  FS$$DIV                         
+1     00000700  __STACK_END                     
+abs   00000300  __STACK_SIZE                    
+1     0000c096  ___TI_cleanup_ptr               
+1     0000c098  ___TI_dtors_ptr                 
+1     0000c094  ___TI_enable_exit_profile_output
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+0     003003c0  ___cinit__                      
+0     003003c0  ___etext__                      
+abs   ffffffff  ___pinit__                      
+0     00300000  ___text__                       
+0     0030039a  __args_main                     
+1     0000c09a  __lock                          
+0     003003b4  __nop                           
+0     003003b0  __register_lock                 
+0     003003ac  __register_unlock               
+1     00000400  __stack                         
+0     003003bf  __system_post_cinit             
+0     003003bd  __system_pre_init               
+1     0000c09c  __unlock                        
+0     0030032d  _abort                          
+0     003001b6  _adc_isr                        
+0     003002d7  _c_int00                        
+1     0000c092  _chk_bad                        
+1     0000c090  _chk_pass                       
+0     00300356  _copy_in                        
+0     0030004d  _dot                            
+0     0030032f  _exit                           
+1     0000c030  _hist                           
+1     0000c08c  _integ                          
+1     0000c08e  _isr_count                      
+1     0000c086  _ki_ts                          
+1     0000c084  _kp                             
+0     003000b6  _main                           
+0     0030037a  _memcpy                         
+1     0000c080  _navg                           
+1     0000c081  _nmain                          
+0     00300414  _poly                           
+1     0000c082  _setpoint                       
+1     0000c08a  _u_out                          
+1     0000c070  _wavg                           
+1     0000c000  _xs                             
+1     0000c088  _y_avg                          
+1     0000c040  _ys                             
+abs   ffffffff  binit                           
+0     003003c0  cinit                           
+0     0033fff6  code_start                      
+0     003003c0  etext                           
+abs   ffffffff  pinit                           
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                            
+----  -------   ----                            
+0     00300000  .text                           
+0     00300000  ___text__                       
+0     0030004d  _dot                            
+0     003000b6  _main                           
+0     003001b6  _adc_isr                        
+0     0030024f  FS$$DIV                         
+0     003002d7  _c_int00                        
+0     0030032d  C$$EXIT                         
+0     0030032d  _abort                          
+0     0030032f  _exit                           
+0     00300356  _copy_in                        
+0     0030037a  _memcpy                         
+0     0030039a  __args_main                     
+0     003003ac  __register_unlock               
+0     003003b0  __register_lock                 
+0     003003b4  __nop                           
+0     003003bd  __system_pre_init               
+0     003003bf  __system_post_cinit             
+0     003003c0  ___cinit__                      
+0     003003c0  ___etext__                      
+0     003003c0  cinit                           
+0     003003c0  etext                           
+0     00300414  _poly                           
+0     0033fff6  code_start                      
+1     00000400  __stack                         
+1     00000700  __STACK_END                     
+1     0000c000  _xs                             
+1     0000c030  _hist                           
+1     0000c040  _ys                             
+1     0000c070  _wavg                           
+1     0000c080  _navg                           
+1     0000c081  _nmain                          
+1     0000c082  _setpoint                       
+1     0000c084  _kp                             
+1     0000c086  _ki_ts                          
+1     0000c088  _y_avg                          
+1     0000c08a  _u_out                          
+1     0000c08c  _integ                          
+1     0000c08e  _isr_count                      
+1     0000c090  _chk_pass                       
+1     0000c092  _chk_bad                        
+1     0000c094  ___TI_enable_exit_profile_output
+1     0000c096  ___TI_cleanup_ptr               
+1     0000c098  ___TI_dtors_ptr                 
+1     0000c09a  __lock                          
+1     0000c09c  __unlock                        
+abs   00000300  __STACK_SIZE                    
+abs   ffffffff  ___TI_pprof_out_hndl            
+abs   ffffffff  ___TI_prof_data_size            
+abs   ffffffff  ___TI_prof_data_start           
+abs   ffffffff  ___binit__                      
+abs   ffffffff  ___c_args__                     
+abs   ffffffff  ___pinit__                      
+abs   ffffffff  binit                           
+abs   ffffffff  pinit                           
+
+[55 symbols]

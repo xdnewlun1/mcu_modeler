@@ -1,0 +1,13 @@
+# NXP P89CV51RD2 PCA loopback, SDCC build (firmware/samples_mcs51/c/pca_pwm.c): module 0 PWM output CEX0 (P1.3)
+# wired to module 1 capture input CEX1 (P1.4).  8-bit PWM at fosc/12/256 = 3600 Hz, 25 % high; the C interrupt
+# handler (__interrupt(PCA_VECTOR) = 0033h) stores the first 8 captures in caps[]: consecutive captures differ by
+# 64 (high) and 192 (low) counts.  LED1 shows the PWM output.
+# Run:  chipem run --board boards/p89cv51_pca_loopback_c.yaml --for 5ms --pin-report
+name: p89cv51_pca_loopback_c
+quantum: 10us
+chips:
+  - {id: A, chip: p89cv51rd2, firmware: ../firmware/samples_mcs51/c/build/pca_pwm.ihx}
+nets:
+  - {name: PWM, pins: [A.P1.3, A.P1.4]}
+parts:
+  - {id: LED1, type: led, active: H, ports: {in: PWM}}

@@ -213,15 +213,16 @@ class SAI(GatedBlock):
                                "MDR": {"on_write": self._mdr_write}}
         for sd in (self.tx, self.rx):
             ov[sd.csr] = {"w1c_mask": W1C, "ro_mask": FWF | FRF, "on_read": self._csr_read(sd),
-                          "on_write": self._csr_write(sd)}
+                          "on_write": self._csr_write(sd), "on_peek": self._csr_read(sd)}
             ov[sd.cr[1]] = {"on_write": self._cfg_write(sd)}
             for i in range(2, 6):
                 ov[sd.cr[i]] = {"on_write": self._cfg_write(sd)}
             for c in (0, 1):
-                ov[f"{sd.p}FR{c}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._fr_read(sd, c)}
+                ov[f"{sd.p}FR{c}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._fr_read(sd, c),
+                                      "on_peek": self._fr_read(sd, c)}
         for c in (0, 1):
-            ov[f"TDR{c}"] = {"on_read": lambda b, r: 0, "on_write": self._tdr_write(c)}
-            ov[f"RDR{c}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._rdr_read(c)}
+            ov[f"TDR{c}"] = {"on_read": lambda b, r: 0, "on_write": self._tdr_write(c), "on_peek": lambda b, r: 0}
+            ov[f"RDR{c}"] = {"ro_mask": 0xFFFFFFFF, "on_read": self._rdr_read(c), "on_peek": self._rdr_peek(c)}
         r = build_regs((name, "I2S0"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.mclk_in_hz = float(params.get("mclk_in_hz", 0.0))
@@ -843,6 +844,12 @@ class SAI(GatedBlock):
                 self._update(sd)
             return 0
         return wr
+
+    def _rdr_peek(self, c: int):
+        def pk(blk, reg):                                # the FIFO head, not popped
+            sd = self.rx
+            return sd.fifo[c][0] if sd.chans() >> c & 1 and sd.fifo[c] else 0
+        return pk
 
     def _rdr_read(self, c: int):
         def rd(blk, reg):

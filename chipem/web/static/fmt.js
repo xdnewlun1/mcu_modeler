@@ -67,3 +67,14 @@ export function chipCls(cid) {
   for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return `c-${"ABCDEFGH"[h % 8]}`;
 }
+
+// a CPU register value formatted from the server's metadata (chipem/regmeta.py: {bits, fmt}); hex is padded to the
+// register width, so an 8-bit 8051 register prints 0x2A and a 22-bit C28x PC 0x3F0012. Without metadata: 32-bit hex.
+export function fmtReg(v, meta) {
+  if (v == null) return "—";
+  if (typeof v !== "number") return typeof v === "object" ? JSON.stringify(v) : String(v);
+  const bits = meta?.bits ?? 32, f = meta?.fmt ?? "hex";
+  if (f === "flag" || f === "dec") return String(v);
+  const n = v < 0 ? v + 2 ** bits : v;
+  return "0x" + n.toString(16).toUpperCase().padStart(Math.max(1, Math.ceil(bits / 4)), "0");
+}

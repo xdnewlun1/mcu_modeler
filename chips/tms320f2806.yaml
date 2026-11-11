@@ -1,0 +1,29 @@
+# TI TMS320F2806 (280x: 100 MHz, 32K-word flash, 10K SARAM = M0/M1/L0/L1, ePWM1-6 (HRPWM 1A-4A), eCAP1-4, eQEP1/2, SPI-A..D, SCI-A/B, eCAN-A, I2C-A).
+# Package: 100-pin LQFP "PZ", same pinout as the F2808 ("All the devices in the 280x family have the same MUXing scheme",
+# SPRU712H 4.2; mux selections of peripherals a part does not have are reserved).  Sources: SPRS230P (Rev. P, Feb 2021)
+# Table 6-1 (device comparison), Figure 9-20 (F2806 memory map), Table 9-20 (flash sectors), Table 9-27 (PARTID 0x0034).
+# This file includes the F2808 description (pins, peripherals, PIE table, boot ROM stand-in) and overrides name, core and
+# memory; `drop:` removes the blocks and PIE lines the part does not have, `peripheral_params:` sets PARTID, CSM ranges,
+# the clock and ADC-clock limits, `add_peripherals:` the smaller SARAM mirror.
+include: tms320f2808.yaml
+name: TMS320F2806
+package: LQFP100 (PZ)
+regs_file: tms320f2808_regs.yaml
+core: {arch: c28x, backend: c28x, cpu: c28x, fpu: false, clock_hz: 100000000, addr_unit_bits: 16, num_irqs: 0}
+
+memory:
+  - {name: M0, base: 0x000000, size: 0x0400, kind: ram}
+  - {name: M1, base: 0x000400, size: 0x0400, kind: ram}
+  - {name: L0L1, base: 0x008000, size: 0x2000, kind: ram}      # L0 + L1 (4K each, secure), mirrored at 0x3F8000
+  - {name: OTP, base: 0x3D7800, size: 0x0400, kind: rom, fill: 0xFF}       # 1K user OTP (secure)
+  - {name: FLASH, base: 0x3F0000, size: 0x8000, kind: flash, fill: 0xFF}  # sectors D..A, 8K each (Table 9-20); 0x3F7FF6 entry
+  - {name: BOOTROM, base: 0x3FF000, size: 0x1000, kind: rom, fill: 0xFF}   # boot ROM (4K); CPU vectors at 0x3FFFC0
+
+drop: [L01H0HI, ECANB, ECAN0INTB, ECAN1INTB]
+peripheral_params:
+  DEV_EMU: {reset: {PARTID: 0x0034}}    # SPRS230P Table 9-27
+  CSM: {pwl_base: 0x3F7FF8, secure_ranges: [[0x8000, 0xA000], [0x3D7800, 0x3D7C00], [0x3F0000, 0x3F8000], [0x3F8000, 0x3FA000]]}   # L0/L1, OTP, flash, mirror
+  SYSCTRL: {ext_hz: 20000000, max_hz: 100000000}   # 20 MHz crystal: PLLCR = 10, CLKINDIV = 0 -> 100 MHz
+  ADC: {adcclk_max_hz: 12500000}         # ADC clock limit (SPRS230P electrical characteristics)
+add_peripherals:
+  - {name: L01HI, model: ti_c2000.alias, base: 0x3F8000, size: 0x2000, params: {target: 0x8000}}  # program view of L0/L1

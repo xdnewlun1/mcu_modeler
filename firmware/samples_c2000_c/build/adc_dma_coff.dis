@@ -145,7 +145,7 @@ TEXT Section .text (Little Endian), 0x2ad words at 0x00330000
 0033007c   6800
 0033007d   0006   LRETR        
 0033007e        _init_adc:
-0033007e   9ae0   MOVB         AL, #0xe0
+0033007e   9ae2   MOVB         AL, #0xe2
 0033007f   f4a9   MOV          *(0:0x7118), AL
 00330080   7118
 00330081   9a00   MOVB         AL, #0x0

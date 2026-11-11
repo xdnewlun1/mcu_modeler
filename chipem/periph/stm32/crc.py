@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs
 
@@ -56,7 +56,7 @@ class CRC(GatedBlock):
         params = dict(params or {})
         self.gate = "CRC"
         ov = {"DR": {"reset": 0xFFFFFFFF, "on_write": self._dr_write},
-              "CR": {"on_write": self._cr_write, "on_read": lambda b, r: 0}}
+              "CR": {"on_write": self._cr_write, "on_read": pure_read(lambda b, r: 0)}}
         r = build_regs((name, "CRC"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self._dr_off = self.regs["DR"].offset

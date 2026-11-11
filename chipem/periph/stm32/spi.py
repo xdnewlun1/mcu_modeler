@@ -56,7 +56,8 @@ Registers from the SVD (CR1, CR2, SR, DR, CRCPR, RXCRCR, TXCRCR, I2SCFGR, I2SPR)
 Every frame is recorded in `frames` (tx, rx) and the transmitted words in `tx_bytes` (bytes; 16-bit words big
 endian; not `output`, which marks UART-like blocks for Session.uart_output).
 I2S mode (I2SCFGR.I2SMOD = 1) of SPI2/SPI3: chipem/periph/stm32/i2s.py (`I2SEngine`; SPI1 has no I2S mode on the F4:
-setting I2SMOD there logs one `warn` and the block stays idle); the I2S2ext/I2S3ext blocks are `stm32.i2s_ext` below.
+setting I2SMOD there logs one `warn` and the block stays idle; with `params.i2s_regs: false`, STM32F401 SPI1/SPI4,
+I2SCFGR/I2SPR are reserved: read 0, writes ignored); the I2S2ext/I2S3ext blocks are `stm32.i2s_ext` below.
 The IRQ line goes through `_util.shared_irq` (SPIx and I2SxEXT share it).
 Not modelled: slave BIDIMODE, the PCLK synchronisation of the TX buffer to the shift register (the
 buffer moves at once and back-to-back frames have no gap), pin speed / slew. The Kinetis DSPI (kinetis.dspi) works
@@ -101,12 +102,17 @@ class SPI(GatedBlock):
         ov = {"CR1": {"on_write": self._cr1_write},
               "CR2": {"on_write": self._cr2_write},
               "SR": {"reset": TXE, "ro_mask": 0xFFFFFFFF & ~CRCERR, "on_read": self._sr_read,
-                     "on_write": self._sr_write},
-              "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
+                     "on_write": self._sr_write, "on_peek": lambda b, r: None},  # peek: no UDR/FRE/OVR clear
+              "DR": {"on_read": self._dr_read, "on_write": self._dr_write, "on_peek": lambda b, r: self.rxbuf},
               "CRCPR": {"on_write": self._crcpr_write},
               "RXCRCR": {"ro_mask": 0xFFFFFFFF}, "TXCRCR": {"ro_mask": 0xFFFFFFFF},
               "I2SCFGR": {"on_write": self._i2s_write}, "I2SPR": {"on_write": self._i2spr_write,
                         "reset": 0x0002}}                  # RM0090 28.5.9 / Table 129 (the SVD says 0x0A)
+        if params.get("i2s_regs", True) is False:
+            # SPI without I2S on this die (STM32F401 SPI1/SPI4, RM0368 2.3 Table 1: "SPI1", "SPI4", no I2S): I2SCFGR and
+            # I2SPR are reserved (read 0, writes ignored)
+            ov["I2SCFGR"] = {"ro_mask": 0xFFFFFFFF, "reset": 0}
+            ov["I2SPR"] = {"ro_mask": 0xFFFFFFFF, "reset": 0}
         r = build_regs((name, "SPI1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         i2s = params.get("i2s", name in ("SPI2", "SPI3"))

@@ -1,0 +1,8 @@
+# STMicroelectronics STM32F439ZI (STM32F439 = STM32F429 + CRYP (GCM/CCM) and HASH (SHA-2), DS9484 Rev 14; Cortex-M4F, 180 MHz, 2048 KB dual-bank flash, 256 KB RAM incl. 64 KB
+# CCM, LCD-TFT controller, LQFP144). Section 8 ordering information: Z = 144 pins, I = 2048 KB.
+# Same die (DEV_ID 0x419), memory map, peripherals and IRQs as chips/stm32f429zi.yaml, which is included below;
+# this file overrides name, package.
+include: stm32f429zi.yaml
+name: STM32F439ZI
+package: LQFP144
+regs_file: stm32f427_regs.yaml

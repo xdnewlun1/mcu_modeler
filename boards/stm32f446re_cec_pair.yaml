@@ -1,0 +1,17 @@
+# Two STM32F446RE on one HDMI-CEC line (stm32.cec, RM0390 ch. 32): bit-level CEC frames on an open-drain net.
+#   A (cec_ping.c, logical address 4 = Playback 1) pings 5 (nobody: TXACKE) and 0, sends <Get CEC Version> 40 9F to
+#     the TV, receives the reply and broadcasts <Active Source> 4F 82 10 00.
+#   B (cec_tv.c, logical address 0 = TV) receives with the CEC interrupt, ACKs messages to 0 and answers 9F with
+#     <CEC Version> 04 9E 05.
+#   Both run on HSI 16 MHz (CEC kernel clock HSI/488), CEC on PB6 (AF3, open drain), console USART2 (PA2, 115200).
+#   The CEC net is open drain (wired-AND, pulled up like the 27 kOhm of RM0390 32.3.1); quantum 10 us keeps a
+#   follower's ACK well inside the +/-200 us bit tolerance.
+# Run:   chipem run --board boards/stm32f446re_cec_pair.yaml --for 400ms
+# Build: firmware/samples_stm32f446/build.sh
+name: stm32f446re_cec_pair
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f446re, firmware: ../firmware/samples_stm32f446/build/cec_ping.elf}
+  - {id: B, chip: stm32f446re, firmware: ../firmware/samples_stm32f446/build/cec_tv.elf}
+nets:
+  - {name: CEC, pins: [A.PB6, B.PB6], open_drain: true}

@@ -400,7 +400,7 @@ class LLWU(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {"F1": {"w1c_mask": 0xFF, "on_write": self._flags_w}, "F2": {"w1c_mask": 0xFF, "on_write": self._flags_w},
-              "F3": {"ro_mask": 0xFF, "on_read": self._f3_read},
+              "F3": {"ro_mask": 0xFF, "on_read": self._f3_read, "on_peek": self._f3_peek},
               "FILT1": {"w1c_mask": 0x80, "ro_mask": 0x10, "on_write": self._flags_w},
               "FILT2": {"w1c_mask": 0x80, "ro_mask": 0x10, "on_write": self._flags_w},
               "RST": {"ro_mask": 0xFC}}
@@ -548,6 +548,10 @@ class LLWU(MMIOBlock):
                 else:
                     self._mflags &= ~(1 << idx)       # the module flag was cleared in the module
         return out
+
+    def _f3_peek(self, blk, reg):
+        return sum(1 << i for i in range(8) if self._mflags >> i & 1 and (
+            LLWU_MODULES.get(i, (None, ""))[1] == "seconds" or self._module_flag(i)))
 
     def _f3_read(self, blk, reg):
         v = self._f3()

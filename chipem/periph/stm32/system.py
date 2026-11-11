@@ -56,7 +56,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, rcc
 
@@ -72,7 +72,7 @@ SECTORS = [(0x0000, 0x4000), (0x4000, 0x4000), (0x8000, 0x4000), (0xC000, 0x4000
 class IWDG(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
-        ov = {"KR": {"on_write": self._kr_write, "on_read": lambda b, r: 0},
+        ov = {"KR": {"on_write": self._kr_write, "on_read": pure_read(lambda b, r: 0)},
               "PR": {"on_write": self._cfg_write}, "RLR": {"on_write": self._cfg_write},
               "SR": {"ro_mask": 0xFFFFFFFF, "on_read": self._sr_read}}
         r = build_regs((name, "IWDG"), size, ov, params.get("regs_file"))
@@ -134,6 +134,7 @@ class IWDG(MMIOBlock):
     def _busy(self, reg: str) -> bool:
         return self.chip is not None and self.chip.now_ns() < self._busy_until[reg]
 
+    @pure_read
     def _sr_read(self, blk, reg):
         return (1 if self._busy("PR") else 0) | (2 if self._busy("RLR") else 0)
 
@@ -199,9 +200,10 @@ class IWDG(MMIOBlock):
 class FLASH(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
-        ov = {"KEYR": {"on_write": self._keyr_write, "on_read": lambda b, r: 0},
-              "OPTKEYR": {"on_read": lambda b, r: 0},
+        ov = {"KEYR": {"on_write": self._keyr_write, "on_read": pure_read(lambda b, r: 0)},
+              "OPTKEYR": {"on_read": pure_read(lambda b, r: 0)},
               "SR": {"w1c_mask": 0xF3, "ro_mask": 0xFFFFFF0C},
+              "OPTCR": {"reset": 0x0FFFAAED},            # RM0090 3.9.10 (the SVD has 0x14); loaded from the option bytes
               "CR": {"on_write": self._cr_write}}
         r = build_regs((name, "FLASH"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
@@ -276,10 +278,13 @@ CSR_WUF, CSR_SBF, CSR_PVDO, CSR_EWUP, CSR_BRE, CSR_BRR, CSR_VOSRDY = (1 << 0, 1 
                                                                      1 << 14)
 PVD_LEVELS = (2.0, 2.1, 2.3, 2.5, 2.6, 2.7, 2.8, 2.9)          # PWR_CR.PLS (RM0090 5.4.1)
 RTC_WAKE_FLAGS = 0x6F00         # RTC_ISR ALRAF ALRBF WUTF TSF TAMP1F TAMP2F (Stop entry ignored while one is set)
-_ALWAYS_ON = ("stm32.rtc", "stm32.iwdg", "stm32.rcc", "stm32.pwr", "stm32.dbgmcu", "stm32.rcc_f42x", "stm32.pwr_f42x")
+_ALWAYS_ON = ("stm32.rtc", "stm32.iwdg", "stm32.rcc", "stm32.pwr", "stm32.dbgmcu", "stm32.rcc_f42x", "stm32.pwr_f42x",
+              "stm32.rcc_f446", "stm32.pwr_f446", "stm32.rcc_f4x1", "stm32.pwr_f4x1",
+              "stm32.rcc_f2", "stm32.pwr_f2", "stm32.rtc_f2")
 # blocks that keep working in Stop (RM0090 5.3.4: "all clocks in the 1.2 V domain are stopped"; RTC / IWDG run from
 # LSE/LSI, EXTI edge detection is asynchronous, GPIO input levels feed it; the others are clock-less storage)
-_STOP_KEEP = _ALWAYS_ON + ("stm32.exti", "stm32.gpio", "stm32.syscfg", "stm32.flash")
+_STOP_KEEP = _ALWAYS_ON + ("stm32.exti", "stm32.gpio", "stm32.syscfg", "stm32.flash", "stm32.flash_f446",
+                            "stm32.flash_f4x1")
 
 
 @register("stm32.pwr")
@@ -352,6 +357,7 @@ class PWR(GatedBlock):
             self._wkup_level = 1 if self._wkup_pin.level() == "H" else 0
 
     # ------------------------------------------------------------ registers
+    @pure_read
     def _csr_read(self, blk, reg):
         v = self.get("CSR") | CSR_VOSRDY
         if v & CSR_BRE:

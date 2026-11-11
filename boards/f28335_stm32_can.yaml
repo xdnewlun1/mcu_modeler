@@ -1,0 +1,16 @@
+# A TMS320F28335 (eCAN-A) and an STM32F405ZG (bxCAN1) on one CAN bus at 500 kbit/s.
+#   A (F28335, firmware/samples_c2000_c/f28335_can.c, TI cl2000 --float_support=fpu32): every 10 ms 100#00<n>4B32
+#     from eCAN-A mailbox 0 (GPIO31 CANTXA / GPIO30 CANRXA); prints "TX 100 <n>" and every received 0x202 frame on
+#     SCI-A (GPIO29).
+#   B (STM32, firmware/samples_stm32/can_echo.c): echoes 0x100 as 202#<same data>, prints both on USART1.
+# Bit timing: F28335 eCAN clock = SYSCLKOUT / 2 = 75 MHz, BRP 10 x 15 tq; STM32 PCLK1 16 MHz / 2 / 16 tq: both 2 us/bit.
+# The F28335 joins the bus after its PLL lock (131072 x 33 ns = 4.4 ms), so the first frame leaves at ~14.4 ms.
+# Run:  chipem run --board boards/f28335_stm32_can.yaml --for 40ms
+# Build: firmware/samples_c2000_c/build.sh f28335_can (TI cl2000), firmware/samples_stm32/build.sh
+name: f28335_stm32_can
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28335, firmware: ../firmware/samples_c2000_c/build/f28335_can.out}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/can_echo.elf}
+links:
+  - {type: can, name: CANBUS, nodes: [A.ECANA, B.CAN1]}

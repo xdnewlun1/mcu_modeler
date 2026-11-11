@@ -157,7 +157,7 @@ class McBSP(C2000Block):
         cfg = {"on_write": self._cfg_write}
         ov = {
             "DRR2": {"ro_mask": 0xFFFF},
-            "DRR1": {"ro_mask": 0xFFFF, "on_read": self._drr1_read},
+            "DRR1": {"ro_mask": 0xFFFF, "on_read": self._drr1_read, "on_peek": lambda b, r: None},
             "DXR1": {"on_write": self._dxr1_write},
             "SPCR1": {"ro_mask": 0x0706, "on_write": self._spcr1_write},
             "SPCR2": {"ro_mask": 0xFC06, "on_write": self._spcr2_write},

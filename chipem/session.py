@@ -259,6 +259,9 @@ class ChipContext:
             chip_.load_firmware(self.image)
             if vtor is not None and hasattr(chip_.arch, "reset_vtor"):
                 chip_.arch.reset_vtor = vtor
+            scs = getattr(chip_.arch, "scs", None)
+            if self.image.fmt == "bin" and self.image.unit_bytes == 1 and scs is not None and hasattr(scs, "cpacr_reset"):
+                scs.cpacr_reset = 0x00F00000    # raw image started by a bootloader that enabled the FPU (CP10/CP11)
             self.reset()
 
     def apply_clock_override(self) -> None:

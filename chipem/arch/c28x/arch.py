@@ -98,6 +98,8 @@ class C28xArch:
         try:
             core.itrap_handler = self.itrap
             core.vector_fetch = self.vector_target
+            if getattr(core, "fpu", False):
+                core.fpu_flag_cb = self.fpu_flag
         except AttributeError:             # pragma: no cover - core with __slots__
             pass
 
@@ -162,6 +164,15 @@ class C28xArch:
                 self._edge(v)
         else:
             self.asserted.discard(v)
+
+    def fpu_flag(self, bit: int) -> None:
+        """FPU STF.LVF (bit 1) / LUF (bit 2) went 0 -> 1: the latched flags are PIE inputs on the F2833x (SPRS439Q
+        Table 8-32: LVF = INT12.7, LUF = INT12.8; the chip YAML names them LVF/LUF).  The PIE latches the edge; the
+        flag in STF stays set until MOVST0 / SETFLG / MOV32 STF clear it, so the next edge needs a clear first."""
+        name = "LVF" if bit == 1 else "LUF"
+        irqs = getattr(getattr(self.chip, "desc", None), "irqs", None) or {}
+        if name in irqs.values():
+            self.pulse_irq(name)
 
     def pulse_irq(self, line: Any) -> None:
         self._edge(self.line_vector(line))

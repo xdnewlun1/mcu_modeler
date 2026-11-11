@@ -150,6 +150,10 @@ class GatedBlock(MMIOBlock):
         super().attach(chip)
         self._rcc = rcc(chip)
         self._gate_loc = self._rcc.gate_location(self.gate) if (self._rcc is not None and self.gate) else None
+        if (self.params or {}).get("reserved_zero"):
+            # offsets that hold no register of this part (e.g. I2C_FLTR, TIMx_OR on the STM32F1) read 0 and ignore
+            # writes, like reserved silicon addresses (default: RAM-like, see periph/base.py)
+            self.ram_like = False
 
     def _gate_ok(self) -> bool:
         loc = self._gate_loc

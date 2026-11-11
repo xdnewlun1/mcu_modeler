@@ -11,12 +11,16 @@ from ._util import C2000Block, build_regs
 @register("ti_c2000.storage")
 class Storage(C2000Block):
     """Register file with the reset values from the register table; no behaviour.  `params.regs` names the table
-    entry (default: the block name).  Accesses are not logged as unmodelled when the register is declared."""
+    entry (default: the block name).  Accesses are not logged as unmodelled when the register is declared.
+    `params.reset: {REG: value}` overrides table reset values for one part of a family sharing the table (e.g. the
+    PARTID / CLASSID of each F280x / F2833x device)."""
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
+        ov = {str(k): {"reset": int(v, 0) if isinstance(v, str) else int(v)}
+              for k, v in (params.get("reset") or {}).items()}
         try:
-            regs = build_regs((params.get("regs") or name, name), size, {}, params.get("regs_file"))
+            regs = build_regs((params.get("regs") or name, name), size, ov, params.get("regs_file"))
         except KeyError:
             regs = []
         super().__init__(name, base, size, regs, params=params, log=log)
@@ -39,7 +43,7 @@ class FlashCtl(C2000Block):
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
-        ov = {"FSTATUS": {"on_read": self._fstatus, "on_write": self._fstatus_write},
+        ov = {"FSTATUS": {"on_read": self._fstatus, "on_peek": self._fstatus, "on_write": self._fstatus_write},
               "FPWR": {"on_write": self._fpwr_write}}
         regs = build_regs((name, "FLASH"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
@@ -137,7 +141,7 @@ class CSM(C2000Block):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {f"KEY{i}": {"on_write": self._key_write} for i in range(8)}
-        ov["CSMSCR"] = {"on_read": self._scr_read, "on_write": self._scr_write}
+        ov["CSMSCR"] = {"on_read": self._scr_read, "on_peek": self._scr_read, "on_write": self._scr_write}
         regs = build_regs((name, "CSM"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self.boot_dummy_read = bool(params.get("boot_dummy_read", True))

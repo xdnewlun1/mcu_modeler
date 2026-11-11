@@ -1,0 +1,165 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      1c4     4 .isr_vector
+ 8000000  8000000      1c4     4         /tmp/startup-0d52f1.o:(.isr_vector)
+ 8000000  8000000      1c4     1                 __vector_table
+ 80001c4  80001c4      3dc     4 .text
+ 80001c4  80001c4        2     4         /tmp/startup-0d52f1.o:(.text.Default_Handler)
+ 80001c4  80001c4        0     1                 $t
+ 80001c5  80001c5        2     1                 Default_Handler
+ 80001c5  80001c5        2     1                 NMI_Handler
+ 80001c5  80001c5        2     1                 HardFault_Handler
+ 80001c5  80001c5        2     1                 MemManage_Handler
+ 80001c5  80001c5        2     1                 BusFault_Handler
+ 80001c5  80001c5        2     1                 UsageFault_Handler
+ 80001c5  80001c5        2     1                 SVC_Handler
+ 80001c5  80001c5        2     1                 DebugMon_Handler
+ 80001c5  80001c5        2     1                 PendSV_Handler
+ 80001c5  80001c5        2     1                 SysTick_Handler
+ 80001c5  80001c5        2     1                 WWDG_IRQHandler
+ 80001c5  80001c5        2     1                 PVD_IRQHandler
+ 80001c5  80001c5        2     1                 TAMP_STAMP_IRQHandler
+ 80001c5  80001c5        2     1                 RTC_WKUP_IRQHandler
+ 80001c5  80001c5        2     1                 FLASH_IRQHandler
+ 80001c5  80001c5        2     1                 RCC_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI0_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI1_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI2_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI3_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI4_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream0_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream1_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream2_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream3_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream4_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream5_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream6_IRQHandler
+ 80001c5  80001c5        2     1                 ADC_IRQHandler
+ 80001c5  80001c5        2     1                 CAN1_TX_IRQHandler
+ 80001c5  80001c5        2     1                 CAN1_RX0_IRQHandler
+ 80001c5  80001c5        2     1                 CAN1_RX1_IRQHandler
+ 80001c5  80001c5        2     1                 CAN1_SCE_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI9_5_IRQHandler
+ 80001c5  80001c5        2     1                 TIM1_BRK_TIM9_IRQHandler
+ 80001c5  80001c5        2     1                 TIM1_UP_TIM10_IRQHandler
+ 80001c5  80001c5        2     1                 TIM1_TRG_COM_TIM11_IRQHandler
+ 80001c5  80001c5        2     1                 TIM1_CC_IRQHandler
+ 80001c5  80001c5        2     1                 TIM2_IRQHandler
+ 80001c5  80001c5        2     1                 TIM3_IRQHandler
+ 80001c5  80001c5        2     1                 TIM4_IRQHandler
+ 80001c5  80001c5        2     1                 I2C1_EV_IRQHandler
+ 80001c5  80001c5        2     1                 I2C1_ER_IRQHandler
+ 80001c5  80001c5        2     1                 I2C2_EV_IRQHandler
+ 80001c5  80001c5        2     1                 I2C2_ER_IRQHandler
+ 80001c5  80001c5        2     1                 SPI1_IRQHandler
+ 80001c5  80001c5        2     1                 SPI2_IRQHandler
+ 80001c5  80001c5        2     1                 USART1_IRQHandler
+ 80001c5  80001c5        2     1                 USART2_IRQHandler
+ 80001c5  80001c5        2     1                 USART3_IRQHandler
+ 80001c5  80001c5        2     1                 EXTI15_10_IRQHandler
+ 80001c5  80001c5        2     1                 RTC_Alarm_IRQHandler
+ 80001c5  80001c5        2     1                 OTG_FS_WKUP_IRQHandler
+ 80001c5  80001c5        2     1                 TIM8_BRK_TIM12_IRQHandler
+ 80001c5  80001c5        2     1                 TIM8_UP_TIM13_IRQHandler
+ 80001c5  80001c5        2     1                 TIM8_TRG_COM_TIM14_IRQHandler
+ 80001c5  80001c5        2     1                 TIM8_CC_IRQHandler
+ 80001c5  80001c5        2     1                 DMA1_Stream7_IRQHandler
+ 80001c5  80001c5        2     1                 FMC_IRQHandler
+ 80001c5  80001c5        2     1                 SDIO_IRQHandler
+ 80001c5  80001c5        2     1                 TIM5_IRQHandler
+ 80001c5  80001c5        2     1                 SPI3_IRQHandler
+ 80001c5  80001c5        2     1                 UART4_IRQHandler
+ 80001c5  80001c5        2     1                 UART5_IRQHandler
+ 80001c5  80001c5        2     1                 TIM6_DAC_IRQHandler
+ 80001c5  80001c5        2     1                 TIM7_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream0_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream1_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream2_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream3_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream4_IRQHandler
+ 80001c5  80001c5        2     1                 CAN2_TX_IRQHandler
+ 80001c5  80001c5        2     1                 CAN2_RX0_IRQHandler
+ 80001c5  80001c5        2     1                 CAN2_RX1_IRQHandler
+ 80001c5  80001c5        2     1                 CAN2_SCE_IRQHandler
+ 80001c5  80001c5        2     1                 OTG_FS_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream5_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream6_IRQHandler
+ 80001c5  80001c5        2     1                 DMA2_Stream7_IRQHandler
+ 80001c5  80001c5        2     1                 USART6_IRQHandler
+ 80001c5  80001c5        2     1                 I2C3_EV_IRQHandler
+ 80001c5  80001c5        2     1                 I2C3_ER_IRQHandler
+ 80001c5  80001c5        2     1                 OTG_HS_EP1_OUT_IRQHandler
+ 80001c5  80001c5        2     1                 OTG_HS_EP1_IN_IRQHandler
+ 80001c5  80001c5        2     1                 OTG_HS_WKUP_IRQHandler
+ 80001c5  80001c5        2     1                 OTG_HS_IRQHandler
+ 80001c5  80001c5        2     1                 DCMI_IRQHandler
+ 80001c5  80001c5        2     1                 FPU_IRQHandler
+ 80001c5  80001c5        2     1                 SPI4_IRQHandler
+ 80001c5  80001c5        2     1                 SAI1_IRQHandler
+ 80001c5  80001c5        2     1                 SAI2_IRQHandler
+ 80001c5  80001c5        2     1                 QUADSPI_IRQHandler
+ 80001c5  80001c5        2     1                 CEC_IRQHandler
+ 80001c5  80001c5        2     1                 SPDIF_RX_IRQHandler
+ 80001c5  80001c5        2     1                 FMPI2C1_EV_IRQHandler
+ 80001c5  80001c5        2     1                 FMPI2C1_ER_IRQHandler
+ 80001c8  80001c8       72     4         /tmp/startup-0d52f1.o:(.text.Reset_Handler)
+ 80001c8  80001c8        0     1                 $t
+ 80001c9  80001c9       72     1                 Reset_Handler
+ 800023c  800023c      32e     4         /tmp/fmpi2c_eeprom-cd9725.o:(.text.main)
+ 800023c  800023c        0     1                 $t
+ 800023d  800023d      32e     1                 main
+ 800056a  800056a       35     1         <internal>:(.rodata.str1.1)
+ 800059f  800059f        1     1         . = ALIGN(4)
+ 80005a0  80005a0       10     4 .ARM.exidx
+ 80005a0  80005a0       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000        4     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/fmpi2c_eeprom-cd9725.o:(.bss.polls)
+20000000 20000000        4     1                 polls
+20000004 20000004        0     1         . = ALIGN(4)
+20000004 20000004        0     1         _ebss = .
+       0        0      1c2     1 .debug_loclists
+       0        0       39     1         /tmp/startup-0d52f1.o:(.debug_loclists)
+      39       39      189     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_loclists)
+       0        0      28e     1 .debug_abbrev
+       0        0       d7     1         /tmp/startup-0d52f1.o:(.debug_abbrev)
+      d7       d7      1b7     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_abbrev)
+       0        0      652     1 .debug_info
+       0        0       b0     1         /tmp/startup-0d52f1.o:(.debug_info)
+      b0       b0      5a2     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_info)
+       0        0       a8     1 .debug_rnglists
+       0        0       24     1         /tmp/startup-0d52f1.o:(.debug_rnglists)
+      24       24       84     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_rnglists)
+       0        0      140     1 .debug_str_offsets
+       0        0       38     1         /tmp/startup-0d52f1.o:(.debug_str_offsets)
+      38       38      108     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_str_offsets)
+       0        0      22d     1 .debug_str
+       0        0      22d     1         <internal>:(.debug_str)
+       0        0       80     1 .debug_addr
+       0        0       18     1         /tmp/startup-0d52f1.o:(.debug_addr)
+      18       18       68     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       49     1 .ARM.attributes
+       0        0       49     1         /tmp/startup-0d52f1.o:(.ARM.attributes)
+       0        0       5c     4 .debug_frame
+       0        0       34     4         /tmp/startup-0d52f1.o:(.debug_frame)
+      34       34       28     4         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_frame)
+       0        0      4ab     1 .debug_line
+       0        0       c8     1         /tmp/startup-0d52f1.o:(.debug_line)
+      c8       c8      3e3     1         /tmp/fmpi2c_eeprom-cd9725.o:(.debug_line)
+       0        0       c6     1 .debug_line_str
+       0        0       c6     1         <internal>:(.debug_line_str)
+       0        0      710     4 .symtab
+       0        0      710     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      7ce     1 .strtab
+       0        0      7ce     1         <internal>:(.strtab)

@@ -1,0 +1,79 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      198     4 .isr_vector
+ 8000000  8000000      198     4         /tmp/startup-ca7a84.o:(.isr_vector)
+ 8000000  8000000      198     1                 vectors
+ 8000198  8000198      234     4 .text
+ 8000198  8000198        2     4         /tmp/startup-ca7a84.o:(.text.Default_Handler)
+ 8000198  8000198        0     1                 $t
+ 8000199  8000199        2     1                 Default_Handler
+ 8000199  8000199        2     1                 SysTick_Handler
+ 8000199  8000199        2     1                 USART1_IRQHandler
+ 8000199  8000199        2     1                 USART2_IRQHandler
+ 8000199  8000199        2     1                 USART6_IRQHandler
+ 800019c  800019c       6a     4         /tmp/startup-ca7a84.o:(.text.Reset_Handler)
+ 800019c  800019c        0     1                 $t
+ 800019d  800019d       6a     1                 Reset_Handler
+ 8000208  8000208       2a     4         /tmp/clock_uart-9ddf59.o:(.text.TIM2_IRQHandler)
+ 8000208  8000208        0     1                 $t
+ 8000209  8000209       2a     1                 TIM2_IRQHandler
+ 8000234  8000234      180     4         /tmp/clock_uart-9ddf59.o:(.text.main)
+ 8000234  8000234        0     1                 $t
+ 8000235  8000235      180     1                 main
+ 80003b4  80003b4       15     1         <internal>:(.rodata.str1.1)
+ 80003c9  80003c9        3     1         . = ALIGN(4)
+ 80003cc  80003cc       10     4 .ARM.exidx
+ 80003cc  80003cc       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000        8     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/clock_uart-9ddf59.o:(.bss.ticks)
+20000000 20000000        4     1                 ticks
+20000004 20000004        4     4         /tmp/clock_uart-9ddf59.o:(.bss.echoed)
+20000004 20000004        4     1                 echoed
+20000008 20000008        0     1         . = ALIGN(4)
+20000008 20000008        0     1         _ebss = .
+       0        0       6f     1 .debug_loclists
+       0        0       32     1         /tmp/startup-ca7a84.o:(.debug_loclists)
+      32       32       3d     1         /tmp/clock_uart-9ddf59.o:(.debug_loclists)
+       0        0      236     1 .debug_abbrev
+       0        0       c7     1         /tmp/startup-ca7a84.o:(.debug_abbrev)
+      c7       c7      16f     1         /tmp/clock_uart-9ddf59.o:(.debug_abbrev)
+       0        0      4a5     1 .debug_info
+       0        0       95     1         /tmp/startup-ca7a84.o:(.debug_info)
+      95       95      410     1         /tmp/clock_uart-9ddf59.o:(.debug_info)
+       0        0       40     1 .debug_rnglists
+       0        0       17     1         /tmp/startup-ca7a84.o:(.debug_rnglists)
+      17       17       29     1         /tmp/clock_uart-9ddf59.o:(.debug_rnglists)
+       0        0      140     1 .debug_str_offsets
+       0        0       34     1         /tmp/startup-ca7a84.o:(.debug_str_offsets)
+      34       34      10c     1         /tmp/clock_uart-9ddf59.o:(.debug_str_offsets)
+       0        0      245     1 .debug_str
+       0        0      245     1         <internal>:(.debug_str)
+       0        0       5c     1 .debug_addr
+       0        0       14     1         /tmp/startup-ca7a84.o:(.debug_addr)
+      14       14       48     1         /tmp/clock_uart-9ddf59.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       49     1 .ARM.attributes
+       0        0       49     1         /tmp/startup-ca7a84.o:(.ARM.attributes)
+       0        0       68     4 .debug_frame
+       0        0       34     4         /tmp/startup-ca7a84.o:(.debug_frame)
+      34       34       34     4         /tmp/clock_uart-9ddf59.o:(.debug_frame)
+       0        0      2d3     1 .debug_line
+       0        0       cb     1         /tmp/startup-ca7a84.o:(.debug_line)
+      cb       cb      208     1         /tmp/clock_uart-9ddf59.o:(.debug_line)
+       0        0       96     1 .debug_line_str
+       0        0       96     1         <internal>:(.debug_line_str)
+       0        0      180     4 .symtab
+       0        0      180     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0       dc     1 .strtab
+       0        0       dc     1         <internal>:(.strtab)

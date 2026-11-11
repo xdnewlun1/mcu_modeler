@@ -83,7 +83,10 @@ class PORT(GatedBlock):
                 pin = board.gpio(self.port, i)
                 self.pins[i] = pin
                 if pin is not None:
-                    board.input_listeners[pin.id].append(partial(self._on_level, i))
+                    cb = partial(self._on_level, i)
+                    # an armed pin interrupt must see a waveform source's edges live (PinBoard.drive_wave)
+                    cb.wave_rt = partial(self._irq_armed, i)
+                    board.input_listeners[pin.id].append(cb)
             from ...pinreport import ensure
             self._rep = ensure(chip)
             if self._rep is not None:
@@ -353,6 +356,9 @@ class PORT(GatedBlock):
         b = 1 if lvl == "H" else 0
         if (irqc == 12) == (b == 1):
             self._set_isf(i)
+
+    def _irq_armed(self, i: int, pin: Any = None) -> bool:
+        return bool((self.pcr(i) >> IRQC_SHIFT) & 0xF)
 
     def _on_level(self, i: int, pin: Any) -> None:
         b = 1 if pin.level() == "H" else 0

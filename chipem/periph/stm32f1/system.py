@@ -1,44 +1,56 @@
 """STM32F1 flash interface (FPEC), option bytes, system memory (device electronic signature) and DBGMCU.
 
-Not verified against RM0008 / PM0075 (the F1 flash programming manual); written from the F1 documentation as used
-by ST's drivers, the SVD layout and DS15060 (Table 28 flash timings, section 3.3 memory, Figure 8).
+Sources: RM0008 Rev 21 3.3.3 (Flash memory: organisation Tables 4-8, "Reading the Flash memory", FLASH_ACR), 7.1.1
+(low-power management reset), 30 (device electronic signature), 31.6.1 / 31.16 (DBGMCU).  RM0008 refers everything
+else about the FPEC (KEYR/OPTKEYR keys, SR, CR, AR, OBR, WRPR, option byte layout and programming) to the flash
+programming manual PM0075 (PM0068 for XL density), which was not available: those parts follow ST's drivers (SPL/HAL
+FLASH code), the SVD layout and DS15060 (Table 28 flash timings) and are not verified.
 
 FLASH (`stm32f1.flash`, 0x40022000):
-* ACR: LATENCY (0..2), HLFCYA, PRFTBE (reset 1), PRFTBS (read-only, follows PRFTBE).  Wait states have no timing
-  effect, but too few for HCLK (0 up to 24 MHz, 1 up to 48 MHz, 2 up to 72 MHz) log one `warn`: silicon would fetch
-  wrong instructions.
-* KEYR 0x45670123 then 0xCDEF89AB clears CR.LOCK; any wrong key locks the FPEC until the next reset (one `warn`; the
-  silicon also returns a bus error).  OPTKEYR with the same keys sets CR.OPTWRE.  CR.LOCK can only be set by software.
-  CR writes while LOCK = 1 are ignored.
-* Page erase (PER, AR, STRT) and mass erase (MER, STRT): BSY = 1 for the erase time (params `erase_ns`, default 30 ms:
-  DS15060 Table 28 tERASE / tME 20-40 ms), then the page / the whole main flash reads 0xFF, EOP = 1 (FLASH vector
-  with EOPIE).  A write-protected page (WRPR bit clear, 4 KB = 4 pages per bit) is not erased and sets WRPRTERR.
-* Programming (PG = 1): CHIP_EM maps the flash as memory the CPU writes directly (no write hook in the core), so the
-  FPEC checks each programmed half-word after the fact, at the next FLASH register access (firmware polls SR.BSY
-  after every half-word): a half-word that was not erased (not 0xFFFF; writing 0x0000 is allowed) is restored and
-  sets PGERR, one in a write-protected page is restored and sets WRPRTERR, a good one sets BSY for tPROG (params
-  `prog_ns`, default 52.5 us, Table 28) and then EOP.  Flash changes made while PG = 0 are restored with one `warn`
-  (silicon ignores such writes / bus-faults).
-* SR: BSY read-only; PGERR, WRPRTERR, EOP write-1-to-clear.  FLASH vector = (EOP & EOPIE) | (errors & ERRIE).
-* OBR / WRPR: read-only images of the option bytes loaded at reset: OBR = OPTERR | RDPRT << 1 | USER << 2 |
+* ACR (RM0008 3.3.3, verified): reset 0x30; LATENCY (0..2), HLFCYA, PRFTBE (reset 1), PRFTBS (read-only, follows
+  PRFTBE).  Wait states have no timing effect, but one `warn` each when: LATENCY is too low for SYSCLK (0 up to 24 MHz,
+  1 up to 48 MHz, 2 up to 72 MHz: silicon would fetch wrong instructions); HLFCYA is set with SYSCLK above 8 MHz, an
+  AHB prescaler or the PLL; PRFTBE is 0 with an AHB prescaler; PRFTBE is switched with SYSCLK above 24 MHz or an AHB
+  prescaler.  A program or erase with the HSI off logs one `warn` (3.3.3: the HSI must be on).
+* (PM0075, not verified) KEYR 0x45670123 then 0xCDEF89AB clears CR.LOCK; any wrong key locks the FPEC until the next
+  reset (one `warn`; the silicon also returns a bus error).  OPTKEYR with the same keys sets CR.OPTWRE.  CR.LOCK can
+  only be set by software.  CR writes while LOCK = 1 are ignored.
+* (PM0075) Page erase (PER, AR, STRT; 1 KB pages on low/medium density, RM0008 Table 4) and mass erase (MER, STRT; the
+  information block is not affected, 3.3.3): BSY = 1 for the erase time (params `erase_ns`, default 30 ms: DS15060
+  Table 28 tERASE / tME 20-40 ms), then the page / the whole main flash reads 0xFF, EOP = 1 (FLASH vector with EOPIE).
+  A write-protected page (WRPR bit clear, 4 KB = 4 pages per bit) is not erased and sets WRPRTERR.
+* (PM0075) Programming (PG = 1, half-words, 3.3.3): CHIP_EM maps the flash as memory the CPU writes directly (no write
+  hook in the core), so the FPEC checks each programmed half-word after the fact, at the next FLASH register access
+  (firmware polls SR.BSY after every half-word): a half-word that was not erased (not 0xFFFF; writing 0x0000 is
+  allowed) is restored and sets PGERR, one in a write-protected page is restored and sets WRPRTERR, a good one sets BSY
+  for tPROG (params `prog_ns`, default 52.5 us, Table 28) and then EOP.  Flash changes made while PG = 0 are restored
+  with one `warn` (silicon ignores such writes / bus-faults).
+* (PM0075) SR: BSY read-only; PGERR, WRPRTERR, EOP write-1-to-clear.  FLASH vector = (EOP & EOPIE) | (errors & ERRIE).
+* (PM0075) OBR / WRPR: read-only images of the option bytes loaded at reset: OBR = OPTERR | RDPRT << 1 | USER << 2 |
   Data0 << 10 | Data1 << 18 (RDPRT = RDP != 0xA5), WRPR = WRP3..WRP0.
-* Option bytes (`stm32f1.optbytes`, 0x1FFFF800, eight half-words: RDP, USER, Data0, Data1, WRP0-3, each byte followed
-  by its complement): OPTER + STRT erases them (to 0xFFFF; needs OPTWRE), OPTPG + a half-word write programs the low
-  byte (the complement is written by hardware).  They take effect at the next reset.  Factory state: RDP 0xA5 (no
-  read protection), USER/Data/WRP 0xFF.  USER bit 0 WDG_SW = 0 starts the IWDG at every reset (hardware watchdog);
-  bits 1/2 nRST_STOP / nRST_STDBY = 0 make Stop / Standby entry reset the chip (stm32f1.pwr asks `rst_on(mode)`).
-  Read protection only shows in OBR (no debugger access to block).
-System memory (`stm32f1.sysmem`, 0x1FFFF000, 2 KB): the ST bootloader is not available, so it reads 0xFF except the
-device electronic signature: flash size register F_SIZE at 0x1FFFF7E0 (16-bit, KB; params `flash_kb`, default from the
-FLASH memory region) and the 96-bit unique ID at 0x1FFFF7E8 (params `uid`, three 32-bit words).  Writes are ignored.
-DBGMCU (`stm32f1.dbgmcu`, 0xE0042000): IDCODE = DEV_ID 0x412 (low density) | REV_ID << 16 (params `idcode`, default
-0x10006412, revision A); CR (DBG_SLEEP/STOP/STANDBY, TRACE, DBG_xxx_STOP) is storage (freeze bits not applied).
+* (PM0075) Option bytes (`stm32f1.optbytes`, 0x1FFFF800-0x1FFFF80F, RM0008 Table 4; eight half-words: RDP, USER,
+  Data0, Data1, WRP0-3, each byte followed by its complement): OPTER + STRT erases them (to 0xFFFF; needs OPTWRE),
+  OPTPG + a half-word write programs the low byte (the complement is written by hardware).  They take effect at the
+  next reset.  Factory state: RDP 0xA5 (no read protection), USER/Data/WRP 0xFF.  USER bit 0 WDG_SW = 0 starts the
+  IWDG at every reset (hardware watchdog, RM0008 19.3.1); bits 1/2 nRST_STOP / nRST_STDBY = 0 make Stop / Standby entry
+  reset the chip (RM0008 7.1.1 low-power management reset; stm32f1.pwr asks `rst_on(mode)`).  Read protection only
+  shows in OBR (no debugger access to block).
+System memory (`stm32f1.sysmem`, 0x1FFFF000, 2 KB, RM0008 Table 4): the ST bootloader is not available, so it reads 0xFF
+except the device electronic signature (RM0008 ch. 30, verified): flash size register F_SIZE at 0x1FFFF7E0 (16-bit,
+KB; params `flash_kb`, default from the FLASH memory region) and the 96-bit unique ID at 0x1FFFF7E8 (params `uid`,
+three 32-bit words; byte/half-word/word reads).  Writes are ignored.
+DBGMCU (`stm32f1.dbgmcu`, 0xE0042000, RM0008 31.6.1 / 31.16.3, verified): IDCODE = REV_ID << 16 | DEV_ID (params
+`density`: 0x412 low, 0x410 medium, 0x414 high, 0x430 XL, 0x418 connectivity line; default low = 0x10006412, revision
+A; `rev_id` / `idcode` override; the reserved bits 15:12 read 0x6 as on silicon).  CR survives system resets (power-on
+reset only); TRACE_IOEN / TRACE_MODE assign the trace pins (stm32f1.gpio); DBG_SLEEP/STOP/STANDBY and the DBG_xxx_STOP freeze bits act only while a debugger halts the
+core, which CHIP_EM does not model: storage.  The errata "IDCODE reads 0 without a debugger" is not in RM0008 (31.6.1
+says the code is readable by user software): `idcode_readable: false` models it.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import build_regs, find_model, irq_number, rcc
 
@@ -55,15 +67,19 @@ class FLASH(MMIOBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov = {"ACR": {"on_write": self._acr_write, "ro_mask": 0xFFFFFFE0},
-              "KEYR": {"on_write": self._keyr_write, "on_read": lambda b, r: 0},
-              "OPTKEYR": {"on_write": self._optkeyr_write, "on_read": lambda b, r: 0},
-              "SR": {"w1c_mask": PGERR | WRPRTERR | EOP, "ro_mask": 0xFFFFFFCB, "on_read": self._sr_read,
+              "KEYR": {"on_write": self._keyr_write, "on_read": pure_read(lambda b, r: 0)},
+              "OPTKEYR": {"on_write": self._optkeyr_write, "on_read": pure_read(lambda b, r: 0)},
+              "SR": {"w1c_mask": PGERR | WRPRTERR | EOP, "ro_mask": 0xFFFFFFCB, "on_read": self._sr_read, "on_peek": self._sr_peek,
                      "on_write": self._sr_write},
               "CR": {"on_write": self._cr_write, "ro_mask": 0xFFFFE908},
-              "AR": {"on_read": lambda b, r: 0},
+              "AR": {"on_read": pure_read(lambda b, r: 0)},
               "OBR": {"ro_mask": 0xFFFFFFFF}, "WRPR": {"ro_mask": 0xFFFFFFFF}}
         r = build_regs((name, "FLASH"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        # page size: 1 KB (low/medium density, RM0008 3.3.3 Tables 4/5) or 2 KB (high density, Table 6; params
+        # `page_size: 2048`).  Write protection (PM0075 FLASH_WRPR): 4 KB per WRPR bit; on 2 KB-page parts bits
+        # 0-30 cover 2 pages each and bit 31 the rest of the flash (pages 62-255)
+        self.page = int(params.get("page_size", PAGE))
         self.erase_ns = float(params.get("erase_ns", 30e6))
         self.prog_ns = float(params.get("prog_ns", 52.5e3))
         self.ob = list(params.get("option_bytes") or OB_FACTORY)       # programmed option bytes (survive resets)
@@ -129,7 +145,8 @@ class FLASH(MMIOBlock):
         return not self.user_bit(1 if mode == "stop" else 2)
 
     def page_protected(self, page: int) -> bool:
-        return not (self.get("WRPR") >> (page // 4)) & 1
+        bit = page * self.page // 4096
+        return not (self.get("WRPR") >> min(bit, 31)) & 1
 
     def _hw_watchdog(self) -> None:
         """USER.WDG_SW = 0 (hardware watchdog): the IWDG is started by every reset (the chip YAML lists IWDG before
@@ -150,13 +167,24 @@ class FLASH(MMIOBlock):
             self.emit("warn", block=self.name, msg=msg)
 
     def _check_latency(self) -> None:
+        """RM0008 3.3.3 "Reading the Flash memory": wait states follow SYSCLK (0 up to 24 MHz, 1 up to 48 MHz, 2 up
+        to 72 MHz); half-cycle access only with SYSCLK <= 8 MHz from HSI/HSE (not the PLL) and no AHB prescaler; the
+        prefetch buffer must be on with an AHB prescaler other than 1."""
         r = rcc(self.chip) if self.chip is not None else None
-        hz = r.core_hz if r is not None else self.chip.clock.hz
+        hz = getattr(r, "sysclk_hz", None) or self.chip.clock.hz
         need = 0 if hz <= 24e6 * 1.001 else (1 if hz <= 48e6 * 1.001 else 2)
-        lat = self.get("ACR") & 7
+        acr = self.get("ACR")
+        lat = acr & 7
         if lat < need:
-            self._warn_once(f"lat{need}", f"FLASH_ACR.LATENCY = {lat} is too low for HCLK {hz / 1e6:.3f} MHz (needs "
+            self._warn_once(f"lat{need}", f"FLASH_ACR.LATENCY = {lat} is too low for SYSCLK {hz / 1e6:.3f} MHz (needs "
                             f"{need} wait state{'s' if need > 1 else ''}): silicon would fetch wrong instructions")
+        hpre = getattr(r, "hpre", 1) if r is not None else 1
+        if acr & 0x8 and (hz > 8e6 * 1.001 or hpre != 1 or getattr(r, "source", "HSI") == "PLL"):
+            self._warn_once("hlfcya", "FLASH_ACR.HLFCYA (half-cycle access) is only allowed with SYSCLK <= 8 MHz from "
+                            "HSI/HSE and no AHB prescaler (RM0008 3.3.3)")
+        if hpre != 1 and not acr & 0x10:
+            self._warn_once("prft", "FLASH_ACR.PRFTBE = 0 with an AHB prescaler: the prefetch buffer must be kept on "
+                            "(RM0008 3.3.3)")
 
     def _update_irq(self) -> None:
         sr, cr = self.get("SR"), self.get("CR")
@@ -216,7 +244,7 @@ class FLASH(MMIOBlock):
                     fix.append((j, snap[j:j + 2]))
                     self._warn_once("nopg", f"flash write at 0x{self._fbase + j:08x} without FLASH_CR.PG (or "
                                     f"locked): ignored, as on silicon")
-                elif self.page_protected(j // PAGE):
+                elif self.page_protected(j // self.page):
                     fix.append((j, snap[j:j + 2]))
                     err |= WRPRTERR
                 elif old != 0xFFFF and new != 0:
@@ -236,11 +264,18 @@ class FLASH(MMIOBlock):
             self.set("SR", self.get("SR") | err)
             self._update_irq()
         if ok:
+            self._hsi_check()
             self.programmed += ok
             self._start_op(self.prog_ns * ok, EOP)
 
     # ------------------------------------------------------------ register hooks
     def _acr_write(self, blk, reg, old, new):
+        if (old ^ new) & 0x10 and self.chip is not None:
+            r = rcc(self.chip)
+            if r is not None and (r.sysclk_hz > 24e6 * 1.001 or r.hpre != 1):
+                self._warn_once("prft_sw", "FLASH_ACR.PRFTBE changed with SYSCLK above 24 MHz or an AHB prescaler: "
+                                "the prefetch buffer may only be switched with SYSCLK < 24 MHz and HCLK = SYSCLK "
+                                "(RM0008 3.3.3)")
         v = (new & ~0x20) | (0x20 if new & 0x10 else 0)      # PRFTBS follows PRFTBE
         self._store(reg, v)
         self._check_latency()
@@ -271,6 +306,13 @@ class FLASH(MMIOBlock):
         else:
             self._optkey = 0
         return 0
+
+    def _sr_peek(self, blk, reg):
+        if self.get("CR") & PG and not self._busy():
+            # the read validates the half-words written into flash since (and may start a program operation):
+            # its result is not known without doing it -> raise = not peekable now (MMIOBlock.peek_reg)
+            raise LookupError("FLASH_SR with PG set: read checks pending flash writes")
+        return None
 
     def _sr_read(self, blk, reg):
         if self.get("CR") & PG and not self._busy():
@@ -303,27 +345,36 @@ class FLASH(MMIOBlock):
         self._update_irq()
         return new
 
+    def _hsi_check(self) -> None:
+        """RM0008 3.3.3: the HSI must be on for Flash write and erase operations (the FPEC is clocked by it)."""
+        r = rcc(self.chip) if self.chip is not None else None
+        if r is not None and not r.get("CR") & 2:
+            self._warn_once("hsi", "Flash program/erase with the HSI off: the HSI must be ON for write and erase "
+                            "operations (RM0008 3.3.3)")
+
     def _start(self, cr: int) -> int:
         chip = self.chip
         if chip is None:
             return cr & ~STRT
+        if cr & (PER | MER | OPTER):
+            self._hsi_check()
         if cr & PER:
             addr = self.get("AR")
             off = addr - self._fbase
             if not 0 <= off < self._fsize:
                 self._warn_once("ar", f"FLASH_AR = 0x{addr:08x} is outside the main flash: page erase ignored")
                 return cr & ~STRT
-            page = off // PAGE
+            page = off // self.page
             if self.page_protected(page):
                 self.set("SR", self.get("SR") | WRPRTERR)
                 return cr & ~STRT
-            chip.core.write_mem(self._fbase + page * PAGE, b"\xff" * PAGE)
+            chip.core.write_mem(self._fbase + page * self.page, b"\xff" * self.page)
             chip.core.flush_code_cache()
             self.erased_pages += 1
-            self.emit("info", block=self.name, msg=f"flash page {page} (0x{self._fbase + page * PAGE:08x}) erased")
+            self.emit("info", block=self.name, msg=f"flash page {page} (0x{self._fbase + page * self.page:08x}) erased")
             self._start_op(self.erase_ns, EOP)
         elif cr & MER:
-            if any(self.page_protected(p) for p in range(self._fsize // PAGE)):
+            if any(self.page_protected(p) for p in range(self._fsize // self.page)):
                 self.set("SR", self.get("SR") | WRPRTERR)
                 return cr & ~STRT
             chip.core.write_mem(self._fbase, b"\xff" * self._fsize)
@@ -390,13 +441,18 @@ class OptionBytes(MMIOBlock):
 
 @register("stm32f1.sysmem")
 class SystemMemory(MMIOBlock):
-    """System memory 0x1FFFF000: bootloader (not available: reads 0xFF), F_SIZE at +0x7E0, unique ID at +0x7E8."""
+    """System memory 0x1FFFF000: bootloader (not available: reads 0xFF), F_SIZE at +0x7E0, unique ID at +0x7E8.
+    `params.fsize_offset` / `uid_offset` move the two signatures for other layouts (STM32F401/F411: block at 0x1FFF7800
+    = OTP area, erased 0xFF, with UID at +0x210 = 0x1FFF7A10 and F_SIZE at +0x222 = 0x1FFF7A22, RM0368/RM0383 24.1/24.2).
+    """
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         super().__init__(name, base, size, (), ram_like=False, log=log, params=params)
         p = self.params
         self.flash_kb = p.get("flash_kb")
         self.uid = [int(x) for x in (p.get("uid") or (0x0034FF6D, 0x34375131, 0x43142357))]
+        self.fsize_offset = int(p.get("fsize_offset", 0x7E0))
+        self.uid_offset = int(p.get("uid_offset", 0x7E8))
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -404,9 +460,10 @@ class SystemMemory(MMIOBlock):
             fl = next((m for m in getattr(chip.desc, "memory", []) if m.kind == "flash"), None)
             self.flash_kb = fl.size // 1024 if fl is not None else 32
         data = bytearray(b"\xff" * self.size)
-        data[0x7E0:0x7E2] = int(self.flash_kb).to_bytes(2, "little")
+        fo, uo = self.fsize_offset, self.uid_offset
+        data[fo:fo + 2] = int(self.flash_kb).to_bytes(2, "little")
         for k, w in enumerate(self.uid):
-            data[0x7E8 + 4 * k:0x7EC + 4 * k] = (w & 0xFFFFFFFF).to_bytes(4, "little")
+            data[uo + 4 * k:uo + 4 + 4 * k] = (w & 0xFFFFFFFF).to_bytes(4, "little")
         self.mem[:] = data
 
     def reset(self) -> None:
@@ -419,14 +476,58 @@ class SystemMemory(MMIOBlock):
         self.emit("warn", block=self.name, msg=f"write to system memory 0x{self.base + offset:08x} ignored (ROM)")
 
 
+# density -> (DEV_ID, default REV_ID) (RM0008 31.6.1)
+DEV_IDS = {"low": (0x412, 0x1000), "medium": (0x410, 0x2003), "high": (0x414, 0x1003), "xl": (0x430, 0x1000),
+           "cl": (0x418, 0x1001)}
+
+
 @register("stm32f1.dbgmcu")
 class DBGMCU(MMIOBlock):
+    """DBGMCU_IDCODE (31.6.1) and DBGMCU_CR (31.16.3).  `params`: `density` (low / medium / high / xl / cl: DEV_ID
+    0x412 / 0x410 / 0x414 / 0x430 / 0x418 with the latest REV_ID of that table), `rev_id` (16-bit), or `idcode` (the
+    whole register); `idcode_readable` (default true: RM0008 31.6.1 says the code is readable by user software; set
+    false to model the errata of early medium/high-density revisions, where the CPU reads 0 without a debugger)."""
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
-        self.idcode = int(params.get("idcode", 0x10006412))
-        ov = {"IDCODE": {"reset": self.idcode, "ro_mask": 0xFFFFFFFF, "on_read": lambda b, r: self.idcode}}
+        density = str(params.get("density") or "low").lower()
+        dev, rev = DEV_IDS.get(density, DEV_IDS["low"])
+        rev = int(params.get("rev_id", rev))
+        # bits 15:12 are reserved in 31.6.1 but read 0x6 on silicon (debug probes report 0x10006412, 0x20036410,
+        # 0x10036414 ...): kept
+        self.idcode = int(params.get("idcode", (rev << 16) | 0x6000 | dev))
+        self.idcode_readable = bool(params.get("idcode_readable", True))
+        # CR: bits 25-30 (TIM9-14, XL density) and 21 (CAN2, connectivity line) are reserved elsewhere
+        cr_rw = 0x0001FFE7 | (1 << 17 | 1 << 18 | 1 << 19 | 1 << 20)
+        if density == "xl":
+            cr_rw |= 0x7E000000
+        if density == "cl":
+            cr_rw |= 1 << 21
+        ov = {"IDCODE": {"reset": self.idcode, "ro_mask": 0xFFFFFFFF, "on_read": self._idcode_read},
+              "CR": {"ro_mask": ~cr_rw & 0xFFFFFFFF, "on_write": self._cr_write}}
         r = build_regs((name, "DBG", "DBGMCU"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        self._powered = False
+
+    pure_reads = frozenset({"IDCODE"})
+
+    def _idcode_read(self, blk, reg):
+        return self.idcode if self.idcode_readable else 0
+
+    def reset(self) -> None:
+        """DBGMCU_CR is reset by a power-on reset only, not by a system reset (31.16.3)."""
+        keep = self.get("CR") if self._powered else 0
+        super().reset()
+        self.set("CR", keep)
+        self._powered = True
+
+    def _cr_write(self, blk, reg, old, new):
+        if (old ^ new) & 0xE0 and self.chip is not None:       # TRACE_IOEN / TRACE_MODE: trace pin assignment
+            self._store(reg, new)
+            from ._util import gpio_ports
+            for p in gpio_ports(self.chip):
+                p.resync_all()
+        return None
 
 
 __all__ = ["FLASH", "OptionBytes", "SystemMemory", "DBGMCU"]

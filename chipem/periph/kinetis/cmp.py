@@ -66,7 +66,8 @@ class CMP(GatedBlock):
         ov = {"CR0": {"ro_mask": 0x8C, "on_write": self._cfg_write},
               "CR1": {"ro_mask": 0x20, "on_write": self._cr1_write},
               "FPR": {"on_write": self._cfg_write},
-              "SCR": {"ro_mask": 0xA1, "w1c_mask": CFR | CFF, "on_write": self._scr_write, "on_read": self._scr_read},
+              "SCR": {"ro_mask": 0xA1, "w1c_mask": CFR | CFF, "on_write": self._scr_write, "on_read": self._scr_read,
+                     "on_peek": self._scr_read},
               "DACCR": {"on_write": self._cfg_write},
               "MUXCR": {"ro_mask": 0x40, "on_write": self._cfg_write}}
         r = build_regs((name, f"CMP{self.index}", "CMP0"), size, ov, params.get("regs_file"))

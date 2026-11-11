@@ -2,7 +2,9 @@
 
 `chipem/core/c28x/` is a pure-Python interpreter for the TI C28x CPU behind the `Core` interface
 (docs/CONTRACTS.md, "16-bit address units and the C28x core"), plus an assembler and disassembler driven by the same
-instruction table. The target is the F2833x family (TMS320F28232: C28x + FPU32, 150 MHz).
+instruction table. The target is the F2833x / F2823x / 280x families: the TMS320F28335 (and F28334/F28333/F28332) is
+C28x + FPU32 at up to 150 MHz; the TMS320F28232 / F2823x and the 280x parts are fixed-point C28x without FPU
+(FPU32 opcodes trap there, as on silicon).
 
 | file | content |
 |---|---|
@@ -15,7 +17,8 @@ instruction table. The target is the F2833x family (TMS320F28232: C28x + FPU32, 
 | `tools/c28x_asm.py` | CLI: `python tools/c28x_asm.py in.asm -o out.c28img [--map m] [--list l] [--bin b]`, `--disasm img` |
 | `tests/test_c28x_core.py`, `test_c28x_asm.py`, `test_c28x_system.py` | instruction groups, round trips, full-chip interrupt test |
 | `tests/test_c28x_golden.py`, `test_c28x_refsem.py` | exact machine words from the TI opcode tables; semantics pinned to the TI pseudo-code |
-| `tests/test_c28x_rptb_amode.py` | RPTB (counts, interrupts inside the block, slice stops), AMODE = 1, MOVB byte select, SUBCUL, FPU traps |
+| `tests/test_c28x_rptb_amode.py` | RPTB (counts, interrupts inside the block, slice stops), AMODE = 1, MOVB byte select, SUBCUL, FPU traps, LVF/LUF edges to the PIE |
+| `tests/test_c2000_f2833x_fpu.py` | TI-compiled FPU32 C on the F28335 (`f28335_fpu`, `f28335_pid`, `boards/f28335_fpu_loop.yaml`) against host IEEE single precision |
 | `tests/test_firmware_c28x.py` | hand-built cl2000-layout COFF2 and C2000 ELF images (loader, symbols, a run on the F28232) |
 | `tests/test_c28x_ticompat.py` | fixes found with TI's cl2000/dis2000 (N/Z on stores to @AX, MOV32 RaH↔ACC/P/XT/XARn, MOVST0, INTR, spellings) |
 | `tests/test_c2000_compiled.py` | TI-compiled C (`firmware/samples_c2000_c`): loader, blinky, chat alone and on a board, RTS self-test |
@@ -366,13 +369,48 @@ TI's C2000 code generation tools 25.11.1.LTS (`toolchains/ti-cgt-c2000/ti-cgt-c2
    truncates (`L$$TOFS`: `SFR ACC,7`; `FS$$DIV`: SUBCU quotient with a first-order correction); a host model of the
    RTS code gives the same words as the interpreter.
 
+## FPU32 verified on the F28335 (cl2000 25.11.1, 2026-11-10)
+
+TI-compiled C with `--float_support=fpu32` (`rts2800_fpu32_eabi.lib` / `rts2800_fpu32.lib`) runs on
+`chips/tms320f28335.yaml`; `tests/test_c2000_f2833x_fpu.py` checks it (skips when the images are not built:
+`firmware/samples_c2000_c/build.sh f28335_fpu f28335_pid`).
+
+1. **Results vs host IEEE single precision**: `f28335_fpu.c` + `f28335_fpu_asm.asm` write 44 results, compared word
+   for word with values computed in Python (float32 rounding by `struct`; exact for +, -, x, / and sqrt of float32
+   operands, since a double has more than 2 x 24 + 2 bits): MPYF32/ADDF32/SUBF32 (round to nearest even: TI's
+   `_c_int00` does `SETFLG RNDF32=1`), F32TOI32/F32TOUI32/F32TOI16 (truncation), I32TOF32/UI32TOF32/I16TOF32 with
+   rounding ties (2^24 + 1, 2^24 + 3), CMPF32 + MOVST0 ZF,NF compares, MINF32/MAXF32, ABSF32/NEGF32, RPTB loops with
+   `RPT || MACF32` (a dot product for lengths 1, 2, 5, 16, 31: RC from AR6 = 0..30; an 8-tap FIR with RPTB over the
+   outputs), an `RPTB #4` Horner loop in assembler vs the compiler's own Horner loop (every step rounded), STF.RND32 = 0
+   truncation, LVF/LUF in STF after overflow/underflow and MOVST0 LVF,LUF -> ST0.V (clearing them). Float division
+   and `sqrtf` go through the FPU32 RTS (`FS$$DIV` keeps the SUBCU quotient of the soft-float version: 3.25 / -1.5 =
+   0xC00AAAAA, 1 ulp below IEEE; `sqrtf(2)` = IEEE). **44 / 44 match** (EABI and COFF images).
+2. **Interrupts and FPU context**: `f28335_pid.c` runs a float PI controller in `__interrupt adc_isr` (SEQ1INT,
+   20 kHz) that saves/restores RB, STF and R0H-R5H and runs its own RPTB loop, while main repeats float work (an RPTB
+   dot product and a polynomial) and compares every pass with the first: 0 differences in ~1,700 passes / 180
+   interrupts; the same run with R0H-R3H or RB corrupted at interrupt entry (a test-only patch) gives 15 / 6
+   differences, so interrupts do land inside RPTB blocks and FPU-live code. `boards/f28335_fpu_loop.yaml` closes the
+   loop with an RC plant (`boards/parts/rc_plant.py`): y settles at 1.2 V, u at ~0.37.
+3. **Disassembler vs `dis2000`** on the four F28335 images (EABI + COFF): 2,970 instructions, 4,175 words, 0 length
+   differences, 2,839 identical after the usual normalisation; the other 131 are spellings of the same encodings
+   (`PUSH/POP XARn` = `MOVL *SP++/*--SP`, `MOVIZF32 #1.0` = `MOVIZ #0x3f80`, `C28OBJ/C28ADDR/C28MAP` =
+   `SETC/CLRC` mode bits, `DINT/EINT` = `SETC/CLRC INTM`, flag lists `SETC INTM, DBGM`, dis2000's `VMOV32` for
+   `MOV32 ACC,mem32` in COFF listings, `ITRAP0` for a 0x0000 data word, and `SETFLG RNDF32=1,RNDF64=1` (the RTS sets
+   the FPU64 rounding bit; we do not name it on an FPU32 core).
+4. **LVF/LUF interrupts**: a 0 -> 1 change of STF.LVF/LUF (math overflow/underflow, MOV32 STF,mem32, SETFLG,
+   RESTORE) calls `core.fpu_flag_cb`; the arch pulses PIE INT12.7 LVF / 12.8 LUF when the chip YAML names them
+   (F2833x, SPRS439Q Table 8-32).
+
+Found no interpreter bug in these paths. Not checked against silicon: EINVF32/EISQRTF32 return correctly rounded
+values (silicon gives an 8-bit estimate; the RTS here uses neither), denormals flush to zero as documented, the
+FPU pipeline delay slots are not modelled (code that reads a result in its delay slot behaves differently).
+
 ## Still unverified
 
-- RPTB's run-time behaviour (RE = pc + 1 + RSIZE, the loop-back) is read from SPRUHS1C's RB description; the
-  encoding matches TI's assembler, but no TI-compiled RPTB loop has run (cl2000 emits RPTB only with
-  `--float_support=fpu32`; the F28232 has no FPU).
 - Operand semantics of instructions that neither the samples nor the RTS paths they reach execute (the tool
   comparisons check encodings and decoding, not flag rules).
+- RPTB nested inside an interrupt at the exact last instruction of a block with RA/RAS (covered by the hand-written
+  tests in `test_c28x_rptb_amode.py`, not by compiled code at that boundary).
 
 ## Image loaders for TI tools (`chipem/firmware.py`)
 

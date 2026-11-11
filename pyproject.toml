@@ -5,13 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chipem"
 version = "0.1.0"
-description = "Description-driven microcontroller emulator (Kinetis K22 / Cortex-M4F first)"
+description = "Description-driven microcontroller emulator: NXP Kinetis K22F, STM32F1/F4 (Cortex-M on Unicorn), TI C2000 C28x and 8051/MCS-51 (Python interpreters), multi-chip boards"
 requires-python = ">=3.12"
-dependencies = ["unicorn", "capstone", "pyelftools", "pyyaml"]
+# unicorn is held to 2.1.x: chipem/core/unicorn_cm.py _calibrate_counter reads Unicorn 2.1 internals (exact
+# fast-mode instruction counts; `chipem doctor` reports whether calibration works)
+dependencies = ["unicorn>=2.1,<2.2", "capstone", "pyelftools", "pyyaml"]
 
 [project.optional-dependencies]
 test = ["pytest", "keystone-engine"]
 serial = ["pyserial"]               # --uart-port / usb_serial_adapter port: serial:... (chipem/hostserial.py)
+dev = ["pytest", "keystone-engine", "pyserial"]   # test + serial: what the full test suite exercises
 
 [project.scripts]
 chipem = "chipem.cli:main"

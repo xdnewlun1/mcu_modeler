@@ -75,6 +75,9 @@ GATES: dict[str, tuple[str, int]] = {
     "GPIOJ": ("AHB1ENR", 9), "GPIOK": ("AHB1ENR", 10), "DMA2D": ("AHB1ENR", 23), "FMC": ("AHB3ENR", 0),
     "UART7": ("APB1ENR", 30), "UART8": ("APB1ENR", 31), "SPI4": ("APB2ENR", 13), "SPI5": ("APB2ENR", 20),
     "SPI6": ("APB2ENR", 21), "SAI1": ("APB2ENR", 22), "LTDC": ("APB2ENR", 26),
+    # STM32F446xx only (RM0390 6.3.12-6.3.14 per STM32F446.svd; RM0390 itself not in the repo)
+    "QUADSPI": ("AHB3ENR", 1), "SPDIFRX": ("APB1ENR", 16), "FMPI2C1": ("APB1ENR", 24), "CEC": ("APB1ENR", 27),
+    "SAI2": ("APB2ENR", 23),
 }
 _RST_REG = {"AHB1ENR": "AHB1RSTR", "AHB2ENR": "AHB2RSTR", "AHB3ENR": "AHB3RSTR", "APB1ENR": "APB1RSTR",
             "APB2ENR": "APB2RSTR"}
@@ -82,6 +85,8 @@ _RST_REG = {"AHB1ENR": "AHB1RSTR", "AHB2ENR": "AHB2RSTR", "AHB3ENR": "AHB3RSTR",
 
 @register("stm32.rcc")
 class RCC(MMIOBlock):
+    SRC_NAMES = SRC_NAMES               # CFGR.SW/SWS names (stm32.rcc_f446: 11 = PLL_R)
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ctl = {"on_write": self._ctl_write}
@@ -355,14 +360,14 @@ class RCC(MMIOBlock):
         sw = cfgr & 3
         sws = (cfgr >> 2) & 3
         if sw != sws:
-            if sw != 3 and self._ready(sw):
+            if self._ready(sw):                  # _ready(3) is False unless a subclass defines SW = 11
                 sws = sw
             elif "sw" not in self._warned:
                 self._warned.add("sw")
-                self.emit("warn", block=self.name, msg=f"RCC: switch to {SRC_NAMES[sw]} refused: source not ready "
-                          f"(SWS stays {SRC_NAMES[sws]})")
+                self.emit("warn", block=self.name, msg=f"RCC: switch to {self.SRC_NAMES[sw]} refused: source not ready "
+                          f"(SWS stays {self.SRC_NAMES[sws]})")
             self.set("CFGR", (cfgr & ~0xC) | (sws << 2))
-        self.source = SRC_NAMES[sws]
+        self.source = self.SRC_NAMES[sws]
         self.sysclk_hz = self.src_hz(sws)
         self.core_hz = self.sysclk_hz / self.hpre
         self.apb1_hz = self.core_hz / self.ppre(1)

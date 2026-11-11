@@ -1,0 +1,15 @@
+# TMS320F28335 float PI loop (FPU32): the controller runs in an ADC interrupt, the plant is an RC on its PWM pin.
+#   A (TMS320F28335, 150 MHz) runs f28335_pid: ePWM1 20 kHz on GPIO0 (EPWM1A), SOCA -> ADC SEQ1 (ADCINA0) ->
+#   `__interrupt adc_isr`: 8-sample average, PI (Kp 0.8, Ki 400/s) toward 1.2 V, CMPA = u x TBPRD; main runs float
+#   check work meanwhile (FPU context saved by the ISR) and prints "PI <n> y=<mV> u=<permille> bad=<count>" on SCI-A
+#   every 2 ms.
+#   PLANT is boards/parts/rc_plant.py: RC (tau 1 ms) from GPIO0 (3.3 V high) to ADCINA0 (3.0 V full scale).
+#   Settles at y = 1.2 V, duty 1.2 / 3.3 = 36.4 % (u = 364) within about 10 ms.
+# Run:   chipem run --board boards/f28335_fpu_loop.yaml --for 20ms
+# Build: firmware/samples_c2000_c/build.sh f28335_pid   (TI cl2000)
+# Security: a script part runs Python with your privileges. Only load boards you trust.
+name: f28335_fpu_loop
+chips:
+  - {id: A, chip: tms320f28335, firmware: ../firmware/samples_c2000_c/build/f28335_pid.out}
+parts:
+  - {id: PLANT, type: script, file: parts/rc_plant.py, ports: {PWM: A.GPIO0, AOUT: A.ADCINA0}}

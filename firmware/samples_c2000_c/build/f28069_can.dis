@@ -1,0 +1,800 @@
+
+Disassembly of build/f28069_can.out:
+
+TEXT Section codestart (Little Endian), 0x2 words at 0x003f7ff6 
+003f7ff6        code_start:
+003f7ff6   007d   LB           0x3d826b
+003f7ff7   826b
+
+TEXT Section .text (Little Endian), 0x27e words at 0x003d8000 
+003d8000        init_sysctrl:
+003d8000   7622   EALLOW       
+003d8001   9a68   MOVB         AL, #0x68
+003d8002   76fd   MOVL         XAR7, #0x3d7c80
+003d8003   7c80
+003d8004   f4a9   MOV          *(0:0x7029), AL
+003d8005   7029
+003d8006   ff69   SPM          #0
+003d8007   f5a9   MOV          AL, *(0:0x701c)
+003d8008   701c
+003d8009   5008   ORB          AL, #0x8
+003d800a   f4a9   MOV          *(0:0x701c), AL
+003d800b   701c
+003d800c   3e67   LCR          *XAR7
+003d800d   7622   EALLOW       
+003d800e   f5a9   MOV          AL, *(0:0x701c)
+003d800f   701c
+003d8010   28a8   MOV          AH, #0x6400
+003d8011   6400
+003d8012   18a9   AND          AL, #0xfff7
+003d8013   fff7
+003d8014   f4a9   MOV          *(0:0x701c), AL
+003d8015   701c
+003d8016   f4a8   MOV          *(0:0x7012), AH
+003d8017   7012
+003d8018   9b12   MOVB         AH, #0x12
+003d8019   f5a9   MOV          AL, *(0:0x7011)
+003d801a   7011
+003d801b   18a9   AND          AL, #0xfe7f
+003d801c   fe7f
+003d801d   f4a9   MOV          *(0:0x7011), AL
+003d801e   7011
+003d801f   f5a9   MOV          AL, *(0:0x7011)
+003d8020   7011
+003d8021   5040   ORB          AL, #0x40
+003d8022   f4a9   MOV          *(0:0x7011), AL
+003d8023   7011
+003d8024   f4a8   MOV          *(0:0x7021), AH
+003d8025   7021
+003d8026        $C$L1:
+003d8026   f5a9   MOV          AL, *(0:0x7011)
+003d8027   7011
+003d8028   40a9   TBIT         AL, #0x0
+003d8029   6cfd   SB           -3, NTC
+003d802a   f5a9   MOV          AL, *(0:0x7011)
+003d802b   7011
+003d802c   18a9   AND          AL, #0xffbf
+003d802d   ffbf
+003d802e   f4a9   MOV          *(0:0x7011), AL
+003d802f   7011
+003d8030   f5a9   MOV          AL, *(0:0x7011)
+003d8031   7011
+003d8032   18a9   AND          AL, #0xff7f
+003d8033   ff7f
+003d8034   1aa9   OR           AL, #0x0100
+003d8035   0100
+003d8036   f4a9   MOV          *(0:0x7011), AL
+003d8037   7011
+003d8038   761a   EDIS         
+003d8039   ff69   SPM          #0
+003d803a   0006   LRETR        
+003d803b        init_ecan:
+003d803b   7622   EALLOW       
+003d803c   be08   MOVB         XAR6, #0x08
+003d803d   0208   MOVB         ACC, #8
+003d803e   8f00   MOVL         XAR4, #0x003000
+003d803f   3000
+003d8040   bda6   VMOV32       *(0:0x602a), XAR6
+003d8041   602a
+003d8042   bda9   VMOV32       *(0:0x602c), ACC
+003d8043   602c
+003d8044   bda4   VMOV32       *(0:0x6014), XAR4
+003d8045   6014
+003d8046        $C$L2:
+003d8046   bfa9   VMOV32       ACC, *(0:0x6018)
+003d8047   6018
+003d8048   44a9   TBIT         AL, #0x4
+003d8049   6cfd   SB           -3, NTC
+003d804a   8f08   MOVL         XAR4, #0x080031
+003d804b   0031
+003d804c   bda4   VMOV32       *(0:0x6016), XAR4
+003d804d   6016
+003d804e   761a   EDIS         
+003d804f   b600   MOVB         XAR7, #0x00
+003d8050   28a9   MOV          AL, #0x6102
+003d8051   6102
+003d8052   be1f   MOVB         XAR6, #0x1f
+003d8053   bda7   VMOV32       *(0:0x6000), XAR7
+003d8054   6000
+003d8055        $C$L3:
+003d8055   5ca9   MOVZ         AR4, AL
+003d8056   9c08   ADDB         AL, #8
+003d8057   c3c4   MOVL         *+XAR4[0], XAR7
+003d8058   000e   BANZ         -3,AR6--
+003d8059   fffd
+003d805a   ff2f   MOV          ACC, #0x1010 << 15
+003d805b   1010
+003d805c   be04   MOVB         XAR6, #0x04
+003d805d   8f41   MOVL         XAR5, #0x010000
+003d805e   0000
+003d805f   bda9   VMOV32       *(0:0x6180), ACC
+003d8060   6180
+003d8061   8f01   MOVL         XAR4, #0x010001
+003d8062   0001
+003d8063   ff2f   MOV          ACC, #0x800 << 15
+003d8064   0800
+003d8065   bda9   VMOV32       *(0:0x6100), ACC
+003d8066   6100
+003d8067   bda6   VMOV32       *(0:0x6102), XAR6
+003d8068   6102
+003d8069   bda5   VMOV32       *(0:0x6002), XAR5
+003d806a   6002
+003d806b   bda4   VMOV32       *(0:0x6000), XAR4
+003d806c   6000
+003d806d   7622   EALLOW       
+003d806e   8f00   MOVL         XAR4, #0x002000
+003d806f   2000
+003d8070   bda4   VMOV32       *(0:0x6014), XAR4
+003d8071   6014
+003d8072   761a   EDIS         
+003d8073        $C$L4:
+003d8073   bfa9   VMOV32       ACC, *(0:0x6018)
+003d8074   6018
+003d8075   44a9   TBIT         AL, #0x4
+003d8076   6dfd   SB           -3, TC
+003d8077   ff69   SPM          #0
+003d8078   0006   LRETR        
+003d8079        $C$L5:
+003d8079        putc_:
+003d8079   f5a8   MOV          AH, *(0:0x7054)
+003d807a   7054
+003d807b   47a8   TBIT         AH, #0x7
+003d807c   6cfd   SB           -3, NTC
+003d807d   90ff   ANDB         AL, #0xff
+003d807e   f4a9   MOV          *(0:0x7059), AL
+003d807f   7059
+003d8080   0006   LRETR        
+003d8081        puts_:
+003d8081   6f04   SB           4, UNC
+003d8082        $C$L6:
+003d8082   9284   MOV          AL, *XAR4++
+003d8083   767d   LCR          0x3d8079
+003d8084   8079
+003d8085        $C$L7:
+003d8085   92c4   MOV          AL, *+XAR4[0]
+003d8086   60fc   SB           -4, NEQ
+003d8087   0006   LRETR        
+003d8088        puthex:
+003d8088   1ea6   MOVL         XAR6, ACC
+003d8089   92a4   MOV          AL, AR4
+003d808a   6113   SB           19, EQ
+003d808b   5603   MOV          ACC, AR4 << 2
+003d808c   02a4
+003d808d   2da9   MOV          T, AL
+003d808e        $C$L8:
+003d808e   92ac   MOV          AL, T
+003d808f   9cfc   ADDB         AL, #-4
+003d8090   2da9   MOV          T, AL
+003d8091   06a6   MOVL         ACC, XAR6
+003d8092   5622   LSRL         ACC, T
+003d8093   900f   ANDB         AL, #0xf
+003d8094   58a9   MOVZ         AR0, AL
+003d8095   8f7d   MOVL         XAR5, #0x3d827e
+003d8096   827e
+003d8097   9295   MOV          AL, *+XAR5[AR0]
+003d8098   767d   LCR          0x3d8079
+003d8099   8079
+003d809a   dc81   SUBB         XAR4, #1
+003d809b   92a4   MOV          AL, AR4
+003d809c   60f2   SB           -14, NEQ
+003d809d        $C$L9:
+003d809d   0006   LRETR        
+003d809e        main:
+003d809e   b2bd   MOVL         *SP++, XAR1
+003d809f   aabd   MOVL         *SP++, XAR2
+003d80a0   a2bd   MOVL         *SP++, XAR3
+003d80a1   3b10   SETC         INTM
+003d80a2   761f   MOVW         DP, #0x280
+003d80a3   0280
+003d80a4   2b0b   MOV          @0xb, #0
+003d80a5   ff69   SPM          #0
+003d80a6   2b0a   MOV          @0xa, #0
+003d80a7   767d   LCR          0x3d8000
+003d80a8   8000
+003d80a9   7622   EALLOW       
+003d80aa   9a00   MOVB         AL, #0x0
+003d80ab   f4a9   MOV          *(0:0x701b), AL
+003d80ac   701b
+003d80ad   f5a9   MOV          AL, *(0:0x701c)
+003d80ae   701c
+003d80af   1aa9   OR           AL, #0x4400
+003d80b0   4400
+003d80b1   f4a9   MOV          *(0:0x701c), AL
+003d80b2   701c
+003d80b3   0284   MOVB         ACC, #132
+003d80b4   bfab   VMOV32       P, *(0:0x6f88)
+003d80b5   6f88
+003d80b6   1aaa   OR           PH, #0x5400
+003d80b7   5400
+003d80b8   bdab   VMOV32       *(0:0x6f88), P
+003d80b9   6f88
+003d80ba   bda9   VMOV32       *(0:0x6fca), ACC
+003d80bb   6fca
+003d80bc   bfa9   VMOV32       ACC, *(0:0x6f9a)
+003d80bd   6f9a
+003d80be   5084   ORB          AL, #0x84
+003d80bf   bda9   VMOV32       *(0:0x6f9a), ACC
+003d80c0   6f9a
+003d80c1   761a   EDIS         
+003d80c2   b607   MOVB         XAR7, #0x07
+003d80c3   be02   MOVB         XAR6, #0x02
+003d80c4   2bab   MOV          PL, #0
+003d80c5   9b60   MOVB         AH, #0x60
+003d80c6   9a22   MOVB         AL, #0x22
+003d80c7   ff69   SPM          #0
+003d80c8   f4a7   MOV          *(0:0x7050), AR7
+003d80c9   7050
+003d80ca   f4a6   MOV          *(0:0x7051), AR6
+003d80cb   7051
+003d80cc   f4ab   MOV          *(0:0x7052), PL
+003d80cd   7052
+003d80ce   f4a8   MOV          *(0:0x7053), AH
+003d80cf   7053
+003d80d0   f4a9   MOV          *(0:0x7051), AL
+003d80d1   7051
+003d80d2   767d   LCR          0x3d803b
+003d80d3   803b
+003d80d4   8f3d   MOVL         XAR4, #0x3d8290
+003d80d5   8290
+003d80d6   767d   LCR          0x3d8081
+003d80d7   8081
+003d80d8   e590   ZERO         R0
+003d80d9   2901   CLRC         SXM
+003d80da   2baa   MOV          PH, #0
+003d80db   b600   MOVB         XAR7, #0x00
+003d80dc   9a10   MOVB         AL, #0x10
+003d80dd   9b00   MOVB         AH, #0x0
+003d80de   8f0d   MOVL         XAR4, #0x0dbb9f
+003d80df   bb9f
+003d80e0   f4a9   MOV          *(0:0x0c04), AL
+003d80e1   0c04
+003d80e2   9a00   MOVB         AL, #0x0
+003d80e3   bda4   VMOV32       *(0:0x0c02), XAR4
+003d80e4   0c02
+003d80e5   f4a8   MOV          *(0:0x0c06), AH
+003d80e6   0c06
+003d80e7   28a8   MOV          AH, #0x8020
+003d80e8   8020
+003d80e9   f4a9   MOV          *(0:0x0c07), AL
+003d80ea   0c07
+003d80eb   f4a8   MOV          *(0:0x0c04), AH
+003d80ec   0c04
+003d80ed        $C$L10:
+003d80ed   f5a9   MOV          AL, *(0:0x0c04)
+003d80ee   0c04
+003d80ef   4fa9   TBIT         AL, #0xf
+003d80f0   6c15   SB           21, NTC
+003d80f1   f5a6   MOV          AR6, *(0:0x0c04)
+003d80f2   0c04
+003d80f3   cca7   AND          AL, AR7, #0xff
+003d80f4   00ff
+003d80f5   1aa6   OR           AR6, #0x8000
+003d80f6   8000
+003d80f7   25a9   MOV          ACC, AL << 16
+003d80f8   28ab   MOV          PL, #0x0001
+003d80f9   0001
+003d80fa   1aa9   OR           AL, #0x4b32
+003d80fb   4b32
+003d80fc   f4a6   MOV          *(0:0x0c04), AR6
+003d80fd   0c04
+003d80fe   be04   MOVB         XAR6, #0x04
+003d80ff   bda9   VMOV32       *(0:0x6104), ACC
+003d8100   6104
+003d8101   bdab   VMOV32       *(0:0x6004), P
+003d8102   6004
+003d8103   bda6   VMOV32       *(0:0x6fce), XAR6
+003d8104   6fce
+003d8105        $C$L11:
+003d8105   bfa9   VMOV32       ACC, *(0:0x6008)
+003d8106   6008
+003d8107   40a9   TBIT         AL, #0x0
+003d8108   6c14   SB           20, NTC
+003d8109   0201   MOVB         ACC, #1
+003d810a   761f   MOVW         DP, #0x280
+003d810b   0280
+003d810c   bda9   VMOV32       *(0:0x6008), ACC
+003d810d   6008
+003d810e   8f3d   MOVL         XAR4, #0x3d829e
+003d810f   829e
+003d8110   0a0b   INC          @0xb
+003d8111   767d   LCR          0x3d8081
+003d8112   8081
+003d8113   d402   MOVB         XAR4, #0x2
+003d8114   0ea7   MOVU         ACC, AR7
+003d8115   767d   LCR          0x3d8088
+003d8116   8088
+003d8117   8f3d   MOVL         XAR4, #0x3d82a6
+003d8118   82a6
+003d8119   767d   LCR          0x3d8081
+003d811a   8081
+003d811b   df01   ADDB         XAR7, #1
+003d811c        $C$L12:
+003d811c   bfa9   VMOV32       ACC, *(0:0x600c)
+003d811d   600c
+003d811e   40a8   TBIT         AH, #0x0
+003d811f   6cce   SB           -50, NTC
+003d8120   bfa2   VMOV32       XAR2, *(0:0x6182)
+003d8121   6182
+003d8122   bfa3   VMOV32       XAR3, *(0:0x6184)
+003d8123   6184
+003d8124   28ac   MOV          T, #0x0012
+003d8125   0012
+003d8126   bfa1   VMOV32       XAR1, *(0:0x6186)
+003d8127   6186
+003d8128   bfa9   VMOV32       ACC, *(0:0x6180)
+003d8129   6180
+003d812a   5622   LSRL         ACC, T
+003d812b   18a9   AND          AL, #0x07ff
+003d812c   07ff
+003d812d   9100   ANDB         AH, #0x0
+003d812e   1ea6   MOVL         XAR6, ACC
+003d812f   a2a9   MOVL         ACC, XAR3
+003d8130   0ea8   MOVU         ACC, AH
+003d8131   9b00   MOVB         AH, #0x0
+003d8132   90ff   ANDB         AL, #0xff
+003d8133   bda9   MOV32        R1H, ACC
+003d8134   0f16
+003d8135   7700   NOP          
+003d8136   7700   NOP          
+003d8137   8f01   MOVL         XAR4, #0x010000
+003d8138   0000
+003d8139   e84f   MPYF32       R0H, #0x3f40, R0H
+003d813a   d000
+003d813b   e68b   UI32TOF32    R1H, R1H
+003d813c   0009
+003d813d   761f   MOVW         DP, #0x280
+003d813e   0280
+003d813f   e84f   MPYF32       R1H, #0x3e80, R1H
+003d8140   a009
+003d8141   bda4   VMOV32       *(0:0x600c), XAR4
+003d8142   600c
+003d8143   e710   ADDF32       R0H, R0H, R1H
+003d8144   0040
+003d8145   0a0a   INC          @0xa
+003d8146   e850   MPYF32       R1H, #0x42c8, R0H
+003d8147   b201
+003d8148   8f3d   MOVL         XAR4, #0x3d82aa
+003d8149   82aa
+003d814a   e688   F32TOI32     R1H, R1H
+003d814b   0009
+003d814c   0280   MOVB         ACC, #128
+003d814d   e203   MOV32        @0xc, R1H
+003d814e   010c
+003d814f   bda9   VMOV32       *(0:0x6fce), ACC
+003d8150   6fce
+003d8151   767d   LCR          0x3d8081
+003d8152   8081
+003d8153   d403   MOVB         XAR4, #0x3
+003d8154   06a6   MOVL         ACC, XAR6
+003d8155   767d   LCR          0x3d8088
+003d8156   8088
+003d8157   8f3d   MOVL         XAR4, #0x3d82ae
+003d8158   82ae
+003d8159   767d   LCR          0x3d8081
+003d815a   8081
+003d815b   93a2   MOV          AH, AR2
+003d815c   910f   ANDB         AH, #0xf
+003d815d   5aa8   MOVZ         AR2, AH
+003d815e   9a30   MOVB         AL, #0x30
+003d815f   94a2   ADD          AL, AR2
+003d8160   767d   LCR          0x3d8079
+003d8161   8079
+003d8162   9a5d   MOVB         AL, #0x5d
+003d8163   767d   LCR          0x3d8079
+003d8164   8079
+003d8165   92a2   MOV          AL, AR2
+003d8166   611e   SB           30, EQ
+003d8167   2bab   MOV          PL, #0
+003d8168   da81   SUBB         XAR2, #1
+003d8169        $C$L13:
+003d8169   92ab   MOV          AL, PL
+003d816a   5208   CMPB         AL, #0x8
+003d816b   6719   SB           25, HIS
+003d816c   5204   CMPB         AL, #0x4
+003d816d   6703   SB           3, HIS
+003d816e   c4a3   MOVL         XAR6, XAR3
+003d816f   6f02   SB           2, UNC
+003d8170        $C$L14:
+003d8170   c4a1   MOVL         XAR6, XAR1
+003d8171        $C$L15:
+003d8171   9a20   MOVB         AL, #0x20
+003d8172   767d   LCR          0x3d8079
+003d8173   8079
+003d8174   28ac   MOV          T, #0x0018
+003d8175   0018
+003d8176   d402   MOVB         XAR4, #0x2
+003d8177   92ab   MOV          AL, PL
+003d8178   9003   ANDB         AL, #0x3
+003d8179   ff82   LSL          AL, 3
+003d817a   74ac   SUB          T, AL
+003d817b   06a6   MOVL         ACC, XAR6
+003d817c   5622   LSRL         ACC, T
+003d817d   767d   LCR          0x3d8088
+003d817e   8088
+003d817f   92ab   MOV          AL, PL
+003d8180   9c01   ADDB         AL, #1
+003d8181   27a9   MOV          PL, AL
+003d8182   000a   BANZ         -25,AR2--
+003d8183   ffe7
+003d8184        $C$L16:
+003d8184   8f3d   MOVL         XAR4, #0x3d82a6
+003d8185   82a6
+003d8186   767d   LCR          0x3d8081
+003d8187   8081
+003d8188   ffef   B            -155, UNC
+003d8189   ff65
+003d818a        __TI_decompress_lzss:
+003d818a        $C$L1:
+003d818a   2f84   MOV          PH, *XAR4++
+003d818b   2bab   MOV          PL, #0
+003d818c   6f18   SB           24, UNC
+003d818d        $C$L2:
+003d818d   a0a9   MOVL         ACC, XAR5
+003d818e   01a0   SUBU         ACC, AR0
+003d818f   1901   SUBB         ACC, #1
+003d8190   1ea7   MOVL         XAR7, ACC
+003d8191   de81   SUBB         XAR6, #1
+003d8192        $C$L3:
+003d8192   5887   MOVZ         AR0, *XAR7++
+003d8193   0200   MOVB         ACC, #0
+003d8194   de81   SUBB         XAR6, #1
+003d8195   1901   SUBB         ACC, #1
+003d8196   7885   MOV          *XAR5++, AR0
+003d8197   0fa6   CMPL         ACC, XAR6
+003d8198   60fa   SB           -6, NEQ
+003d8199   6f03   SB           3, UNC
+003d819a        $C$L4:
+003d819a   9284   MOV          AL, *XAR4++
+003d819b   9685   MOV          *XAR5++, AL
+003d819c        $C$L5:
+003d819c   92aa   MOV          AL, PH
+003d819d   ffc0   LSR          AL, 1
+003d819e   2fa9   MOV          PH, AL
+003d819f   92ab   MOV          AL, PL
+003d81a0   9c01   ADDB         AL, #1
+003d81a1   27a9   MOV          PL, AL
+003d81a2   5210   CMPB         AL, #0x10
+003d81a3   63e7   SB           -25, GEQ
+003d81a4        $C$L6:
+003d81a4   40aa   TBIT         PH, #0x0
+003d81a5   6df5   SB           -11, TC
+003d81a6   9284   MOV          AL, *XAR4++
+003d81a7   cda9   AND          AH, AL, #0xf
+003d81a8   000f
+003d81a9   9d02   ADDB         AH, #2
+003d81aa   ffc3   LSR          AL, 4
+003d81ab   88a8   MOVZ         AR6, AH
+003d81ac   58a9   MOVZ         AR0, AL
+003d81ad   5311   CMPB         AH, #0x11
+003d81ae   6004   SB           4, NEQ
+003d81af   06a6   MOVL         ACC, XAR6
+003d81b0   0d84   ADDU         ACC, *XAR4++
+003d81b1   1ea6   MOVL         XAR6, ACC
+003d81b2        $C$L7:
+003d81b2   80a0   MOVZ         AR7, AR0
+003d81b3   ff20   MOV          ACC, #4095
+003d81b4   0fff
+003d81b5   0fa7   CMPL         ACC, XAR7
+003d81b6   60d7   SB           -41, NEQ
+003d81b7   0006   LRETR        
+003d81b8        __TI_auto_init_nobinit_nopinit:
+003d81b8   b2bd   MOVL         *SP++, XAR1
+003d81b9   8f3d   MOVL         XAR4, #0x3d82c2
+003d81ba   82c2
+003d81bb   aabd   MOVL         *SP++, XAR2
+003d81bc   a8a9   MOVL         ACC, XAR4
+003d81bd   a2bd   MOVL         *SP++, XAR3
+003d81be   8dfd   MOVL         XAR3, #0x3d82bc
+003d81bf   82bc
+003d81c0   0fa3   CMPL         ACC, XAR3
+003d81c1   611c   SB           28, EQ
+003d81c2   8f3d   MOVL         XAR4, #0x3d82ce
+003d81c3   82ce
+003d81c4   8d7d   MOVL         XAR1, #0x3d82c6
+003d81c5   82c6
+003d81c6   a8a9   MOVL         ACC, XAR4
+003d81c7   0fa1   CMPL         ACC, XAR1
+003d81c8   6115   SB           21, EQ
+003d81c9   03a1   SUBL         ACC, XAR1
+003d81ca   3b01   SETC         SXM
+003d81cb   ff41   SFR          ACC, 2
+003d81cc   1901   SUBB         ACC, #1
+003d81cd   86a9   MOVL         XAR2, ACC
+003d81ce        $C$L11:
+003d81ce   8a81   MOVL         XAR4, *XAR1++
+003d81cf   3b01   SETC         SXM
+003d81d0   9284   MOV          AL, *XAR4++
+003d81d1   5603   MOV          ACC, AL << 1
+003d81d2   01a9
+003d81d3   07a3   ADDL         ACC, XAR3
+003d81d4   83a9   MOVL         XAR5, ACC
+003d81d5   c5c5   MOVL         XAR7, *+XAR5[0]
+003d81d6   8381   MOVL         XAR5, *XAR1++
+003d81d7   3e67   LCR          *XAR7
+003d81d8   da81   SUBB         XAR2, #1
+003d81d9   0200   MOVB         ACC, #0
+003d81da   1901   SUBB         ACC, #1
+003d81db   0fa2   CMPL         ACC, XAR2
+003d81dc   60f2   SB           -14, NEQ
+003d81dd        $C$L12:
+003d81dd   767d   LCR          0x3d827d
+003d81de   827d
+003d81df   82be   MOVL         XAR3, *--SP
+003d81e0   86be   MOVL         XAR2, *--SP
+003d81e1   8bbe   MOVL         XAR1, *--SP
+003d81e2   0006   LRETR        
+003d81e3        abort:
+003d81e3        C$$EXIT:
+003d81e3   7700   NOP          
+003d81e4        $C$L1:
+003d81e4   6f00   SB           0, UNC
+003d81e5        exit:
+003d81e5   b2bd   MOVL         *SP++, XAR1
+003d81e6   761f   MOVW         DP, #0x280
+003d81e7   0280
+003d81e8   59a9   MOVZ         AR1, AL
+003d81e9   9200   MOV          AL, @0x0
+003d81ea   610d   SB           13, EQ
+003d81eb   28ab   MOV          PL, #0xffff
+003d81ec   ffff
+003d81ed   28aa   MOV          PH, #0xffff
+003d81ee   ffff
+003d81ef   28a9   MOV          AL, #0xffff
+003d81f0   ffff
+003d81f1   28a8   MOV          AH, #0xffff
+003d81f2   ffff
+003d81f3   0fab   CMPL         ACC, P
+003d81f4   6103   SB           3, EQ
+003d81f5   767f   LCR          0x3fffff
+003d81f6   ffff
+003d81f7        $C$L2:
+003d81f7   761f   MOVW         DP, #0x280
+003d81f8   0280
+003d81f9   c506   MOVL         XAR7, @0x6
+003d81fa   3e67   LCR          *XAR7
+003d81fb   761f   MOVW         DP, #0x280
+003d81fc   0280
+003d81fd   0604   MOVL         ACC, @0x4
+003d81fe   6104   SB           4, EQ
+003d81ff   1ea7   MOVL         XAR7, ACC
+003d8200   92a1   MOV          AL, AR1
+003d8201   3e67   LCR          *XAR7
+003d8202        $C$L3:
+003d8202   761f   MOVW         DP, #0x280
+003d8203   0280
+003d8204   0602   MOVL         ACC, @0x2
+003d8205   6103   SB           3, EQ
+003d8206   1ea7   MOVL         XAR7, ACC
+003d8207   3e67   LCR          *XAR7
+003d8208        $C$L4:
+003d8208   767d   LCR          0x3d81e3
+003d8209   81e3
+003d820a   8bbe   MOVL         XAR1, *--SP
+003d820b   0006   LRETR        
+003d820c        memcpy:
+003d820c   8ea9   MOVL         XAR0, ACC
+003d820d   a8ab   MOVL         P, XAR4
+003d820e   c5a4   MOVL         XAR7, XAR4
+003d820f   92a0   MOV          AL, AR0
+003d8210   6107   SB           7, EQ
+003d8211   88a0   MOVZ         AR6, AR0
+003d8212   de81   SUBB         XAR6, #1
+003d8213        $C$L1:
+003d8213   9285   MOV          AL, *XAR5++
+003d8214   9687   MOV          *XAR7++, AL
+003d8215   000e   BANZ         -2,AR6--
+003d8216   fffe
+003d8217        $C$L2:
+003d8217   88a0   MOVZ         AR6, AR0
+003d8218   3aa9   MOVL         ACC, XAR0
+003d8219   0fa6   CMPL         ACC, XAR6
+003d821a   6110   SB           16, EQ
+003d821b   0ea8   MOVU         ACC, AH
+003d821c   610e   SB           14, EQ
+003d821d   3aa9   MOVL         ACC, XAR0
+003d821e   9dff   ADDB         AH, #-1
+003d821f   5ca8   MOVZ         AR4, AH
+003d8220        $C$L3:
+003d8220   76bf   MOVL         XAR6, #0x3ffffe
+003d8221   fffe
+003d8222        $C$L4:
+003d8222   9285   MOV          AL, *XAR5++
+003d8223   9687   MOV          *XAR7++, AL
+003d8224   000e   BANZ         -2,AR6--
+003d8225   fffe
+003d8226   9285   MOV          AL, *XAR5++
+003d8227   9687   MOV          *XAR7++, AL
+003d8228   000c   BANZ         -8,AR4--
+003d8229   fff8
+003d822a        $C$L5:
+003d822a   a9a4   MOVL         XAR4, P
+003d822b   0006   LRETR        
+003d822c        _c_int00:
+003d822c   28ad   MOV          SP, #0x0400
+003d822d   0400
+003d822e   ff69   SPM          #0
+003d822f   561f   SETC         OBJMODE
+003d8230   5616   CLRC         AMODE
+003d8231   561a   SETC         M0M1MAP
+003d8232   e610   SETFLG       RNDF32=1
+003d8233   0200
+003d8234   2940   CLRC         PAGE0
+003d8235   761f   MOVW         DP, #0x0
+003d8236   0000
+003d8237   2902   CLRC         OVM
+003d8238   761b   ASP          
+003d8239   767d   LCR          0x3d827b
+003d823a   827b
+003d823b   5200   CMPB         AL, #0x0
+003d823c   6103   SB           3, EQ
+003d823d   767d   LCR          0x3d81b8
+003d823e   81b8
+003d823f        BYPASS_AUTO_INIT:
+003d823f   767d   LCR          0x3d8243
+003d8240   8243
+003d8241   767d   LCR          0x3d81e5
+003d8242   81e5
+003d8243        _args_main:
+003d8243   0200   MOVB         ACC, #0
+003d8244   28ab   MOV          PL, #0xffff
+003d8245   ffff
+003d8246   28aa   MOV          PH, #0xffff
+003d8247   ffff
+003d8248   1901   SUBB         ACC, #1
+003d8249   0fab   CMPL         ACC, P
+003d824a   6004   SB           4, NEQ
+003d824b   9a00   MOVB         AL, #0x0
+003d824c   d400   MOVB         XAR4, #0x0
+003d824d   6f05   SB           5, UNC
+003d824e        $C$L1:
+003d824e   a9a4   MOVL         XAR4, P
+003d824f   92c4   MOV          AL, *+XAR4[0]
+003d8250   a9a4   MOVL         XAR4, P
+003d8251   dc02   ADDB         XAR4, #2
+003d8252        $C$L2:
+003d8252   767d   LCR          0x3d809e
+003d8253   809e
+003d8254   0006   LRETR        
+003d8255        __TI_zero_init_nomemset:
+003d8255   8acc   MOVL         XAR4, *+XAR4[1]
+003d8256   0200   MOVB         ACC, #0
+003d8257   1901   SUBB         ACC, #1
+003d8258   dc81   SUBB         XAR4, #1
+003d8259   0fa4   CMPL         ACC, XAR4
+003d825a   6107   SB           7, EQ
+003d825b        $C$L1:
+003d825b   0200   MOVB         ACC, #0
+003d825c   dc81   SUBB         XAR4, #1
+003d825d   2b85   MOV          *XAR5++, #0
+003d825e   1901   SUBB         ACC, #1
+003d825f   0fa4   CMPL         ACC, XAR4
+003d8260   60fb   SB           -5, NEQ
+003d8261        $C$L2:
+003d8261   0006   LRETR        
+003d8262        _register_unlock:
+003d8262   761f   MOVW         DP, #0x280
+003d8263   0280
+003d8264   a808   MOVL         @0x8, XAR4
+003d8265   0006   LRETR        
+003d8266        _register_lock:
+003d8266   761f   MOVW         DP, #0x280
+003d8267   0280
+003d8268   a806   MOVL         @0x6, XAR4
+003d8269   0006   LRETR        
+003d826a        _nop:
+003d826a   0006   LRETR        
+003d826b        wd_disable:
+003d826b   561f   SETC         OBJMODE
+003d826c   7622   EALLOW       
+003d826d   b9c0   MOVZ         DP, #0x1c0
+003d826e   2829   MOV          @0x29, #0x0068
+003d826f   0068
+003d8270   761a   EDIS         
+003d8271   007d   LB           0x3d822c
+003d8272   822c
+003d8273        __TI_decompress_none:
+003d8273   c4a5   MOVL         XAR6, XAR5
+003d8274   83a4   MOVL         XAR5, XAR4
+003d8275   06cd   MOVL         ACC, *+XAR5[1]
+003d8276   8aa6   MOVL         XAR4, XAR6
+003d8277   dd03   ADDB         XAR5, #3
+003d8278   767d   LCR          0x3d820c
+003d8279   820c
+003d827a   0006   LRETR        
+003d827b        _system_pre_init:
+003d827b   9a01   MOVB         AL, #0x1
+003d827c   0006   LRETR        
+003d827d        _system_post_cinit:
+003d827d   0006   LRETR        
+
+DATA Section .cinit (Little Endian), 0x1c words at 0x003d82b2 
+003d82b2   0001    .word 0x0001
+003d82b3   001b    .word 0x001b
+003d82b4   0001    .word 0x0001
+003d82b5   0000    .word 0x0000
+003d82b6   0002    .word 0x0002
+003d82b7   826a    .word 0x826a
+003d82b8   003d    .word 0x003d
+003d82b9   0010    .word 0x0010
+003d82ba   fff0    .word 0xfff0
+003d82bb   0000    .word 0x0000
+003d82bc        __TI_Handler_Table_Base:
+003d82bc   8255    .word 0x8255
+003d82bd   003d    .word 0x003d
+003d82be   818a    .word 0x818a
+003d82bf   003d    .word 0x003d
+003d82c0   8273    .word 0x8273
+003d82c1   003d    .word 0x003d
+003d82c2        __TI_Handler_Table_Limit:
+003d82c2   0000    .word 0x0000
+003d82c3   0000    .word 0x0000
+003d82c4   0004    .word 0x0004
+003d82c5   0000    .word 0x0000
+003d82c6        __TI_CINIT_Base:
+003d82c6   82b2    .word 0x82b2
+003d82c7   003d    .word 0x003d
+003d82c8   a000    .word 0xa000
+003d82c9   0000    .word 0x0000
+003d82ca   82c2    .word 0x82c2
+003d82cb   003d    .word 0x003d
+003d82cc   a00a    .word 0xa00a
+003d82cd   0000    .word 0x0000
+
+DATA Section .const (Little Endian), 0x33 words at 0x003d827e 
+003d827e        $C$FSL1:
+003d827e   0030    .word 0x0030
+003d827f   0031    .word 0x0031
+003d8280   0032    .word 0x0032
+003d8281   0033    .word 0x0033
+003d8282   0034    .word 0x0034
+003d8283   0035    .word 0x0035
+003d8284   0036    .word 0x0036
+003d8285   0037    .word 0x0037
+003d8286   0038    .word 0x0038
+003d8287   0039    .word 0x0039
+003d8288   0041    .word 0x0041
+003d8289   0042    .word 0x0042
+003d828a   0043    .word 0x0043
+003d828b   0044    .word 0x0044
+003d828c   0045    .word 0x0045
+003d828d   0046    .word 0x0046
+003d828e   0000    .word 0x0000
+003d828f   0000    .word 0x0000
+003d8290        $C$FSL2:
+003d8290   0043    .word 0x0043
+003d8291   0041    .word 0x0041
+003d8292   004e    .word 0x004e
+003d8293   0020    .word 0x0020
+003d8294   0046    .word 0x0046
+003d8295   0032    .word 0x0032
+003d8296   0038    .word 0x0038
+003d8297   0030    .word 0x0030
+003d8298   0036    .word 0x0036
+003d8299   0039    .word 0x0039
+003d829a   000d    .word 0x000d
+003d829b   000a    .word 0x000a
+003d829c   0000    .word 0x0000
+003d829d   0000    .word 0x0000
+003d829e        $C$FSL3:
+003d829e   0054    .word 0x0054
+003d829f   0058    .word 0x0058
+003d82a0   0020    .word 0x0020
+003d82a1   0031    .word 0x0031
+003d82a2   0030    .word 0x0030
+003d82a3   0030    .word 0x0030
+003d82a4   0020    .word 0x0020
+003d82a5   0000    .word 0x0000
+003d82a6        $C$FSL4:
+003d82a6   000d    .word 0x000d
+003d82a7   000a    .word 0x000a
+003d82a8   0000    .word 0x0000
+003d82a9   0000    .word 0x0000
+003d82aa        $C$FSL5:
+003d82aa   0052    .word 0x0052
+003d82ab   0058    .word 0x0058
+003d82ac   0020    .word 0x0020
+003d82ad   0000    .word 0x0000
+003d82ae        $C$FSL6:
+003d82ae   0020    .word 0x0020
+003d82af   005b    .word 0x005b
+003d82b0   0000    .word 0x0000

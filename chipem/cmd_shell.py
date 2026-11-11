@@ -681,11 +681,15 @@ class Shell(DebugCommands, cmd.Cmd):
             self.p(f"cannot read 0x{addr:04X}: {e}")
             return
         pc = self.chip.core.pc
+        dbg, bps, last_line = self._dis_debug()          # source lines (SDCC .cdb / DWARF) and breakpoint marks
         for a, raw, text in lines:
             sym = self.symbols.lookup(a)
             if sym and "+" not in sym:
                 self.p(f"{sym[1:-1]}:")
+            last_line = self._dis_src(dbg, a, last_line)
             mark = "=>" if a == pc else "  "
+            if a in bps:
+                mark = "B>" if a == pc else "B "
             self.p(f"{mark} {a:04X}: {raw.hex(' ').upper():<9} {text}")
 
     def _dis_c28x(self, addr: int, n: int) -> None:

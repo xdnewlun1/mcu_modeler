@@ -1,0 +1,647 @@
+ASxxxx Linker V03.00/V05.40 + sdld,  page 1.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CABS                                00000000    00000000 =           0. bytes (ABS,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000000  l_BIT_BANK                      
+C:   00000000  l_BSEG                          
+C:   00000000  l_BSEG_BYTES                    
+C:   00000000  l_CABS                          
+C:   00000000  l_CONST                         
+C:   00000000  l_GSINIT                        
+C:   00000000  l_GSINIT1                       
+C:   00000000  l_GSINIT5                       
+C:   00000000  l_IABS                          
+C:   00000000  l_ISEG                          
+C:   00000000  l_OSEG                          
+C:   00000000  l_PSEG                          
+C:   00000000  l_REG_BANK_1                    
+C:   00000000  l_REG_BANK_2                    
+C:   00000000  l_REG_BANK_3                    
+C:   00000000  l_RSEG                          
+C:   00000000  l_RSEG0                         
+C:   00000000  l_RSEG1                         
+C:   00000000  l_XABS                          
+C:   00000000  l_XINIT                         
+C:   00000000  l_XISEG                         
+C:   00000000  l_XSEG                          
+C:   00000000  l__CODE                         
+C:   00000000  s_BSEG                          
+C:   00000000  s_CABS                          
+C:   00000000  s_DSEG                          
+C:   00000000  s_HOME                          
+C:   00000000  s_IABS                          
+C:   00000000  s_ISEG                          
+C:   00000000  s_REG_BANK_0                    
+C:   00000000  s_RSEG                          
+C:   00000000  s_RSEG0                         
+C:   00000000  s_RSEG1                         
+C:   00000000  s_XABS                          
+C:   00000001  s_PSEG                          
+C:   00000001  s_XISEG                         
+C:   00000001  s_XSEG                          
+C:   00000003  l_GSFINAL                       
+C:   00000003  l_GSINIT0                       
+C:   00000008  l_REG_BANK_0                    
+C:   00000008  s_REG_BANK_1                    
+C:   00000008  s_SSEG                          
+C:   0000000A  l_GSINIT2                       
+C:   00000010  s_REG_BANK_2                    
+C:   00000018  s_BIT_BANK                      
+C:   00000018  s_OSEG                          
+C:   00000018  s_REG_BANK_3                    
+C:   0000001F  l_CSEG                          
+C:   00000020  s_BSEG_BYTES                    
+C:   00000020  s__CODE                         
+ASxxxx Linker V03.00/V05.40 + sdld,  page 2.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CABS                                00000000    00000000 =           0. bytes (ABS,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000022  l_GSINIT3                       
+C:   0000002A  l_GSINIT4                       
+C:   0000004C  l_HOME                          
+C:   0000004C  s_GSINIT0                       
+C:   0000004F  s_GSINIT1                       
+C:   0000004F  s_GSINIT2                       
+C:   00000059  s_GSINIT3                       
+C:   0000007B  s_GSINIT4                       
+C:   00000080  l_DSEG                          
+C:   000000A5  s_GSFINAL                       
+C:   000000A5  s_GSINIT                        
+C:   000000A5  s_GSINIT5                       
+C:   000000A8  s_CSEG                          
+C:   000000C7  s_CONST                         
+C:   000000C7  s_XINIT                         
+C:   000000F8  l_SSEG                          
+C:   00000100  l_IRAM                          
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 3.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000000  .__.ABS.                           _startup
+     00000080  G$P0$0_0$0                         blinky
+     00000080  G$P0_0$0_0$0                       blinky
+     00000080  _P0                                blinky
+     00000080  _P0_0                              blinky
+     00000081  G$P0_1$0_0$0                       blinky
+     00000081  G$SP$0_0$0                         blinky
+     00000081  _P0_1                              blinky
+     00000081  _SP                                blinky
+     00000082  G$DPL$0_0$0                        blinky
+     00000082  G$P0_2$0_0$0                       blinky
+     00000082  _DPL                               blinky
+     00000082  _P0_2                              blinky
+     00000083  G$DPH$0_0$0                        blinky
+     00000083  G$P0_3$0_0$0                       blinky
+     00000083  _DPH                               blinky
+     00000083  _P0_3                              blinky
+     00000084  G$P0_4$0_0$0                       blinky
+     00000084  _P0_4                              blinky
+     00000085  G$P0_5$0_0$0                       blinky
+     00000085  _P0_5                              blinky
+     00000086  G$P0_6$0_0$0                       blinky
+     00000086  G$SPDAT$0_0$0                      blinky
+     00000086  _P0_6                              blinky
+     00000086  _SPDAT                             blinky
+     00000087  G$P0_7$0_0$0                       blinky
+     00000087  G$PCON$0_0$0                       blinky
+     00000087  _P0_7                              blinky
+     00000087  _PCON                              blinky
+     00000088  G$IT0$0_0$0                        blinky
+     00000088  G$TCON$0_0$0                       blinky
+     00000088  _IT0                               blinky
+     00000088  _TCON                              blinky
+     00000089  G$IE0$0_0$0                        blinky
+     00000089  G$TMOD$0_0$0                       blinky
+     00000089  _IE0                               blinky
+     00000089  _TMOD                              blinky
+     0000008A  G$IT1$0_0$0                        blinky
+     0000008A  G$TL0$0_0$0                        blinky
+     0000008A  _IT1                               blinky
+     0000008A  _TL0                               blinky
+     0000008B  G$IE1$0_0$0                        blinky
+     0000008B  G$TL1$0_0$0                        blinky
+     0000008B  _IE1                               blinky
+     0000008B  _TL1                               blinky
+     0000008C  G$TH0$0_0$0                        blinky
+     0000008C  G$TR0$0_0$0                        blinky
+     0000008C  _TH0                               blinky
+     0000008C  _TR0                               blinky
+     0000008D  G$TF0$0_0$0                        blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 4.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     0000008D  G$TH1$0_0$0                        blinky
+     0000008D  _TF0                               blinky
+     0000008D  _TH1                               blinky
+     0000008E  G$AUXR$0_0$0                       blinky
+     0000008E  G$TR1$0_0$0                        blinky
+     0000008E  _AUXR                              blinky
+     0000008E  _TR1                               blinky
+     0000008F  G$CKCON$0_0$0                      blinky
+     0000008F  G$TF1$0_0$0                        blinky
+     0000008F  _CKCON                             blinky
+     0000008F  _TF1                               blinky
+     00000090  G$P1$0_0$0                         blinky
+     00000090  G$P1_0$0_0$0                       blinky
+     00000090  _P1                                blinky
+     00000090  _P1_0                              blinky
+     00000091  G$P1_1$0_0$0                       blinky
+     00000091  _P1_1                              blinky
+     00000092  G$P1_2$0_0$0                       blinky
+     00000092  _P1_2                              blinky
+     00000093  G$P1_3$0_0$0                       blinky
+     00000093  _P1_3                              blinky
+     00000094  G$P1_4$0_0$0                       blinky
+     00000094  _P1_4                              blinky
+     00000095  G$P1_5$0_0$0                       blinky
+     00000095  _P1_5                              blinky
+     00000096  G$P1_6$0_0$0                       blinky
+     00000096  _P1_6                              blinky
+     00000097  G$P1_7$0_0$0                       blinky
+     00000097  _P1_7                              blinky
+     00000098  G$RI$0_0$0                         blinky
+     00000098  G$SCON$0_0$0                       blinky
+     00000098  _RI                                blinky
+     00000098  _SCON                              blinky
+     00000099  G$SBUF$0_0$0                       blinky
+     00000099  G$TI$0_0$0                         blinky
+     00000099  _SBUF                              blinky
+     00000099  _TI                                blinky
+     0000009A  G$RB8$0_0$0                        blinky
+     0000009A  _RB8                               blinky
+     0000009B  G$TB8$0_0$0                        blinky
+     0000009B  _TB8                               blinky
+     0000009C  G$REN$0_0$0                        blinky
+     0000009C  _REN                               blinky
+     0000009D  G$SM2$0_0$0                        blinky
+     0000009D  _SM2                               blinky
+     0000009E  G$SM1$0_0$0                        blinky
+     0000009E  _SM1                               blinky
+     0000009F  G$SM0$0_0$0                        blinky
+     0000009F  _SM0                               blinky
+     000000A0  G$P2$0_0$0                         blinky
+     000000A0  G$P2_0$0_0$0                       blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 5.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     000000A0  _P2                                blinky
+     000000A0  _P2_0                              blinky
+     000000A0  __XPAGE                            
+     000000A1  G$P2_1$0_0$0                       blinky
+     000000A1  _P2_1                              blinky
+     000000A2  G$AUXR1$0_0$0                      blinky
+     000000A2  G$P2_2$0_0$0                       blinky
+     000000A2  _AUXR1                             blinky
+     000000A2  _P2_2                              blinky
+     000000A3  G$P2_3$0_0$0                       blinky
+     000000A3  _P2_3                              blinky
+     000000A4  G$P2_4$0_0$0                       blinky
+     000000A4  _P2_4                              blinky
+     000000A5  G$P2_5$0_0$0                       blinky
+     000000A5  _P2_5                              blinky
+     000000A6  G$P2_6$0_0$0                       blinky
+     000000A6  G$WDTRST$0_0$0                     blinky
+     000000A6  _P2_6                              blinky
+     000000A6  _WDTRST                            blinky
+     000000A7  G$P2_7$0_0$0                       blinky
+     000000A7  _P2_7                              blinky
+     000000A8  G$EX0$0_0$0                        blinky
+     000000A8  G$IE$0_0$0                         blinky
+     000000A8  _EX0                               blinky
+     000000A8  _IE                                blinky
+     000000A9  G$ET0$0_0$0                        blinky
+     000000A9  G$SADDR$0_0$0                      blinky
+     000000A9  _ET0                               blinky
+     000000A9  _SADDR                             blinky
+     000000AA  G$EX1$0_0$0                        blinky
+     000000AA  G$SPSR$0_0$0                       blinky
+     000000AA  _EX1                               blinky
+     000000AA  _SPSR                              blinky
+     000000AB  G$ET1$0_0$0                        blinky
+     000000AB  _ET1                               blinky
+     000000AC  G$ES$0_0$0                         blinky
+     000000AC  _ES                                blinky
+     000000AD  G$ET2$0_0$0                        blinky
+     000000AD  _ET2                               blinky
+     000000AE  G$EC$0_0$0                         blinky
+     000000AE  _EC                                blinky
+     000000AF  G$EA$0_0$0                         blinky
+     000000AF  _EA                                blinky
+     000000B0  G$P3$0_0$0                         blinky
+     000000B0  G$P3_0$0_0$0                       blinky
+     000000B0  _P3                                blinky
+     000000B0  _P3_0                              blinky
+     000000B1  G$P3_1$0_0$0                       blinky
+     000000B1  _P3_1                              blinky
+     000000B2  G$P3_2$0_0$0                       blinky
+     000000B2  _P3_2                              blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 6.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     000000B3  G$P3_3$0_0$0                       blinky
+     000000B3  _P3_3                              blinky
+     000000B4  G$P3_4$0_0$0                       blinky
+     000000B4  _P3_4                              blinky
+     000000B5  G$P3_5$0_0$0                       blinky
+     000000B5  _P3_5                              blinky
+     000000B6  G$P3_6$0_0$0                       blinky
+     000000B6  _P3_6                              blinky
+     000000B7  G$IPH$0_0$0                        blinky
+     000000B7  G$P3_7$0_0$0                       blinky
+     000000B7  _IPH                               blinky
+     000000B7  _P3_7                              blinky
+     000000B8  G$IP$0_0$0                         blinky
+     000000B8  G$PX0$0_0$0                        blinky
+     000000B8  _IP                                blinky
+     000000B8  _PX0                               blinky
+     000000B9  G$PT0$0_0$0                        blinky
+     000000B9  G$SADEN$0_0$0                      blinky
+     000000B9  _PT0                               blinky
+     000000B9  _SADEN                             blinky
+     000000BA  G$PX1$0_0$0                        blinky
+     000000BA  _PX1                               blinky
+     000000BB  G$PT1$0_0$0                        blinky
+     000000BB  _PT1                               blinky
+     000000BC  G$PS$0_0$0                         blinky
+     000000BC  _PS                                blinky
+     000000BD  G$PT2$0_0$0                        blinky
+     000000BD  _PT2                               blinky
+     000000BE  G$PPC$0_0$0                        blinky
+     000000BE  _PPC                               blinky
+     000000C8  G$CP_RL2$0_0$0                     blinky
+     000000C8  G$T2CON$0_0$0                      blinky
+     000000C8  _CP_RL2                            blinky
+     000000C8  _T2CON                             blinky
+     000000C9  G$C_T2$0_0$0                       blinky
+     000000C9  G$T2MOD$0_0$0                      blinky
+     000000C9  _C_T2                              blinky
+     000000C9  _T2MOD                             blinky
+     000000CA  G$RCAP2L$0_0$0                     blinky
+     000000CA  G$TR2$0_0$0                        blinky
+     000000CA  _RCAP2L                            blinky
+     000000CA  _TR2                               blinky
+     000000CB  G$EXEN2$0_0$0                      blinky
+     000000CB  G$RCAP2H$0_0$0                     blinky
+     000000CB  _EXEN2                             blinky
+     000000CB  _RCAP2H                            blinky
+     000000CC  G$TCLK$0_0$0                       blinky
+     000000CC  G$TL2$0_0$0                        blinky
+     000000CC  _TCLK                              blinky
+     000000CC  _TL2                               blinky
+     000000CD  G$RCLK$0_0$0                       blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 7.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     000000CD  G$TH2$0_0$0                        blinky
+     000000CD  _RCLK                              blinky
+     000000CD  _TH2                               blinky
+     000000CE  G$EXF2$0_0$0                       blinky
+     000000CE  _EXF2                              blinky
+     000000CF  G$TF2$0_0$0                        blinky
+     000000CF  _TF2                               blinky
+     000000D0  G$P$0_0$0                          blinky
+     000000D0  G$PSW$0_0$0                        blinky
+     000000D0  _P                                 blinky
+     000000D0  _PSW                               blinky
+     000000D1  G$F1$0_0$0                         blinky
+     000000D1  _F1                                blinky
+     000000D2  G$OV$0_0$0                         blinky
+     000000D2  _OV                                blinky
+     000000D3  G$RS0$0_0$0                        blinky
+     000000D3  _RS0                               blinky
+     000000D4  G$RS1$0_0$0                        blinky
+     000000D4  _RS1                               blinky
+     000000D5  G$F0$0_0$0                         blinky
+     000000D5  G$SPCR$0_0$0                       blinky
+     000000D5  _F0                                blinky
+     000000D5  _SPCR                              blinky
+     000000D6  G$AC$0_0$0                         blinky
+     000000D6  _AC                                blinky
+     000000D7  G$CY$0_0$0                         blinky
+     000000D7  _CY                                blinky
+     000000D8  G$CCF0$0_0$0                       blinky
+     000000D8  G$CCON$0_0$0                       blinky
+     000000D8  _CCF0                              blinky
+     000000D8  _CCON                              blinky
+     000000D9  G$CCF1$0_0$0                       blinky
+     000000D9  G$CMOD$0_0$0                       blinky
+     000000D9  _CCF1                              blinky
+     000000D9  _CMOD                              blinky
+     000000DA  G$CCAPM0$0_0$0                     blinky
+     000000DA  G$CCF2$0_0$0                       blinky
+     000000DA  _CCAPM0                            blinky
+     000000DA  _CCF2                              blinky
+     000000DB  G$CCAPM1$0_0$0                     blinky
+     000000DB  G$CCF3$0_0$0                       blinky
+     000000DB  _CCAPM1                            blinky
+     000000DB  _CCF3                              blinky
+     000000DC  G$CCAPM2$0_0$0                     blinky
+     000000DC  G$CCF4$0_0$0                       blinky
+     000000DC  _CCAPM2                            blinky
+     000000DC  _CCF4                              blinky
+     000000DD  G$CCAPM3$0_0$0                     blinky
+     000000DD  _CCAPM3                            blinky
+     000000DE  G$CCAPM4$0_0$0                     blinky
+     000000DE  G$CR$0_0$0                         blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 8.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+.  .ABS.                            00000000    00000000 =           0. bytes (ABS,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     000000DE  _CCAPM4                            blinky
+     000000DE  _CR                                blinky
+     000000DF  G$CF$0_0$0                         blinky
+     000000DF  _CF                                blinky
+     000000E0  G$ACC$0_0$0                        blinky
+     000000E0  _ACC                               blinky
+     000000E9  G$CL$0_0$0                         blinky
+     000000E9  _CL                                blinky
+     000000EA  G$CCAP0L$0_0$0                     blinky
+     000000EA  _CCAP0L                            blinky
+     000000EB  G$CCAP1L$0_0$0                     blinky
+     000000EB  _CCAP1L                            blinky
+     000000EC  G$CCAP2L$0_0$0                     blinky
+     000000EC  _CCAP2L                            blinky
+     000000ED  G$CCAP3L$0_0$0                     blinky
+     000000ED  _CCAP3L                            blinky
+     000000EE  G$CCAP4L$0_0$0                     blinky
+     000000EE  _CCAP4L                            blinky
+     000000F0  G$B$0_0$0                          blinky
+     000000F0  _B                                 blinky
+     000000F9  G$CH$0_0$0                         blinky
+     000000F9  _CH                                blinky
+     000000FA  G$CCAP0H$0_0$0                     blinky
+     000000FA  _CCAP0H                            blinky
+     000000FB  G$CCAP1H$0_0$0                     blinky
+     000000FB  _CCAP1H                            blinky
+     000000FC  G$CCAP2H$0_0$0                     blinky
+     000000FC  _CCAP2H                            blinky
+     000000FD  G$CCAP3H$0_0$0                     blinky
+     000000FD  _CCAP3H                            blinky
+     000000FE  G$CCAP4H$0_0$0                     blinky
+     000000FE  _CCAP4H                            blinky
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 9.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+REG_BANK_0                          00000000    00000008 =           8. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 10.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+DSEG                                00000000    00000080 =         128. bytes (REL,CON)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 11.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+SSEG                                00000008    000000F8 =         248. bytes (REL,OVR)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+     00000008  __start__stack                     blinky
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 12.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+HOME                                00000000    0000004C =          76. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000000  A$blinky$511                       blinky
+C:   00000008  A$blinky$515                       blinky
+C:   00000008  sdcc_atomic_exchange_rollback_st   blinky
+C:   00000009  A$blinky$516                       blinky
+C:   0000000A  A$blinky$518                       blinky
+C:   0000000B  A$blinky$519                       blinky
+C:   0000000C  A$blinky$520                       blinky
+C:   0000000D  A$blinky$521                       blinky
+C:   0000000E  A$blinky$522                       blinky
+C:   00000010  A$blinky$523                       blinky
+C:   00000011  A$blinky$524                       blinky
+C:   00000012  A$blinky$526                       blinky
+C:   00000013  A$blinky$527                       blinky
+C:   00000014  A$blinky$528                       blinky
+C:   00000015  A$blinky$529                       blinky
+C:   00000016  A$blinky$530                       blinky
+C:   00000018  A$blinky$532                       blinky
+C:   00000019  A$blinky$533                       blinky
+C:   0000001C  A$blinky$534                       blinky
+C:   0000001D  A$blinky$535                       blinky
+C:   0000001E  A$blinky$536                       blinky
+C:   0000001F  A$blinky$537                       blinky
+C:   00000020  A$blinky$539                       blinky
+C:   00000021  A$blinky$540                       blinky
+C:   00000024  A$blinky$541                       blinky
+C:   00000025  A$blinky$542                       blinky
+C:   00000026  A$blinky$543                       blinky
+C:   00000027  A$blinky$544                       blinky
+C:   00000028  A$blinky$546                       blinky
+C:   00000029  A$blinky$547                       blinky
+C:   0000002C  A$blinky$548                       blinky
+C:   0000002D  A$blinky$549                       blinky
+C:   0000002E  A$blinky$550                       blinky
+C:   0000002F  A$blinky$554                       blinky
+C:   0000002F  sdcc_atomic_exchange_gptr_impl     blinky
+C:   0000002F  sdcc_atomic_exchange_rollback_en   blinky
+C:   00000032  A$blinky$555                       blinky
+C:   00000034  A$blinky$556                       blinky
+C:   00000037  A$blinky$558                       blinky
+C:   00000038  A$blinky$559                       blinky
+C:   00000039  A$blinky$560                       blinky
+C:   0000003B  A$blinky$561                       blinky
+C:   0000003C  A$blinky$563                       blinky
+C:   0000003E  A$blinky$564                       blinky
+C:   0000003F  A$blinky$566                       blinky
+C:   0000003F  sdcc_atomic_compare_exchange_gpt   blinky
+C:   00000042  A$blinky$567                       blinky
+C:   00000044  A$blinky$568                       blinky
+C:   00000047  A$blinky$569                       blinky
+C:   00000049  A$blinky$591                       blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 13.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+HOME                                00000000    0000004C =          76. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000049  __sdcc_program_startup             blinky
+ASxxxx Linker V03.00/V05.40 + sdld,  page 14.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT0                             0000004C    00000003 =           3. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000004C  __sdcc_gsinit_startup              
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 15.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT2                             0000004F    0000000A =          10. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+ASxxxx Linker V03.00/V05.40 + sdld,  page 16.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT3                             00000059    00000022 =          34. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   00000059  __mcs51_genXINIT                   
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 17.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSINIT4                             0000007B    0000002A =          42. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   0000007B  __mcs51_genRAMCLEAR                
+C:   00000081  __mcs51_genXRAMCLEAR               
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 18.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+GSFINAL                             000000A5    00000003 =           3. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000A5  A$blinky$584                       blinky
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 19.
+Hexadecimal  [32-Bits]
+
+Area                                    Addr        Size        Decimal Bytes (Attributes)
+--------------------------------        ----        ----        ------- ----- ------------
+CSEG                                000000A8    0000001F =          31. bytes (REL,CON,CODE)
+
+      Value  Global                              Global Defined In Module
+      -----  --------------------------------   ------------------------
+C:   000000A8  A$blinky$618                       blinky
+C:   000000A8  C$blinky.c$4$0_0$2                 blinky
+C:   000000A8  C$blinky.c$6$1_0$2                 blinky
+C:   000000A8  Fblinky$delay_50ms$0$0             blinky
+C:   000000AA  A$blinky$621                       blinky
+C:   000000AA  C$blinky.c$7$1_0$2                 blinky
+C:   000000AD  A$blinky$624                       blinky
+C:   000000AD  C$blinky.c$8$1_0$2                 blinky
+C:   000000B0  A$blinky$628                       blinky
+C:   000000B0  C$blinky.c$9$1_0$2                 blinky
+C:   000000B2  A$blinky$632                       blinky
+C:   000000B2  C$blinky.c$10$1_0$2                blinky
+C:   000000B4  A$blinky$636                       blinky
+C:   000000B4  C$blinky.c$11$1_0$2                blinky
+C:   000000B7  A$blinky$641                       blinky
+C:   000000B7  C$blinky.c$13$1_0$2                blinky
+C:   000000B7  XFblinky$delay_50ms$0$0            blinky
+C:   000000B8  A$blinky$654                       blinky
+C:   000000B8  C$blinky.c$15$1_0$4                blinky
+C:   000000B8  C$blinky.c$17$1_0$4                blinky
+C:   000000B8  G$main$0$0                         blinky
+C:   000000B8  _main                              blinky
+C:   000000BB  A$blinky$658                       blinky
+C:   000000BB  C$blinky.c$19$3_0$6                blinky
+C:   000000BD  A$blinky$661                       blinky
+C:   000000BD  C$blinky.c$20$3_0$6                blinky
+C:   000000C0  A$blinky$662                       blinky
+C:   000000C2  A$blinky$667                       blinky
+C:   000000C2  C$blinky.c$22$2_0$4                blinky
+C:   000000C2  XG$main$0$0                        blinky
+C:   000000C3  ___sdcc_external_startup           _startup
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 20.
+
+Files Linked                              [ module(s) ]
+
+build/obj_blinky/blinky.rel               [  ]
+
+
+Libraries Linked                          [ object file ]
+
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtclear.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtxinit.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtxclear.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtpagesfr.rel ]
+/usr/share/sdcc/lib/small/mcs51.lib       [ crtstart.rel ]
+/usr/share/sdcc/lib/small/libsdcc.lib     [ _startup.rel ]
+
+ASxxxx Linker V03.00/V05.40 + sdld,  page 21.
+
+User Base Address Definitions
+
+HOME = 0x0000
+XSEG = 0x0001
+PSEG = 0x0001
+ISEG = 0x0000
+BSEG = 0x0000
+
+

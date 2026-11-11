@@ -6,7 +6,9 @@ the DSPI frame stream itself: a PUSHR entry with CONT=0 (PCS released after the 
 transaction.  Commands: 0x9F RDID, 0x90 REMS, 0xAB RES (release from deep power-down + electronic signature),
 0x05 RDSR, 0x01 WRSR, 0x06 WREN, 0x04 WRDI, 0x03 READ, 0x0B FAST_READ, 0x02 PP (page program, bits 1->0,
 wraps within the 256-byte page), 0x20 4 KB / 0x52 32 KB / 0xD8 64 KB sector erase, 0x60/0xC7 chip erase,
-0xB9 deep power-down.  Program/erase need WEL (set by WREN, cleared at the end of the operation) and complete
+0xB9 deep power-down.  `addr_bytes` (default 3) sets the address length of READ/FAST_READ/PP/erase: 2 makes it a
+16-bit-address serial EEPROM such as the X25256 / 25LC256 that the C2000 280x boot ROM's SPI loader reads
+(0x03 + two address bytes).  Program/erase need WEL (set by WREN, cleared at the end of the operation) and complete
 instantly (WIP always reads 0).  Unknown commands return 0xFF.
 """
 from __future__ import annotations
@@ -35,8 +37,11 @@ def _parse_size(v: Any) -> int:
 
 class SpiNorFlash:
     def __init__(self, jedec: int = 0x202015, size: int | str | None = None, *, image: str | Path | None = None,
-                 name: str = "spi_flash"):
+                 name: str = "spi_flash", addr_bytes: int = 3):
         self.name = name
+        self.addr_bytes = int(addr_bytes)
+        if self.addr_bytes not in (1, 2, 3, 4):
+            raise ValueError(f"spi_flash: addr_bytes must be 1..4 (got {addr_bytes})")
         self.jedec = int(jedec) & 0xFFFFFF
         self.size = _parse_size(size) if size is not None else KNOWN.get(self.jedec, 2 << 20)
         self.mem = bytearray(b"\xff" * self.size)
@@ -85,9 +90,10 @@ class SpiNorFlash:
     def _end(self) -> None:
         cmd, n = self._cmd, len(self._buf)
         if cmd is not None and self.wel:
-            a = self._addr_from_buf() % self.size if n >= 3 else 0
+            na = self.addr_bytes
+            a = self._addr_from_buf() % self.size if n >= na else 0
             span = {0x20: 0x1000, 0x52: 0x8000, 0xD8: 0x10000}.get(cmd)
-            if span is not None and n >= 3:
+            if span is not None and n >= na:
                 a -= a % span
                 self.mem[a:a + span] = b"\xff" * span
                 self.ops.append((f"erase{span // 1024}k", a))
@@ -96,7 +102,7 @@ class SpiNorFlash:
                 self.mem[:] = b"\xff" * self.size
                 self.ops.append(("chip_erase", 0))
                 self.wel = False
-            elif cmd == 0x02 and n >= 3:
+            elif cmd == 0x02 and n >= na:
                 self.ops.append(("program", a))
                 self.wel = False
             elif cmd == 0x01:
@@ -106,8 +112,10 @@ class SpiNorFlash:
         self._buf.clear()
 
     def _addr_from_buf(self) -> int:
-        b = self._buf
-        return (b[0] << 16) | (b[1] << 8) | b[2]
+        a = 0
+        for x in self._buf[:self.addr_bytes]:
+            a = (a << 8) | x
+        return a
 
     def transfer(self, tx: int, pcs: int = 0, bits: int = 8) -> int:
         tx &= 0xFF
@@ -140,18 +148,18 @@ class SpiNorFlash:
                 return 0xFF
             return (self.jedec >> 16) & 0xFF if (k - 3) % 2 == 0 else (self.jedec & 0xFF) - 1
         if cmd in (0x03, 0x0B):
-            hdr = 3 if cmd == 0x03 else 4
+            hdr = self.addr_bytes + (0 if cmd == 0x03 else 1)
             if k < hdr:
-                if k == 2:
+                if k == self.addr_bytes - 1:
                     self._addr = self._addr_from_buf()
                 return 0xFF
             v = self.mem[self._addr % self.size]
             self._addr += 1
             return v
         if cmd == 0x02:
-            if k == 2:
+            if k == self.addr_bytes - 1:
                 self._addr = self._addr_from_buf()
-            elif k >= 3 and self.wel:
+            elif k >= self.addr_bytes and self.wel:
                 a = self._addr % self.size
                 self.mem[a] &= tx
                 self._addr = (self._addr & ~0xFF) | ((self._addr + 1) & 0xFF)
@@ -171,6 +179,12 @@ def parse_spec(spec: str) -> tuple[str, dict]:
 
 def attach_from_spec(chip: Any, spec: str) -> SpiNorFlash:
     spi, o = parse_spec(spec)
+    blk = (getattr(chip, "peripherals", None) or {}).get(spi)
+    if blk is not None and hasattr(blk, "attach_qspi_flash"):       # quad-SPI controller (stm32.quadspi)
+        from .qspi_flash import from_options
+        dev = from_options(o, name=f"{spi}_flash")
+        blk.attach_qspi_flash(dev, int(o.get("bank", 1)))
+        return dev
     dev = SpiNorFlash(int(o.get("jedec", "0x202015"), 0), o.get("size"), image=o.get("file"),
-                      name=f"{spi}_flash")
+                      name=f"{spi}_flash", addr_bytes=int(o.get("addr_bytes", "3"), 0))
     return dev.attach(chip, spi, o.get("cs"))

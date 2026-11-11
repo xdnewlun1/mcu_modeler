@@ -137,6 +137,12 @@ class Debugger:
         if image is not None and getattr(image, "fmt", "") == "elf" and src:
             from .dwarf import DwarfInfo
             self.dwarf = DwarfInfo.load(src, self.source_dirs)
+        elif image is not None and src:
+            # SDCC (mcs51) builds: line table + functions from the .cdb next to the .ihx/.hex (chipem/sdcc_cdb.py)
+            from .sdcc_cdb import cdb_for_image, load_cdb
+            cdb = cdb_for_image(image)
+            if cdb is not None:
+                self.dwarf = load_cdb(cdb, self.source_dirs)
         self.data_syms: dict[str, tuple[int, int]] = self._load_data_symbols(image)
         self.bps: dict[int, Breakpoint] = {}
         self._ids = ids or self._own_ids
@@ -209,6 +215,20 @@ class Debugger:
     def fmt_addr(self, a: int) -> str:
         return f"0x{a:06X}" if self.c28x else f"0x{a:08X}"
 
+    # ---------------------------------------------------------------------------------------------- variables
+    # (chipem/dwarfvars.py: DWARF locals / globals / typed expressions; item shape in its docstring)
+    def frame_vars(self, level: int = 0) -> dict:
+        from .dwarfvars import frame_vars
+        return frame_vars(self, level)
+
+    def globals_list(self, q: str | None = None, limit: int = 500) -> list[dict]:
+        from .dwarfvars import globals_list
+        return globals_list(self, q, limit)
+
+    def evaluate(self, expr: str, level: int = 0) -> dict:
+        from .dwarfvars import evaluate
+        return evaluate(self, expr, level)
+
     # ---------------------------------------------------------------------------------------------- locations
     def eval_expr(self, text: str | ast.Expression, *, values: bool = True) -> int:
         """Evaluate a debugger expression (compile_expr). `values`: a data symbol stands for its value (conditions,
@@ -267,9 +287,14 @@ class Debugger:
         if low in self.reg_names() or low in ("ip", "fp", "ah", "al", "ph", "pl", "t", "tl") \
                 or re.fullmatch(r"(r\d+|s\d+|ar\d|xar\d|r\dh)", low):
             try:
-                return self.core.read_reg(low)
+                v = self.core.read_reg(low)
             except Exception:
-                pass
+                v = None
+            if v is not None:
+                # a location (memory view, watch): an arch with several address spaces tags the register's space
+                # (MCS-51: sp -> IDATA, dptr -> XDATA); a value (condition) stays the plain register value
+                ra = getattr(self.ad, "reg_address", None) if not values else None
+                return ra(low, v) if ra is not None else v
         s = self.data_syms.get(name) or (self.data_syms.get("_" + name) if not name.startswith("_") else None)
         if s is None:
             raise DebugError(f"unknown register or symbol {name!r}")
@@ -1043,6 +1068,10 @@ class Debugger:
                     self.add_break("", internal=True, addr=dw.prologue_end(tf))
         cfa0 = self.cfa()
         frame = ("cfa_ge", cfa0) if cfa0 is not None else None
+        if frame is None and self.ad is not None and self.ad.stack_grows_up:
+            # MCS-51 (no CFI): a line of this frame starts with SP at most one byte above the current SP (SDCC can
+            # leave one saved byte on the stack across a call); a deeper call pushed at least its return address
+            frame = ("le", self.core.read_reg("sp") + 1)
         cur = (li.file, li.line)
         addrs = set()
         for r in dw.function_lines(fn):

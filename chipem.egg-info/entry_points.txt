@@ -1,2 +1,0 @@
-[console_scripts]
-chipem = chipem.cli:main

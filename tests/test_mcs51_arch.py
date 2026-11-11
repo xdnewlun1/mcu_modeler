@@ -196,7 +196,7 @@ def test_reti_stop_reason_and_vector_table():
     c = chip_for(program("SJMP $", isrs={T0: " RETI", SER: " RETI"}))
     vt = {v["name"]: v for v in c.arch.vector_table()}
     assert vt["TIMER0"]["addr"] == 0x0B and vt["SERIAL"]["target"] > 0x50
-    assert c.arch.exc_label(7) == "0x003B" and c.arch.exc_name(6) == "PCA"
+    assert c.arch.exc_label(5) == "0x002B" and c.arch.exc_name(5) == "TIMER2" and c.arch.exc_name(6) == "PCA"
     c.core.write_mem(0x200, b"\x32")
     c.core.pc = 0x200
     c.core.iram[8], c.core.iram[9] = 0x34, 0x12

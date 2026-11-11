@@ -25,6 +25,11 @@ whose read would pop a FIFO or clear a flag returns its stored value).
 C28x: gdb has no C28x architecture. The server sends a custom target.xml (architecture "c28x", feature
 org.chipem.c28x, all registers 32 bits) for generic RSP clients; addresses are 16-bit word addresses (as in TI's
 tools), `m`/`M` lengths are bytes (two per word, little-endian words).
+
+MCS-51 (8051): gdb has no 8051 architecture either. The custom target.xml (architecture "mcs51", feature
+org.chipem.mcs51) lists r0-r7 of the current bank, a, b, psw, sp (8 bits), dptr, pc (16 bits) and dps (8 bits) for
+generic RSP clients. Memory addresses are CHIP_EM's tagged 8051 spaces (docs/MCS51_CORE.md): CODE 0x00000, XDATA
+0x10000, IDATA 0x20000, SFR 0x30080-0x300FF, on-chip XRAM 0x40000; breakpoints are CODE addresses.
 """
 from __future__ import annotations
 
@@ -147,8 +152,14 @@ class _Layout:
 
     def __init__(self, chip: Any):
         self.c28x = getattr(chip, "arch_kind", "") == "c28x"
+        self.mcs51 = getattr(chip, "arch_kind", "") == "mcs51"
         regs: list[tuple[str, int, str | None, str]] = []      # (gdb name, bits, core reg, feature)
-        if self.c28x:
+        if self.mcs51:
+            regs += [(f"r{i}", 8, f"r{i}", "org.chipem.mcs51") for i in range(8)]
+            regs += [(n, 8, n, "org.chipem.mcs51") for n in ("a", "b", "psw", "sp")]
+            regs += [("dptr", 16, "dptr", "org.chipem.mcs51"), ("pc", 16, "pc", "org.chipem.mcs51"),
+                     ("dps", 8, "dps", "org.chipem.mcs51")]
+        elif self.c28x:
             names = list(getattr(chip.arch, "reg_names", ()) or ())
             for n in names:
                 regs.append((n, 32, n, "org.chipem.c28x"))
@@ -178,7 +189,7 @@ class _Layout:
             k = int(cn[1:])
             lo, hi = core.read_reg(f"s{2 * k}"), core.read_reg(f"s{2 * k + 1}")
             return lo | (hi << 32)
-        if cn in ("msp", "psp") and not self.c28x:
+        if cn in ("msp", "psp") and not (self.c28x or self.mcs51):
             return core.read_reg(cn)
         return core.read_reg(cn) & ((1 << bits) - 1)
 
@@ -200,6 +211,8 @@ def target_xml(chip: Any) -> str:
     lay = _Layout(chip)
     if lay.c28x:
         arch = "c28x"
+    elif lay.mcs51:
+        arch = "mcs51"
     else:
         arch = "arm"
     out = ['<?xml version="1.0"?>', '<!DOCTYPE target SYSTEM "gdb-target.dtd">', "<target>",
@@ -514,7 +527,8 @@ class GdbServer:
                 return "OK"
             if p == "qHostInfo":
                 lay = self._layout
-                triple = ("c28x-unknown-none" if lay.c28x else "thumbv7m-none-eabi").encode().hex()
+                triple = ("c28x-unknown-none" if lay.c28x else "mcs51-unknown-none" if lay.mcs51
+                          else "thumbv7m-none-eabi").encode().hex()
                 return f"triple:{triple};endian:little;ptrsize:4;"
             if p == "qProcessInfo":
                 return "pid:1;endian:little;ptrsize:4;"

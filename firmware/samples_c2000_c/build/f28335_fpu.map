@@ -1,0 +1,343 @@
+******************************************************************************
+             TMS320C2000 Linker Unix v25.11.1                  
+******************************************************************************
+>> Linked Tue Nov 10 22:44:51 2026
+
+OUTPUT FILE NAME:   <build/f28335_fpu.out>
+ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
+
+
+MEMORY CONFIGURATION
+
+         name            origin    length      used     unused   attr    fill
+----------------------  --------  ---------  --------  --------  ----  --------
+PAGE 0:
+  RAML0                 00008000   00001000  00000000  00001000  RWIX
+  RAML1                 00009000   00001000  00000000  00001000  RWIX
+  FLASH                 00300000   0003ff80  000004d0  0003fab0  RWIX
+  CSM_RSVD              0033ff80   00000076  00000000  00000076  RWIX
+  BEGIN                 0033fff6   00000002  00000002  00000000  RWIX
+  CSM_PWL               0033fff8   00000008  00000000  00000008  RWIX
+  ADC_CAL               00380080   00000009  00000000  00000009  RWIX
+  OTP                   00380400   00000400  00000000  00000400  RWIX
+  RESET                 003fffc0   00000002  00000000  00000002  RWIX
+
+PAGE 1:
+  BOOT_RSVD             00000000   00000050  00000000  00000050  RWIX
+  RAMM0                 00000050   000003b0  00000000  000003b0  RWIX
+  RAMM1                 00000400   00000400  00000300  00000100  RWIX
+  PIEVECT               00000d00   00000100  00000000  00000100  RWIX
+  RAML2                 0000a000   00001000  00000000  00001000  RWIX
+  RAML3                 0000b000   00001000  00000000  00001000  RWIX
+  RAML4                 0000c000   00001000  00000193  00000e6d  RWIX
+  RAML5                 0000d000   00001000  0000002f  00000fd1  RWIX
+  RAML6                 0000e000   00001000  00000000  00001000  RWIX
+  RAML7                 0000f000   00001000  00000000  00001000  RWIX
+
+
+SECTION ALLOCATION MAP
+
+ output                                  attributes/
+section   page    origin      length       input sections
+--------  ----  ----------  ----------   ----------------
+.text      0    00300000    00000482     
+                  00300000    0000028f     f28335_fpu.obj (.text)
+                  0030028f    00000088     rts2800_fpu32_eabi.lib : fs_div28.asm.obj (.text)
+                  00300317    0000002e                            : copy_decompress_lzss.c.obj (.text:decompress:lzss)
+                  00300345    00000001                            : startup.c.obj (.text)
+                  00300346    0000002e     f28335_fpu_asm.obj (.text)
+                  00300374    0000002b     rts2800_fpu32_eabi.lib : autoinit.c.obj (.text:__TI_auto_init_nobinit_nopinit)
+                  0030039f    00000029                            : exit.c.obj (.text)
+                  003003c8    00000027                            : e_sqrtf.c.obj (.text)
+                  003003ef    00000022                            : i_div28.asm.obj (.text)
+                  00300411    00000020                            : memcpy.c.obj (.text)
+                  00300431    00000017                            : boot28.asm.obj (.text)
+                  00300448    00000012                            : args_main.c.obj (.text)
+                  0030045a    0000000d                            : copy_zero_init.c.obj (.text:decompress:ZI:__TI_zero_init_nomemset)
+                  00300467    00000009                            : _lock.c.obj (.text)
+                  00300470    00000008     codestart.obj (.text)
+                  00300478    00000008     rts2800_fpu32_eabi.lib : copy_decompress_none.c.obj (.text:decompress:none)
+                  00300480    00000002                            : pre_init.c.obj (.text)
+
+.cinit     0    0030048e    00000042     
+                  0030048e    00000030     (.cinit..data.load) [load image, compression = lzss]
+                  003004be    00000006     (__TI_handler_table)
+                  003004c4    00000004     (.cinit..bss.load) [load image, compression = zero_init]
+                  003004c8    00000008     (__TI_cinit_table)
+
+codestart 
+*          0    0033fff6    00000002     
+                  0033fff6    00000002     codestart.obj (codestart)
+
+.stack     1    00000400    00000300     UNINITIALIZED
+                  00000400    00000300     --HOLE--
+
+.reset     0    003fffc0    00000000     DSECT
+
+.init_array 
+*          0    00300000    00000000     UNINITIALIZED
+
+.const     0    00300482    0000000c     
+                  00300482    0000000c     f28335_fpu.obj (.const:poly)
+
+.bss       1    0000c000    00000193     UNINITIALIZED
+                  0000c000    000000a0     f28335_fpu.obj (.bss:results)
+                  0000c0a0    00000050     f28335_fpu.obj (.bss:xs)
+                  0000c0f0    00000050     f28335_fpu.obj (.bss:ys)
+                  0000c140    00000040     f28335_fpu.obj (.bss:firout)
+                  0000c180    00000010     f28335_fpu.obj (.bss:coef)
+                  0000c190    00000003     f28335_fpu.obj (.bss)
+
+.data      1    0000d000    0000002f     UNINITIALIZED
+                  0000d000    0000001e     f28335_fpu.obj (.data)
+                  0000d01e    00000006     f28335_fpu.obj (.data:nsel)
+                  0000d024    00000006     rts2800_fpu32_eabi.lib : exit.c.obj (.data)
+                  0000d02a    00000002                            : _lock.c.obj (.data:_lock)
+                  0000d02c    00000002                            : _lock.c.obj (.data:_unlock)
+                  0000d02e    00000001                            : errno.c.obj (.data)
+
+MODULE SUMMARY
+
+       Module                       code   ro data   rw data
+       ------                       ----   -------   -------
+    build/obj_eabi/f28335_fpu/
+       f28335_fpu.obj               655    12        439    
+       f28335_fpu_asm.obj           46     0         0      
+       codestart.obj                10     0         0      
+    +--+----------------------------+------+---------+---------+
+       Total:                       711    12        439    
+                                                            
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_fpu32_eabi.lib
+       fs_div28.asm.obj             136    0         0      
+       exit.c.obj                   41     0         6      
+       copy_decompress_lzss.c.obj   46     0         0      
+       autoinit.c.obj               43     0         0      
+       e_sqrtf.c.obj                39     0         0      
+       i_div28.asm.obj              34     0         0      
+       memcpy.c.obj                 32     0         0      
+       boot28.asm.obj               23     0         0      
+       args_main.c.obj              18     0         0      
+       _lock.c.obj                  9      0         4      
+       copy_zero_init.c.obj         13     0         0      
+       copy_decompress_none.c.obj   8      0         0      
+       pre_init.c.obj               2      0         0      
+       errno.c.obj                  0      0         1      
+       startup.c.obj                1      0         0      
+    +--+----------------------------+------+---------+---------+
+       Total:                       445    0         11     
+                                                            
+       Stack:                       0      0         768    
+       Linker Generated:            0      66        0      
+    +--+----------------------------+------+---------+---------+
+       Grand Total:                 1156   78        1218   
+
+
+LINKER GENERATED COPY TABLES
+
+__TI_cinit_table @ 003004c8 records: 2, size/record: 4, table size: 8
+	.data: load addr=0030048e, load size=00000030 bytes, run addr=0000d000, run size=0000002f bytes, compression=lzss
+	.bss: load addr=003004c4, load size=00000004 bytes, run addr=0000c000, run size=00000193 bytes, compression=zero_init
+
+
+LINKER GENERATED HANDLER TABLE
+
+__TI_handler_table @ 003004be records: 3, size/record: 2, table size: 6
+	index: 0, handler: __TI_zero_init
+	index: 1, handler: __TI_decompress_lzss
+	index: 2, handler: __TI_decompress_none
+
+
+GLOBAL DATA SYMBOLS: SORTED BY DATA PAGE
+
+address     data page           name
+--------    ----------------    ----
+00000400      10 (00000400)     __stack
+
+0000c000     300 (0000c000)     results
+
+0000c0a0     302 (0000c080)     xs
+
+0000c0f0     303 (0000c0c0)     ys
+
+0000c140     305 (0000c140)     firout
+
+0000c180     306 (0000c180)     coef
+0000c190     306 (0000c180)     fpu_done
+0000c191     306 (0000c180)     nresults
+
+0000d000     340 (0000d000)     i1
+0000d002     340 (0000d000)     f1
+0000d004     340 (0000d000)     f2
+0000d006     340 (0000d000)     f3
+0000d008     340 (0000d000)     f4
+0000d00a     340 (0000d000)     f5
+0000d00c     340 (0000d000)     big
+0000d00e     340 (0000d000)     tiny
+0000d010     340 (0000d000)     three_e9
+0000d012     340 (0000d000)     neg
+0000d014     340 (0000d000)     two
+0000d016     340 (0000d000)     l1
+0000d018     340 (0000d000)     l2
+0000d01a     340 (0000d000)     l3
+0000d01c     340 (0000d000)     u1
+0000d01e     340 (0000d000)     nsel
+0000d024     340 (0000d000)     __TI_enable_exit_profile_output
+0000d026     340 (0000d000)     __TI_cleanup_ptr
+0000d028     340 (0000d000)     __TI_dtors_ptr
+0000d02a     340 (0000d000)     _lock
+0000d02c     340 (0000d000)     _unlock
+0000d02e     340 (0000d000)     errno
+
+00300482    c012 (00300480)     poly
+
+
+GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
+
+page  address   name                           
+----  -------   ----                           
+0     0030039f  C$$EXIT                        
+0     003004c8  __TI_CINIT_Base                
+0     003004d0  __TI_CINIT_Limit               
+0     003004d0  __TI_CINIT_Warm                
+0     003004be  __TI_Handler_Table_Base        
+0     003004c4  __TI_Handler_Table_Limit       
+1     00000700  __TI_STACK_END                 
+abs   00000300  __TI_STACK_SIZE                
+0     00300374  __TI_auto_init_nobinit_nopinit 
+1     0000d026  __TI_cleanup_ptr               
+0     00300317  __TI_decompress_lzss           
+0     00300478  __TI_decompress_none           
+1     0000d028  __TI_dtors_ptr                 
+1     0000d024  __TI_enable_exit_profile_output
+abs   ffffffff  __TI_pprof_out_hndl            
+abs   ffffffff  __TI_prof_data_size            
+abs   ffffffff  __TI_prof_data_start           
+0     0030045a  __TI_zero_init_nomemset        
+0     0030028f  __c28xabi_divf                 
+0     003003ef  __c28xabi_divi                 
+0     00300400  __c28xabi_modi                 
+abs   ffffffff  __c_args__                     
+1     00000400  __stack                        
+0     00300448  _args_main                     
+0     00300431  _c_int00                       
+1     0000d02a  _lock                          
+0     0030046f  _nop                           
+0     0030046b  _register_lock                 
+0     00300467  _register_unlock               
+0     00300345  _system_post_cinit             
+0     00300480  _system_pre_init               
+1     0000d02c  _unlock                        
+0     0030039f  abort                          
+1     0000d00c  big                            
+0     0033fff6  code_start                     
+1     0000c180  coef                           
+0     00300019  dot                            
+1     0000d02e  errno                          
+0     003003a1  exit                           
+1     0000d002  f1                             
+1     0000d004  f2                             
+1     0000d006  f3                             
+1     0000d008  f4                             
+1     0000d00a  f5                             
+0     00300039  fir8                           
+1     0000c140  firout                         
+1     0000c190  fpu_done                       
+0     00300346  fpu_mul_trunc                  
+0     00300364  fpu_poly_rptb                  
+0     00300357  fpu_st0_after_mul              
+0     0030034e  fpu_stf_after_mul              
+1     0000d000  i1                             
+1     0000d016  l1                             
+1     0000d018  l2                             
+1     0000d01a  l3                             
+0     00300074  main                           
+0     00300411  memcpy                         
+1     0000d012  neg                            
+1     0000c191  nresults                       
+1     0000d01e  nsel                           
+0     00300482  poly                           
+1     0000c000  results                        
+0     003003c8  sqrtf                          
+1     0000d010  three_e9                       
+1     0000d00e  tiny                           
+1     0000d014  two                            
+1     0000d01c  u1                             
+1     0000c0a0  xs                             
+1     0000c0f0  ys                             
+
+
+GLOBAL SYMBOLS: SORTED BY Symbol Address 
+
+page  address   name                           
+----  -------   ----                           
+0     00300019  dot                            
+0     00300039  fir8                           
+0     00300074  main                           
+0     0030028f  __c28xabi_divf                 
+0     00300317  __TI_decompress_lzss           
+0     00300345  _system_post_cinit             
+0     00300346  fpu_mul_trunc                  
+0     0030034e  fpu_stf_after_mul              
+0     00300357  fpu_st0_after_mul              
+0     00300364  fpu_poly_rptb                  
+0     00300374  __TI_auto_init_nobinit_nopinit 
+0     0030039f  C$$EXIT                        
+0     0030039f  abort                          
+0     003003a1  exit                           
+0     003003c8  sqrtf                          
+0     003003ef  __c28xabi_divi                 
+0     00300400  __c28xabi_modi                 
+0     00300411  memcpy                         
+0     00300431  _c_int00                       
+0     00300448  _args_main                     
+0     0030045a  __TI_zero_init_nomemset        
+0     00300467  _register_unlock               
+0     0030046b  _register_lock                 
+0     0030046f  _nop                           
+0     00300478  __TI_decompress_none           
+0     00300480  _system_pre_init               
+0     00300482  poly                           
+0     003004be  __TI_Handler_Table_Base        
+0     003004c4  __TI_Handler_Table_Limit       
+0     003004c8  __TI_CINIT_Base                
+0     003004d0  __TI_CINIT_Limit               
+0     003004d0  __TI_CINIT_Warm                
+0     0033fff6  code_start                     
+1     00000400  __stack                        
+1     00000700  __TI_STACK_END                 
+1     0000c000  results                        
+1     0000c0a0  xs                             
+1     0000c0f0  ys                             
+1     0000c140  firout                         
+1     0000c180  coef                           
+1     0000c190  fpu_done                       
+1     0000c191  nresults                       
+1     0000d000  i1                             
+1     0000d002  f1                             
+1     0000d004  f2                             
+1     0000d006  f3                             
+1     0000d008  f4                             
+1     0000d00a  f5                             
+1     0000d00c  big                            
+1     0000d00e  tiny                           
+1     0000d010  three_e9                       
+1     0000d012  neg                            
+1     0000d014  two                            
+1     0000d016  l1                             
+1     0000d018  l2                             
+1     0000d01a  l3                             
+1     0000d01c  u1                             
+1     0000d01e  nsel                           
+1     0000d024  __TI_enable_exit_profile_output
+1     0000d026  __TI_cleanup_ptr               
+1     0000d028  __TI_dtors_ptr                 
+1     0000d02a  _lock                          
+1     0000d02c  _unlock                        
+1     0000d02e  errno                          
+abs   00000300  __TI_STACK_SIZE                
+abs   ffffffff  __TI_pprof_out_hndl            
+abs   ffffffff  __TI_prof_data_size            
+abs   ffffffff  __TI_prof_data_start           
+abs   ffffffff  __c_args__                     
+
+[69 symbols]

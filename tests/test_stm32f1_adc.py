@@ -116,9 +116,11 @@ def test_first_adon_powers_up_second_adon_starts(desc):
     chip.run_cycles(100)
     assert adc.conversions == 1
     wr(chip, ADC1 + CR2, ADON | ALIGN | EXTTRIG)
-    wr(chip, ADC1 + CR2, ADON | ALIGN | EXTTRIG)                       # EXTTRIG = 1: ADON rewrite does not start
     chip.run_cycles(100)
     assert adc.conversions == 1
+    wr(chip, ADC1 + CR2, ADON | ALIGN | EXTTRIG)                       # RM0008 11.12.3: the ADON rewrite starts a
+    chip.run_cycles(LAT + CONV0 + 10)                                  # conversion whatever EXTTRIG is
+    assert adc.conversions == 2
 
 
 def test_second_adon_before_tstab_waits_for_power_up(desc):
@@ -219,11 +221,12 @@ def test_calibration_needs_adon_and_tstab(desc):
     chip2 = spin_chip(desc)
     t0 = chip2.now_cycles()
     wr(chip2, ADC1 + CR2, ADON)
-    wr(chip2, ADC1 + CR2, ADON | CAL)                                  # right after power-up: from the ready time
-    cr = probe(chip2, [t0 + 8 + 83 * K - 1, t0 + 8 + 83 * K + 1], ADC1 + CR2)
-    chip2.run_cycles(8 + 83 * K + 10)
+    wr(chip2, ADC1 + CR2, ADON | CAL)                                  # right after power-up: RM0008 11.4 asks for
+    end = t0 + 2 * K + 83 * K                                          # ADON = 1 for 2 ADCCLK first (not tSTAB)
+    cr = probe(chip2, [end - 1, end + 1], ADC1 + CR2)
+    chip2.run_cycles(2 * K + 83 * K + 10)
     assert [c & CAL for c in cr] == [CAL, 0]
-    assert any("tSTAB" in w for w in warns(chip2))
+    assert any("2 ADCCLK" in w for w in warns(chip2))
 
 
 def test_adon_off_aborts_conversion_and_calibration(desc):
@@ -333,7 +336,7 @@ def test_discontinuous_mode(desc):
         eoc.append(rd(chip, ADC1 + SR) & EOC)
         wr(chip, ADC1 + SR, 0)
     assert counts == [2, 4, 5, 7]                                      # 0,1 | 2,3 | 4 | 0,1
-    assert eoc == [0, 0, EOC, 0]
+    assert eoc == [EOC] * 4                                            # RM0008 11.3.10: EOC at each conversion
 
 
 def test_sqr_write_restarts_regular_group(desc):
@@ -429,6 +432,8 @@ def test_dual_regular_simultaneous_dr_upper_half(desc):
     sr = probe(chip, [t0 + LAT + CONV0 + 1], ADC2 + SR)
     chip.run_cycles(LAT + CONV0 + 5)
     assert a1.conversions == a2.conversions == 1 and sr[0] & EOC
+    assert rd(chip, ADC1 + DR) == code(1.0)                            # RM0008 11.9 note: ADC2DATA needs ADC1 DMA = 1
+    wr(chip, ADC1 + CR2, ADON | SW | DMA)
     assert rd(chip, ADC1 + DR) == code(2.0) << 16 | code(1.0)
     wr(chip, ADC2 + CR2, ADON | SW | SWSTART)                          # slave's own trigger: ignored
     chip.run_cycles(100)

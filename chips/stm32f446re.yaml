@@ -1,0 +1,284 @@
+# STMicroelectronics STM32F446RE (Cortex-M4F, 180 MHz with over-drive, 512 KB flash (sectors 0-7), 128 KB SRAM =
+# SRAM1 112 KB + SRAM2 16 KB, no CCM RAM, LQFP64; the NUCLEO-F446RE part). Base file of the STM32F446xx die (DEV_ID 0x421):
+# chips/stm32f446{ve,ze,me}.yaml include it and override name, package and pins.
+# Sources (see docs/LIMITATIONS.md "STM32F446"; the data sheet DS10693 is still not in the repo):
+# * RM0390 Rev 9 (docs/datasheets/st/RM0390_stm32f446_reference_manual.pdf): memory map Table 1, vector table Table 38
+#   (10.2, every entry below checked), DMA Tables 28/29, RCC/PWR/FLASH/SYSCFG/EXTI registers, QUADSPI, FMPI2C, CEC,
+#   SPDIFRX, device electronic signature (ch. 34), DBGMCU IDCODE (33.6.1);
+# * CMSIS-SVD STM32F446.svd (cmsis-svd-data @ c65f8551, SVD version 1.1; chips/README.md) for peripheral bases and the
+#   register table chips/stm32f446_regs.yaml;
+# * the STM32CubeF4 device header stm32f446xx.h (firmware/vendor/STM32CubeF4) for the IRQ numbers (IRQn_Type), the
+#   FMPI2C1 base (the SVD has no FMPI2C1) and the reset values that HAL_RCC_DeInit writes;
+# * ST's STM32_open_pin_data @ 7d1f1514 (svd/dl-open-pin-data-f446/) for the pin table;
+# * RM0090 Rev 22 for the models of the IP shared with the STM32F42x (DMA, TIM, USART, SPI/I2S, I2C, bxCAN, SAI, FMC,
+#   OTG, SDIO, DCMI, ADC, DAC, RTC); their F446 differences were checked against RM0390 (docs/LIMITATIONS.md).
+# Part-number decoding (STM32 ordering scheme): R = 64 pins, V = 100, Z = 144, M = 81 (WLCSP); C = 256 KB, E = 512 KB;
+# T = LQFP, Y = WLCSP.
+name: STM32F446RE
+package: LQFP64
+family: stm32
+regs_file: stm32f446_regs.yaml
+gpio_name_format: "P{port}{bit}"
+# 16 MHz = HSI after reset; stm32.rcc_f446 derives HCLK from the PLL/prescaler registers (PLL_P or PLL_R as SYSCLK).
+# num_irqs 97: highest vector is 96 FMPI2C1_ER (stm32f446xx.h IRQn_Type).
+core: {arch: armv7e-m, backend: unicorn, cpu: cortex-m4, fpu: true, clock_hz: 16000000, addr_unit_bits: 8, num_irqs: 97}
+# SysTick CLKSOURCE=0 reference: HCLK/8 (RM0390 6.2 clock tree, "Cortex system timer").
+systick_ext_div: 8
+# Boot from main flash (BOOT0 = 0) through the alias at 0x00000000, which CHIP_EM does not map: VTOR starts at the
+# flash base (images are linked at 0x08000000).
+vtor: 0x08000000
+
+memory:
+  - {name: FLASH, base: 0x08000000, size: 0x80000, kind: flash}    # 512 KB: sectors 0-3 16 KB, 4 64 KB, 5-7 128 KB
+  - {name: SRAM, base: 0x20000000, size: 0x20000, kind: ram}       # SRAM1 112 KB + SRAM2 16 KB
+  - {name: BKPSRAM, base: 0x40024000, size: 0x1000, kind: ram}     # backup SRAM (AHB1)
+  # system memory (0x1FFF0000), OTP (0x1FFF7800) and option bytes (0x1FFFC000) are not mapped
+
+# armv7m.scs (0xE000E000, SysTick/NVIC/SCB) is created by the arch layer, not listed here.
+# The STM32F446 has no I2S2ext/I2S3ext (SPI2/SPI3 are half-duplex I2S), no Ethernet, RNG, CRYP/HASH, LTDC, DMA2D,
+# UART7/8, SPI5/6, GPIOI-K or CCM RAM.
+peripherals:
+  # APB1
+  - {name: TIM2, model: stm32.tim, base: 0x40000000, size: 0x400}
+  - {name: TIM3, model: stm32.tim, base: 0x40000400, size: 0x400}
+  - {name: TIM4, model: stm32.tim, base: 0x40000800, size: 0x400}
+  - {name: TIM5, model: stm32.tim, base: 0x40000C00, size: 0x400}
+  - {name: TIM6, model: stm32.tim, base: 0x40001000, size: 0x400}
+  - {name: TIM7, model: stm32.tim, base: 0x40001400, size: 0x400}
+  - {name: TIM12, model: stm32.tim, base: 0x40001800, size: 0x400}
+  - {name: TIM13, model: stm32.tim, base: 0x40001C00, size: 0x400}
+  - {name: TIM14, model: stm32.tim, base: 0x40002000, size: 0x400}
+  - {name: RTC, model: stm32.rtc, base: 0x40002800, size: 0x400}   # RTC and backup registers (backup domain)
+  - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400}
+  - {name: IWDG, model: stm32.iwdg, base: 0x40003000, size: 0x400}
+  - {name: SPI2, model: stm32.spi, base: 0x40003800, size: 0x400}   # SPI2/I2S2
+  - {name: SPI3, model: stm32.spi, base: 0x40003C00, size: 0x400}   # SPI3/I2S3
+  - {name: SPDIFRX, model: stm32.spdifrx, base: 0x40004000, size: 0x400}   # SPDIF receiver (RM0390 ch. 27; input from a board spdif_source part, INSEL n = SPDIFRX_INn)
+  - {name: USART2, model: stm32.usart, base: 0x40004400, size: 0x400, params: {index: 2, kind: usart}}
+  - {name: USART3, model: stm32.usart, base: 0x40004800, size: 0x400, params: {index: 3, kind: usart}}
+  - {name: UART4, model: stm32.usart, base: 0x40004C00, size: 0x400, params: {index: 4, kind: uart}}
+  - {name: UART5, model: stm32.usart, base: 0x40005000, size: 0x400, params: {index: 5, kind: uart}}
+  - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400}   # with FLTR (digital noise filter)
+  - {name: I2C2, model: stm32.i2c, base: 0x40005800, size: 0x400}
+  - {name: I2C3, model: stm32.i2c, base: 0x40005C00, size: 0x400}
+  - {name: FMPI2C1, model: stm32.fmpi2c, base: 0x40006000, size: 0x400}   # Fast-mode Plus I2C (RM0390 ch. 23; not in the SVD): controller + target on the pins, DMA
+  - {name: CAN1, model: stm32.can, base: 0x40006400, size: 0x400}            # bxCAN master: owns the 28 filter banks
+  - {name: CAN2, model: stm32.can, base: 0x40006800, size: 0x400}            # bxCAN slave: needs the CAN1 clock
+  - {name: CEC, model: stm32.cec, base: 0x40006C00, size: 0x400}             # HDMI-CEC (RM0390 ch. 32): bit-level on the CEC pin (open drain)
+  - {name: PWR, model: stm32.pwr_f446, base: 0x40007000, size: 0x400}        # over-drive / under-drive (RM0090 5.5 IP)
+  - {name: DAC, model: stm32.dac, base: 0x40007400, size: 0x400}
+  # APB2
+  - {name: TIM1, model: stm32.tim, base: 0x40010000, size: 0x400}
+  - {name: TIM8, model: stm32.tim, base: 0x40010400, size: 0x400}
+  - {name: USART1, model: stm32.usart, base: 0x40011000, size: 0x400, params: {index: 1, kind: usart}}
+  - {name: USART6, model: stm32.usart, base: 0x40011400, size: 0x400, params: {index: 6, kind: usart}}
+  - {name: ADC1, model: stm32.adc, base: 0x40012000, size: 0x100}
+  - {name: ADC2, model: stm32.adc, base: 0x40012100, size: 0x100}
+  - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100}
+  - {name: C_ADC, model: stm32.adc_common, base: 0x40012300, size: 0x400}   # ADC common registers
+  - {name: SDIO, model: stm32.sdio, base: 0x40012C00, size: 0x400, params: {ceata: false}}   # RM0390 ch. 29: the F405 SDIO IP without CE-ATA / STBITERR ("SDMMC" v2 in the SVD is wrong); clock DCKCFGR2.SDIOSEL
+  - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400}   # SPI1/I2S1
+  - {name: SPI4, model: stm32.spi, base: 0x40013400, size: 0x400}
+  - {name: SYSCFG, model: stm32.syscfg_f446, base: 0x40013800, size: 0x400}   # RM0390 8.2: + CFGR (FMPI2C1 Fm+ drive)
+  - {name: EXTI, model: stm32.exti, base: 0x40013C00, size: 0x400, params: {reserved_edge_lines: [19]}}   # RM0390 10.3.3/10.3.4: no line 19 edge bits
+  - {name: TIM9, model: stm32.tim, base: 0x40014000, size: 0x400}
+  - {name: TIM10, model: stm32.tim, base: 0x40014400, size: 0x400}
+  - {name: TIM11, model: stm32.tim, base: 0x40014800, size: 0x400}
+  - {name: SAI1, model: stm32.sai, base: 0x40015800, size: 0x400, params: {gate: SAI1}}   # kernel clock DCKCFGR.SAI1SRC
+  - {name: SAI2, model: stm32.sai, base: 0x40015C00, size: 0x400, params: {gate: SAI2}}   # kernel clock DCKCFGR.SAI2SRC
+  # AHB1
+  - {name: GPIOA, model: stm32.gpio, base: 0x40020000, size: 0x400, params: {port: A}}
+  - {name: GPIOB, model: stm32.gpio, base: 0x40020400, size: 0x400, params: {port: B}}
+  - {name: GPIOC, model: stm32.gpio, base: 0x40020800, size: 0x400, params: {port: C}}
+  - {name: GPIOD, model: stm32.gpio, base: 0x40020C00, size: 0x400, params: {port: D}}
+  - {name: GPIOE, model: stm32.gpio, base: 0x40021000, size: 0x400, params: {port: E}}
+  - {name: GPIOF, model: stm32.gpio, base: 0x40021400, size: 0x400, params: {port: F}}
+  - {name: GPIOG, model: stm32.gpio, base: 0x40021800, size: 0x400, params: {port: G}}
+  - {name: GPIOH, model: stm32.gpio, base: 0x40021C00, size: 0x400, params: {port: H}}
+  - {name: CRC, model: stm32.crc, base: 0x40023000, size: 0x400}
+  - {name: RCC, model: stm32.rcc_f446, base: 0x40023800, size: 0x400, params: {ext_hz: 8000000}}   # PLL_R, PLLSAI/PLLI2S with M/P, DCKCFGR2
+  - {name: FLASH, model: stm32.flash_f446, base: 0x40023C00, size: 0x400}   # single bank, sectors 0-7
+  - {name: DMA1, model: stm32.dma, base: 0x40026000, size: 0x400, params: {controller: 1, requests: f446}}
+  - {name: DMA2, model: stm32.dma, base: 0x40026400, size: 0x400, params: {controller: 2, requests: f446}}
+  - {name: OTG_HS, model: stm32.otg_hs, base: 0x40040000, size: 0x40000, params: {core: otg2, endpoints: 9, channels: 16}}   # USB OTG HS core (RM0390 31.3 Table 221: 9 endpoints, 16 channels, 4 KB, LPM; embedded FS PHY only)
+  # AHB2
+  - {name: OTG_FS, model: stm32.otg_fs, base: 0x50000000, size: 0x40000, params: {core: otg2, endpoints: 6, channels: 12}}   # USB OTG FS core (RM0390 31.3 Table 221: 6 endpoints, 12 channels, 1.25 KB, LPM)
+  - {name: DCMI, model: stm32.dcmi, base: 0x50050000, size: 0x400}
+  # AHB3
+  - {name: FMC, model: stm32.fmc_f446, base: 0xA0000000, size: 0x1000}   # FMC control registers (RM0390 ch. 11: NAND bank 3 only); NOR/PSRAM 0x60000000, SDRAM 0xC0000000/0xD0000000
+  - {name: QUADSPI, model: stm32.quadspi, base: 0xA0001000, size: 0x400}   # QUADSPI registers; memory-mapped window 0x90000000 (256 MB)
+  # OTP area 0x1FFF7800-0x1FFF7A0F (erased) and the device electronic signature (RM0390 ch. 34): unique ID 0x1FFF7A10,
+  # F_SIZE 0x1FFF7A22 (flash KB from `memory`), package data 0x1FFF7BF0 (PKG from `package`)
+  - {name: SYSMEM, model: stm32.sysmem_f446, base: 0x1FFF7800, size: 0x400}
+  # Cortex-M4 debug MCU
+  - {name: DBGMCU, model: stm32.dbgmcu, base: 0xE0042000, size: 0x400, params: {idcode: 0x10006421}}   # DEV_ID 0x421, REV_ID 0x1000 = rev A / 1 (RM0390 33.6.1)
+
+# External interrupt numbers (exception = 16 + n), stm32f446xx.h IRQn_Type, checked entry by entry against RM0390 10.2
+# Table 38 (positions 0-96; 61/62, 79/80, 82/83, 85/86, 88-90 are reserved). STM32F446.svd attaches several
+# <interrupt> elements to the wrong peripherals and lists vectors this part does not have (UART7/8, ETH, LCD-TFT);
+# the numbers below follow the device header, which svd2chip --check confirms where the SVD agrees.
+irqs:
+  0: WWDG
+  1: PVD
+  2: TAMP_STAMP
+  3: RTC_WKUP
+  4: FLASH
+  5: RCC
+  6: EXTI0
+  7: EXTI1
+  8: EXTI2
+  9: EXTI3
+  10: EXTI4
+  11: DMA1_Stream0
+  12: DMA1_Stream1
+  13: DMA1_Stream2
+  14: DMA1_Stream3
+  15: DMA1_Stream4
+  16: DMA1_Stream5
+  17: DMA1_Stream6
+  18: ADC
+  19: CAN1_TX
+  20: CAN1_RX0
+  21: CAN1_RX1
+  22: CAN1_SCE
+  23: EXTI9_5
+  24: TIM1_BRK_TIM9
+  25: TIM1_UP_TIM10
+  26: TIM1_TRG_COM_TIM11
+  27: TIM1_CC
+  28: TIM2
+  29: TIM3
+  30: TIM4
+  31: I2C1_EV
+  32: I2C1_ER
+  33: I2C2_EV
+  34: I2C2_ER
+  35: SPI1
+  36: SPI2
+  37: USART1
+  38: USART2
+  39: USART3
+  40: EXTI15_10
+  41: RTC_Alarm
+  42: OTG_FS_WKUP
+  43: TIM8_BRK_TIM12
+  44: TIM8_UP_TIM13
+  45: TIM8_TRG_COM_TIM14
+  46: TIM8_CC
+  47: DMA1_Stream7
+  48: FMC
+  49: SDIO
+  50: TIM5
+  51: SPI3
+  52: UART4
+  53: UART5
+  54: TIM6_DAC
+  55: TIM7
+  56: DMA2_Stream0
+  57: DMA2_Stream1
+  58: DMA2_Stream2
+  59: DMA2_Stream3
+  60: DMA2_Stream4
+  63: CAN2_TX
+  64: CAN2_RX0
+  65: CAN2_RX1
+  66: CAN2_SCE
+  67: OTG_FS
+  68: DMA2_Stream5
+  69: DMA2_Stream6
+  70: DMA2_Stream7
+  71: USART6
+  72: I2C3_EV
+  73: I2C3_ER
+  74: OTG_HS_EP1_OUT
+  75: OTG_HS_EP1_IN
+  76: OTG_HS_WKUP
+  77: OTG_HS
+  78: DCMI
+  81: FPU
+  84: SPI4
+  87: SAI1
+  91: SAI2
+  92: QUADSPI
+  93: CEC
+  94: SPDIF_RX
+  95: FMPI2C1_EV
+  96: FMPI2C1_ER
+
+# Pin table: generated from ST's STM32_open_pin_data @ 7d1f1514ed5583ec5007ad91236b4e1d377295b1 (cached in
+# svd/dl-open-pin-data-f446/): mcu/STM32F446R(C-E)Tx.xml gives the LQFP64 positions and the signals of each pin,
+# mcu/IP/GPIO-STM32F446_gpio_v1_0_Modes.xml the AF number of every alternate function. The data sheet (DS10693) is not
+# in the repo, so the names follow ST's open pin data with the DS8626/DS9405 spelling conventions of the other STM32F4
+# files: USB_OTG_FS_* / USB_OTG_HS_* -> OTG_FS_* / OTG_HS_*, SYS_JTMS-SWDIO -> JTMS-SWDIO (etc.), RCC_MCO_1 -> MCO1,
+# SPIx and I2Sx signals on the same AF joined as SPIx_SCK/I2Sx_CK; ADCn_INm -> ADC123_INm; RCC_OSC_IN -> analog OSC_IN;
+# SYS_WKUPn -> additional WKUPn (ST numbers the two wake-up pins WKUP0 = PA0 and WKUP1 = PC13); FMC_CLE / FMC_ALE
+# (no own AF in the modes file) share AF12 with FMC_A16 / FMC_A17. ST's pseudo-signals ADCx_EXTIy / DAC_EXTIy (EXTI
+# lines as converter triggers) are not pin functions and are left out. EVENTOUT (AF15) on every GPIO.
+# Second source: the GPIO_AFn_<periph> defines for STM32F446xx in stm32f4xx_hal_gpio_ex.h (every AF/peripheral pair of
+# the table exists there; tests/test_stm32f446_pins.py).
+# All 64 package pins (50 GPIOs, IONb in the open pin data).
+pins:
+  - {num: 1, name: VBAT, kind: power, default: VBAT}
+  - {num: 2, name: PC13, kind: gpio, port: C, bit: 13, default: GPIO, functions: {AF15: EVENTOUT, additional: RTC_AF1/WKUP1}}
+  - {num: 3, name: PC14/OSC32_IN, kind: gpio, port: C, bit: 14, default: GPIO, functions: {AF15: EVENTOUT, analog: OSC32_IN}}
+  - {num: 4, name: PC15/OSC32_OUT, kind: gpio, port: C, bit: 15, default: GPIO, functions: {AF15: EVENTOUT, analog: OSC32_OUT}}
+  - {num: 5, name: PH0/OSC_IN, kind: gpio, port: H, bit: 0, default: GPIO, functions: {AF15: EVENTOUT, analog: OSC_IN}}
+  - {num: 6, name: PH1/OSC_OUT, kind: gpio, port: H, bit: 1, default: GPIO, functions: {AF15: EVENTOUT, analog: OSC_OUT}}
+  - {num: 7, name: NRST, kind: special, default: NRST}
+  - {num: 8, name: PC0, kind: gpio, port: C, bit: 0, default: GPIO, functions: {AF6: SAI1_MCLK_B, AF10: OTG_HS_ULPI_STP, AF15: EVENTOUT, ADC: ADC123_IN10}}
+  - {num: 9, name: PC1, kind: gpio, port: C, bit: 1, default: GPIO, functions: {AF5: SPI3_MOSI/I2S3_SD, AF6: SAI1_SD_A, AF7: SPI2_MOSI/I2S2_SD, AF15: EVENTOUT, ADC: ADC123_IN11}}
+  - {num: 10, name: PC2, kind: gpio, port: C, bit: 2, default: GPIO, functions: {AF5: SPI2_MISO, AF10: OTG_HS_ULPI_DIR, AF15: EVENTOUT, ADC: ADC123_IN12}}
+  - {num: 11, name: PC3, kind: gpio, port: C, bit: 3, default: GPIO, functions: {AF5: SPI2_MOSI/I2S2_SD, AF10: OTG_HS_ULPI_NXT, AF15: EVENTOUT, ADC: ADC123_IN13}}
+  - {num: 12, name: VSSA, kind: power, default: VSSA}
+  - {num: 13, name: VDDA, kind: power, default: VDDA}
+  - {num: 14, name: PA0/WKUP, kind: gpio, port: A, bit: 0, default: GPIO, functions: {AF1: TIM2_CH1/TIM2_ETR, AF2: TIM5_CH1, AF3: TIM8_ETR, AF7: USART2_CTS, AF8: UART4_TX, AF15: EVENTOUT, ADC: ADC123_IN0, additional: RTC_AF2/WKUP0}}
+  - {num: 15, name: PA1, kind: gpio, port: A, bit: 1, default: GPIO, functions: {AF1: TIM2_CH2, AF2: TIM5_CH2, AF7: USART2_RTS, AF8: UART4_RX, AF9: QUADSPI_BK1_IO3, AF15: EVENTOUT, ADC: ADC123_IN1}}
+  - {num: 16, name: PA2, kind: gpio, port: A, bit: 2, default: GPIO, functions: {AF1: TIM2_CH3, AF2: TIM5_CH3, AF3: TIM9_CH1, AF7: USART2_TX, AF15: EVENTOUT, ADC: ADC123_IN2}}
+  - {num: 17, name: PA3, kind: gpio, port: A, bit: 3, default: GPIO, functions: {AF1: TIM2_CH4, AF2: TIM5_CH4, AF3: TIM9_CH2, AF6: SAI1_FS_A, AF7: USART2_RX, AF10: OTG_HS_ULPI_D0, AF15: EVENTOUT, ADC: ADC123_IN3}}
+  - {num: 18, name: VSS, kind: power, default: VSS}
+  - {num: 19, name: VDD, kind: power, default: VDD}
+  - {num: 20, name: PA4, kind: gpio, port: A, bit: 4, default: GPIO, functions: {AF5: SPI1_NSS/I2S1_WS, AF6: SPI3_NSS/I2S3_WS, AF7: USART2_CK, AF12: OTG_HS_SOF, AF13: DCMI_HSYNC, AF15: EVENTOUT, ADC: ADC12_IN4, analog: DAC_OUT1}}
+  - {num: 21, name: PA5, kind: gpio, port: A, bit: 5, default: GPIO, functions: {AF1: TIM2_CH1/TIM2_ETR, AF3: TIM8_CH1N, AF5: SPI1_SCK/I2S1_CK, AF10: OTG_HS_ULPI_CK, AF15: EVENTOUT, ADC: ADC12_IN5, analog: DAC_OUT2}}
+  - {num: 22, name: PA6, kind: gpio, port: A, bit: 6, default: GPIO, functions: {AF1: TIM1_BKIN, AF2: TIM3_CH1, AF3: TIM8_BKIN, AF5: SPI1_MISO, AF6: I2S2_MCK, AF9: TIM13_CH1, AF13: DCMI_PIXCLK, AF15: EVENTOUT, ADC: ADC12_IN6}}
+  - {num: 23, name: PA7, kind: gpio, port: A, bit: 7, default: GPIO, functions: {AF1: TIM1_CH1N, AF2: TIM3_CH2, AF3: TIM8_CH1N, AF5: SPI1_MOSI/I2S1_SD, AF9: TIM14_CH1, AF15: EVENTOUT, ADC: ADC12_IN7}}
+  - {num: 24, name: PC4, kind: gpio, port: C, bit: 4, default: GPIO, functions: {AF5: I2S1_MCK, AF8: SPDIFRX_IN2, AF15: EVENTOUT, ADC: ADC12_IN14}}
+  - {num: 25, name: PC5, kind: gpio, port: C, bit: 5, default: GPIO, functions: {AF7: USART3_RX, AF8: SPDIFRX_IN3, AF15: EVENTOUT, ADC: ADC12_IN15}}
+  - {num: 26, name: PB0, kind: gpio, port: B, bit: 0, default: GPIO, functions: {AF1: TIM1_CH2N, AF2: TIM3_CH3, AF3: TIM8_CH2N, AF7: SPI3_MOSI/I2S3_SD, AF8: UART4_CTS, AF10: OTG_HS_ULPI_D1, AF12: SDIO_D1, AF15: EVENTOUT, ADC: ADC12_IN8}}
+  - {num: 27, name: PB1, kind: gpio, port: B, bit: 1, default: GPIO, functions: {AF1: TIM1_CH3N, AF2: TIM3_CH4, AF3: TIM8_CH3N, AF10: OTG_HS_ULPI_D2, AF12: SDIO_D2, AF15: EVENTOUT, ADC: ADC12_IN9}}
+  - {num: 28, name: PB2, kind: gpio, port: B, bit: 2, default: GPIO, functions: {AF1: TIM2_CH4, AF6: SAI1_SD_A, AF7: SPI3_MOSI/I2S3_SD, AF9: QUADSPI_CLK, AF10: OTG_HS_ULPI_D4, AF12: SDIO_CK, AF15: EVENTOUT}}
+  - {num: 29, name: PB10, kind: gpio, port: B, bit: 10, default: GPIO, functions: {AF1: TIM2_CH3, AF4: I2C2_SCL, AF5: SPI2_SCK/I2S2_CK, AF6: SAI1_SCK_A, AF7: USART3_TX, AF10: OTG_HS_ULPI_D3, AF15: EVENTOUT}}
+  - {num: 30, name: VCAP_1, kind: power, default: VCAP_1}
+  - {num: 31, name: VSS, kind: power, default: VSS}
+  - {num: 32, name: VDD, kind: power, default: VDD}
+  - {num: 33, name: PB12, kind: gpio, port: B, bit: 12, default: GPIO, functions: {AF1: TIM1_BKIN, AF4: I2C2_SMBA, AF5: SPI2_NSS/I2S2_WS, AF6: SAI1_SCK_B, AF7: USART3_CK, AF9: CAN2_RX, AF10: OTG_HS_ULPI_D5, AF12: OTG_HS_ID, AF15: EVENTOUT}}
+  - {num: 34, name: PB13, kind: gpio, port: B, bit: 13, default: GPIO, functions: {AF1: TIM1_CH1N, AF5: SPI2_SCK/I2S2_CK, AF7: USART3_CTS, AF9: CAN2_TX, AF10: OTG_HS_ULPI_D6, AF15: EVENTOUT, additional: OTG_HS_VBUS}}
+  - {num: 35, name: PB14, kind: gpio, port: B, bit: 14, default: GPIO, functions: {AF1: TIM1_CH2N, AF3: TIM8_CH2N, AF5: SPI2_MISO, AF7: USART3_RTS, AF9: TIM12_CH1, AF12: OTG_HS_DM, AF15: EVENTOUT}}
+  - {num: 36, name: PB15, kind: gpio, port: B, bit: 15, default: GPIO, functions: {AF0: RTC_REFIN, AF1: TIM1_CH3N, AF3: TIM8_CH3N, AF5: SPI2_MOSI/I2S2_SD, AF9: TIM12_CH2, AF12: OTG_HS_DP, AF15: EVENTOUT}}
+  - {num: 37, name: PC6, kind: gpio, port: C, bit: 6, default: GPIO, functions: {AF2: TIM3_CH1, AF3: TIM8_CH1, AF4: FMPI2C1_SCL, AF5: I2S2_MCK, AF8: USART6_TX, AF12: SDIO_D6, AF13: DCMI_D0, AF15: EVENTOUT}}
+  - {num: 38, name: PC7, kind: gpio, port: C, bit: 7, default: GPIO, functions: {AF2: TIM3_CH2, AF3: TIM8_CH2, AF4: FMPI2C1_SDA, AF5: SPI2_SCK/I2S2_CK, AF6: I2S3_MCK, AF7: SPDIFRX_IN1, AF8: USART6_RX, AF12: SDIO_D7, AF13: DCMI_D1, AF15: EVENTOUT}}
+  - {num: 39, name: PC8, kind: gpio, port: C, bit: 8, default: GPIO, functions: {AF0: TRACED0, AF2: TIM3_CH3, AF3: TIM8_CH3, AF7: UART5_RTS, AF8: USART6_CK, AF12: SDIO_D0, AF13: DCMI_D2, AF15: EVENTOUT}}
+  - {num: 40, name: PC9, kind: gpio, port: C, bit: 9, default: GPIO, functions: {AF0: MCO2, AF2: TIM3_CH4, AF3: TIM8_CH4, AF4: I2C3_SDA, AF5: I2S_CKIN, AF7: UART5_CTS, AF9: QUADSPI_BK1_IO0, AF12: SDIO_D1, AF13: DCMI_D3, AF15: EVENTOUT}}
+  - {num: 41, name: PA8, kind: gpio, port: A, bit: 8, default: GPIO, functions: {AF0: MCO1, AF1: TIM1_CH1, AF4: I2C3_SCL, AF7: USART1_CK, AF10: OTG_FS_SOF, AF15: EVENTOUT}}
+  - {num: 42, name: PA9, kind: gpio, port: A, bit: 9, default: GPIO, functions: {AF1: TIM1_CH2, AF4: I2C3_SMBA, AF5: SPI2_SCK/I2S2_CK, AF6: SAI1_SD_B, AF7: USART1_TX, AF13: DCMI_D0, AF15: EVENTOUT, additional: OTG_FS_VBUS}}
+  - {num: 43, name: PA10, kind: gpio, port: A, bit: 10, default: GPIO, functions: {AF1: TIM1_CH3, AF7: USART1_RX, AF10: OTG_FS_ID, AF13: DCMI_D1, AF15: EVENTOUT}}
+  - {num: 44, name: PA11, kind: gpio, port: A, bit: 11, default: GPIO, functions: {AF1: TIM1_CH4, AF7: USART1_CTS, AF9: CAN1_RX, AF10: OTG_FS_DM, AF15: EVENTOUT}}
+  - {num: 45, name: PA12, kind: gpio, port: A, bit: 12, default: GPIO, functions: {AF1: TIM1_ETR, AF7: USART1_RTS, AF9: CAN1_TX, AF10: OTG_FS_DP, AF15: EVENTOUT}}
+  - {num: 46, name: PA13, kind: gpio, port: A, bit: 13, default: JTMS-SWDIO, functions: {AF0: JTMS-SWDIO, AF15: EVENTOUT}}
+  - {num: 47, name: VSS, kind: power, default: VSS}
+  - {num: 48, name: VDD, kind: power, default: VDD}
+  - {num: 49, name: PA14, kind: gpio, port: A, bit: 14, default: JTCK-SWCLK, functions: {AF0: JTCK-SWCLK, AF15: EVENTOUT}}
+  - {num: 50, name: PA15, kind: gpio, port: A, bit: 15, default: JTDI, functions: {AF0: JTDI, AF1: TIM2_CH1/TIM2_ETR, AF4: CEC, AF5: SPI1_NSS/I2S1_WS, AF6: SPI3_NSS/I2S3_WS, AF8: UART4_RTS, AF15: EVENTOUT}}
+  - {num: 51, name: PC10, kind: gpio, port: C, bit: 10, default: GPIO, functions: {AF6: SPI3_SCK/I2S3_CK, AF7: USART3_TX, AF8: UART4_TX, AF9: QUADSPI_BK1_IO1, AF12: SDIO_D2, AF13: DCMI_D8, AF15: EVENTOUT}}
+  - {num: 52, name: PC11, kind: gpio, port: C, bit: 11, default: GPIO, functions: {AF6: SPI3_MISO, AF7: USART3_RX, AF8: UART4_RX, AF9: QUADSPI_BK2_NCS, AF12: SDIO_D3, AF13: DCMI_D4, AF15: EVENTOUT}}
+  - {num: 53, name: PC12, kind: gpio, port: C, bit: 12, default: GPIO, functions: {AF4: I2C2_SDA, AF6: SPI3_MOSI/I2S3_SD, AF7: USART3_CK, AF8: UART5_TX, AF12: SDIO_CK, AF13: DCMI_D9, AF15: EVENTOUT}}
+  - {num: 54, name: PD2, kind: gpio, port: D, bit: 2, default: GPIO, functions: {AF2: TIM3_ETR, AF8: UART5_RX, AF12: SDIO_CMD, AF13: DCMI_D11, AF15: EVENTOUT}}
+  - {num: 55, name: PB3, kind: gpio, port: B, bit: 3, default: JTDO/TRACESWO, functions: {AF0: JTDO/TRACESWO, AF1: TIM2_CH2, AF4: I2C2_SDA, AF5: SPI1_SCK/I2S1_CK, AF6: SPI3_SCK/I2S3_CK, AF15: EVENTOUT}}
+  - {num: 56, name: PB4, kind: gpio, port: B, bit: 4, default: NJTRST, functions: {AF0: NJTRST, AF2: TIM3_CH1, AF4: I2C3_SDA, AF5: SPI1_MISO, AF6: SPI3_MISO, AF7: SPI2_NSS/I2S2_WS, AF15: EVENTOUT}}
+  - {num: 57, name: PB5, kind: gpio, port: B, bit: 5, default: GPIO, functions: {AF2: TIM3_CH2, AF4: I2C1_SMBA, AF5: SPI1_MOSI/I2S1_SD, AF6: SPI3_MOSI/I2S3_SD, AF9: CAN2_RX, AF10: OTG_HS_ULPI_D7, AF13: DCMI_D10, AF15: EVENTOUT}}
+  - {num: 58, name: PB6, kind: gpio, port: B, bit: 6, default: GPIO, functions: {AF2: TIM4_CH1, AF3: CEC, AF4: I2C1_SCL, AF7: USART1_TX, AF9: CAN2_TX, AF10: QUADSPI_BK1_NCS, AF13: DCMI_D5, AF15: EVENTOUT}}
+  - {num: 59, name: PB7, kind: gpio, port: B, bit: 7, default: GPIO, functions: {AF2: TIM4_CH2, AF4: I2C1_SDA, AF7: USART1_RX, AF8: SPDIFRX_IN0, AF13: DCMI_VSYNC, AF15: EVENTOUT}}
+  - {num: 60, name: BOOT0, kind: special, default: BOOT0}
+  - {num: 61, name: PB8, kind: gpio, port: B, bit: 8, default: GPIO, functions: {AF1: TIM2_CH1/TIM2_ETR, AF2: TIM4_CH3, AF3: TIM10_CH1, AF4: I2C1_SCL, AF9: CAN1_RX, AF12: SDIO_D4, AF13: DCMI_D6, AF15: EVENTOUT}}
+  - {num: 62, name: PB9, kind: gpio, port: B, bit: 9, default: GPIO, functions: {AF1: TIM2_CH2, AF2: TIM4_CH4, AF3: TIM11_CH1, AF4: I2C1_SDA, AF5: SPI2_NSS/I2S2_WS, AF6: SAI1_FS_B, AF9: CAN1_TX, AF12: SDIO_D5, AF13: DCMI_D7, AF15: EVENTOUT}}
+  - {num: 63, name: VSS, kind: power, default: VSS}
+  - {num: 64, name: VDD, kind: power, default: VDD}

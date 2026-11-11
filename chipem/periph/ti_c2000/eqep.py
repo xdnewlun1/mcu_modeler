@@ -123,9 +123,9 @@ class EQEP(C2000Block):
         zero = lambda b, r: 0                                         # noqa: E731
         ov = {
             "QPOSCMP": {"on_write": self._qposcmp_write},
-            "QUTMR": {"on_read": self._qutmr_read, "on_write": self._qutmr_write},
+            "QUTMR": {"on_read": self._qutmr_read, "on_peek": self._qutmr_read, "on_write": self._qutmr_write},
             "QUPRD": {"on_write": self._qupr_write},
-            "QWDTMR": {"on_read": self._qwdtmr_read, "on_write": self._qwdtmr_write},
+            "QWDTMR": {"on_read": self._qwdtmr_read, "on_peek": self._qwdtmr_read, "on_write": self._qwdtmr_write},
             "QWDPRD": {"on_write": self._qwdprd_write},
             "QDECCTL": {"on_write": self._qdecctl_write},
             "QPOSCTL": {"on_write": self._qposctl_write},
@@ -133,10 +133,10 @@ class EQEP(C2000Block):
             "QCAPCTL": {"on_write": self._qcapctl_write},
             "QEINT": {"on_write": self._qeint_write},
             "QFLG": {"ro_mask": 0xFFFF},
-            "QCLR": {"on_write": self._qclr_write, "on_read": zero},
-            "QFRC": {"on_write": self._qfrc_write, "on_read": zero},
-            "QEPSTS": {"on_read": self._qepsts_read},
-            "QCTMR": {"on_read": self._qctmr_read, "on_write": self._qctmr_write},
+            "QCLR": {"on_write": self._qclr_write, "on_read": zero, "on_peek": zero},
+            "QFRC": {"on_write": self._qfrc_write, "on_read": zero, "on_peek": zero},
+            "QEPSTS": {"on_read": self._qepsts_read, "on_peek": self._qepsts_peek},
+            "QCTMR": {"on_read": self._qctmr_read, "on_peek": self._qctmr_read, "on_write": self._qctmr_write},
         }
         regs_ = build_regs((name, "EQEP1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs_, params=params, log=log)
@@ -236,11 +236,14 @@ class EQEP(C2000Block):
 
     # ------------------------------------------------------------ inputs
     def _sig_level(self, k: str) -> int:
+        """Input k as the decoder sees it: the pin when exactly one pin is muxed to the signal, else the default 1
+        (SPRU712H Table 4-8: EQEPxA/I/S default 1 when no pin or more than one pin selects the function; B is not
+        listed there and is taken as 1 too)."""
         board = self.chip.pins
-        for p in self._pins[k]:
-            if board.signal_matches(p.owner, self.signals[k]):
-                return 1 if p.level() == "H" else 0
-        return 0
+        own = [p for p in self._pins[k] if board.signal_matches(p.owner, self.signals[k])]
+        if len(own) != 1:
+            return 1
+        return 1 if own[0].level() == "H" else 0
 
     def _resample(self) -> None:
         """Take the current input levels without producing edges (reset, mux change)."""
@@ -740,6 +743,12 @@ class EQEP(C2000Block):
         if (old ^ new) & CEN:
             self._update_timers()
         return None
+
+    def _qepsts_peek(self, blk, reg):
+        v = self.get("QEPSTS")
+        if self._ct_on and not self._ct_ovf and self._ct_total(self._now()) > 0xFFFF:
+            v |= COEF                                   # the overflow a read would latch
+        return v
 
     def _qepsts_read(self, blk, reg):
         if self._ct_on and not self._ct_ovf and self._ct_total(self._now()) > 0xFFFF:

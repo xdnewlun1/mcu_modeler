@@ -22,6 +22,12 @@ def pure_read(fn):
     """Mark an on_read hook as free of side effects (it only computes the value): the debugger's peek may call it."""
     fn.pure_read = True
     return fn
+
+
+def peek_stored(blk, reg):
+    """Reg.on_peek for a register whose read hook only has side effects (clear-on-read sequence, FIFO pop already
+    reflected in the stored value): a peek shows the stored value, exactly."""
+    return None
 WriteHook = Callable[["MMIOBlock", "Reg", int, int], "int | None"]
 
 
@@ -32,13 +38,16 @@ class Reg:
     on_read(block, reg) -> int | None : a non-None return value is what the CPU reads (storage unchanged).
     on_write(block, reg, old, new) -> int | None : called after `new` (masks applied) has been stored;
         a non-None return value is stored instead.
+    on_peek(block, reg) -> int | None : the value a CPU read would return now, computed WITHOUT the read's side
+        effects (FIFO head without popping, live flags without clear-on-read, current counter); None = the stored
+        value. Used by the debugger (MMIOBlock.peek_reg) when on_read is not pure.
     """
     __slots__ = ("name", "offset", "width", "reset", "ro_mask", "w1c_mask", "on_read", "on_write", "mask", "doc",
-                 "unit_bits", "boff", "bw", "_raw")
+                 "unit_bits", "boff", "bw", "_raw", "on_peek")
 
     def __init__(self, name: str, offset: int, width: int = 4, reset: int = 0, ro_mask: int = 0, w1c_mask: int = 0,
                  on_read: ReadHook | None = None, on_write: WriteHook | None = None, doc: str = "",
-                 unit_bits: int = 8):
+                 unit_bits: int = 8, on_peek: ReadHook | None = None):
         if width not in (1, 2, 4, 8):
             raise ValueError(f"register {name}: width must be 1, 2, 4 or 8 units")
         self.name = name
@@ -46,6 +55,7 @@ class Reg:
         self.width = width
         self.on_read = on_read
         self.on_write = on_write
+        self.on_peek = on_peek
         self.doc = doc
         self._raw = (reset, ro_mask, w1c_mask)
         self.set_unit_bits(unit_bits)
@@ -188,10 +198,19 @@ class MMIOBlock:
 
     def peek_reg(self, reg: Reg) -> tuple[int, bool]:
         """(value, exact) of `reg` as the CPU would read it, without side effects (debugger / register browser).
-        No read hook: the stored value (exact). A hook named in `pure_reads`: its value (exact). Otherwise the
-        stored value with exact=False: reading the register runs a hook that may have side effects (FIFO pop,
-        flag clear) or computes the value, so the debugger shows what the model last stored."""
+        `reg.on_peek` set: its value (exact). No read hook: the stored value (exact). A hook named in `pure_reads`
+        or marked @pure_read: its value (exact). Otherwise the stored value with exact=False: reading the register
+        runs a hook that may have side effects (FIFO pop, flag clear), so the debugger shows what the model last
+        stored. Models with a fast-path read() override must give the overridden registers an on_peek (or a pure
+        on_read) so the peek sees what read() returns."""
         v = int.from_bytes(self.mem[reg.boff:reg.boff + reg.bw], "little")
+        pk = reg.on_peek
+        if pk is not None:
+            try:
+                x = pk(self, reg)
+            except Exception:
+                return v, False
+            return (v if x is None else x & reg.mask), True
         if reg.on_read is None:
             return v, True
         if reg.name in self.pure_reads or getattr(reg.on_read, "pure_read", False):

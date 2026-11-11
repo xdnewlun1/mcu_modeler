@@ -93,7 +93,7 @@ from typing import Any
 
 from ...bus import BusError
 from ...ethernet import (EthPhy, describe, fcs, fcs_ok, inet_checksum, mac_str, wire_ns, BROADCAST)
-from ..base import Reg
+from ..base import Reg, pure_read
 from ..registry import register
 from ..sdbus import ClockWave
 from ._util import GatedBlock, exti_input, find_model, irq_number, make_absent, part_present, rcc, svd_regs
@@ -280,9 +280,12 @@ def checksum_verify(frame: bytes) -> tuple[int, bool, bool, bool]:
     return 0, 0, False, False, False
 
 
-def _build_regs(regs_file: str | None, overrides: dict[str, dict]) -> list[Reg]:
+def _build_regs(regs_file: str | None, overrides: dict[str, dict], names: Any = None) -> list[Reg]:
+    """MAC/MMC/PTP/DMA register tables; `names` (params `svd_blocks`) overrides the four SVD block names (the
+    STM32F107 SVD calls them ETHERNET_MAC ... : stm32f1.eth)."""
     out: list[Reg] = []
-    for svd, delta in BLOCKS:
+    blocks = BLOCKS if not names else tuple(zip(names, (d for _, d in BLOCKS)))
+    for svd, delta in blocks:
         pr = svd_regs((svd,), regs_file)
         if pr is None:
             raise KeyError(f"no SVD register table {svd}")
@@ -295,6 +298,8 @@ def _build_regs(regs_file: str | None, overrides: dict[str, dict]) -> list[Reg]:
 
 @register("stm32.eth")
 class ETH(GatedBlock):
+    MDC_DIV = MDC_DIV                 # MACMIIAR.CR -> HCLK divider (a subclass may drop reserved values)
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         self.gate = "ETH"
@@ -304,7 +309,8 @@ class ETH(GatedBlock):
             "MACMIIAR": {"on_write": self._miiar_write},
             "MACMIIDR": {"on_write": self._miidr_write},
             "MACFCR": {"on_write": self._macfcr_write},
-            "MACPMTCSR": {"ro_mask": MPR | WFR, "on_read": self._pmt_read, "on_write": self._pmt_write},
+            "MACPMTCSR": {"ro_mask": MPR | WFR, "on_read": self._pmt_read, "on_write": self._pmt_write,
+                          "on_peek": lambda b, r: None},           # the stored value; the read clears MPR / WFR
             "MACDBGR": ro, "MACSR": {"ro_mask": 0xFFFFFFFF, "on_read": self._macsr_read},
             "MACIMR": {"on_write": self._update_w},
             # RM0090 33.8.1: MO (bit 31) always 1, bits 30:16 reserved; MACA2LR is a plain 32-bit address (the SVD
@@ -316,19 +322,20 @@ class ETH(GatedBlock):
             "MMCRIMR": {"on_write": self._update_w}, "MMCTIMR": {"on_write": self._update_w},
             "PTPTSCR": {"on_write": self._ptp_write},
             # RM0090 33.8.4: reset 0x0002 0101 (RDP = 1, PBL = 1, SR = 1); the SVD gives 0x2101 (PBL = 33, invalid)
-            "DMABMR": {"reset": 0x00020101, "on_write": self._dmabmr_write, "on_read": self._dmabmr_read},
-            "DMATPDR": {"on_write": self._tpdr_write, "on_read": lambda b, r: 0},
-            "DMARPDR": {"on_write": self._rpdr_write, "on_read": lambda b, r: 0},
+            "DMABMR": {"reset": 0x00020101, "on_write": self._dmabmr_write, "on_read": self._dmabmr_read,
+                       "on_peek": lambda b, r: None},
+            "DMATPDR": {"on_write": self._tpdr_write, "on_read": pure_read(lambda b, r: 0)},
+            "DMARPDR": {"on_write": self._rpdr_write, "on_read": pure_read(lambda b, r: 0)},
             "DMARDLAR": {"on_write": self._rdlar_write}, "DMATDLAR": {"on_write": self._tdlar_write},
             "DMASR": {"ro_mask": ~W1C & 0xFFFFFFFF, "w1c_mask": W1C, "on_write": self._dmasr_write},
             "DMAOMR": {"on_write": self._dmaomr_write},
             "DMAIER": {"on_write": self._update_w},
-            "DMAMFBOCR": {"ro_mask": 0xFFFFFFFF, "on_read": self._mfbocr_read},
+            "DMAMFBOCR": {"ro_mask": 0xFFFFFFFF, "on_read": self._mfbocr_read, "on_peek": lambda b, r: None},
             "DMACHTDR": ro, "DMACHRDR": ro, "DMACHTBAR": ro, "DMACHRBAR": ro,
         }
         for c in ("MMCTGFSCCR", "MMCTGFMSCCR", "MMCTGFCR", "MMCRFCECR", "MMCRFAECR", "MMCRGUFCR"):
-            ov[c] = {"ro_mask": 0xFFFFFFFF, "on_read": self._counter_read(c)}
-        r = _build_regs(params.get("regs_file"), ov)
+            ov[c] = {"ro_mask": 0xFFFFFFFF, "on_read": self._counter_read(c), "on_peek": lambda b, r: None}
+        r = _build_regs(params.get("regs_file"), ov, params.get("svd_blocks"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.absent = False
         self.phy = EthPhy(self, model=params.get("phy", "lan8720"), addr=int(params.get("phy_addr", 0)),
@@ -422,6 +429,8 @@ class ETH(GatedBlock):
         addr, aneg, link, reset)."""
         if self.absent:
             raise ValueError(f"{self.name}: the Ethernet MAC is not present on this part")
+        if str(phy.pop("clock", None) or "phy").lower() != "phy":       # PHY clocked from MCO: stm32f1.eth only
+            raise ValueError(f"{self.name}: PHY option clock: only 'phy' (own crystal) is modelled for this MAC")
         if phy:
             self.phy.configure(**phy)
         if self.phy.segment is not None and self.phy.segment is not segment:
@@ -564,6 +573,7 @@ class ETH(GatedBlock):
             v |= MMCTS_M | MMCS_M
         return v                        # PMTS stays visible when masked: MACIMR.PMTIM only masks the interrupt
 
+    @pure_read
     def _macsr_read(self, blk, reg):
         return self._macsr_value()
 
@@ -576,7 +586,7 @@ class ETH(GatedBlock):
         if not new & MB:
             return None
         cr = (new >> 2) & 7
-        div = MDC_DIV.get(cr)
+        div = self.MDC_DIV.get(cr)
         if div is None:
             self._warn_once("cr", f"{self.name}: MACMIIAR.CR={cr} is reserved: MDC = HCLK/102 assumed")
             div = 102

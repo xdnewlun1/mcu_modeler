@@ -113,7 +113,7 @@ class UsbFs(GatedBlock):
         ov: dict[str, dict] = {
             "PERID": ro, "IDCOMP": ro, "REV": ro, "ADDINFO": ro,
             "OTGISTAT": {"w1c_mask": 0xED, "ro_mask": 0x12, "on_read": self._otgistat_read,
-                         "on_write": self._otgistat_write},
+                         "on_write": self._otgistat_write, "on_peek": self._otgistat_peek},
             "OTGICR": {"ro_mask": 0x12, "on_write": self._otgicr_write},
             "OTGSTAT": {"ro_mask": 0xFF},
             "OTGCTL": {"ro_mask": 0x4B, **conn},
@@ -122,13 +122,14 @@ class UsbFs(GatedBlock):
             "ERRSTAT": {"w1c_mask": 0xBF, "ro_mask": 0x40, **irqw},
             "ERREN": {"ro_mask": 0x40, **irqw},
             "STAT": {"ro_mask": 0xFF},
-            "CTL": {"ro_mask": JSTATE | SE0, "on_read": self._ctl_read, "on_write": self._ctl_write},
+            "CTL": {"ro_mask": JSTATE | SE0, "on_read": self._ctl_read, "on_write": self._ctl_write,
+                    "on_peek": self._ctl_read},
             "ADDR": {"on_write": self._addr_write},
             "BDTPAGE1": {"ro_mask": 0x01},
             "FRMNUML": {"ro_mask": 0xFF}, "FRMNUMH": {"ro_mask": 0xFF},
             "TOKEN": {"on_write": self._token_write},
             "USBCTRL": {"ro_mask": 0x3F, **conn},
-            "OBSERVE": {"ro_mask": 0xFF, "on_read": self._observe_read},
+            "OBSERVE": {"ro_mask": 0xFF, "on_read": self._observe_read, "on_peek": self._observe_read},
             "CONTROL": {"ro_mask": 0xEF, **conn},
             "USBTRC0": {"ro_mask": 0x5F, "on_write": self._usbtrc0_write},
         }
@@ -232,6 +233,10 @@ class UsbFs(GatedBlock):
     def _otgistat_read(self, blk, reg) -> int:
         self._onemsec()
         return self.mem[0x10]
+
+    def _otgistat_peek(self, blk, reg) -> int:
+        v = self.mem[0x10]
+        return v | ONEMSEC if self._ms_count() > self._ms_seen else v      # the 1 ms flag a read would latch
 
     def _otgistat_write(self, blk, reg, old, new):
         if old & ONEMSEC and not new & ONEMSEC:

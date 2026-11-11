@@ -1,0 +1,150 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      130     4 .isr_vector
+ 8000000  8000000      130     4         /tmp/startup_f1x-7a9086.o:(.isr_vector)
+ 8000000  8000000      130     1                 vectors
+ 8000130  8000130      cc8     4 .text
+ 8000130  8000130        2     4         /tmp/startup_f1x-7a9086.o:(.text.Default_Handler)
+ 8000130  8000130        0     1                 $t
+ 8000131  8000131        2     1                 Default_Handler
+ 8000131  8000131        2     1                 NMI_Handler
+ 8000131  8000131        2     1                 HardFault_Handler
+ 8000131  8000131        2     1                 MemManage_Handler
+ 8000131  8000131        2     1                 BusFault_Handler
+ 8000131  8000131        2     1                 UsageFault_Handler
+ 8000131  8000131        2     1                 SVC_Handler
+ 8000131  8000131        2     1                 DebugMon_Handler
+ 8000131  8000131        2     1                 PendSV_Handler
+ 8000131  8000131        2     1                 SysTick_Handler
+ 8000131  8000131        2     1                 WWDG_IRQHandler
+ 8000131  8000131        2     1                 PVD_IRQHandler
+ 8000131  8000131        2     1                 TAMPER_IRQHandler
+ 8000131  8000131        2     1                 RTC_IRQHandler
+ 8000131  8000131        2     1                 FLASH_IRQHandler
+ 8000131  8000131        2     1                 RCC_IRQHandler
+ 8000131  8000131        2     1                 EXTI0_IRQHandler
+ 8000131  8000131        2     1                 EXTI1_IRQHandler
+ 8000131  8000131        2     1                 EXTI2_IRQHandler
+ 8000131  8000131        2     1                 EXTI3_IRQHandler
+ 8000131  8000131        2     1                 EXTI4_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel1_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel2_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel3_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel4_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel5_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel6_IRQHandler
+ 8000131  8000131        2     1                 DMA1_Channel7_IRQHandler
+ 8000131  8000131        2     1                 ADC1_2_IRQHandler
+ 8000131  8000131        2     1                 USB_HP_CAN1_TX_IRQHandler
+ 8000131  8000131        2     1                 USB_LP_CAN1_RX0_IRQHandler
+ 8000131  8000131        2     1                 CAN1_RX1_IRQHandler
+ 8000131  8000131        2     1                 CAN1_SCE_IRQHandler
+ 8000131  8000131        2     1                 EXTI9_5_IRQHandler
+ 8000131  8000131        2     1                 TIM1_BRK_IRQHandler
+ 8000131  8000131        2     1                 TIM1_UP_IRQHandler
+ 8000131  8000131        2     1                 TIM1_TRG_COM_IRQHandler
+ 8000131  8000131        2     1                 TIM1_CC_IRQHandler
+ 8000131  8000131        2     1                 TIM2_IRQHandler
+ 8000131  8000131        2     1                 TIM3_IRQHandler
+ 8000131  8000131        2     1                 TIM4_IRQHandler
+ 8000131  8000131        2     1                 I2C1_EV_IRQHandler
+ 8000131  8000131        2     1                 I2C1_ER_IRQHandler
+ 8000131  8000131        2     1                 I2C2_EV_IRQHandler
+ 8000131  8000131        2     1                 I2C2_ER_IRQHandler
+ 8000131  8000131        2     1                 SPI1_IRQHandler
+ 8000131  8000131        2     1                 SPI2_IRQHandler
+ 8000131  8000131        2     1                 USART1_IRQHandler
+ 8000131  8000131        2     1                 USART2_IRQHandler
+ 8000131  8000131        2     1                 USART3_IRQHandler
+ 8000131  8000131        2     1                 EXTI15_10_IRQHandler
+ 8000131  8000131        2     1                 RTC_Alarm_IRQHandler
+ 8000131  8000131        2     1                 USBWakeUp_IRQHandler
+ 8000131  8000131        2     1                 TIM8_BRK_IRQHandler
+ 8000131  8000131        2     1                 TIM8_UP_IRQHandler
+ 8000131  8000131        2     1                 TIM8_TRG_COM_IRQHandler
+ 8000131  8000131        2     1                 TIM8_CC_IRQHandler
+ 8000131  8000131        2     1                 ADC3_IRQHandler
+ 8000131  8000131        2     1                 FSMC_IRQHandler
+ 8000131  8000131        2     1                 SDIO_IRQHandler
+ 8000131  8000131        2     1                 TIM5_IRQHandler
+ 8000131  8000131        2     1                 SPI3_IRQHandler
+ 8000131  8000131        2     1                 UART4_IRQHandler
+ 8000131  8000131        2     1                 UART5_IRQHandler
+ 8000131  8000131        2     1                 TIM6_IRQHandler
+ 8000131  8000131        2     1                 TIM7_IRQHandler
+ 8000131  8000131        2     1                 DMA2_Channel1_IRQHandler
+ 8000131  8000131        2     1                 DMA2_Channel2_IRQHandler
+ 8000131  8000131        2     1                 DMA2_Channel3_IRQHandler
+ 8000131  8000131        2     1                 DMA2_Channel4_5_IRQHandler
+ 8000134  8000134       5c     4         /tmp/startup_f1x-7a9086.o:(.text.Reset_Handler)
+ 8000134  8000134        0     1                 $t
+ 8000135  8000135       5c     1                 Reset_Handler
+ 8000190  8000190      ac4     4         /tmp/hd_sdio-44e7a3.o:(.text.main)
+ 8000190  8000190        0     1                 $t
+ 8000191  8000191      ac4     1                 main
+ 8000c54  8000c54       9e     4         /tmp/hd_sdio-44e7a3.o:(.text.fail)
+ 8000c54  8000c54        0     1                 $t
+ 8000c55  8000c55       9e     1                 fail
+ 8000cf2  8000cf2      105     1         <internal>:(.rodata.str1.1)
+ 8000df7  8000df7        1     1         . = ALIGN(4)
+ 8000df8  8000df8       10     4 .ARM.exidx
+ 8000df8  8000df8       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000      814     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000       10     4         /tmp/hd_sdio-44e7a3.o:(.bss.csd)
+20000000 20000000       10     1                 csd
+20000010 20000010      200     4         /tmp/hd_sdio-44e7a3.o:(.bss.wbuf)
+20000010 20000010      200     1                 wbuf
+20000210 20000210      200     4         /tmp/hd_sdio-44e7a3.o:(.bss.rbuf)
+20000210 20000210      200     1                 rbuf
+20000410 20000410      400     4         /tmp/hd_sdio-44e7a3.o:(.bss.dbuf)
+20000410 20000410      400     1                 dbuf
+20000810 20000810        4     4         /tmp/hd_sdio-44e7a3.o:(.bss.result)
+20000810 20000810        4     1                 result
+20000814 20000814        0     1         . = ALIGN(4)
+20000814 20000814        0     1         _ebss = .
+       0        0      7d2     1 .debug_loclists
+       0        0       32     1         /tmp/startup_f1x-7a9086.o:(.debug_loclists)
+      32       32      7a0     1         /tmp/hd_sdio-44e7a3.o:(.debug_loclists)
+       0        0      339     1 .debug_abbrev
+       0        0       c0     1         /tmp/startup_f1x-7a9086.o:(.debug_abbrev)
+      c0       c0      279     1         /tmp/hd_sdio-44e7a3.o:(.debug_abbrev)
+       0        0      e81     1 .debug_info
+       0        0       8b     1         /tmp/startup_f1x-7a9086.o:(.debug_info)
+      8b       8b      df6     1         /tmp/hd_sdio-44e7a3.o:(.debug_info)
+       0        0      1d1     1 .debug_rnglists
+       0        0       17     1         /tmp/startup_f1x-7a9086.o:(.debug_rnglists)
+      17       17      1ba     1         /tmp/hd_sdio-44e7a3.o:(.debug_rnglists)
+       0        0      184     1 .debug_str_offsets
+       0        0       34     1         /tmp/startup_f1x-7a9086.o:(.debug_str_offsets)
+      34       34      150     1         /tmp/hd_sdio-44e7a3.o:(.debug_str_offsets)
+       0        0      2a1     1 .debug_str
+       0        0      2a1     1         <internal>:(.debug_str)
+       0        0      190     1 .debug_addr
+       0        0       14     1         /tmp/startup_f1x-7a9086.o:(.debug_addr)
+      14       14      17c     1         /tmp/hd_sdio-44e7a3.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       41     1 .ARM.attributes
+       0        0       41     1         /tmp/startup_f1x-7a9086.o:(.ARM.attributes)
+       0        0       6c     4 .debug_frame
+       0        0       34     4         /tmp/startup_f1x-7a9086.o:(.debug_frame)
+      34       34       38     4         /tmp/hd_sdio-44e7a3.o:(.debug_frame)
+       0        0      b53     1 .debug_line
+       0        0       c6     1         /tmp/startup_f1x-7a9086.o:(.debug_line)
+      c6       c6      a8d     1         /tmp/hd_sdio-44e7a3.o:(.debug_line)
+       0        0       b9     1 .debug_line_str
+       0        0       b9     1         <internal>:(.debug_line_str)
+       0        0      5d0     4 .symtab
+       0        0      5d0     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      5c2     1 .strtab
+       0        0      5c2     1         <internal>:(.strtab)

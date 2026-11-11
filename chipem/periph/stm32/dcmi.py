@@ -51,7 +51,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, dma_request, irq_number, make_absent, part_present
 
@@ -72,9 +72,10 @@ class DCMI(GatedBlock):
               "SR": {"ro_mask": 0xFFFFFFFF, "on_read": self._sr_read},
               "RIS": {"ro_mask": 0xFFFFFFFF},
               "IER": {"on_write": self._ier_write},
-              "MIS": {"ro_mask": 0xFFFFFFFF, "on_read": lambda b, r: self.get("RIS") & self.get("IER")},
-              "ICR": {"on_read": lambda b, r: 0, "on_write": self._icr_write},
-              "DR": {"ro_mask": 0xFFFFFFFF, "on_read": self._dr_read}}
+              "MIS": {"ro_mask": 0xFFFFFFFF, "on_read": pure_read(lambda b, r: self.get("RIS") & self.get("IER"))},
+              "ICR": {"on_read": pure_read(lambda b, r: 0), "on_write": self._icr_write},
+              "DR": {"ro_mask": 0xFFFFFFFF, "on_read": self._dr_read,
+                     "on_peek": lambda b, r: 0 if self.absent or not self.fifo else self.fifo[0]}}
         r = build_regs((name, "DCMI"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.absent = False
@@ -556,6 +557,7 @@ class DCMI(GatedBlock):
         self._vs_blank = True if p is None else self._blank("DCMI_VSYNC", p.level(), VSPOL)
         self._in_frame = False                            # capture begins with the next frame start
 
+    @pure_read
     def _sr_read(self, blk, reg):
         v = 0
         if not self._enabled():

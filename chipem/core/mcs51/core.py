@@ -114,6 +114,7 @@ class MCS51Core(Core):
         self._dbg_info: dict | None = None
         self._watch: list | None = None
         self._watch_snaps: list = []
+        self._idata_rwatch: tuple[int, int] | None = None
         self.debug_hook = None
         self.bp_skip = None
         self.spin_pc: int | None = None
@@ -171,6 +172,10 @@ class MCS51Core(Core):
 
     def add_cycles(self, machine_cycles: int) -> None:
         self._extra += int(machine_cycles) * self.clocks_per_mc
+
+    def add_clocks(self, clocks: int) -> None:
+        """Charge oscillator periods to the next run() (e.g. the interrupt polling cycle after an Idle wake-up)."""
+        self._extra += int(clocks)
 
     # ================================================================== memory map
     def _add_region(self, base: int, size: int, kind: str, rd=None, wr=None) -> None:
@@ -1604,6 +1609,7 @@ class MCS51Core(Core):
         n = 0
         cache, costs, decode = self._cache, self._costs, self._decode
         snaps = self._watch_snaps
+        rw = self._idata_rwatch
         try:
             while True:
                 try:
@@ -1614,6 +1620,10 @@ class MCS51Core(Core):
                         count += costs[pc]
                         n += 1
                         ipc = pc
+                        if rw:
+                            for a in self.idata_reads(pc):
+                                if rw[0] <= IDATA_BASE + a < rw[1]:
+                                    self._watch_hit(IDATA_BASE + a, 1, "r", self.iram[a], pc)
                         pc = f()
                         for buf, lo, hi, base, old in snaps:
                             cur = buf[lo:hi]
@@ -1743,7 +1753,54 @@ class MCS51Core(Core):
                 if a < b:
                     snaps.append((buf, a - base, b - base, base, bytearray(buf[a - base:b - base])))
         self._watch_snaps = snaps
+        # read watchpoints on internal RAM: the IDATA addresses each instruction reads are computed before it runs
+        rd = [(lo, hi) for lo, hi, acc in wl if "r" in acc and lo < IDATA_BASE + 0x100 and hi > IDATA_BASE]
+        self._idata_rwatch = (min(r[0] for r in rd), max(r[1] for r in rd)) if rd else None
         self.flush_code_cache()                  # SFR accessors are rebuilt with (or without) the watch check
+
+    def idata_reads(self, pc: int) -> list[int]:
+        """Internal-RAM addresses (00-FF) the instruction at `pc` will read in the current state: direct operands
+        below 80h that are sources or read-modify-write targets, R0-R7 of the current bank, @Ri pointers and their
+        targets, bit-addressable bytes 20h-2Fh read by bit tests, and the stack bytes of POP/RET/RETI."""
+        code, iram, sfr = self.code, self.iram, self.sfr
+        op = code[pc & 0xFFFF]
+        e = OPCODES[op]
+        if e is None:
+            return []
+        b1, b2 = code[(pc + 1) & 0xFFFF], code[(pc + 2) & 0xFFFF]
+        bank = sfr[PSW] & 0x18
+        out: list[int] = []
+        lo = op & 0x0F
+        hi = op >> 4
+        # register operand encoded in the opcode: columns 8-F are Rn, columns 6-7 @Ri in every row; MOVX @Ri
+        # (E2/E3/F2/F3) reads Ri only (its target is XDATA)
+        if lo >= 8:
+            if hi not in (0x7, 0xA, 0xF):                 # MOV Rn,#imm / MOV Rn,dir / MOV Rn,A only write Rn
+                out.append(bank | (lo & 7))
+        elif lo in (6, 7):
+            r = bank | (lo & 1)
+            out.append(r)
+            if hi not in (0x7, 0xA, 0xF):                 # MOV @Ri,#imm / MOV @Ri,dir / MOV @Ri,A only write it
+                out.append(iram[r])
+        elif op in (0xE2, 0xE3, 0xF2, 0xF3):
+            out.append(bank | (op & 1))
+        # direct operands
+        pos = 1
+        for i in e.order:
+            k = e.ops[i]
+            v = code[(pc + pos) & 0xFFFF]
+            pos += {"dir": 1, "#imm": 1, "#imm16": 2, "bit": 1, "/bit": 1, "rel": 1, "a11": 1, "a16": 2}.get(k, 0)
+            if k == "dir" and v < 0x80:
+                dest_only = (op in (0x75, 0xF5, 0xD0) or 0x86 <= op <= 0x8F) and i == 0 or (op == 0x85 and i == 1)
+                if not dest_only:
+                    out.append(v)
+            elif k in ("bit", "/bit") and v < 0x80 and op not in (0x92, 0xC2, 0xD2):
+                out.append(0x20 + (v >> 3))
+        if op == 0xD0:                                    # POP
+            out.append(sfr[SP])
+        elif op in (0x22, 0x32):                          # RET / RETI
+            out += [sfr[SP], (sfr[SP] - 1) & 0xFF]
+        return out
 
     def _watched(self, a: int) -> list:
         return [w for w in (self._watch or ()) if w[0] <= a < w[1]]

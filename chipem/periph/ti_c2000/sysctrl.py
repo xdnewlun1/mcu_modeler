@@ -103,8 +103,8 @@ class SysCtrl(C2000Block):
             "HISPCP": {"on_write": self._presc_write},
             "LOSPCP": {"on_write": self._presc_write},
             "SCSR": {"on_write": self._scsr_write},
-            "WDCNTR": {"on_read": self._wdcntr_read},
-            "WDKEY": {"on_write": self._wdkey_write, "on_read": self._wdkey_read},
+            "WDCNTR": {"on_read": self._wdcntr_read, "on_peek": self._wdcntr_read},
+            "WDKEY": {"on_write": self._wdkey_write, "on_read": self._wdkey_read, "on_peek": self._wdkey_read},
             "WDCR": {"on_write": self._wdcr_write},
             "PCLKCR0": {"on_write": self._pclk_write},
             "PCLKCR1": {"on_write": self._pclk_write},
@@ -117,6 +117,9 @@ class SysCtrl(C2000Block):
         self.ext_hz = float(params.get("ext_hz", 30_000_000))
         self.boot_divsel = int(params.get("boot_divsel", 2))
         self.pll_lock_ns = params.get("pll_lock_ns")
+        mx = params.get("max_hz")              # data sheet SYSCLKOUT limit of the part (60 / 100 / 150 MHz)
+        self.max_hz = float(mx) if mx else None
+        self._max_warned = False
         self.frozen = False                 # set by the session for --clock
         self.pclk_listeners: list = []      # cb() after a PCLKCRx write (ePWM: TBCLKSYNC / EPWMxENCLK)
         self._lock_ev = None
@@ -205,6 +208,11 @@ class SysCtrl(C2000Block):
         if self.chip.clock.hz != hz:
             self.chip.clock.set_hz(hz)
             self.emit("info", block=self.name, msg=f"SYSCLKOUT {fmt_hz(hz)}{' (' + why + ')' if why else ''}")
+            if self.max_hz and hz > self.max_hz * 1.0001 and not self._max_warned:
+                self._max_warned = True
+                name = getattr(getattr(self.chip, "desc", None), "name", "this part")
+                self.emit("warn", block=self.name, msg=f"SYSCLKOUT {fmt_hz(hz)} exceeds the {fmt_hz(self.max_hz)} "
+                          f"maximum of the {name} (data sheet); the emulation runs at it anyway")
 
     # ------------------------------------------------------------------ lifecycle
     def attach(self, chip: Any) -> None:

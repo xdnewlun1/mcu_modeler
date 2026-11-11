@@ -61,7 +61,7 @@ class GPIO(C2000Block):
             ov[f"GP{p}MUX2"] = {"on_write": self._cfg_write}
             ov[f"GP{p}DIR"] = {"on_write": self._cfg_write}
             ov[f"GP{p}PUD"] = {"on_write": self._cfg_write}
-            ov[f"GP{p}DAT"] = {"on_write": self._dat_write, "on_read": self._dat_read}
+            ov[f"GP{p}DAT"] = {"on_write": self._dat_write, "on_read": self._dat_read, "on_peek": self._dat_peek}
             ov[f"GP{p}SET"] = {"on_write": self._set_write, "on_read": _zero}
             ov[f"GP{p}CLEAR"] = {"on_write": self._clear_write, "on_read": _zero}
             ov[f"GP{p}TOGGLE"] = {"on_write": self._toggle_write, "on_read": _zero}
@@ -140,6 +140,9 @@ class GPIO(C2000Block):
                         cb(pin, lvl)
                 if pin.id in self.periph_listeners:
                     self._periph_notify(pin)
+        # qualification, XINT and peripheral inputs on the pin must see a waveform source's edges live
+        inv.wave_rt = lambda pin: (pin.id in self._qlvl or bool(self.qual_listeners.get(pin.id))
+                                   or pin.id in self.periph_listeners)
         return inv
 
     # ------------------------------------------------------------------ input qualification (SPRUI07 1.4.4)
@@ -483,11 +486,24 @@ class GPIO(C2000Block):
     def _dat_read(self, blk, reg):
         return self.dat_value(reg.name[2])
 
+    def _dat_peek(self, blk, reg) -> int:
+        """GPxDAT for the debugger: cached or the (qualified) pin levels, without counting, warning or caching."""
+        port = reg.name[2]
+        v = self._dat[port]
+        if v is not None:
+            return v
+        ql = self._qlvl
+        return sum(1 << i for i, pin in enumerate(self.pins[port])
+                   if pin is not None and ((ql.get(pin.id) if ql else None) or pin.level()) == "H")
+
     def dat_value(self, port: str) -> int:
         self.n_reads[port] += 1
         v = self._dat[port]
         if v is not None:
             return v
+        pb = self.chip.pins if self.chip is not None else None
+        if pb is not None and pb._waves:
+            pb.sync_waves()                 # waveform sources (SCI TX frames): the pins' levels at this instruction
         v = 0
         new_x = []
         ql = self._qlvl
@@ -506,7 +522,8 @@ class GPIO(C2000Block):
             self.emit("warn", block=self.name, pins=new_x,
                       msg=f"GP{port}DAT read with floating input(s) {', '.join(new_x)} (pull-up disabled, nothing "
                           "connected): read as 0")
-        self._dat[port] = v
+        if pb is None or not pb._waves:     # no cache while a waveform is pending
+            self._dat[port] = v
         return v
 
     # ------------------------------------------------------------------ fast path for polling GPxDAT

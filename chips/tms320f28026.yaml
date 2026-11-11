@@ -1,0 +1,20 @@
+# TI TMS320F28026 (Piccolo A, F2802x), 48-pin LQFP "PT": the TMS320F28027 die description (chips/tms320f28027.yaml: core,
+# peripherals, IRQs, pins, boot ROM stand-in) with this part's memory and options, SPRS523P Table 6-1 (60 MHz,
+# 16K-word flash, 6K-word SARAM, HRPWM on ePWM1A-4A, eCAP1 yes), Figure 9-2, Table 9-4, Table 9-11 (PARTID).
+# The maximum SYSCLKOUT (60 MHz) is not enforced (the clock follows the PLL settings).
+include: tms320f28027.yaml
+name: TMS320F28026
+memory:
+  - {name: M0, base: 0x000000, size: 0x0400, kind: ram}
+  - {name: M1, base: 0x000400, size: 0x0400, kind: ram}
+  - {name: L0, base: 0x008000, size: 0x1000, kind: ram}        # L0 SARAM 4K, dual-mapped at 0x3F8000
+  - {name: OTP, base: 0x3D7800, size: 0x07C0, kind: rom, fill: 0xFF}
+  - {name: FLASH, base: 0x3F4000, size: 0x4000, kind: flash, fill: 0xFF}
+  - {name: BOOTROM, base: 0x3FE000, size: 0x2000, kind: rom, fill: 0xFF}
+drop: [L0HI]
+add_peripherals:
+  - {name: L0HI, model: ti_c2000.alias, base: 0x3F8000, size: 0x1000, params: {target: 0x8000}}
+peripheral_params:
+  PARTID: {value: 0x00C7}                  # SPRS523 Table 9-11 (TMS320F28026PT)
+  DEV_EMU: {reset: {CLASSID: 0x00C7}}
+  CSM: {secure_ranges: [[0x8000, 0x9000], [0x3D7800, 0x3D7C00], [0x3F4000, 0x3F8000], [0x3F8000, 0x3F9000]]}

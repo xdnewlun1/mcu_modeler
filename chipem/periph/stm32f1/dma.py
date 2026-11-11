@@ -1,68 +1,72 @@
-"""STM32F1 DMA1 (RM0008 ch. 13 layout, low/medium-density 7-channel controller).
+"""STM32F1 DMA controllers (RM0008 ch. 13): DMA1 (7 channels) and DMA2 (5 channels, high-density, XL-density and
+connectivity line).
 
-Not verified against RM0008 (the reference manual was not available when this was written): behaviour from the
-RM0008 DMA chapter as known and as used by the HAL/LL/SPL drivers; register layout from ST's STM32F103xx.svd
-(chips/stm32f103_regs.yaml: ISR, IFCR, CCRn/CNDTRn/CPARn/CMARn, n = 1..7, channel stride 0x14).
+Verified against RM0008 Rev 21 ch. 13 (13.3 functional description, 13.4 registers, Tables 76-80); register layout
+from ST's STM32F103xx.svd (chips/stm32f103_regs.yaml: ISR, IFCR, CCRn/CNDTRn/CPARn/CMARn, channel stride 0x14 = 0d20).
 
-Request API (same as stm32.dma, so the reused stm32.usart / spi / i2c / tim models and stm32f1.adc reach it through
-`chipem.periph.stm32._util.dma_request(chip, name, level)`; the block declares `stm32_dma_api = True`):
+Parameters: `controller` (1 or 2; default from the block name), `channels` (default 7 for DMA1, 5 for DMA2),
+`apb_byte_lanes` (default true), `apb_ranges` (default APB1 + APB2, 0x4000_0000-0x4001_7FFF).
+
+Request API (same as stm32.dma, so the reused stm32.usart / spi / i2c / tim / dac / sdio models and stm32f1.adc reach it
+through `chipem.periph.stm32._util.dma_request(chip, name, level)`; the block declares `stm32_dma_api = True`):
 
     DMA.request(name, level=True, last=False) -> bool      DMA.request_active(name) -> bool
 
-`name` is a peripheral request ("USART1_TX", "SPI1_RX", "TIM2_CH3", "TIM1_UP", "ADC1" ...).  The fixed mapping of
-RM0008 Table 78 (DMA1 requests per channel) is `REQUESTS`; a channel's request line is the OR of the requests mapped
-to it (each peripheral gates its own request with its DMA enable bit, e.g. USART CR3.DMAT, ADC CR2.DMA).  The level /
-acknowledge semantics are those of stm32.dma: a request stays asserted until the peripheral deasserts it or the
-channel serving it moves ONE data item (acknowledge); a request asserted while no channel is enabled is remembered.
-"MEM2MEM" is accepted as a no-op name.  `last` is accepted for API compatibility (no peripheral flow control on the
-F1).  When CNDTR reaches 0 the controller calls `dma_transfer_complete(names)` on every peripheral that has it (names =
-the requests mapped to the channel), as stm32.dma does.
+`name` is a peripheral request ("USART1_TX", "SPI1_RX", "TIM2_CH3", "TIM1_UP", "ADC1", "SPI3_RX", "ADC3", "DAC1" ...).
+The fixed mappings are 13.3.7 Table 78 (DMA1, `REQUESTS`) and Table 79 (DMA2, `REQUESTS2`); a channel's request line is
+the OR of the requests mapped to it (13.3.7: "simply logically ORed"; each peripheral gates its own request with its
+DMA enable bit).  The level / acknowledge semantics are those of stm32.dma (13.3.1): a request stays asserted until the
+peripheral deasserts it or the channel serving it moves ONE data item; a request asserted while no channel is enabled
+is remembered.  "MEM2MEM" is accepted as a no-op name; `last` is accepted for API compatibility.  When CNDTR reaches 0
+the controller calls `dma_transfer_complete(names)` on every peripheral that has it, as stm32.dma does.
 
-Transfers take zero bus time but never run inside the MMIO access that triggered them: a request or the EN write
-schedules a service event at the current cycle (`sched.in_cycles(0)`).  One service pass arbitrates like RM0008 13.3.2:
-among the channels with a pending request (or MEM2MEM) the highest CCR.PL wins, the lower channel number on a tie;
-each grant moves one item, so a memory-to-memory channel (always ready) finishes before a lower-priority channel moves.
-
-Per channel (CCRx: EN TCIE HTIE TEIE DIR CIRC PINC MINC PSIZE MSIZE PL MEM2MEM):
-* DIR = 0: read from CPAR ("peripheral"), write to CMAR; DIR = 1: read CMAR, write CPAR.  MEM2MEM = 1: the channel runs
-  without a request as soon as EN is set (direction still from DIR); MEM2MEM with CIRC is not allowed (one `warn`, a
-  single pass is run).
-* Data sizes (RM0008 Table 79): the source is read with its own width (PSIZE for the peripheral side, MSIZE for the
-  memory side) and the destination written with its width: a narrower source is zero-extended (B0 -> 0x00B0,
-  0x000000B0), a wider one truncated to its low bytes (B3B2B1B0 -> B1B0 / B0).  PINC/MINC step each pointer by its own
-  size.  PSIZE/MSIZE = 11 (reserved) refuses the enable (one `warn`).  The AHB-to-APB byte-lane replication of
-  RM0008 13.3.4 (a byte write to a 32-bit APB register written as B0B0B0B0) is not modelled.
-* CNDTR (16 bits) counts items down.  It is read-only while EN = 1 (and so are CPAR and CMAR: writes ignored); a
-  channel with CNDTR = 0 transfers nothing even when enabled.  At CNDTR = 0: TCIF; in circular mode CNDTR is reloaded
-  with the programmed value and the internal pointers restart from CPAR/CMAR; otherwise the channel stops with EN still
-  set (the F1 does not clear EN on completion: software must clear it before reprogramming CNDTR).  HTIF when CNDTR
-  reaches half of the programmed count (CNDTR == N // 2).  CPAR/CMAR are never modified (internal pointers, loaded
-  when EN is set).
-* CCRx configuration bits (all but EN and the TCIE/HTIE/TEIE enables) are kept while EN = 1 (one `warn`): the RM asks
-  software to configure the channel with EN = 0.  Clearing EN stops the channel at once (no flag set); setting it again
-  restarts the pointers from CPAR/CMAR with the remaining CNDTR.
-* ISR: GIFx / TCIFx / HTIFx / TEIFx (bits 4(x-1) .. 4(x-1)+3), read-only; GIFx is set with any of the three.  IFCR is
-  write-1-to-clear (reads 0): CTCIFx/CHTIFx/CTEIFx clear one flag, CGIFx clears all four flags of the channel.
-* Channel interrupt "DMA1_Channelx" (number from the chip YAML): level of (TCIF & TCIE) | (HTIF & HTIE) |
-  (TEIF & TEIE).
-* Transfer error: an access the bus cannot resolve (BusError: unmapped address outside the auto-stub windows) sets
-  TEIF and GIF and clears EN (RM0008: the faulty channel is disabled by hardware).
-Clock gate RCC_AHBENR.DMA1EN: a register access with the clock off logs one `warn` (transfers still run, like the rest
-of the family).  There is no AHB reset register on this line: only a chip reset clears the controller.
+Verified (RM0008 section):
+* Arbitration (13.3.2): among the channels with a pending request (or MEM2MEM) the highest CCR.PL wins, the lower channel
+  number on a tie; each grant moves one item.  DMA1 is served before DMA2 when both have work at the same instant
+  (13.3.2 note).
+* Channels (13.3.3): DIR = 0 reads CPAR and writes CMAR, DIR = 1 the reverse; MEM2MEM runs without a request as soon as
+  EN is set and stops at CNDTR = 0; MEM2MEM with CIRC "may not be used" (one `warn`, a single pass is run).  Circular
+  mode reloads CNDTR and the internal pointers from CPAR/CMAR.  CPAR/CMAR keep their programmed value (the current
+  pointers are internal).  A disabled channel keeps its registers.  Without CIRC the channel serves no request after
+  CNDTR = 0 and EN stays set (software clears it to reload CNDTR).
+* Data widths (13.3.4 Table 76): the source is read with its own width and the destination written with its width; a
+  narrower source is zero-extended (B0 -> 00B0 / 000000B0), a wider one truncated to its low bytes (B3B2B1B0 -> B1B0 / B0);
+  PINC/MINC step by the own size.  PA/MA low bits are ignored for 16/32-bit sizes (13.4.5/13.4.6: aligned access).
+* AHB/APB byte lanes (13.3.4): a byte or half-word write to an address on APB1/APB2 is performed as a 32-bit write of
+  the data replicated on all lanes (0xB0 -> 0xB0B0B0B0, 0xB1B0 -> 0xB1B0B1B0) to the word address.
+* Flags (13.4.1/13.4.2): ISR GIFx/TCIFx/HTIFx/TEIFx are read-only; GIFx is a stored flag set with any of TE/HT/TC and
+  cleared only by CGIFx (CGIFx clears all four; CTCIFx/CHTIFx/CTEIFx one each).  IFCR reads 0.  Bits of channels 6/7
+  are reserved on DMA2 (13.4 note), as are its CCR6/7 .. CMAR6/7 (read 0, writes ignored).
+* Interrupts (13.3.6): a channel line is (TCIF & TCIE) | (HTIF & HTIE) | (TEIF & TEIE); vector "DMAx_Channely" from the
+  chip YAML, DMA2 channels 4 and 5 sharing "DMA2_Channel4_5" on high/XL density (separate vectors on the connectivity
+  line).
+* CNDTR (13.4.4): 16 bits, writable only while the channel is disabled ("read-only" once enabled); with CNDTR = 0 "no
+  transaction can be served whether the channel is enabled or not".  TCIF at CNDTR = 0.
+* Transfer error (13.3.5): an access to a reserved address (BusError: unmapped and outside the auto-stub windows) sets
+  TEIF (and GIF) and clears EN.
+Approximate / not in RM0008:
+* HTIF is set when CNDTR reaches N // 2 (13.3.3 "once half of the bytes are transferred"; for odd N the RM gives no
+  rule; N = 1 sets no HTIF).
+* CPAR/CMAR writes while EN = 1 are ignored (13.4.5/13.4.6 only say they "must not be written"); CCR configuration
+  bits other than EN/TCIE/HTIE/TEIE written while EN = 1 are ignored with one `warn` (RM0008 states no lock; later ST
+  manuals for the same DMA IP make them read-only while EN = 1).  PSIZE/MSIZE = 11 (reserved) refuses the enable.
+* Transfers take zero bus time (no CPU stall or bus-matrix round robin, 13.3) but never run inside the MMIO access that
+  triggered them (a service event at the current cycle).
+* Clock gate RCC_AHBENR.DMAxEN: a register access with the clock off logs one `warn` (transfers still run).
 """
 from __future__ import annotations
 
 from typing import Any
 
 from ...bus import BusError
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, irq_number
 
 NCH = 7
 
-# RM0008 Table 78 "Summary of each channel's requests" (DMA1), channel 1..7.  TIM4 / USART3 / SPI2 / I2C2 requests are
-# listed although the low-density F103T6 has none of those peripherals (they exist on medium/high density parts).
+# RM0008 13.3.7 Table 78 "Summary of DMA1 requests for each channel", channel 1..7.  TIM4 / USART3 / SPI2 / I2C2
+# requests are listed although the low-density F103T6 has none of those peripherals (medium/high density parts).
 REQUESTS: dict[int, tuple[str, ...]] = {
     1: ("ADC1", "TIM2_CH3", "TIM4_CH1"),
     2: ("SPI1_RX", "USART3_TX", "TIM1_CH1", "TIM2_UP", "TIM3_CH3"),
@@ -73,6 +77,21 @@ REQUESTS: dict[int, tuple[str, ...]] = {
     7: ("USART2_TX", "I2C1_RX", "TIM2_CH2", "TIM2_CH4", "TIM4_UP"),
 }
 CHANNEL_OF = {n: ch for ch, names in REQUESTS.items() for n in names}
+# RM0008 13.3.7 Table 79 "Summary of DMA2 requests for each channel" (high-density, XL-density and connectivity line;
+# ADC3, SDIO and TIM8 requests exist on high/XL density only).  The DAC channels request as "DAC1"/"DAC2" (stm32.dac)
+# and share channels 3/4 with TIM6_UP/TIM7_UP.
+REQUESTS2: dict[int, tuple[str, ...]] = {
+    1: ("TIM5_CH4", "TIM5_TRIG", "TIM8_CH3", "TIM8_UP", "SPI3_RX", "I2S3_RX"),
+    2: ("TIM8_CH4", "TIM8_TRIG", "TIM8_COM", "TIM5_CH3", "TIM5_UP", "SPI3_TX", "I2S3_TX"),
+    3: ("TIM8_CH1", "UART4_RX", "TIM6_UP", "DAC1", "DAC_Channel1"),
+    4: ("TIM5_CH2", "SDIO", "TIM7_UP", "DAC2", "DAC_Channel2"),
+    5: ("ADC3", "TIM8_CH2", "TIM5_CH1", "UART4_TX"),
+}
+CHANNEL_OF2 = {n: ch for ch, names in REQUESTS2.items() for n in names}
+# AHB-to-APB bridges (RM0008 3.3 memory map: APB1 0x4000_0000-0x4000_7FFF, APB2 0x4001_0000-0x4001_7FFF; the AHB
+# peripherals start with SDIO at 0x4001_8000): byte / half-word DMA writes there become word writes with the data
+# replicated on all byte lanes (13.3.4).
+APB_RANGES = ((0x40000000, 0x40018000),)
 
 # CCR
 EN, TCIE, HTIE, TEIE, DIR, CIRC, PINC, MINC = 1, 2, 4, 8, 16, 32, 64, 128
@@ -111,31 +130,57 @@ class DMA(GatedBlock):
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
+        params.setdefault("reserved_zero", True)        # reserved offsets read 0, writes ignored
         self.gate = str(params.get("gate", name))
+        digits = "".join(ch for ch in name if ch.isdigit())
+        self.controller = int(params.get("controller", digits or 1))
+        if self.controller not in (1, 2):
+            raise ValueError(f"{name}: stm32f1.dma controller must be 1 or 2")
+        self.nch = int(params.get("channels", 7 if self.controller == 1 else 5))
+        if not 1 <= self.nch <= NCH:
+            raise ValueError(f"{name}: stm32f1.dma channels must be 1..7")
+        table = REQUESTS if self.controller == 1 else REQUESTS2
+        self.requests = {c: names for c, names in table.items() if c <= self.nch}
+        self.channel_of = {n: c for c, names in self.requests.items() for n in names}
+        self.lane_replication = bool(params.get("apb_byte_lanes", True))
+        self.apb_ranges = tuple(tuple(int(x) for x in r) for r in params.get("apb_ranges", APB_RANGES))
+        # ISR/IFCR bits of channels this controller does not have are reserved (13.4: "all bits related to channel6
+        # and channel7 are not relevant for DMA2"); bits 31:28 are reserved on both.
+        self.flag_mask = (1 << (4 * self.nch)) - 1
         ov: dict[str, dict] = {
             "ISR": {"ro_mask": 0xFFFFFFFF},
-            "IFCR": {"on_write": self._ifcr_write, "on_read": lambda b, r: 0},
+            "IFCR": {"on_write": self._ifcr_write, "on_read": pure_read(lambda b, r: 0)},
         }
         for c in range(1, NCH + 1):
+            if c > self.nch:                 # absent channel: reserved, reads 0
+                for k in ("CCR", "CNDTR", "CPAR", "CMAR"):
+                    ov[f"{k}{c}"] = {"ro_mask": 0xFFFFFFFF, "reset": 0}
+                continue
             ov[f"CCR{c}"] = {"on_write": self._ccr_write(c), "ro_mask": 0xFFFF8000}
             ov[f"CNDTR{c}"] = {"on_write": self._cndtr_write(c), "ro_mask": 0xFFFF0000}
             ov[f"CPAR{c}"] = {"on_write": self._prot_write(c)}
             ov[f"CMAR{c}"] = {"on_write": self._prot_write(c)}
-        r = build_regs((name, "DMA1"), size, ov, params.get("regs_file"))
+        r = build_regs((name, f"DMA{self.controller}", "DMA1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
-        self.known = set(CHANNEL_OF)
+        self.known = set(self.channel_of)
         self.levels: dict[str, bool] = {}
-        self.chans = [None] + [_Chan(c) for c in range(1, NCH + 1)]
-        self._ccr = [None] + [self.regs[f"CCR{c}"] for c in range(1, NCH + 1)]
-        self._cndtr = [None] + [self.regs[f"CNDTR{c}"] for c in range(1, NCH + 1)]
+        self.chans = [None] + [_Chan(c) for c in range(1, self.nch + 1)]
+        self._ccr = [None] + [self.regs[f"CCR{c}"] for c in range(1, self.nch + 1)]
+        self._cndtr = [None] + [self.regs[f"CNDTR{c}"] for c in range(1, self.nch + 1)]
         self._ev = None
         self._busy = False
+        self._first: Any = None             # DMA1 when this is DMA2 (13.3.2: DMA1 has priority over DMA2)
+        self._irq_lines: dict[int, set[int]] = {}
         self.items = 0                      # data items moved (statistics)
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
-        for c in range(1, NCH + 1):
-            self.chans[c].irq = irq_number(chip, f"{self.name}_Channel{c}", f"DMA1_Channel{c}")
+        k = self.controller
+        for c in range(1, self.nch + 1):
+            names = [f"{self.name}_Channel{c}", f"DMA{k}_Channel{c}"]
+            if k == 2 and c in (4, 5):       # high/XL density: one vector "DMA2_Channel4_5" (13.3.6 note)
+                names += [f"{self.name}_Channel4_5", "DMA2_Channel4_5"]
+            self.chans[c].irq = irq_number(chip, *names)
 
     def reset(self) -> None:
         if self._ev is not None and self.chip is not None:
@@ -147,6 +192,7 @@ class DMA(GatedBlock):
                 self.irq(ch.irq, False)
             ch.line = False
             ch.clear()
+        self._irq_lines.clear()
         super().reset()
 
     def write(self, offset: int, size: int, value: int) -> None:
@@ -158,7 +204,7 @@ class DMA(GatedBlock):
     def request(self, name: str, level: bool = True, last: bool = False) -> bool:
         """Assert (level=True) or deassert peripheral DMA request `name` (RM0008 Table 78).  False when no channel of
         this controller serves it."""
-        c = CHANNEL_OF.get(name)
+        c = self.channel_of.get(name)
         if c is None:
             return name == "MEM2MEM"
         self.levels[name] = bool(level)
@@ -172,7 +218,14 @@ class DMA(GatedBlock):
         return bool(self.levels.get(name))
 
     def channel_requests(self, c: int) -> tuple[str, ...]:
-        return REQUESTS[c]
+        return self.requests[c]
+
+    def remaining_items(self, name: str) -> int | None:
+        """CNDTR of the enabled channel serving request `name`, None if none (stm32.i2c CR2.LAST uses it)."""
+        c = self.channel_of.get(name)
+        if c is None or not self._ccrv(c) & EN:
+            return None
+        return self._ndt(c)
 
     # ------------------------------------------------------------------ helpers
     def _ccrv(self, c: int) -> int:
@@ -199,7 +252,12 @@ class DMA(GatedBlock):
         if lvl != ch.line:
             ch.line = lvl
             if ch.irq is not None and self.chip is not None:
-                self.irq(ch.irq, lvl)
+                srcs = self._irq_lines.setdefault(ch.irq, set())   # DMA2_Channel4_5: one line, two channels
+                if lvl:
+                    srcs.add(c)
+                else:
+                    srcs.discard(c)
+                self.irq(ch.irq, bool(srcs))
 
     lp_frozen: Any = False                  # PWR freezer: Stop / gated Sleep (no HCLK)
 
@@ -216,13 +274,13 @@ class DMA(GatedBlock):
     # ------------------------------------------------------------------ register hooks
     def _ifcr_write(self, blk, reg, old, new):
         isr = self.get("ISR")
-        for c in range(1, NCH + 1):
+        for c in range(1, self.nch + 1):
             nib = (new >> (4 * (c - 1))) & 0xF
             if nib & F_G:
                 nib = 0xF                    # CGIFx clears GIF, TCIF, HTIF and TEIF of the channel
             isr &= ~(nib << (4 * (c - 1)))
         self.set("ISR", isr)
-        for c in range(1, NCH + 1):
+        for c in range(1, self.nch + 1):
             self._update_line(c)
         return 0
 
@@ -281,7 +339,7 @@ class DMA(GatedBlock):
         ch.mstep = msize if ccr & MINC else 0
         ch.pptr = self.get(f"CPAR{c}")
         ch.mptr = self.get(f"CMAR{c}")
-        if self._ndt(c) and (ch.m2m or any(self.levels.get(n) for n in REQUESTS[c])):
+        if self._ndt(c) and (ch.m2m or any(self.levels.get(n) for n in self.requests[c])):
             self._kick()
 
     # ------------------------------------------------------------------ bus access
@@ -292,6 +350,13 @@ class DMA(GatedBlock):
             raise _DmaFault(addr, str(e)) from None
 
     def _wr(self, addr: int, n: int, v: int) -> None:
+        if n < 4 and self.lane_replication:
+            for lo, hi in self.apb_ranges:
+                if lo <= addr < hi:          # 13.3.4: the AHB/APB bridge ignores HSIZE: word write, lanes replicated
+                    v = v * (0x01010101 if n == 1 else 0x00010001)
+                    addr &= ~3
+                    n = 4
+                    break
         try:
             self.chip.bus.write(addr, n, v)
         except BusError as e:
@@ -304,19 +369,23 @@ class DMA(GatedBlock):
         if ccr & MEM2MEM:
             return True
         levels = self.levels
-        for n in REQUESTS[c]:
+        for n in self.requests[c]:
             if levels.get(n):
                 return True
         return False
 
     def _service(self) -> None:
         self._ev = None
+        first = self._dma1()
+        if first is not None and first._ev is not None and not first._busy:
+            self.chip.sched.cancel(first._ev)        # 13.3.2 note: DMA1 is served before DMA2
+            first._service()
         self._busy = True
         try:
             guard = 0
             while guard < 2_000_000:
                 best, best_pl = 0, -1
-                for c in range(1, NCH + 1):
+                for c in range(1, self.nch + 1):
                     ccr = self._ccrv(c)
                     if ccr & EN and (ccr >> 12 & 3) > best_pl and self._ready(c, ccr):
                         best, best_pl = c, ccr >> 12 & 3
@@ -331,15 +400,18 @@ class DMA(GatedBlock):
         """Move one data item on channel c (one granted request)."""
         ch = self.chans[c]
         if not ch.m2m:
-            for n in REQUESTS[c]:            # acknowledge before the access: a re-request during it is kept
+            for n in self.requests[c]:            # acknowledge before the access: a re-request during it is kept
                 self.levels[n] = False
+        # 13.4.5/13.4.6: PA[0] / MA[0] (16-bit) and PA[1:0] / MA[1:0] (32-bit) are ignored (aligned access)
+        pa = ch.pptr & ~(ch.psize - 1)
+        ma = ch.mptr & ~(ch.msize - 1)
         try:
             if ch.dir:                       # memory -> peripheral
-                v = self._rd(ch.mptr, ch.msize)
-                self._wr(ch.pptr, ch.psize, v & ((1 << (8 * ch.psize)) - 1))
+                v = self._rd(ma, ch.msize)
+                self._wr(pa, ch.psize, v & ((1 << (8 * ch.psize)) - 1))
             else:                            # peripheral (or M2M source) -> memory
-                v = self._rd(ch.pptr, ch.psize)
-                self._wr(ch.mptr, ch.msize, v & ((1 << (8 * ch.msize)) - 1))
+                v = self._rd(pa, ch.psize)
+                self._wr(ma, ch.msize, v & ((1 << (8 * ch.msize)) - 1))
         except _DmaFault as e:
             self.emit("warn", block=self.name, msg=f"{self.name} channel {c}: bus error at 0x{e.addr:08x} ({e.msg}); "
                       "TEIF set, channel disabled")
@@ -361,9 +433,19 @@ class DMA(GatedBlock):
                 ch.pptr = self.get(f"CPAR{c}")
                 ch.mptr = self.get(f"CMAR{c}")
             if not ch.m2m:
-                self._notify_last(REQUESTS[c])
+                self._notify_last(self.requests[c])
         if flags:
             self._set_flags(c, flags)
+
+    def _dma1(self) -> Any:
+        """DMA1 of the chip when this block is DMA2 (cached), else None."""
+        if self.controller != 2 or self.chip is None:
+            return None
+        if self._first is None:
+            self._first = next((b for b in (getattr(self.chip, "peripherals", {}) or {}).values()
+                                if getattr(b, "model", None) == self.model and getattr(b, "controller", 0) == 1),
+                               False)
+        return self._first or None
 
     def _notify_last(self, names: tuple[str, ...]) -> None:
         for blk in (getattr(self.chip, "peripherals", {}) or {}).values():

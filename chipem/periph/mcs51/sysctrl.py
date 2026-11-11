@@ -6,8 +6,10 @@
   IDL) enters Power-down: the oscillator stops, so every timer/UART/PCA/SPI/watchdog freezes (chipem/periph/
   lowpower.Freezer: timers, PCA, watchdog get `clock_stop(True, "pd")`; the pending events of the UART and SPI are
   held and resumed with their remaining time, and they ignore input while `lp_frozen`); only an enabled LEVEL-sensitive external interrupt (INTx low with
-  ITx = 0, EXx = 1, EA = 1) or a reset ends it (`chip.wake_gate`).  The data sheet's 1024-clock oscillator restart is
-  not modelled (wake-up is immediate).  POF (bit 4) is set by a power-on reset only and kept by other resets; SMOD1
+  ITx = 0, EXx = 1, EA = 1) or a reset ends it (`chip.wake_gate`).  Sec. 6.12.2: "Holding an external interrupt
+  pin LOW restarts the oscillator, the signal must hold LOW at least 1024 clock cycles before bringing back HIGH to
+  complete the exit": the wake-up completes `params.pd_wake_clocks` (default 1024) oscillator periods after the
+  level interrupt became pending; released earlier, the device stays in Power-down (one `warn`).  POF (bit 4) is set by a power-on reset only and kept by other resets; SMOD1
   doubles the UART mode 1/2/3 baud rate, SMOD0 makes SCON.7 the framing-error flag (read by mcs51.uart).
 * AUXR (Table 5/6 pp.13-14): EXTRAM = 1 sends every MOVX to the external bus (`core.extram`); with EXTRAM = 0 MOVX
   below 0300H uses the 768-byte on-chip XRAM.  AO = 1 stops ALE except during MOVX/MOVC (the ALE pin is not
@@ -42,6 +44,9 @@ class SysCtrl(SfrBlock):
         self.mode: str | None = None         # "idle" | "pd" while sleeping
         self.fx2 = False                     # FX2 non-volatile 6-clock bit (mcs51.flash sets it)
         self._pof = True
+        self.pd_wake_clocks = int(self.params.get("pd_wake_clocks", 1024))
+        self._osc_start: int | None = None   # clock cycle the oscillator restarted (power-down wake request)
+        self._osc_ev = None
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
@@ -52,11 +57,16 @@ class SysCtrl(SfrBlock):
         if fz is not None:
             fz.drop()
             self._freezer = None
+        self.cancel(getattr(self, "_osc_ev", None))
+        self._osc_ev = None
+        self._osc_start = None
         pof = self._pof
         cause = getattr(getattr(self.chip, "arch", None), "reset_cause", "por") if self.chip else "por"
         super().reset()
         if cause == "por":
             pof = True
+        if not self.params.get("pof", True):            # PCON.POF is an NXP addition (not on the Intel 80C52)
+            pof = False
         self.set("PCON", POF if pof else 0)
         self._pof = pof
         self.mode = None
@@ -69,8 +79,12 @@ class SysCtrl(SfrBlock):
             self._apply_cpu_clock()
 
     # ------------------------------------------------------------------ clocks
+    def _opt(self, name: str) -> int:
+        """Value of an SFR this part may not have (AUXR, CKCON: absent on a plain 80C52) - 0 when absent."""
+        return self.get(name) if name in self.regs else 0
+
     def cpu_x2(self) -> bool:
-        return self.fx2 or bool(self.get("CKCON") & 1)
+        return self.fx2 or bool(self._opt("CKCON") & 1)
 
     def periph_div(self, bit: str | None = None) -> int:
         """Oscillator periods per peripheral clock cycle: 12, or 6 in 6-clock mode unless the CKCON bit is set."""
@@ -78,7 +92,7 @@ class SysCtrl(SfrBlock):
             return 12
         if bit is None or bit == "X2":
             return 6
-        return 12 if self.get("CKCON") >> CKCON_BITS[bit] & 1 else 6
+        return 12 if self._opt("CKCON") >> CKCON_BITS[bit] & 1 else 6
 
     def _apply_cpu_clock(self) -> None:
         f = getattr(self.chip.core, "set_clocks_per_mc", None)
@@ -170,12 +184,41 @@ class SysCtrl(SfrBlock):
 
     def _pd_gate(self) -> bool:
         t = find_model(self.chip, "mcs51.timer01")
-        return bool(t is not None and t.pd_wakeup())
+        req = bool(t is not None and t.pd_wakeup())
+        now = self.chip.clock.cycles
+        if not req:
+            if self._osc_start is not None:
+                self.emit("warn", block=self.name, msg=f"external interrupt released {now - self._osc_start} clocks "
+                          f"after it restarted the oscillator (< {self.pd_wake_clocks}): Power-down not left")
+                self._osc_start = None
+                self.cancel(self._osc_ev)
+                self._osc_ev = None
+            return False
+        if self.pd_wake_clocks <= 0:
+            return True
+        if self._osc_start is None:
+            self._osc_start = now
+            self._osc_ev = self.chip.sched.at_cycles(now + self.pd_wake_clocks, self._osc_ready)
+        return now >= self._osc_start + self.pd_wake_clocks
+
+    def _osc_ready(self) -> None:
+        """Oscillator restart time over: an event at that cycle makes the sleeping Chip loop re-check the gate; if
+        the interrupt pin was released meanwhile the exit did not complete (the gate is only consulted while a wake
+        request is pending, so the release is noticed here)."""
+        self._osc_ev = None
+        t = find_model(self.chip, "mcs51.timer01")
+        if self.mode == "pd" and self._osc_start is not None and not (t is not None and t.pd_wakeup()):
+            self.emit("warn", block=self.name, msg=f"external interrupt released less than {self.pd_wake_clocks} "
+                      "clocks after it restarted the oscillator: Power-down not left")
+            self._osc_start = None
 
     def on_wake(self, chip: Any) -> None:
         mode = self.mode
         self.mode = None
         chip.wake_gate = None
+        self._osc_start = None
+        self.cancel(self._osc_ev)
+        self._osc_ev = None
         self.set("PCON", self.get("PCON") & ~(IDL | PD))
         fz = getattr(self, "_freezer", None)
         if fz is not None:

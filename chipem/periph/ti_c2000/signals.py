@@ -23,5 +23,7 @@ TABLE = SignalTable([
     (r"EPWMSYNCI|TZ\d+|EQEP\d+[ABIS]", IN),
     (r"MDR[AB]|MCLK[RX][AB]|MFS[RX][AB]", IN),  # McBSP: static fallback; ti_c2000.mcbsp sets the live role
     (r"XCLKOUT", OUT_L),
+    (r"COMP\d+OUT", OUT_L),                  # Piccolo comparator outputs (ti_c2000.comp drives the live level)
+    (r"HRCAP\d+", IN),                       # Piccolo F2806x high-resolution capture inputs
     (r"ADCIN[AB]\d+", ANALOG),
 ])

@@ -1,0 +1,10 @@
+# STM32F103ZE FSMC bank 1 / NE1 with a 64K x 16 (128 KB) asynchronous SRAM (chipem.devices.sram on the FSMC).
+# The firmware enables the bank (BCR1 MBKEN | MWID 16 | WREN), tests the SRAM, shows the 128 KB mirror across the
+# 64 MB window, runs code from the SRAM, then disables the bank and takes the bus fault; USART1 prints "done".
+# Run:   chipem run --board boards/stm32f103ze_fsmc_sram.yaml --for 20ms
+# Build: firmware/samples_stm32f1_variants/build.sh
+name: stm32f103ze_fsmc_sram
+chips:
+  - {id: A, chip: stm32f103ze, firmware: ../firmware/samples_stm32f1_variants/build/hd_fsmc.elf}
+devices:
+  - {type: sram, chip: A, bus: FSMC, size: 64K, width: 16}

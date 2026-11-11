@@ -8,20 +8,22 @@ preset      max_slice  auto_quantum  poll_skip    pin_log  drop_kinds  ui_interv
 ==========  =========  ============  ===========  =======  ==========  ===========
 accurate    500        off           off          all      -           30 ms
 default     2000       off           off          auto     -           30 ms
-fast        2000       on            100 us       auto     mmio        200 ms
+fast        20000      on            100 us       auto     mmio        200 ms
 ==========  =========  ============  ===========  =======  ==========  ===========
 
 No preset changes the board quantum (the board author picks it for the board's links).
 
 What each one costs (see docs/USER_GUIDE.md "Making it faster"):
 
-* ``max_slice`` (instructions per core slice). Slices end at the next scheduled event anyway, so interrupts, timers
-  and pin timestamps stay exact. A longer slice delays only what is not an event: a Session.stop()/pause from
-  another thread, a board chip's yield, and anything that timestamps with `clock.now_ns()` instead of `chip.now_ns()`
-  (up to one slice early), and an event that a model schedules from inside an MMIO *read* (a read callback cannot
-  end the slice on ARM: it is noticed at the end of the slice, so it fires up to one slice late). That last effect
-  made max_slice 50000 three times slower on boards/k22_i2c_eeprom.yaml (I2C events late, the firmware waits
-  longer), so no preset raises it. A core parked in a branch-to-itself ignores the limit (nothing can change).
+* ``max_slice`` (instructions per core slice). Slices end at the next scheduled event anyway, also one that a model
+  schedules from inside an MMIO callback (read or write: the core lowers the running slice's instruction limit to
+  the event, chipem/core/unicorn_cm.py `end_slice_at`), so interrupts, timers and pin timestamps stay exact. A longer
+  slice delays only what is not an event: a Session.stop()/pause from another thread (Unicorn stops at the next
+  translation block, so in practice at once) and anything that timestamps with `clock.now_ns()` instead of
+  `chip.now_ns()` (up to one slice early). Measured with tools/bench.py: 2000 -> 20000 gains about 10-15 % on busy
+  loops and about 30 % on k22_sdcard, and no case got slower (k22_i2c_eeprom was three times slower at 50000 while
+  read callbacks could not end a slice; it is now flat), so `fast` uses 20000. A core parked in a branch-to-itself
+  ignores the limit (nothing can change).
 * ``poll_skip_ns``: a polling loop (the same MMIO values, no MMIO write and the identical CPU register state in two
   consecutive iterations) is fast-forwarded by whole iterations up to the next scheduled event, at most this long at
   a time. Exact for models that change status bits in events; a value a model derives from the time on each read is
@@ -138,7 +140,7 @@ def _kinds(v: Any) -> frozenset:
 PRESETS: dict[str, PerfSettings] = {
     "accurate": PerfSettings("accurate", max_slice=500, pin_log="all"),
     "default": PerfSettings("default"),
-    "fast": PerfSettings("fast", auto_quantum=True, drop_kinds=frozenset({"mmio"}),
+    "fast": PerfSettings("fast", max_slice=20000, auto_quantum=True, drop_kinds=frozenset({"mmio"}),
                          ui_interval_s=0.2, poll_skip_ns=100e3),
 }
 

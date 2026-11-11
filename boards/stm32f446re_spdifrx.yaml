@@ -1,0 +1,13 @@
+# STM32F446RE SPDIFRX (stm32.spdifrx, RM0390 ch. 27) fed by an IEC 60958 transmitter part (chipem/parts/spdif_source.py):
+# 48 kHz stereo, "counter" signal (left = frame number, right = its complement), consumer PCM channel status.  The
+# firmware (firmware/samples_stm32f446/spdifrx_rx.c) clocks SPDIFRX from PLLI2S_P = 100 MHz, synchronises (SYNCD,
+# WIDTH5 -> Fs estimate), reads the channel status through CSR and receives 16 samples with DMA1 stream 1 channel 0
+# (SPDIFRX_DT).  The S/PDIF line is summarised (no per-edge events): the net stays L, a `wave` pin event counts the
+# biphase transitions.
+# Run:   chipem run --board boards/stm32f446re_spdifrx.yaml --for 30ms
+# Build: firmware/samples_stm32f446/build.sh
+name: stm32f446re_spdifrx
+chips:
+  - {id: A, chip: stm32f446re, firmware: ../firmware/samples_stm32f446/build/spdifrx_rx.elf}
+parts:
+  - {id: TX1, type: spdif_source, rate: 48000, signal: counter, start: 2ms, ports: {out: A.PB7}}

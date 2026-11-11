@@ -29,11 +29,11 @@ class CpuTimer(C2000Block):
         params = dict(params or {})
         self.index = int(params.get("index", name[-1] if name[-1].isdigit() else 0))
         ov = {
-            "TIM": {"on_read": self._tim_read, "on_write": self._tim_write},
+            "TIM": {"on_read": self._tim_read, "on_peek": self._tim_read, "on_write": self._tim_write},
             "PRD": {"on_write": self._prd_write},
             "TCR": {"on_write": self._tcr_write, "w1c_mask": TIF, "ro_mask": 0x33CF},
-            "TPR": {"on_read": self._tpr_read, "on_write": self._tpr_write},
-            "TPRH": {"on_read": self._tpr_read, "on_write": self._tpr_write},
+            "TPR": {"on_read": self._tpr_read, "on_peek": self._tpr_read, "on_write": self._tpr_write},
+            "TPRH": {"on_read": self._tpr_read, "on_peek": self._tpr_read, "on_write": self._tpr_write},
         }
         regs = build_regs((name, f"CPUTIMER{self.index}", "CPUTIMER0"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)

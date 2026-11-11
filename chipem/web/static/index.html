@@ -52,12 +52,12 @@
         <button id="btnRunFor" class="btn run-ctl" title="Run for the given virtual time">Run for</button>
       </div>
       <div class="rate joined" title="Emulation rate: virtual seconds per wall-clock second (real-time pacing); max = as fast as possible. Type any factor (e.g. 0.002) and press Enter.">
-        <select id="rateSel" aria-label="Emulation rate preset">
+        <input id="rateIn" type="text" value="max" spellcheck="false" aria-label="Emulation rate (factor or max)">
+        <select id="rateSel" aria-label="Emulation rate preset" title="rate presets">
           <option value="max">max</option><option value="0.01">×0.01</option><option value="0.1">×0.1</option>
           <option value="0.5">×0.5</option><option value="1">×1</option><option value="2">×2</option>
           <option value="10">×10</option><option value="custom" hidden>custom</option>
         </select>
-        <input id="rateIn" type="text" value="max" spellcheck="false" aria-label="Emulation rate (factor or max)">
       </div>
       <button id="btnBoard" class="btn" title="Board setup (B): add or remove MCUs, choose firmware, new / open / save a board">Board</button>
     </div>
@@ -79,6 +79,8 @@
       <span class="ro ro-insn" title="Instructions executed by the selected chip"><i>insn</i><b id="tInsn">—</b></span>
       <span class="ro ro-cyc" title="Core cycles of the selected chip"><i>cyc</i><b id="tCycles">—</b></span>
       <span class="conn" id="conn" title="Live stream (Server-Sent Events)">connecting</span>
+    </div>
+    <div class="hdr-end">
       <button id="btnTheme" class="btn small ghost theme-btn" type="button" title="Theme" aria-label="Switch theme">
         <svg class="ico-sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M7.3 0h1.4v2.6H7.3zM7.3 13.4h1.4V16H7.3zM0 7.3h2.6v1.4H0zM13.4 7.3H16v1.4h-2.6zM2.1 3.1l1-1 1.8 1.8-1 1zM11.1 12.1l1-1 1.8 1.8-1 1zM2.1 12.9l1.8-1.8 1 1-1.8 1.8zM11.1 3.9l1.8-1.8 1 1-1.8 1.8z"/></svg>
         <svg class="ico-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 1.2A6.8 6.8 0 1 0 14.8 11 5.6 5.6 0 0 1 10.5 1.2z"/></svg>
@@ -99,6 +101,7 @@
       <tr><th>R</th><td>reset the chip(s); virtual time continues</td></tr>
       <tr><th></th><td>Restart button: rebuild at t=0 (page reloads)</td></tr>
       <tr><th>F, 0</th><td>fit the board</td></tr>
+      <tr><th>Z</th><td>zoom to the selected chip (again: fit); at fit zoom only wired / selected / peripheral pins are named, hover or focus a pin for its name</td></tr>
       <tr><th>+ −</th><td>zoom the board</td></tr>
       <tr><th>B</th><td>board setup (MCUs, firmware, open / save)</td></tr>
       <tr class="board-row"><th>W</th><td>wire mode (click two pins)</td></tr>
@@ -416,6 +419,15 @@
         <button type="button" id="sdCancel" class="btn small">Close</button>
         <button type="button" id="sdSave" class="btn small primary">Save &amp; reload</button>
       </div>
+    </div>
+  </dialog>
+
+  <dialog id="askDlg" class="dialog ask-dlg" aria-labelledby="askTitle" aria-modal="true">
+    <div class="dlg-head"><h3 id="askTitle">Confirm</h3></div>
+    <p id="askText" class="ask-text"></p>
+    <div class="dlg-foot">
+      <button type="button" id="askNo" class="btn small">Cancel</button>
+      <button type="button" id="askYes" class="btn small primary">OK</button>
     </div>
   </dialog>
 

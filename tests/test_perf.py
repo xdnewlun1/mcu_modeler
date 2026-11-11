@@ -41,11 +41,11 @@ def test_presets_and_validation():
     d = PerfSettings()
     assert d == preset("default") and d.max_slice == 2000 and d.poll_skip_ns == 0 and not d.auto_quantum
     f = d.updated(preset="fast")
-    assert f.preset == "fast" and f.max_slice == 2000 and f.auto_quantum and f.poll_skip_ns == 100e3
+    assert f.preset == "fast" and f.max_slice == 20000 and f.auto_quantum and f.poll_skip_ns == 100e3
     assert "mmio" in f.drop_kinds and f.quantum_ns is None          # no preset changes the board quantum
     c = f.updated(max_slice=1234)
     assert c.preset == "custom" and c.max_slice == 1234 and c.auto_quantum
-    assert f.updated(max_slice=2000).preset == "fast"               # unchanged value: still the preset
+    assert f.updated(max_slice=20000).preset == "fast"              # unchanged value: still the preset
     assert c.updated(drop_kinds="i2s, mmio").drop_kinds == frozenset({"i2s", "mmio"})
     for bad in ({"max_slice": 0}, {"pin_log": "some"}, {"drop_kinds": "nosuch"}, {"drop_kinds": "fault"},
                 {"quantum_ns": -1}, {"ui_interval_s": 0}, {"poll_skip_ns": -5}, {"bogus": 1}, {"preset": "turbo"}):
@@ -70,7 +70,7 @@ def test_session_apply_and_speed_meter():
     try:
         assert s.speed_info()["ratio"] is None and s.speed_info()["requested"] is None
         s.set_perf(preset="fast")
-        assert s.chip.max_slice == 2000 and s.chip.poll_skip_ns == 100e3 and s.chip.log.drop == {"mmio"}
+        assert s.chip.max_slice == 20000 and s.chip.poll_skip_ns == 100e3 and s.chip.log.drop == {"mmio"}
         s.set_perf(pin_log="off")
         assert "pin" in s.chip.log.drop and s.perf.preset == "custom"
         s.run_for(2e6)
@@ -338,7 +338,7 @@ def test_web_perf_and_rate_api(app):
     d = _get(app, "/api/perf")
     assert d["settings"]["preset"] == "default" and set(d["presets"]) == {"accurate", "default", "fast"}
     st, d = _post(app, "/api/perf", {"preset": "fast"})
-    assert st == 200 and d["settings"]["max_slice"] == 2000 and d["settings"]["poll_skip_ns"] == 100e3
+    assert st == 200 and d["settings"]["max_slice"] == 20000 and d["settings"]["poll_skip_ns"] == 100e3
     st, d = _post(app, "/api/perf", {"max_slice": 4000, "poll_skip": "50us", "drop_kinds": "i2s", "ui_interval": "100ms",
                                      "pin_log": "all"})
     assert st == 200 and d["settings"]["preset"] == "custom" and d["settings"]["poll_skip_ns"] == 50e3

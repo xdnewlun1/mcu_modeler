@@ -1,0 +1,31 @@
+{
+ "format": "c28img",
+ "unit_bits": 16,
+ "entry": 4128768,
+ "segments": [
+  {
+   "addr": 4128768,
+   "data_hex": "103b22761f76c001292868001c1a08007d76807c22761f76c0011c18f7ff1228006411187ffe111a400021280c001140ff6c1118bfff111a00011f76be01061800ff1f76bf0104280f001f76be010a1a0f001a7600d21f76bf01a292a9cc0f00009601daa9282d75ff9cff60f56f"
+  },
+  {
+   "addr": 4161526,
+   "data_hex": "7f000000"
+  }
+ ],
+ "symbols": {
+  "GPAMUX1": 28550,
+  "GPADIR": 28554,
+  "GPADAT": 28608,
+  "GPACLEAR": 28612,
+  "PLLSTS": 28689,
+  "CLKCTL": 28690,
+  "PCLKCR0": 28700,
+  "PLLCR": 28705,
+  "WDCR": 28713,
+  "Device_cal": 4029568,
+  "start": 4128768,
+  "pll": 4128791,
+  "loop": 4128811,
+  "dly": 4128820
+ }
+}

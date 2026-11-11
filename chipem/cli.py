@@ -1,4 +1,4 @@
-"""`chipem` command line: info | run | shell | serve | new-part."""
+"""`chipem` command line: info | run | shell | serve | new-part | doctor."""
 from __future__ import annotations
 
 import argparse
@@ -66,7 +66,9 @@ def cmd_not_implemented(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
     ap = argparse.ArgumentParser(prog="chipem", description="Description-driven MCU emulator")
+    ap.add_argument("--version", action="version", version=f"chipem {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p, optional_fw=False):
@@ -201,6 +203,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("new-part", help="write a commented template for a custom part in Python (script part)")
     cmd_new_part.add_args(p)
     p.set_defaults(func=cmd_new_part.main)
+
+    from . import doctor
+    p = sub.add_parser("doctor", help="check Python, packages, Unicorn calibration and optional tools")
+    doctor.add_args(p)
+    p.set_defaults(func=doctor.main)
 
     for name, hlp in (("run", "run firmware and log pin activity"), ("shell", "interactive REPL"),
                       ("serve", "browser UI")):

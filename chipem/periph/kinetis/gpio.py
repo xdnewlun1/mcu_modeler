@@ -40,7 +40,7 @@ class GPIO(MMIOBlock):
             "PSOR": {"on_write": self._psor_write, "on_read": _zero},
             "PCOR": {"on_write": self._pcor_write, "on_read": _zero},
             "PTOR": {"on_write": self._ptor_write, "on_read": _zero},
-            "PDIR": {"on_read": self._pdir_read},
+            "PDIR": {"on_read": self._pdir_read, "on_peek": self._pdir_peek},
             "PDDR": {"on_write": self._pddr_write},
         }
         r = build_regs((name, f"GPIO{self.port}"), size, ov, params.get("regs_file"))
@@ -310,6 +310,13 @@ class GPIO(MMIOBlock):
         if v is not None:
             return v
         return self._pdir_compute()
+
+    def _pdir_peek(self, blk, reg) -> int:
+        """PDIR for the debugger: the cached value or the pins' levels, without counting, warning or caching."""
+        if self._pdir is not None:
+            return self._pdir
+        m = self.gpio_mask
+        return sum(1 << i for i, p in enumerate(self.pins) if p is not None and m >> i & 1 and p.level() == "H")
 
     def _pdir_compute(self) -> int:
         """PDIR cache miss (first read, or an input/mux/direction changed since the last read)."""

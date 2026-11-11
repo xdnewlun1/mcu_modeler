@@ -17,6 +17,9 @@ stm32.rcc_f42x (RM0090 ch. 6 "Reset and clock control for STM32F42xxx and STM32F
   scale 1 without / scale 2 with over-drive, 144 MHz scale 2, 120 MHz scale 3; APB1 45 / APB2 90 MHz with over-drive,
   42 / 84 MHz without. Exceeding them logs a `warn` (silicon is out of spec, the model keeps running).
 * Stop / Standby entry also clear PLLSAION (6.3.1).
+* LCD_CLK (F429/F439, `ltdc_clk_hz()`): PLLSAI_R = VCO / PLLSAIR (6.3.24 bits 30:28, 2..7) / PLLSAIDIVR (6.3.25 bits
+  17:16: /2, /4, /8, /16); `params.ltdc: true` (F429/F439 chip YAMLs) makes APB2ENR/RSTR/LPENR bit 26 (LTDC) writable.
+  `listeners` are also called when the LCD clock changes.
 
 stm32.pwr_f42x (RM0090 5.1.4 "Entering/Exiting Over-drive mode", 5.5.1 PWR_CR, 5.5.2 PWR_CSR for STM32F42xxx/43xxx):
 * CR reset 0x0000C000 (VOS = 11 scale 1); VOS[1:0] (00 = scale 3 too) is writable only while the main PLL is off
@@ -88,6 +91,10 @@ class RCCF42x(RCC):
         for rn, bits in _EXTRA_RW.items():
             if rn in self.regs:
                 self.regs[rn].ro_mask &= ~bits
+        if (params or {}).get("ltdc"):             # STM32F429/F439: LTDCEN / LTDCRST / LTDCLPEN (bit 26, 6.3.14/6.3.18)
+            for rn in ("APB2ENR", "APB2RSTR", "APB2LPENR"):
+                if rn in self.regs:
+                    self.regs[rn].ro_mask &= ~(1 << 26)
         # reset values the SVD gets wrong for the F42x: PLLI2SQ = 4 (6.3.23); the low-power enables of the F42x
         # blocks (6.3.15 / 6.3.18 / 6.3.19: the SVD has the F405 values, so UART7/8, SPI4-6, SAI1, DMA2D, GPIOJ/K
         # would be clock-gated in Sleep mode); the writable LPENR bits are exactly the ones set at reset
@@ -169,6 +176,23 @@ class RCCF42x(RCC):
                       "(RM0090 6.3.25): no SAI clock")
         return 0.0
 
+    def pllsai_r_hz(self) -> float:
+        """PLLSAI_R = PLL input / PLLM x PLLSAIN / PLLSAIR (RM0090 6.3.24; PLLSAIR 0/1 wrong configuration: 0 Hz)."""
+        if not self.get("CR") & PLLSAIRDY:
+            return 0.0
+        n, r = self._f("PLLSAICFGR", 6, 9), self._f("PLLSAICFGR", 28, 3)
+        if n < 2 or r < 2:
+            if r < 2 and "sair" not in self._warned:
+                self._warned.add("sair")
+                self.emit("warn", block=self.name, msg=f"RCC_PLLSAICFGR.PLLSAIR = {r} is a wrong configuration "
+                          "(RM0090 6.3.24): no LCD clock")
+            return 0.0
+        return self._vco_in() * n / r
+
+    def ltdc_clk_hz(self) -> float:
+        """LCD_CLK = PLLSAI_R / PLLSAIDIVR (DCKCFGR bits 17:16: /2, /4, /8, /16; RM0090 6.3.25)."""
+        return self.pllsai_r_hz() / (2 << ((self.get("DCKCFGR") >> 16) & 3))
+
     def timer_hz(self, bus: int) -> float:
         if not self.get("DCKCFGR") & TIMPRE:
             return super().timer_hz(bus)
@@ -194,7 +218,7 @@ class RCCF42x(RCC):
     # ------------------------------------------------------------ update
     def update(self) -> None:
         super().update()
-        sai = (self.sai_clk_hz("A"), self.sai_clk_hz("B"), bool(self.get("DCKCFGR") & TIMPRE))
+        sai = (self.sai_clk_hz("A"), self.sai_clk_hz("B"), bool(self.get("DCKCFGR") & TIMPRE), self.ltdc_clk_hz())
         if sai != self._sai:                    # SAI kernel clocks or TIMPRE (timer clocks) changed
             self._sai = sai
             for cb in list(self.listeners):

@@ -126,6 +126,37 @@ def _int(v: Any) -> int:
     return int(v, 0) if isinstance(v, str) else int(v)
 
 
+def _apply_variant_patch(data: dict, path: Path) -> None:
+    """Part-variant edits of an included (superset) description, applied after the `include:` merge:
+    `drop: [NAME, ...]` removes the peripherals and the `irqs:` entries with these names (blocks the part does not
+    have), `peripheral_params: {NAME: {key: value}}` merges keys into an inherited peripheral's `params` (e.g. HRPWM on
+    fewer ePWMs, another PARTID), `add_peripherals: [...]` appends entries (e.g. a smaller RAM alias replacing a
+    dropped one).  Unknown names are an error, so a typo cannot silently keep a block."""
+    drop = data.pop("drop", None) or []
+    pp = data.pop("peripheral_params", None) or {}
+    add = data.pop("add_peripherals", None) or []
+    if not drop and not pp and not add:
+        return
+    periphs = [dict(p) for p in data.get("peripherals") or []]
+    names = {p["name"] for p in periphs}
+    irqs = dict(data.get("irqs") or {})
+    irq_names = set(map(str, irqs.values()))
+    bad = [n for n in drop if n not in names and n not in irq_names] + [n for n in pp if n not in names]
+    if bad:
+        raise ValueError(f"{path}: drop / peripheral_params name unknown peripherals or IRQs: {', '.join(bad)}")
+    dropped = set(drop)
+    out = []
+    for p in periphs:
+        if p["name"] in dropped:
+            continue
+        if p["name"] in pp:
+            p["params"] = {**(p.get("params") or {}), **pp[p["name"]]}
+        out.append(p)
+    data["peripherals"] = out + [dict(p) for p in add]
+    if irqs:
+        data["irqs"] = {k: v for k, v in irqs.items() if str(v) not in dropped}
+
+
 def load_chip(path: str | Path) -> ChipDescription:
     """Load a chips/*.yaml file (supports `include:` of another YAML whose keys are merged as defaults)."""
     path = Path(path)
@@ -134,6 +165,7 @@ def load_chip(path: str | Path) -> ChipDescription:
         base = yaml.safe_load((path.parent / data.pop("include")).read_text())
         for k, v in base.items():
             data.setdefault(k, v)
+    _apply_variant_patch(data, path)
     core = CoreDesc(**{k: (float(v) if k == "clock_hz" else v) for k, v in (data.get("core") or {}).items()})
     memory = [MemoryDesc(name=m["name"], base=_int(m["base"]), size=_int(m["size"]), kind=m.get("kind", "ram"),
                          writable=m.get("writable"), fill=_int(m.get("fill", 0xFF))) for m in data.get("memory", [])]

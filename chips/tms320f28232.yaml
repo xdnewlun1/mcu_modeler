@@ -69,11 +69,11 @@ peripherals:
   - {name: GPIO, model: ti_c2000.gpio, base: 0x6F80, size: 0x80}
   # Peripheral Frame 2
   - {name: SYSCTRL, model: ti_c2000.sysctrl, base: 0x7010, size: 0x20,
-     params: {ext_hz: 20000000, boot_divsel: 2}}   # 20 MHz crystal: PLLCR=10, DIVSEL=/2 -> 100 MHz (TI 100 MHz setup)
+     params: {ext_hz: 20000000, boot_divsel: 2, max_hz: 100000000}}   # 20 MHz crystal: PLLCR=10, DIVSEL=/2 -> 100 MHz (TI 100 MHz setup)
   - {name: SPIA, model: ti_c2000.spi, base: 0x7040, size: 0x10, params: {gate: SPIAENCLK}}   # SPRUI07 ch. 9; SPIRXINTA/SPITXINTA = PIE 6.1/6.2
   - {name: SCIA, model: ti_c2000.sci, base: 0x7050, size: 0x10}
   - {name: XINT, model: ti_c2000.xint, base: 0x7070, size: 0x10}
-  - {name: ADC, model: ti_c2000.adc, base: 0x7100, size: 0x20}
+  - {name: ADC, model: ti_c2000.adc, base: 0x7100, size: 0x20, params: {adcclk_max_hz: 25000000}}  # 12.5 MSPS (Table 5-1)
   - {name: SCIB, model: ti_c2000.sci, base: 0x7750, size: 0x10}
   - {name: I2CA, model: ti_c2000.i2c, base: 0x7900, size: 0x40, params: {gate: I2CAENCLK}}
 

@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from ..base import peek_stored as _stored
 from ..registry import register
 from ._util import GatedBlock, build_regs, find_model, irq_number
 from .clockutil import bus_hz
@@ -48,9 +49,9 @@ class CMT(GatedBlock):
         params = dict(params or {})
         self.gate = "CMT"
         ov = {"OC": {"ro_mask": 0x1F, "on_write": self._oc_write},
-              "MSC": {"ro_mask": EOCF, "on_read": self._msc_read, "on_write": self._msc_write},
-              "CMD2": {"on_read": self._cmd_access, "on_write": self._cmd_write},
-              "CMD4": {"on_read": self._cmd_access, "on_write": self._cmd_write},
+              "MSC": {"ro_mask": EOCF, "on_read": self._msc_read, "on_write": self._msc_write, "on_peek": _stored},
+              "CMD2": {"on_read": self._cmd_access, "on_write": self._cmd_write, "on_peek": _stored},
+              "CMD4": {"on_read": self._cmd_access, "on_write": self._cmd_write, "on_peek": _stored},
               "PPS": {"ro_mask": 0xF0}, "DMA": {"ro_mask": 0xFE, "on_write": lambda b, r, o, n: self._update()}}
         r = build_regs((name, "CMT"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)

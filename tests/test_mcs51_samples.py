@@ -88,7 +88,9 @@ def test_timer_irq_10ms_ticks_high_priority():
     e = edges(s, "P1.1")
     assert iram(s, 0x31) == 10 and len(e) == 10
     for a, b in zip(e, e[1:]):
-        assert (b - a) / MC_NS == pytest.approx(9216 + 8, abs=1)          # reload in the ISR: +8 machine cycles
+        # reload in the ISR 10 machine cycles after the overflow: the 2-cycle CJNE/SJMP running in the polling cycle,
+        # the hardware LCALL (2), LJMP (2), MOV TH0 (2), MOV TL0 (2)
+        assert (b - a) / MC_NS == pytest.approx(9216 + 10, abs=1)
     assert s.chip.arch._prio(s.chip.arch.source("TF0")) == 3
 
 
@@ -128,7 +130,7 @@ def test_spi_flash_board_jedec_id():
 
 def test_iap_flash_sample():
     s = sess("iap_flash")
-    s.run_for(30e6)
+    s.run_for(60e6)                                     # includes the 30 ms page erase
     assert iram(s, 0x30) == 0x55 and iram(s, 0x31) == 0 and iram(s, 0x32) == 0x15
     assert s.uart_output("UART") == b"IAP OK!"
     assert bytes(s.chip.core.code[0xE000:0xE008]) == b"IAP OK!\0"

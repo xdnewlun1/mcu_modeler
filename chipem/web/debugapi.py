@@ -19,6 +19,15 @@ Debugger (chipem/debug.py; `chip` = board chip id, default the view chip):
                                         one instruction now, or the Worker runs until the next debugger stop
   POST /api/debug/reg {chip?, name, value}   (paused only)
   POST /api/debug/mem {chip?, addr, hex}     (paused only; MMIO writes go through the bus)
+Variables (chipem/dwarfvars.py; side-effect free reads; item = {name, kind, type, value, text, addr, loc, avail,
+reason, children: [items], count?}, see that module's docstring):
+  GET  /api/debug/locals?chip=&frame=N  {frame, func, pc, has_dwarf, reason (no DWARF / no info for this function),
+                                        note? (outer frame: registers not recovered), vars: [items, kind arg|local|
+                                        static]}
+  GET  /api/debug/globals?chip=&q=&limit=   {vars: [{name, type, addr, size (address units), file, func?}]}
+                                        (no values; without DWARF: ELF data symbols, type "?")
+  POST /api/debug/eval {chip?, expr, frame?} -> item (a variable, a.b, a[3], p->x, *p, &x, casts, $reg,
+                                        PERIPH.REG[.FIELD], arithmetic; an unknown name / bad syntax -> 400)
 Register browser:
   GET  /api/regs/tree?chip=             [{name, base, size, model, regs: [names]}] (static)
   GET  /api/regs/block?chip=&name=      {name, base, regs: [{name, offset, width, reset, access, fields: [{name, lsb,
@@ -59,6 +68,17 @@ def _state(s: Any, w: Any, chip: str | None) -> dict:
             "stack": stack, "bps": [b.to_dict() for b in D.breakpoints()], "last_stop": D.last_stop,
             "stops": D.stops, "has_dwarf": d.dwarf is not None, "running": w.running, "unit_bytes": d.ub,
             "fpu": d._fpu, "func": d.describe(d.core.pc)}
+
+
+def _goto_addr(d: Any, text: str) -> int:
+    """Address of a 'go to' target: an expression (0x4ac, sp, symbol+4) or a location (FILE:LINE, FUNC)."""
+    import re
+    if re.fullmatch(r"\s*.+?:\d+\s*", text) and not re.fullmatch(r"\s*0x[0-9a-fA-F]+\s*", text):
+        return d.resolve_location(text)[0][0]
+    try:
+        return d.eval_expr(text, values=False)
+    except Exception:
+        return d.resolve_location(text)[0][0]
 
 
 def _block_regs(chip: Any, blk: Any) -> list[dict]:
@@ -123,7 +143,7 @@ def get(app: Any, path: str, qs: dict) -> dict | list:
 
         def fn():
             d = _dbg(w.s, chip)
-            a = None if addr is None else d.eval_expr(addr, values=False)
+            a = None if addr is None else _goto_addr(d, addr)
             return jsonable(d.listing(a, before, after, mode))
         return w.call(fn)
     if path == "/api/debug/mem":
@@ -137,6 +157,13 @@ def get(app: Any, path: str, qs: dict) -> dict | list:
             return {"addr": a, "hex": data.hex(), "unit_bytes": d.ub,
                     "inexact": [i for i, e in enumerate(exact) if not e]}
         return w.call(fn)
+    if path == "/api/debug/locals":
+        level = int(_q(qs, "frame", "0") or 0)
+        return w.call(lambda: jsonable(_dbg(w.s, chip).frame_vars(level)))
+    if path == "/api/debug/globals":
+        q = _q(qs, "q")
+        limit = max(1, min(int(_q(qs, "limit", "500")), 5000))
+        return w.call(lambda: {"vars": jsonable(_dbg(w.s, chip).globals_list(q, limit))})
     if path == "/api/regs/tree":
         def fn():
             ctx = w.s._ctx(chip)
@@ -268,6 +295,12 @@ def post(app: Any, path: str, body: dict) -> dict:
             d.write_memory(a, data)
             return {"addr": a, "bytes": len(data)}
         return w.call(fn)
+    if path == "/api/debug/eval":
+        expr = str(body.get("expr") or "").strip()
+        if not expr:
+            raise ValueError("missing 'expr'")
+        level = int(body.get("frame") or 0)
+        return w.call(lambda: jsonable(_dbg(w.s, chip).evaluate(expr, level)))
     if path in ("/api/regs/write", "/api/regs/read"):
         bname = str(body.get("block") or "")
         rname = str(body.get("reg") or "")

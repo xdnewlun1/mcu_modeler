@@ -39,6 +39,7 @@
 #define ADCTRL2_INT_ENA_SEQ1   0x0800u
 #define ADCTRL2_RST_SEQ1       0x4000u
 #define ADCTRL3_POWER_UP       0x00E0u   /* ADCBGRFDN = 11, ADCPWDN = 1 */
+#define ADCTRL3_ADCCLKPS_2     0x0002u   /* ADCCLKPS (bits 4:1) = 1: ADCCLK = HSPCLK / 2 = 25 MHz, the part's maximum */
 #define ADC_RESULT_PF0         0x0B00ul  /* right-justified results, on the DMA bus */
 
 /* ---- DMA, 0x1000 (all registers EALLOW protected); channel n at 0x1000 + 0x20 n (TI DSP2833x_DMA.h) ---- */
@@ -183,7 +184,7 @@ static void init_epwm1(void)
 
 static void init_adc(void)
 {
-    ADCTRL3 = ADCTRL3_POWER_UP;
+    ADCTRL3 = ADCTRL3_POWER_UP | ADCTRL3_ADCCLKPS_2;
     ADCTRL1 = 0;                                        /* dual sequencers, start/stop mode */
     ADCMAXCONV = 3;                                     /* SEQ1: 4 conversions */
     ADCCHSELSEQ1 = 0x3210;                              /* CONV00-03 = ADCINA0-A3 */

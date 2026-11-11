@@ -17,7 +17,7 @@ Errors (exit status 1):
   * two gpio/analog pins with the same name
 Warnings (exit status 1 only with --strict):
   * a function key that the family's mux model does not know (kinetis ALT0-7/EzPort, stm32 AF0-15/ADC/analog/
-    additional, ti_c2000 GPIO/MUX1-3/ANALOG, stm32f1 AF/REMAP/ADC/analog/additional/debug, mcs51 GPIO/ALT1-3)
+    additional, ti_c2000 GPIO/MUX1-3/ANALOG/AIO, stm32f1 AF/REMAP/ADC/analog/additional/debug, mcs51 GPIO/ALT1-3)
   * a power pin whose name does not look like a supply (V*, GND*, AVDD/AVSS ...), or a non-power pin that does
   * a pin whose name looks like a GPIO name but whose kind is not gpio
   * a gpio pin whose `default` matches none of its functions (and is not GPIO/DISABLED/empty)
@@ -44,7 +44,7 @@ KINDS = ("gpio", "analog", "power", "special")
 FUNCTION_KEYS = {
     "kinetis": re.compile(r"ALT[0-7]|EzPort\Z"),
     "stm32": re.compile(r"AF([0-9]|1[0-5])|ADC|analog|additional\Z"),
-    "ti_c2000": re.compile(r"GPIO|MUX[1-3]|ANALOG\Z"),
+    "ti_c2000": re.compile(r"GPIO|MUX[1-3]|ANALOG|AIO\Z"),     # AIO: Piccolo analog-shared digital I/O (AIOMUX1)
     "stm32f1": re.compile(r"AF|REMAP|ADC|analog|additional|debug\Z"),
     "mcs51": re.compile(r"GPIO|ALT[1-3]\Z"),
 }

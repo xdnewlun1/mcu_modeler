@@ -295,7 +295,8 @@ def test_iap_calls_program_erase_read_and_security():
     """))
     c.core.write_mem(0x3000, b"\x00" * 16)
     c.run_for(500 * MC_NS)
-    assert iram(c, 0x30) == 0 and iram(c, 0x31) == 0x0A and iram(c, 0x32) != 0 and iram(c, 0x33) & 1
+    assert c.clock.now_ns() > 30e6                     # the page erase took 30 ms of CPU time (typical, sec. 2)
+    assert iram(c, 0x30) == 0 and iram(c, 0x31) == 0x0A and iram(c, 0x32) != 0 and iram(c, 0x33) == 0x04   # SB
     assert c.core.code[0x3000] == 0xFF and c.core.code[0x3005] == 0x0A and c.core.code[0x3006] == 0xFF
 
 

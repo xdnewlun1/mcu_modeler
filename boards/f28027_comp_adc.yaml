@@ -1,0 +1,13 @@
+# TMS320F28027 (Piccolo A) comparator trip: COMP1 + digital compare stop ePWM1 when an analog input passes the DAC.
+#   A (TMS320F28027) runs f28027_comp_trip: ePWM1 20 kHz 50 % on GPIO0 (EPWM1A); COMP1A (pin ADCINA2/COMP1A/AIO2)
+#   against the internal DAC at 1.652 V; COMP1OUT -> DCAH -> DCAEVT1 = one-shot trip source -> EPWM1A forced low,
+#   EPWM1_TZINT counted (trip_count at 0x8000) and GPIO2 toggled; COMP1OUT is also on GPIO1.
+#   RAMP is boards/parts/ramp_source.py: 0.5 V until 8 ms, then a 2 ms ramp to 2.5 V: the comparator trips at
+#   1.652 V, i.e. about 9.15 ms; EPWM1A runs at 20 kHz from 6.56 ms (PLL locked) until then.
+# Run:  chipem run --board boards/f28027_comp_adc.yaml --for 12ms
+# Security: a script part runs Python with your privileges. Only load boards you trust.
+name: f28027_comp_adc
+chips:
+  - {id: A, chip: tms320f28027, firmware: ../firmware/samples_c2000/build/f28027_comp_trip.c28img}
+parts:
+  - {id: RAMP, type: script, file: parts/ramp_source.py, ports: {AOUT: A.ADCINA2}}

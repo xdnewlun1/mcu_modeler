@@ -134,12 +134,15 @@ class Chip:
         self._was_reset = False
         self._lock = threading.RLock()
         self.sched.on_early = self._early_event
+        self._end_slice_at = getattr(self.core, "end_slice_at", None)   # Unicorn: cut the slice at the event exactly
+        self._run_thread: int | None = None      # thread running _run (stop() from it: a stop from a callback)
         self.sched.slice_offset = self.core.insns_in_slice     # precise "now" for in_ns/in_cycles mid-slice
         self.clock.slice_offset = self.core.insns_in_slice     # set_hz re-bases at the current instruction
         # a clock change inside a slice also moves the run window's end (target cycles): end the slice there
         self.clock.on_change(self._clock_changed)
         if self.pins is not None:
             self.pins.time_fn = self.now_ns
+            self.pins.sched = self.sched            # realtime waveform sources (PinBoard.drive_wave)
 
         # memory
         for m in desc.memory:
@@ -245,6 +248,8 @@ class Chip:
                 image.thumb = False         # byte-addressed code without a Thumb bit (symbols.Symbols.for_image)
             except AttributeError:
                 pass
+        if self.arch_kind == "mcs51" and hasattr(self.arch, "map_symbols"):
+            self.arch.map_symbols(image)        # SDCC __xdata symbols -> on-chip XRAM tag (docs/MCS51_CORE.md)
         self.firmware = image
         v = getattr(image, "vtor", None)
         if v is not None and hasattr(self.arch, "reset_vtor"):
@@ -306,7 +311,9 @@ class Chip:
     def stop(self) -> None:
         """Ask a running run_for/run_cycles (possibly in another thread) to return StopReason.USER."""
         self._stop_flag = True
-        self.core.request_stop()
+        # from this chip's own callbacks (MMIO hooks, UART listeners): end after the current instruction, which must
+        # not be aborted half way (an emu_stop in a write callback would run the store again on resume)
+        self.core.request_stop(from_mmio=self._run_thread == threading.get_ident())
 
     def run_for(self, ns: float) -> StopReason:
         target_ns = self.clock.now_ns() + ns
@@ -333,6 +340,10 @@ class Chip:
             clock, sched, core, arch = self.clock, self.sched, self.core, self.arch
             cyc_core = getattr(core, "cycle_counted", False)     # run() returns clock periods (MCS-51), not insns
             self._stop_flag = False
+            self._run_thread = threading.get_ident()
+            pb = self.pins
+            if pb is not None and not hasattr(pb, "_waves"):
+                pb = None
             hz = clock.hz
             ArchFault = self._arch_fault
             while True:
@@ -357,8 +368,11 @@ class Chip:
                                           and (self.wake_gate is None or self.wake_gate())):
                         self._end_sleep()
                     else:
+                        nd = sched.next_due()            # a wake gate may have scheduled an event (oscillator restart)
                         to = target if nd is None else min(nd, target)
                         clock.advance(max(to - now, 0))
+                        if pb is not None and pb._waves:
+                            pb.sync_waves()
                         continue
                 if arch.lockup:
                     if self.lockup_reset and not self.halt_on_fault:   # parts whose reset controller resets on core LOCKUP (Kinetis)
@@ -397,6 +411,8 @@ class Chip:
                         sched.horizon = math.inf
                     clock.advance(ex)
                     self.insns += core.last_insns if cyc_core else ex
+                    if pb is not None and pb._waves:
+                        pb.sync_waves()              # waveform-source edges (UART frames) passed in this slice
                     if r is StopReason.COUNT or r is StopReason.USER:
                         # parked: the core sits in a loop whose state repeats until an event (board auto quantum)
                         self.parked = r is StopReason.COUNT and getattr(core, "spin_pc", None) is not None
@@ -472,10 +488,23 @@ class Chip:
             self.core.request_stop(from_mmio=True)
 
     def _early_event(self) -> None:
-        """An MMIO access scheduled an event inside the running slice: end the slice after this access. While this
-        chip does not run, `idle_watch(chip)` (the board's auto quantum) hears about events scheduled on it."""
-        if self.core.running:
-            self.core.request_stop(from_mmio=True)
+        """An MMIO access (or an event) scheduled an event inside the running slice: end the slice exactly when it is
+        due. A core with `end_slice_at` (Unicorn) lowers the running slice's instruction budget, so the slice ends at
+        the event's cycle (at the earliest after the accessing instruction) and nothing stops early; other cores
+        (interpreters) stop after the current instruction. While this chip does not run, `idle_watch(chip)` (the
+        board's auto quantum) hears about events scheduled on it."""
+        core = self.core
+        if core.running:
+            cut = self._end_slice_at
+            if cut is not None:
+                nd = self.sched.next_due()
+                if nd is not None:
+                    n = nd - self.clock.cycles
+                    if cut(n):
+                        if self.clock.cycles + n < self.sched.horizon:
+                            self.sched.horizon = self.clock.cycles + n
+                        return
+            core.request_stop(from_mmio=True)
         elif self.idle_watch is not None:
             self.idle_watch(self)
 

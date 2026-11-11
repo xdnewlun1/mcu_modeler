@@ -152,8 +152,8 @@ def test_web_register_browser(app):
     sopt2 = next(r for r in sim["regs"] if r["name"] == "SOPT2")
     assert any(f["name"] == "CLKOUTSEL" and f["enum"] for f in sopt2["fields"])
     uart = get(app, "/api/regs/block?name=UART0")
-    hooked = [r for r in uart["regs"] if not r["exact"]]
-    assert hooked and all(r["hook"] for r in hooked)               # stored values of read-hooked registers
+    hooked = [r for r in uart["regs"] if r["hook"]]
+    assert hooked and all(r["exact"] for r in hooked)              # read-hooked registers are peeked live (on_peek)
     v = get(app, "/api/regs/values?blocks=SIM,GPIOC")
     assert set(v) == {"SIM", "GPIOC"} and v["GPIOC"]["PDDR"][1] is True
     r = post(app, "/api/regs/write", {"block": "GPIOC", "reg": "PDDR", "value": "0x20"})

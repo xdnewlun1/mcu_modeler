@@ -48,7 +48,7 @@ class EWM(GatedBlock):
         params = dict(params or {})
         self.gate = params.get("gate", "EWM")
         ov = {"CTRL": {"ro_mask": 0xF0, "on_write": self._ctrl_write},
-              "SERV": {"on_write": self._serv_write, "on_read": lambda b, r: 0},
+              "SERV": {"on_write": self._serv_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
               "CMPL": {"on_write": self._cmp_write}, "CMPH": {"on_write": self._cmp_write}}
         r = build_regs((name, "EWM"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)

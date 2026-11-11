@@ -42,10 +42,10 @@ class Pca(SfrBlock):
     table = ("PCA",)
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
-        ov = {"CCON": {"on_read": self._fold_r, "on_write": self._ccon_w, "ro_mask": 0x20},
+        ov = {"CCON": {"on_read": self._fold_r, "on_write": self._ccon_w, "ro_mask": 0x20, "on_peek": self._fold_peek},
               "CMOD": {"on_write": self._cfg_w, "ro_mask": 0x38},
-              "CL": {"on_read": self._fold_r, "on_write": self._cnt_w},
-              "CH": {"on_read": self._fold_r, "on_write": self._cnt_w}}
+              "CL": {"on_read": self._fold_r, "on_write": self._cnt_w, "on_peek": self._fold_peek},
+              "CH": {"on_read": self._fold_r, "on_write": self._cnt_w, "on_peek": self._fold_peek}}
         for i in range(5):
             ov[f"CCAPM{i}"] = {"on_write": self._cfg_w, "ro_mask": 0x80}
             ov[f"CCAP{i}L"] = {"on_write": self._ccapl_w}
@@ -301,6 +301,28 @@ class Pca(SfrBlock):
         self.chip.arch.set_irq("PCA", on)
 
     # ------------------------------------------------------------------ SFR hooks
+    def _fold_peek(self, blk, reg) -> int:
+        """Debugger peek: CL/CH/CCON as a read (which folds the counter up to now) returns them, computed without the
+        fold's side effects (match counts, CEXn toggles, PWM reloads, watchdog reset)."""
+        p = self.period() if self.chip is not None else None
+        if p is None or not self.running():
+            return self.get(reg.name)
+        k = (self.now() - self.t0) // p
+        if k <= 0:
+            return self.get(reg.name)
+        v = self.counter()
+        if reg.name == "CL":
+            return (v + k) & 0xFF
+        if reg.name == "CH":
+            return ((v + k) >> 8) & 0xFF
+        ccon = self.get("CCON")
+        if v + k > 0xFFFF:
+            ccon |= CF
+        for i in range(5):
+            if self._is_cmp(i) and ((self.ccap(i) - v - 1) & 0xFFFF) < k:
+                ccon |= 1 << i
+        return ccon
+
     def _fold_r(self, blk, reg):
         self._fold()
         return None

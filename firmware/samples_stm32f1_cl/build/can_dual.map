@@ -1,0 +1,156 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000      150     4 .isr_vector
+ 8000000  8000000      150     4         /tmp/startup-081459.o:(.isr_vector)
+ 8000000  8000000      150     1                 vectors
+ 8000150  8000150      5f0     4 .text
+ 8000150  8000150        2     4         /tmp/startup-081459.o:(.text.Default_Handler)
+ 8000150  8000150        0     1                 $t
+ 8000151  8000151        2     1                 Default_Handler
+ 8000151  8000151        2     1                 NMI_Handler
+ 8000151  8000151        2     1                 HardFault_Handler
+ 8000151  8000151        2     1                 MemManage_Handler
+ 8000151  8000151        2     1                 BusFault_Handler
+ 8000151  8000151        2     1                 UsageFault_Handler
+ 8000151  8000151        2     1                 SVC_Handler
+ 8000151  8000151        2     1                 DebugMon_Handler
+ 8000151  8000151        2     1                 PendSV_Handler
+ 8000151  8000151        2     1                 WWDG_IRQHandler
+ 8000151  8000151        2     1                 PVD_IRQHandler
+ 8000151  8000151        2     1                 TAMPER_IRQHandler
+ 8000151  8000151        2     1                 RTC_IRQHandler
+ 8000151  8000151        2     1                 FLASH_IRQHandler
+ 8000151  8000151        2     1                 RCC_IRQHandler
+ 8000151  8000151        2     1                 EXTI0_IRQHandler
+ 8000151  8000151        2     1                 EXTI1_IRQHandler
+ 8000151  8000151        2     1                 EXTI2_IRQHandler
+ 8000151  8000151        2     1                 EXTI3_IRQHandler
+ 8000151  8000151        2     1                 EXTI4_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel1_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel2_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel3_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel4_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel5_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel6_IRQHandler
+ 8000151  8000151        2     1                 DMA1_Channel7_IRQHandler
+ 8000151  8000151        2     1                 ADC1_2_IRQHandler
+ 8000151  8000151        2     1                 CAN1_TX_IRQHandler
+ 8000151  8000151        2     1                 CAN1_RX1_IRQHandler
+ 8000151  8000151        2     1                 CAN1_SCE_IRQHandler
+ 8000151  8000151        2     1                 EXTI9_5_IRQHandler
+ 8000151  8000151        2     1                 TIM1_BRK_IRQHandler
+ 8000151  8000151        2     1                 TIM1_UP_IRQHandler
+ 8000151  8000151        2     1                 TIM1_TRG_COM_IRQHandler
+ 8000151  8000151        2     1                 TIM1_CC_IRQHandler
+ 8000151  8000151        2     1                 TIM2_IRQHandler
+ 8000151  8000151        2     1                 TIM3_IRQHandler
+ 8000151  8000151        2     1                 TIM4_IRQHandler
+ 8000151  8000151        2     1                 I2C1_EV_IRQHandler
+ 8000151  8000151        2     1                 I2C1_ER_IRQHandler
+ 8000151  8000151        2     1                 I2C2_EV_IRQHandler
+ 8000151  8000151        2     1                 I2C2_ER_IRQHandler
+ 8000151  8000151        2     1                 SPI1_IRQHandler
+ 8000151  8000151        2     1                 SPI2_IRQHandler
+ 8000151  8000151        2     1                 USART1_IRQHandler
+ 8000151  8000151        2     1                 USART2_IRQHandler
+ 8000151  8000151        2     1                 USART3_IRQHandler
+ 8000151  8000151        2     1                 EXTI15_10_IRQHandler
+ 8000151  8000151        2     1                 RTC_Alarm_IRQHandler
+ 8000151  8000151        2     1                 OTG_FS_WKUP_IRQHandler
+ 8000151  8000151        2     1                 TIM5_IRQHandler
+ 8000151  8000151        2     1                 SPI3_IRQHandler
+ 8000151  8000151        2     1                 UART4_IRQHandler
+ 8000151  8000151        2     1                 UART5_IRQHandler
+ 8000151  8000151        2     1                 TIM6_IRQHandler
+ 8000151  8000151        2     1                 TIM7_IRQHandler
+ 8000151  8000151        2     1                 DMA2_Channel1_IRQHandler
+ 8000151  8000151        2     1                 DMA2_Channel2_IRQHandler
+ 8000151  8000151        2     1                 DMA2_Channel3_IRQHandler
+ 8000151  8000151        2     1                 DMA2_Channel4_IRQHandler
+ 8000151  8000151        2     1                 DMA2_Channel5_IRQHandler
+ 8000151  8000151        2     1                 ETH_IRQHandler
+ 8000151  8000151        2     1                 ETH_WKUP_IRQHandler
+ 8000151  8000151        2     1                 CAN2_TX_IRQHandler
+ 8000151  8000151        2     1                 CAN2_RX1_IRQHandler
+ 8000151  8000151        2     1                 CAN2_SCE_IRQHandler
+ 8000151  8000151        2     1                 OTG_FS_IRQHandler
+ 8000154  8000154       5c     4         /tmp/startup-081459.o:(.text.Reset_Handler)
+ 8000154  8000154        0     1                 $t
+ 8000155  8000155       5c     1                 Reset_Handler
+ 80001b0  80001b0       78     4         /tmp/can_dual-c831ad.o:(.text.CAN2_RX0_IRQHandler)
+ 80001b0  80001b0        0     1                 $t
+ 80001b1  80001b1       78     1                 CAN2_RX0_IRQHandler
+ 8000228  8000228       62     4         /tmp/can_dual-c831ad.o:(.text.CAN1_RX0_IRQHandler)
+ 8000228  8000228        0     1                 $t
+ 8000229  8000229       62     1                 CAN1_RX0_IRQHandler
+ 800028c  800028c       10     4         /tmp/can_dual-c831ad.o:(.text.SysTick_Handler)
+ 800028c  800028c        0     1                 $t
+ 800028d  800028d       10     1                 SysTick_Handler
+ 800029c  800029c      47e     4         /tmp/can_dual-c831ad.o:(.text.main)
+ 800029c  800029c        0     1                 $t
+ 800029d  800029d      47e     1                 main
+ 800071a  800071a       23     1         <internal>:(.rodata.str1.1)
+ 800073d  800073d        3     1         . = ALIGN(4)
+ 8000740  8000740       10     4 .ARM.exidx
+ 8000740  8000740       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000       18     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/can_dual-c831ad.o:(.bss.bad)
+20000000 20000000        4     1                 bad
+20000004 20000004        4     4         /tmp/can_dual-c831ad.o:(.bss.rx2)
+20000004 20000004        4     1                 rx2
+20000008 20000008        4     4         /tmp/can_dual-c831ad.o:(.bss.sent)
+20000008 20000008        4     1                 sent
+2000000c 2000000c        4     4         /tmp/can_dual-c831ad.o:(.bss.rx1)
+2000000c 2000000c        4     1                 rx1
+20000010 20000010        4     4         /tmp/can_dual-c831ad.o:(.bss.ticks)
+20000010 20000010        4     1                 ticks
+20000014 20000014        4     4         /tmp/can_dual-c831ad.o:(.bss.can2sb)
+20000014 20000014        4     1                 can2sb
+20000018 20000018        0     1         . = ALIGN(4)
+20000018 20000018        0     1         _ebss = .
+       0        0      24f     1 .debug_loclists
+       0        0       32     1         /tmp/startup-081459.o:(.debug_loclists)
+      32       32      21d     1         /tmp/can_dual-c831ad.o:(.debug_loclists)
+       0        0      26b     1 .debug_abbrev
+       0        0       c0     1         /tmp/startup-081459.o:(.debug_abbrev)
+      c0       c0      1ab     1         /tmp/can_dual-c831ad.o:(.debug_abbrev)
+       0        0      4b7     1 .debug_info
+       0        0       8b     1         /tmp/startup-081459.o:(.debug_info)
+      8b       8b      42c     1         /tmp/can_dual-c831ad.o:(.debug_info)
+       0        0      10e     1 .debug_rnglists
+       0        0       17     1         /tmp/startup-081459.o:(.debug_rnglists)
+      17       17       f7     1         /tmp/can_dual-c831ad.o:(.debug_rnglists)
+       0        0       e0     1 .debug_str_offsets
+       0        0       34     1         /tmp/startup-081459.o:(.debug_str_offsets)
+      34       34       ac     1         /tmp/can_dual-c831ad.o:(.debug_str_offsets)
+       0        0      1d6     1 .debug_str
+       0        0      1d6     1         <internal>:(.debug_str)
+       0        0       a8     1 .debug_addr
+       0        0       14     1         /tmp/startup-081459.o:(.debug_addr)
+      14       14       94     1         /tmp/can_dual-c831ad.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       41     1 .ARM.attributes
+       0        0       41     1         /tmp/startup-081459.o:(.ARM.attributes)
+       0        0       a8     4 .debug_frame
+       0        0       34     4         /tmp/startup-081459.o:(.debug_frame)
+      34       34       74     4         /tmp/can_dual-c831ad.o:(.debug_frame)
+       0        0      618     1 .debug_line
+       0        0       c6     1         /tmp/startup-081459.o:(.debug_line)
+      c6       c6      552     1         /tmp/can_dual-c831ad.o:(.debug_line)
+       0        0       9f     1 .debug_line_str
+       0        0       9f     1         <internal>:(.debug_line_str)
+       0        0      5f0     4 .symtab
+       0        0      5f0     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      5cb     1 .strtab
+       0        0      5cb     1         <internal>:(.strtab)

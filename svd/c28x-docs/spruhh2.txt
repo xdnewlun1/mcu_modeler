@@ -1,0 +1,840 @@
+                                                                                                                         User's Guide
+                                                                                          SPRUHH2C – July 2012 – Revised March 2019
+
+
+LAUNCHXL-F28027 C2000 Piccolo LaunchPad
+Experimenter Kit
+
+
+                                                                      Contents
+       1      LAUNCHXL-F28027 Overview ............................................................................................. 1
+       2      Installation .................................................................................................................... 2
+       3      Getting Started with the LAUNCHXL-F28027 ............................................................................ 3
+       4      Hardware Configuration ..................................................................................................... 4
+       5      LAUNCHXL-F28027 Hardware ............................................................................................ 5
+       6      Suggested Reading ........................................................................................................ 11
+       7      Frequently Asked Questions (FAQ) ...................................................................................... 12
+
+                                                                 List of Figures
+       1      LAUNCHXL-F28027 Board Overview ..................................................................................... 2
+       2      C2000 LaunchPad Schematic—Sheet 1 of 2 ............................................................................ 7
+       3      C2000 LaunchPad Schematic—Sheet 2 of 2 ............................................................................ 8
+       4      LAUNCHXL-F28027 PCB Layout—Top Layer........................................................................... 9
+       5      LAUNCHXL-F28027 PCB Layout—Bottom Layer ....................................................................... 9
+       6      LAUNCHXL-F28027 PCB Layout—Silkscreen Image .................................................................. 9
+
+                                                                  List of Tables
+       1      C2000 LaunchPad Pin Out and Pin Mux Options ....................................................................... 5
+       2      LAUNCHXL-F28027 Bill of Materials .................................................................................... 10
+
+
+1      LAUNCHXL-F28027 Overview
+
+1.1    Overview
+       The C2000™ Piccolo™ LaunchPad™, LAUNCHXL-F28027, is a complete low-cost experimenter board
+       for the Texas Instruments Piccolo F2802x devices. The LAUNCHXL-F28027 kit features all the hardware
+       and software necessary to develop applications based on the F2802x microprocessor. The LaunchPad is
+       based on the superset F28027 device, and easily allows users to migrate to lower cost F2802x devices
+       once the design needs are known. It offers an on-board JTAG emulation tool allowing direct interface to a
+       PC for easy programming, debugging, and evaluation. In addition to JTAG emulation, the USB interface
+       provides a UART serial connection from the F2802x device to the host PC.
+       Users can download an unrestricted version of Code Composer Studio™ IDE version 5 to write,
+       download, and debug applications on the LAUNCHXL-F28027 board. The debugger is unobtrusive,
+       allowing the user to run an application at full speed with hardware breakpoints and single stepping
+       available while consuming no extra hardware resources.
+       As shown in Figure 1, the LAUNCHXL-F28027 C2000 LaunchPad features include:
+       • USB debugging and programming interface via a high-speed galvanically isolated XDS100v2 debug
+          probe featuring a USB/UART connection.
+       • Superset F28027 device that allows applications to easily migrate to lower cost devices.
+       • Nibble (4-bit) wide LED display.
+
+SPRUHH2C – July 2012 – Revised March 2019                          LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                    1
+Submit Documentation Feedback
+                                            Copyright © 2012–2019, Texas Instruments Incorporated
+LAUNCHXL-F28027 Overview                                                                                                   www.ti.com
+
+      •   Two push buttons for user feedback and device reset.
+      •   Easily accessible device pins for debugging purposes or as sockets for adding customized extension
+          boards.
+      •   Boot selection and USB and UART disconnect switches.
+
+                                                                JTAG Emulator               Serial
+                                                                   Circuitry                TX/RX
+            USB Connection                                                                  LEDs
+
+
+                        JTAG
+                      Isolation
+
+                      Jumpers:
+                     JP1 and JP3                                                           Jumper: JP2
+
+
+                                                                                                  20 PCB Pins
+                    S4 Serial                                                            (doubled-sided male connectors)
+                Connection Switch
+                                                                                    Pre-Programmed C2000
+                                                                                    Piccolo TMS320F28027
+                      S1 Boot                                                                MCU
+                  Selection Switch
+
+                                                                                         Programmable
+                     CPU Reset                                                            Push Button:
+                     Push Button                                                            GPIO12
+
+
+
+
+                                                   Four LEDs
+                                     Figure 1. LAUNCHXL-F28027 Board Overview
+
+
+1.2   Kit Contents
+      The LAUNCHXL-F28027 C2000 LaunchPad experimenter kit includes the following items:
+      • C2000 LaunchPad Board (LAUNCHXL-F28027)
+      • Mini USB-B Cable, 0.5m
+      • Quick Start Guide
+
+1.3   Revisions
+      The first production revision of the LAUNCHXL-F28027 C2000 Piccolo LaunchPad, version 1.0, was
+      released in July of 2012 and is currently the only revision available.
+      All Revisions:
+      • Resistor R7 in the oscillator circuit is incorrectly placed or should not be installed. This resistor may
+          impact startup time or robustness of the clocking circuit over the full operating range of the MCU or
+          different physical layouts of this circuit. The probability is low that this resistor will have any impact on
+          the functionality of this EVM as is not intended to be operated outside of Standard Temperature and
+          Pressure in a lab or prototype environment. Do not use this circuit as reference. Follow the
+          requirements for the Oscillator schematic as documented in the MCU Datasheet.
+
+2     Installation
+      The C2000 LaunchPad installation consists of three easy steps:
+      1. Download Code Composer Studio and controlSUITE™.
+      2. Install Code Composer Studio and controlSUITE.
+
+2     LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                              SPRUHH2C – July 2012 – Revised March 2019
+                                                                                                     Submit Documentation Feedback
+                                        Copyright © 2012–2019, Texas Instruments Incorporated
+www.ti.com                                                                                                         Installation
+
+       3. Connect and install the C2000 LaunchPad to the PC.
+       Now the LaunchPad is ready to develop applications or run the pre-programmed demo.
+
+2.1    Download the Required Software
+       Code Composer Studio IDE is available for free without any restriction when used with the XDS100 debug
+       probe on the C2000 LaunchPad. The software can be downloaded from the C2000 LaunchPad page at
+       www.ti.com/c2000-launchpad. At this site, you can also download a copy of controlSUITE that includes
+       drivers, examples, and other support software needed to get started.
+
+2.2    Install the Software
+       Once downloaded, install Code Composer Studio and the controlSUITE package.
+
+2.3    Install the Hardware
+       After Code Composer Studio is installed, plug the supplied USB cable into the C2000 LaunchPad board
+       and into an available USB port on your computer.
+       Windows® will automatically detect the hardware and ask you to install software drivers. Let Windows run
+       a search for the drivers and automatically install them. After Windows successfully installs the drivers for
+       the integrated XDS100v2 debug probe, your LaunchPad is now ready for use.
+
+3      Getting Started with the LAUNCHXL-F28027
+
+3.1    Getting Started
+       The first time the LAUNCHXL-F28027 is used, a demo application automatically starts when the board is
+       powered from a USB host. If your board does not start the demo application, try placing S1 in the following
+       positions and resetting the board: UP - UP - DOWN. To start the demo, connect the LAUNCHXL-F28027
+       with the included mini-USB cable to a free USB port. The demo application starts with the LEDs flashing
+       to show the device is active.
+
+3.2    Demo Application, Internal Temperature Measurement
+       The LAUNCHXL-F28027 includes a pre-programmed TMS320F28027 device. When the LaunchPad is
+       connected via USB, the demo starts with an LED flash sequence that points toward S3 in the lower right
+       corner of the board. Press S3 to start the temperature measurement mode.
+       A reference temperature is taken at the beginning of this mode and the LEDs of the LaunchPad are used
+       to display any difference between the current temperature and the reference temperature. Initially, the
+       LED connected to GPIO3 is lit to indicate an 8 in binary, which corresponds to the current temperature
+       being equal to the reference temperature. As the temperature drifts away from the reference, the
+       difference is displayed as a binary increment or decrement of the nibble wide LED display. For instance, if
+       the reference temperature was 30ºC and the current temperature is 33ºC, the LEDs would be (from left to
+       right) ON, OFF, ON, and ON which would be 11 in binary (33-30=3 and 11-8=3). A new reference
+       temperature may be set at any time by pressing S3 again.
+       In addition to the LED display, temperature information is also displayed on your PC through the
+       USB/UART connection. To view the UART information on your PC, first figure out the COM port
+       associated with the LaunchPad. To do this in Windows, right click on My Computer and click on
+       Properties. In the dialog box that appears, click on the Hardware tab and open Device Manager. Look for
+       an entry under Ports (COM & LPT) titled "USB Serial Port (COMX)", where X is a number. Remember this
+       number for when you open a serial terminal. The demo applications UART data was written and debugged
+       using PuTTY, and for the best user experience we recommend you use PuTTY to view the UART data.
+       Open your serial terminal program and open the COM port you found previously in device manager with
+       the following settings: 115200 Baud, 8 data bits, no parity, 1 stop bit. After opening the serial port in your
+       serial terminal, reset the Launchpad with the reset push button and observe the serial terminal for a
+       surprise.
+
+
+
+SPRUHH2C – July 2012 – Revised March 2019                      LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit      3
+Submit Documentation Feedback
+                                        Copyright © 2012–2019, Texas Instruments Incorporated
+Getting Started with the LAUNCHXL-F28027                                                                               www.ti.com
+
+3.3   Program and Debug the Temperature Measurement Demo Application
+      The project and associated source code for the C2000 Piccolo LaunchPad demo is included in the
+      controlSUITE software package and should automatically be found by the TI Resource Explorer in Code
+      Composer Studio v5. In the resource explorer, open the controlSUITE folder and then the Development
+      Tools entry and look for the C2000 LaunchPad line item. Expand this item and LAUNCHXL-F28027, then
+      select the LaunchPad Demo Application. Follow the steps in the main pane of the resource explorer to
+      import, build, debug, and run this application.
+
+4     Hardware Configuration
+      The C2000 LaunchPad gives users several options as to how to configure the board.
+
+4.1   Power Domain
+      The C2000 LaunchPad has two separate power domains for the purpose of allowing JTAG isolation.
+      Jumpers JP1, JP2, and JP3 configure whether the USB power is passed to the target device.
+
+                                        Jumper                             Power Domain
+                                           JP1                                   3.3 V
+                                           JP2                                  Ground
+                                           JP3                                    5V
+
+
+
+4.2   Serial Connectivity
+      The LAUNCHXL-F28027 has a USB to UART adapter built in. This makes it easy to print debug
+      information back to the host PC even in isolated environments. However, in some cases the user may
+      wish to connect the Piccolo SCI peripheral (C2000 UART peripheral) to a BoosterPack or other hardware
+      via the header pins. If the SCI pins are connected to both the header pins, the XDS100 UART channel
+      contention would exist and the pins would not be driven to the correct voltage levels. To solve this issue
+      we have included a switch to allow the user to disconnect the Piccolo serial pins from the XDS100 UART
+      connection. When S4 is in the up position, the Piccolo device's SCI is connected to the XDS100 and you
+      are able to receive and send serial information from or to the board. When S4 is in the down position, the
+      Piccolo device's SCI is disconnected from the XDS100 and BoosterPacks, which use serial
+      communication, and can communicate with the Piccolo device.
+
+4.3   Boot Mode Selection
+      The LaunchPad's F28027 device includes a boot ROM that performs some basic start-up checks and
+      allows for the device to boot in many different ways. Most users will either want to perform an emulation
+      boot or a boot to flash (if they are running the application standalone). S1 has been provided to allow
+      users to easily configure the pins that the bootROM checks to make this decision. The switches on S1
+      correspond to:
+
+                                        Switch                                 Function
+                                            1                                  GPIO34
+                                            2                                  GPIO37
+                                            3                                   TRSTn
+
+
+
+
+4     LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                            SPRUHH2C – July 2012 – Revised March 2019
+                                                                                                   Submit Documentation Feedback
+                                      Copyright © 2012–2019, Texas Instruments Incorporated
+www.ti.com                                                                                                           Hardware Configuration
+
+           Keep in mind that the debugger does not connect if the device is not in the emulation boot mode (TRST
+           switch in the up position). More information about boot mode selection can be found in the
+           TMS320x2802x Piccolo Boot ROM Reference Guide (SPRUFN6).
+
+4.4        Connecting a Crystal
+           Although the Piccolo device present on the LAUNCHXL-F28027 has an internal oscillator — and for most
+           applications this is sufficient — the LaunchPad offers a footprint for surface mount or through-hole HC-49
+           crystals for users who require a more precise clock. If you wish to use an external crystal, solder the
+           crystal to the Q1/Q2 footprint and appropriate load capacitors to the C3 and C4 footprints. You also need
+           to configure the device to use the external oscillator in software.
+
+4.5        Connecting a Satellite Board
+           The C2000 LaunchPad is the perfect experimenter board to start hardware development with the F2802x
+           devices. Connectors J1, J2, J5, and J6 and the power supply at J3 are aligned in a 0.1-in (2.54-mm) grid
+           to allow an easy and inexpensive development of a breadboard extension module. These satellite boards
+           can access all of the GPIO and analog signals. The alignment of the connectors and the pin out can be
+           found in Section 5.
+
+4.6        Device Migration Path
+           Applications developed on the LAUNCHXL-F28027 can easily be migrated to any of these lower cost
+           devices in the F2802x family:
+
+            Part Number                    Description
+                                (1)
+            TMS320F28027                   32-bit Real Time Microcontroller, 60 MHz, 32K Flash, 6K RAM, 4 HRPWM
+            TMS320F28026                   32-bit Real Time Microcontroller, 60 MHz, 16K Flash, 6K RAM, 4 HRPWM
+            TMS320F28023                   32-bit Real Time Microcontroller, 50 MHz, 32K Flash, 6K RAM, 4 HRPWM
+            TMS320F28022                   32-bit Real Time Microcontroller, 50 MHz, 16K Flash, 6K RAM, 4 HRPWM
+            TMS320F28021                   32-bit Real Time Microcontroller, 40 MHz, 32K Flash, 5K RAM
+            TMS320F28020                   32-bit Real Time Microcontroller, 40 MHz, 16K Flash, 3K RAM
+            TMS320F280200                  32-bit Real Time Microcontroller, 40 MHz, 8K Flash, 3K RAM
+           (1)
+                 This device is present on the LAUNCHXL-F28027.
+
+
+
+5          LAUNCHXL-F28027 Hardware
+
+5.1        Device Pin Out
+           Table 1 lists the pin out and pin mux options for the C2000 LaunchPad.
+
+                                      Table 1. C2000 LaunchPad Pin Out and Pin Mux Options
+                               Mux Value                                                                     Mux Value
+       3                   2               1             0       J1 Pin      J5 Pin         0            1               2         3
+                                                  +3.3V            1           1      +5V
+                                                  ADCINA6          2           2      GND
+TZ2                 SDAA              SCIRXDA     GPIO28           3           3      ADCINA7
+TZ3                 SCLA              SCITXDA     GPIO29           4           4      ADCINA3
+Rsvd                Rsvd              COMP2OUT    GPIO34           5           5      ADCINA1
+                                                  ADCINA4          6           6      ADCINA0
+                    SCITXDA           SPICLK      GPIO18           7           7      ADCINB1
+                                                  ADCINA2          8           8      ADCINB3
+                                                  ADCINB2          9           9      ADCINB7
+                                                  ADCINB4         10          10      NC
+
+       3                   2               1             0       J6 Pin      J2 Pin         0            1               2         3
+
+
+
+SPRUHH2C – July 2012 – Revised March 2019                                 LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit       5
+Submit Documentation Feedback
+                                                 Copyright © 2012–2019, Texas Instruments Incorporated
+LAUNCHXL-F28027 Hardware                                                                                                         www.ti.com
+
+
+                            Table 1. C2000 LaunchPad Pin Out and Pin Mux Options (continued)
+                            Mux Value                                                                          Mux Value
+       3                2               1           0          J1 Pin     J5 Pin          0              1                 2           3
+Rsvd             Rsvd              EPWM1A      GPIO0             1           1      GND
+COMP1OUT         Rsvd              EPWM1B      GPIO1             2           2      GPIO19         SPISTEA       SCIRXDA       ECAP1
+Rsvd             Rsvd              EPWM2A      GPIO2             3           3      GPIO12         TZ1           SCITXDA       Rsvd
+COMP2OUT         Rsvd              EPWM2B      GPIO3             4           4      NC
+Rsvd             Rsvd              EPWM3A      GPIO4             5           5      RESET#
+ECAP1            Rsvd              EPWM3B      GPIO5             6           6      GPIO16/32      SPISIMOA/     Rsvd/         TZ2/
+                                                                                                   SDAA          EPWMSYNCI     ADCSOCA
+TZ2/             Rsvd/             SPISIMOA/   GPIO16/32         7           7      GPIO17/33      SPISOMIA/     Rsvd/         TZ3/
+ADCSOCA          EPWMSYNCI         SDAA                                                            SCLA          EPWMSYNCO     ADCSOCB
+TZ3/             Rsvd/             SPISOMIA/   GPIO17/33         8           8      GPIO6          EPWM4A        EPWMSYNCI     EPWMSYNCO
+ADCSOCB          EPWMSYNCO         SCLA
+                                               NC                9           9      GPIO7          EPWM4B        SCIRXDA       Rsvd
+                                               NC               10          10      ADCINB6
+
+
+           On headers J2 and J6, there are multiple instances of the same pins being connected. By default, GPIO16
+           and GPIO32 are shorted together and connected to both J2.6 and J6.7. Similarly, GPIO17 and GPIO33
+           are shorted together and connected to both J2.7 and J6.8. This configuration provides extra options for
+           signal routing based on application needs. The configuration is also reversible as top-layer cut-traces, are
+           buried in between two exposed pads, alternately known as Net-Ties. Net-Ties JP4 - JP11 are located
+           directly adjacent to header J6 and marked clearly on the silkscreen. These Net-Ties are visible on the
+           right-hand side of Figure 3.
+           To select an exclusive connection to one header location, two cuts will need to be made - cut the Net-Tie
+           that shorts the other GPIO to the desired header location, then cut the desired GPIO from the other
+           header location. For example - to exclusively connect GPIO16 on J2.6, cut JP5 to isolate GPIO32 from
+           J2.6 and then cut JP8 to isolate GPIO16 from J6.7. If GPIO16 ever needs to be connected to J6.2 in the
+           future, simply place a 0 Ω resistor on the exposed pads of JP4.
+
+5.2        Schematics
+           Figure 2 and Figure 3 show the C2000 LaunchPad schematics sheets.
+
+
+
+
+6          LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                                SPRUHH2C – July 2012 – Revised March 2019
+                                                                                                            Submit Documentation Feedback
+                                               Copyright © 2012–2019, Texas Instruments Incorporated
+www.ti.com                                                                                                                                                                                                                     LAUNCHXL-F28027 Hardware
+
+                       1                                                       2                                                      3                                                4                                5                                          6
+
+                                                                                                                                                                                                                                                  +5V
+                                         U4
+                                                                                                                                                                                                                                         1 JP3
+
+
+                                                     ADJ/GND
+                           USBVCC3        VIN                   VOUT1     2               FTDI_3V3                                                                                                                                       2
+                                                                VOUT2     4
+                                                                                                                                                                                                                       USBVCC
+A                                                                                                                  R17    820
+                                                                                                                                                                                                                                            R16                                    A
+                       C7                          1           TLV1117-33                 C8           C9                                                                                                                                   0
+                                                                                                                                                                                                         FTDI_3V3                           R18
+                       1u                                                                 100u         0.1u
+                                                                                                                          D6                                                                             L1                                 0
+                                                                                                                                                                                                                                            R19
+                                                                                                                                                                                                         L2
+                AGND                          AGND                                 AGND        AGND              AGND
+                                                                                                                                                                                                                                            0
+                                                                                                                                                                                           C10 C11                                          R20
+
+                                                                                                                                                                                           4.7u 4.7u                                        0
+                                                                                                                                                                                                                                         1 JP1
+                                                                                                                                                                                                                                         2
+
+                                                                                                                                                                                AGND        AGND
+                                  F1                                               FTDI_1V8                                                                          FTDI_3V3                                                           R21              +3V3
+B                                                       USBVCC                                                                        P$9
+                                                                                                                                               P$12
+                                                                                                                                               P$37
+                                                                                                                                                            P$20
+                                                                                                                                                            P$31
+                                                                                                                                                            P$42                                                               FTDI_3V3                                            B
+           1                      500mA                                                                                               P$4      P$64         P$56       U6                                                         U5    0
+           2                                            D-
+           3                                            D+                                                                                         VCORE1   VCCIO1    ADBUS0      P$16                                           1    VCC1        VCC2   16
+                                                                                                                                      VPLL                                        P$17                                           2                       15
+           4                                                                                                                                                VCCIO2    ADBUS1                                                          GND1        GND2
+                                                                                                                                      VPHY         VCORE2   VCCIO3                P$18                                           3                       14             TCK
+           5                                                                                                                                                          ADBUS2                                                          INA         OUTA
+                                                                                                  FTDI_3V3 P$50                     VREGIN         VCORE3   VCCIO4    ADBUS3      P$19                                           4    INB         OUTB   13             TDI
+                                                                                                                         P$49       VREGOUT                           ADBUS4      P$21                                           5    INC         OUTC   12             TMS
+                                                                                                                                                                      ADBUS5      P$22                                           6    IND         OUTD   11             SCI_RX
+                                                     C12 C13 C14 C15                                       D-                 P$7   USBDM                             ADBUS6      P$23                                           7    NC            EN   10
+
+                       AGND
+                                                                                                                                                                      ADBUS7      P$24                                           8    GND1        GND2   9
+                                                     0.1u 0.1u 0.1u 3.3u                                   D+                 P$8   USBDP
+
+                                                                                                                                                                                                                        AGND
+                                                                                                                                                                      ACBUS0      P$26                                               ISO7240
+                                                                                                      R22                 P$6       REF                               ACBUS1      P$27                                                                       GND
+
+                                           AGND          AGND     AGND    AGND
+                                                                                                                         P$14                                                     P$28                                          FTDI_3V3
+                                                                                                                                                                                                                                                         +3V3
+                                                                                                                                    RESET#                            ACBUS2                                                                            U7
+                                                                                                      1k                                                              ACBUS3      P$29
+                                                                                                                                                                                  P$30                                          16                       1
+C                                                                                                                                                                     ACBUS4
+                                                                                                                                                                      ACBUS5      P$32 R23                                      15
+                                                                                                                                                                                                                                      VCC2
+                                                                                                                                                                                                                                      GND2
+                                                                                                                                                                                                                                                  VCC1
+                                                                                                                                                                                                                                                  GND1   2                         C
+                                                                                                                                                                                  P$33 1k                                       14                       3             TDO
+                                                                                                                R24
+                                                                                                                                                                      ACBUS6                                                          OUTA         INA
+                                                                                                                        12k
+                                                                                                                                                                                                    AGND
+                                                                                                                                                                      ACBUS7      P$34                                          13    OUTB         INB   4             SCI_TX
+                                                                                                                                                                                                                                12    INC         OUTC   5             JTAG_TRST
+                                  FTDI_3V3                                                                                                                            BDBUS0      P$38                                          11    NC2          NC1   6
+
+                                                                                                            AGND
+                                                                                                                                                                      BDBUS1      P$39                                          10    EN2          EN1   7
+                                                                                                                                                                      BDBUS2      P$40                                           9    GND2        GND1   8
+                                                                                                                                                                      BDBUS3      P$41
+                                  U8
+                                                                                                                                                                                                                                       1 JP2     ISO7231
+                                                   6
+                                                                                                                                                                      BDBUS4      P$43
+               FTDI_CLK       4    CLK               VCC                                   FTDI_CS                       P$63       EECS                              BDBUS5      P$44
+                                                                                                                                                                                                                                       2
+                                          EEPROM
+                                                                                           FTDI_CLK                      P$62                                                     P$45             FTDI_3V3
+                                                                   R29
+                                                                                                                                    EECLK                             BDBUS6
+               FTDI_CS        5    CS                                    10k               FTDI_DATA                     P$61       EEDATA                            BDBUS7      P$46
+    C16
+                                          Array
+                                                                              R31                                                                                                                                                       R25
+                                                      DO 1                                 FTDI_DATA                                                                  BCBUS0      P$48
+                                                                                                                                                                                                         D7
+    0.1u       FTDI_DATA 3 DI                                                                                                                                                     P$52
+                                                                              2.2k                                                                                                                                                      0
+                                                                                                                                                                                             R26
+                                                                                                                                                                      BCBUS1
+                                                                                                                                                                                                   330
+                                                                                                                                                                                                                        AGND
+                                                     GND                                                                      P$2                                                 P$53
+                                                   2                                                                                OSCI                              BCBUS2
+D                                 93                                                                                                                                  BCBUS3      P$54
+                                                                                                                                                                                                   R27                                  R28                  GND                   D
+                                                                                                                              P$3   OSCO                              BCBUS4      P$55
+                                                                                                                                                                                  P$57             330                                  0
+                                                                                                                                                                      BCBUS5
+                                                                                                                                                                                  P$58                        D8
+                                                                                                                                                                      BCBUS6
+                                                                                                                                                                                  P$59                                                  R30
+                                                                                                                                                                      BCBUS7
+
+                                              AGND
+                                                                                                      12M                                                                                                                               0
+                                                                                               Q3                        P$13                                                     P$60              PWREN#
+                                                                                                                                    TEST                              PWREN#                                                            R32
+                                                                                                                                                                     SUSPEND#     P$36              SUSPEND#
+
+                                                                                                                                                   AGND
+                                                                                                                                                                                                                                        0
+                                                                                                                                                          GND1
+                                                                                                                                                          GND2
+                                                                                               C17              C18                                       GND3
+                                                                                                                                                          GND4
+                                                                                                                                                          GND5
+                                                                                                                                      TH                  GND6
+                                                                                                                                                          GND7
+                                                                                                                                                          GND8
+                                                                                               36p              36p
+                                                                                                                                                                        FT2232H
+                                                                                                                                               P$10
+                                                                                                                                                           P$1
+                                                                                                                                      TH
+                                                                                                                                                           P$5
+                                                                                                                                                          P$11
+                                                                                                                                                          P$15
+                                                                                                                                                                                                           Emulator - XDS100v2
+                                                                                                                                                          P$25
+                                                                                                                                                          P$35
+                                                                                                                                                          P$47
+                                                                                                                                                          P$51
+
+
+E                                                                                                                                                                                                                                                                                  E
+
+
+                                                                                                                                            AGND                                                         C2000_LaunchPad.sch                                             1.0
+
+
+
+                                                                               Figure 2. C2000 LaunchPad Schematic—Sheet 1 of 2
+
+
+
+
+SPRUHH2C – July 2012 – Revised March 2019                                                                                                                   LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                                                               7
+Submit Documentation Feedback
+                                                                                                       Copyright © 2012–2019, Texas Instruments Incorporated
+LAUNCHXL-F28027 Hardware                                                                                                                                                                                                                                                                                     www.ti.com
+
+
+                1                                                            2                                                         3                                                                      4                                                     5                                    6
+                                      +3V3                                                                                                                                                     +3V3    +3V3
+
+
+                                              820
+                                                                                                                                                                                                      820
+                                       R1                                                                                                                                                       R4    R5          820
+                                                                                                                                                                           S1
+A                                                                                               SCI_RX
+                                                                                                SCI_TX
+                                                                                                                           GPIO34
+                                                                                                                           TDO
+                                                                                                                                                                       1
+                                                                                                                                                                       2   2 1
+                                                                                                                                                                                         ON
+                                                                                                                                                                                               6
+                                                                                                                                                                                               5
+                                                                                                                                                                                                                                                                                                                              A
+                 +3V3                                                                                                      TRST                                                                       JTAG_TRST
+                                                                                                                                                                       3                       4
+                                                                              P$2         P$4                                                                              3
+
+                                              D1                                         ON                                                                                219-03
+
+
+                                                                             P$1204-1
+                                                                                                                                     2.2k      2.2k
+                                                                                                                                R8   R9        R10       2.2k
+                                                                            S4           1
+
+                     R6   2.2k                                                            P$3
+                                                               GPIO28
+                                        GND              U1    GPIO29                                                           GND GND GND                                                                              +3V3                                 C3   36p
+                            GPIO29                 1                                                                                   GPIO28/SCIRXDA/SDAA/TZ2# 48                                                 GPIO28
+                                                                                                                                                                                                                                          1M Q1
+                            TRST                   2
+                                                          GPIO29/SCITXDA/SCLA/TX3#
+                                                                                                                                                                                                                   GPIO12                         Q2
+                                                          TRST#                                                                             GPIO12/TZ1#/SCITXDA 47
+                            RESET#                 3      XRS#                                                                                              X2  46
+                            ADCINA6                4      ADCINA6/AIO6                                                                                      X1  45                                                                   R7
+                     L3     ADCINA4                5      ADCINA4/COMP2A/AIO4                                                                            VSS2   44                                                                                            C4   36p
+B                           ADCINA7                6      ADCINA7                                                                                        VDD2   43                                                                                                                                                            B
+                            ADCINA3                7      ADCINA3                                                                        GPIO7/EPWM4B/SCIRXDA 42                                                   GPIO7
+                            ADCINA1                8      ADCINA1                                                           GPIO6/EPWM4A/EPWMSYNCI/EPWMSYNCO41                                                     GPIO6        L4
+                            ADCINA2                9      ADCINA2/COMP1A/AIO2                                                              GPIO5/EPWM3B/ECAP1 40                                                   GPIO5
+                            ADCINA0                                                                                                                                                                                GPIO4                                             GND                                     1 JP4
+                                                  10      ADCINA0/VREFHI                                                                         GPIO4/EPWM3A 39
+                                                  11      VDDA                                                                         GPIO3/EPWM2B/COMP2OUT 38                                                    GPIO3                                                                                     2
+                                                  12      VSSA/VREFLO                                                                            GPIO2/EPWM2A 37                                                   GPIO2                                                                                             SPI_MOSI
+                     ADCINB1                      13      ADCINB1                                                            GPIO33/SCLA/EPWMSYNCO/ADCSOCBO#36                                                     GPIO33                                                                                            GPIO16
+                     ADCINB2                                                                                                                                                                                                                                                                                 1 JP5
+                                                  14      ADCINB2/COMP1B/AIO10                                                                          VDDIO   35
+                     ADCINB3                      15      ADCINB3                                                                                    VREGENZ# 34                                                                                                                                             2
+           C21 C19 ADCINB4                        16      ADCINB4/COMP2B/AIO12                                                                           VSS1   33                                                              C20
+                     ADCINB6                      17      ADCINB6/AIO14                                                                                  VDD1   32                                                                                                                                                   GPIO32
+           2.2u 2.2u ADCINB7                      18                                                                                                                                                               GPIO32       2.2u
+                                                          ADCINB7                                                             GPIO32/SDAA/EPWMSYNCI/ADCSOCAO#31
+                     GPIO34                                                                                                                                                                                                                                                                                  1 JP6
+                                                  19      GPIO34/COMP2OUT                                                                                TEST   30
+                     TDI                          20      TDI                                                                                    GPIO0/EPWM1A 29                                                   GPIO0                                                                                     2
+                     TMS                          21      TMS                                                                          GPIO1/EPWM1B/COMP1OUT 28                                                    GPIO1                                                                                             SPI_MISO
+                     TDO                          22                                                                                       GPIO16/SPISIMOA/TZ2# 27                                                 GPIO16                              GPIO0              1               1                          GPIO17
+C                    TCK                          23
+                                                          TDO
+                                                          TCK                                                                              GPIO17/SPISOMIA/TZ3# 26                                                 GPIO17                              GPIO1              2               2    GPIO19        1 JP7
+                                                                                                                                                                                                                                                                                                                              C
+                     GPIO18                       24      GPIO18/SPICLKA/SCITXDA/XCLKOUT                                    GPIO19/XCLKIN/SPISTEA#/SCIRXDA/ECAP125                                                 GPIO19                              GPIO2              3               3    GPIO12        2
+                                                                                                                                                                                                                                                       GPIO3              4               4
+                                                         TMS320F28027PT                                                                                                                                                                                GPIO4              5               5    RESET#                GPIO33
+                                                                                                                                                                                                                                                       GPIO5              6               6
+                                                                                                                                                                                                                  C5    C6
+                                                                                                                                                                                                                                                       JP8
+        GND GND                         GND                                                                                                                                                                                                                               7               7
+                                                               +3V3                             +3V3       +3V3                       +3V3                      +3V3             +3V3                                                                                                          GPIO6
+                                                                                                                                                                                                                                                                          8               8
+                                                                                                                                                                                                                  2.2u 2.2u SPI_MOSI              2
+                                                                                                                                                                                                                                                  1                       9               9    GPIO7
+                                                                                                                                                                                                                             GPIO16                                      10               10   ADCINB6
+                                                                                                    R12
+                                                                                                          330
+                                                                                                                    330                                             R14
+                                                                                                                                                                           330
+                                                                                                                                                                                          330         GNDGND GND GND                                   JP9                      J6 J2
+                                                                    5                                     R13                             5                                R15                                                                    2
+                                                                            U2                                                                     U3                                                                                             1
+                                                                                                                                                                                                                                     GPIO32
+                                                                      VCC                                                                    VCC                                                                                                       JP10
+                                             GPIO0 1                                            6         D2        D4    GPIO2 1                               6           D3                D5                                SPI_MISO
+                                                                                                                                                                                                                                                  2
+                                                                                                                                                                                                                                                  1                      +3V3
+                                                               1A                       1Y                                           1A                 1Y
+D                                                                                                                                                                                                                                GPIO17                                                                                       D
+                                                                                                                                                                                                                                                       JP11
+                                                                                                                                                                                                                                                                                 1
+                                             GPIO1 3           2A                       2Y      4                         GPIO3 3    2A                 2Y      4                                                                                                                2         GND
+                                                                      GND                                                                    GND
+                                                                                                                                                                                                                                                  2
+                                                                                                                                                                                                                                                  1                              3
+                                                                                                                                                                                                                                     GPIO33
+                                                                                                                                                                                                                                                                                     J3
+                                                                    2       SN74LVC2G07                                                   2        SN74LVC2G07
+
+              +3V3        1                         +5V
+                                                    1
+                                                                                                                                                                                                                                                                           GND
+           ADCINA6 2                                2           GND                                                                     GND
+    SCI_RXGPIO28 3                                  3         ADCINA7
+    SCI_TX GPIO29 4                                 4         ADCINA3
+           GPIO34 5                                           ADCINA1                                                                 +3V3
+                                                    5                                                          S2                                       S3
+           ADCINA4 6                                6         ADCINA0                                                                                                                                                           Piccolo F2802x
+    SPI_CLKGPIO18 7                                 7         ADCINB1
+           ADCINA2 8                                8         ADCINB3                                             RESET#                                      GPIO12
+E          ADCINB2 9                                9         ADCINB7                                       FSMJSMA                                     FSMJSMA                                                                                                                                                               E
+           ADCINB4 10                               10
+                                                                                                                                                                            10k         R11
+                                 J1          J5
+                                                                                                                                                                                                                             C2000_LaunchPad.sch                                                                     1.0
+                                                       GND                                      GND                                                                          GND
+
+
+
+                                                                            Figure 3. C2000 LaunchPad Schematic—Sheet 2 of 2
+
+
+
+
+8        LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                                                                                                                                                                           SPRUHH2C – July 2012 – Revised March 2019
+                                                                                                                                                                                                                                                     Submit Documentation Feedback
+                                                                                                            Copyright © 2012–2019, Texas Instruments Incorporated
+www.ti.com                                                                                      LAUNCHXL-F28027 Hardware
+
+5.3    PCB Layout
+       Figure 4, Figure 5, and Figure 6 show the LAUNCHXL-F28027 PCB layout.
+
+
+
+
+                              Figure 4. LAUNCHXL-F28027 PCB Layout—Top Layer
+
+
+
+
+                            Figure 5. LAUNCHXL-F28027 PCB Layout—Bottom Layer
+
+
+
+
+                          Figure 6. LAUNCHXL-F28027 PCB Layout—Silkscreen Image
+
+
+
+
+SPRUHH2C – July 2012 – Revised March 2019                      LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit   9
+Submit Documentation Feedback
+                                        Copyright © 2012–2019, Texas Instruments Incorporated
+LAUNCHXL-F28027 Hardware                                                                                                www.ti.com
+
+5.4   Bill of Materials (BOM)
+      Table 2 lists the LAUNCHXL-F28027 bill of materials.
+
+                                       Table 2. LAUNCHXL-F28027 Bill of Materials
+                                                  Quantity
+                                                    per
+      Reference                                    Board        Description
+      R12, R13, R14, R15, R26, R27                     6        RES 330 Ω 1/10W 5% 0402 SMD
+      R1, R4, R5, R17                                  4        RES 820 Ω 1/10W 5% 0402 SMD
+      R22, R23                                         2        RES 1.0K Ω 1/10W 5% 0402 SMD
+      R6, R8, R9, R10, R31                             5        RES 2.2K Ω 1/10W 5% 0402 SMD
+      R11, R29                                         2        RES 10K Ω 1/10W 5% 0402 SMD
+      R24                                              1        RES 12K Ω 1/16W .5% 0402 SMD
+      R7                                               1        RES 1.0M Ω 1/10W 5% 0402 SMD
+      R16, R18, R19, R20, R21, R25, R28, R30,          9        RES 0.0 Ω 1/4W 1206 SMD
+      R32
+      L1, L2                                           2        FERRITE BEAD 600 Ω 0402
+      L3                                               1        FERRITE BEAD 220 Ω 0402
+      L4                                               1        FERRITE CHIP 60 Ω 1.5A 0402
+      C9, C12, C13, C14, C16                           5        CAP .10 µF 16 V CERAMIC Y5V 0402
+      C7                                               1        CAP CER 1.0 µF 6.3 V X5R 20% 0402
+      C5, C6, C19, C20, C21                            5        CAP CER 2.2 µF 6.3 V 20% X5R 0402
+      C15                                              1        CAP CER 3.3 µF 4.0 V X5R 0402
+      C10, C11                                         2        CAP CER 4.7 µF 4 V X5R 0402
+      C3, C4                                           2        CAP CER 36PF 50 V C0G 0402
+      C17, C18                                         2        CAP CER 36PF 50 V C0G 0402
+      C8                                               1        CAP TANTALUM 100 µF 6.3 V 10% SMD
+      F1                                               1        PTC RESETTABLE .50A 15 V 1812
+      S1                                               1        SWITCH DIP 3POS TOP SLIDE SMT
+      S4                                               1        SWITCH DIP DPST 1POS SMT
+      S2, S3                                           2        SW TACT SPST-NO MOM 160GF SMD
+      Q1, Q2                                           1        Crystal
+      Q3                                               1        CRYSTAL 12.0000 MHZ 18PF SMD
+      D6                                               1        LED RED HIGH BRIGHT ESS SMD
+      D1                                               1        LED GREEN HIGH BRIGHT ESS SMD
+      D2, D3, D4, D5, D7, D8                           6        LED BLUE HIGH BRIGHT ESS SMD
+      JP1, JP2, JP3                                    3        BERGSTIK II .100" SR STRAIGHT
+      J1 and J5, J2 and J6                             2        CONN HEADER .100 DUAL STR 20POS
+      J3                                               1        CONN HEADER .100 SNGL STR 3POS
+      CON1                                             1        CONN RECEPT MINI-USB TYPE B SMT
+      U4                                               1        IC LDO REG 800MA 3.3 V SOT223-4
+      U2, U3                                           2        IC BUFF/DVR DL NON-INV SOT236
+      U5                                               1        ISOLAT DGTL 2.5 KVRMS 4CH 16-SOIC
+      U7                                               1        ISOLAT DGTL 3 KVRMS 3CH 16-SOIC
+      U6                                               1        IC USB HS DUAL UART and FIFO 64-QFN
+      U8                                               1        IC EEPROM 2KBIT 3 MHZ SOT23-6
+      U1                                               1        IC MCU 32 BIT 64KB FLASH 48LQFP
+
+
+
+
+10    LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                             SPRUHH2C – July 2012 – Revised March 2019
+                                                                                                    Submit Documentation Feedback
+                                       Copyright © 2012–2019, Texas Instruments Incorporated
+www.ti.com                                                                                                 Suggested Reading
+
+6      Suggested Reading
+       The following documents describe the C2000 devices. Copies of these documents are available on the
+       Internet at http://www.ti.com/c2000 and www.ti.com/c2000-launchpad, or click on the links below:
+       • TMS320F28027/28026/28023/28022/28021/28020/280200 Piccolo Microcontrollers Data Manual
+           (SPRS523)
+       • TMS320F28027/28026/28023/28022/28021/28020/2802x0 Piccolo MCU Silicon Errata (SPRZ292)
+       • TMS320x2802x, 2803x Piccolo Analog-to-Digital Converter (ADC) and Comparator Reference Guide
+           (SPRUGE5)
+       • TMS320x2802x, 2803x Piccolo High Resolution Pulse Width Modulator (HRPWM) Reference Guide
+           (SPRUGE8)
+       • TMS320x2802x, 2803x Piccolo Inter-Integrated Circuit (I2C) Reference Guide (SPRUFZ9)
+       • TMS320x2802x, 2803x Piccolo Enhanced Pulse Width Modulator (ePWM) Module Reference Guide
+           (SPRUGE9)
+       • TMS320x2802x/TMS320F2802xx Piccolo System Control and Interrupts Reference Guide (SPRUFN3)
+       • TMS320x2802x Piccolo Boot ROM Reference Guide (SPRUFN6)
+       • TMS320x2802x, 2803x Piccolo Serial Communications Interface (SCI) Reference Guide (SPRUGH1)
+       • TMS320x2802x, 2803x Piccolo Enhanced Capture (eCAP) Module Reference Guide (SPRUFZ8)
+       • TMS320C28x Instruction Set Simulator Technical Overview (SPRU608)
+       • TMS320C28x Optimizing C/C++ Compiler v6.1 User's Guide (SPRU514)
+       • TMS320C28x Assembly Language Tools v6.1 User's Guide (SPRU513)
+
+
+
+
+SPRUHH2C – July 2012 – Revised March 2019                      LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit   11
+Submit Documentation Feedback
+                                        Copyright © 2012–2019, Texas Instruments Incorporated
+Frequently Asked Questions (FAQ)                                                                                       www.ti.com
+
+7     Frequently Asked Questions (FAQ)
+      1. Can other programming and debug tools (such as an XDS510 debug probe) be used with the C2000
+         LaunchPad?
+         While a user could potentially connect an external debug probe to the F28027 device present on the
+         LaunchPad, it would require some rework of the board. It is recommended that users who want to use
+         an external debug probe purchase a controlCard and docking station that includes an external JTAG
+         connector.
+      2. What versions of Code Composer Studio can be used to develop software for the C2000 LaunchPad?
+         It is highly recommend that novice users develop applications with Code Composer Studio v5. The
+         drivers, examples, and other associated software are tailored to make the user experience as smooth
+         as possible in Code Composer Studio v5. However, there is nothing to prevent a user from creating
+         projects in Code Composer Studio v3 or v4 with the source files available in controlSUITE. Keep in
+         mind that all the projects for the C2000 LaunchPad are Code Composer Studio v5 projects and will not
+         import into Code Composer Studio v3 or v4. Only expert users should attempt to use the LaunchPad
+         with Code Composer Studio v3 or v4.
+      3. Why can’t I connect to the LaunchPad in Code Composer Studio?
+         There are a number of things that could cause this and they all have an easy fix.
+         • Is S1 switch 3 in the down position?
+              This is the TRST pin that enables and disables JTAG functionality on the chip. This switch must be
+              in the up position for the debug probe to be able to connect.
+         • Are both power LEDs lit?
+              The board has two power domains because of the isolated JTAG interface. For low-voltage
+              application development, JTAG isolation is not needed and the power domains can be combined to
+              allow for convenience (that is, the board can be powered completely through the USB). Ensure that
+              jumpers are placed on the posts of JP1, JP2, and JP3.
+         • Are drivers correctly installed for the XDS100v2 present on the LaunchPad?
+              Right click on My Computer and select properties. Navigate to the Hardware tab in the dialog box
+              and open the device manager. Scroll to the bottom of the list and expand the USB Serial Bus
+              controllers item. Are there two entries for TI XDS100 Channel A/B? If not, try unplugging and
+              replugging in the board. Does Windows give you any messages in the system tray? In Device
+              Manger, do either of the entries have a yellow exclamation mark over their icon? If so, try
+              reinstalling the drivers.
+      4. Why is the serial connection not working?
+         There are a few things that could cause this and they are easy to fix.
+         • Is S4 in the up position?
+              S4 connects the F28027 device serial peripheral to the XDS100 serial port, so this switch must be
+              turned on (up) for serial connectivity to function.
+         • Are you using the correct COM port?
+              Right click on My Computer and select properties. Navigate to the Hardware tab in the dialog box
+              and open the device manager. Scroll to Ports (COM & LPT) and expand this entry. Is there a USB
+              Serial Port listed? If so, read the COM number to the right of the entry; this is the COM number you
+              should be using.
+         • Are you using the correct baud rate?
+              Most, if not all, of the examples are configured for a baud rate of 115200 when the CPU is running
+              at 60 MHz. If you have changed the PLL settings or written your own application you may have to
+              recalculate the baud rate for your specific application. For information on how to do this, see the
+              TMS320x2802x, 2803x Piccolo Serial Communications Interface (SCI) Reference Guide
+              (SPRUGH1).
+
+8     Trademarks
+      C2000, Piccolo, LaunchPad, Code Composer Studio, controlSUITE are trademarks of Texas Instruments.
+      Windows is a registered trademark of Microsoft Corporation in the United States and/or other countries.
+      All other trademarks are the property of their respective owners.
+
+12    LAUNCHXL-F28027 C2000 Piccolo LaunchPad Experimenter Kit                            SPRUHH2C – July 2012 – Revised March 2019
+                                                                                                   Submit Documentation Feedback
+                                      Copyright © 2012–2019, Texas Instruments Incorporated
+www.ti.com                                                                                                                             Revision History
+
+
+                                                                Revision History
+NOTE: Page numbers for previous revisions may differ from page numbers in the current version.
+
+Changes from B Revision (July 2018) to C Revision ..................................................................................................... Page
+
+•   Update was made in Section 3.2. ....................................................................................................... 3
+
+
+
+
+SPRUHH2C – July 2012 – Revised March 2019                                                                                       Revision History         13
+Submit Documentation Feedback
+                                                  Copyright © 2012–2019, Texas Instruments Incorporated
+                                                 IMPORTANT NOTICE AND DISCLAIMER
+
+TI PROVIDES TECHNICAL AND RELIABILITY DATA (INCLUDING DATASHEETS), DESIGN RESOURCES (INCLUDING REFERENCE
+DESIGNS), APPLICATION OR OTHER DESIGN ADVICE, WEB TOOLS, SAFETY INFORMATION, AND OTHER RESOURCES “AS IS”
+AND WITH ALL FAULTS, AND DISCLAIMS ALL WARRANTIES, EXPRESS AND IMPLIED, INCLUDING WITHOUT LIMITATION ANY
+IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT OF THIRD
+PARTY INTELLECTUAL PROPERTY RIGHTS.
+These resources are intended for skilled developers designing with TI products. You are solely responsible for (1) selecting the appropriate
+TI products for your application, (2) designing, validating and testing your application, and (3) ensuring your application meets applicable
+standards, and any other safety, security, or other requirements. These resources are subject to change without notice. TI grants you
+permission to use these resources only for development of an application that uses the TI products described in the resource. Other
+reproduction and display of these resources is prohibited. No license is granted to any other TI intellectual property right or to any third
+party intellectual property right. TI disclaims responsibility for, and you will fully indemnify TI and its representatives against, any claims,
+damages, costs, losses, and liabilities arising out of your use of these resources.
+TI’s products are provided subject to TI’s Terms of Sale (www.ti.com/legal/termsofsale.html) or other applicable terms available either on
+ti.com or provided in conjunction with such TI products. TI’s provision of these resources does not expand or otherwise alter TI’s applicable
+warranties or warranty disclaimers for TI products.
+
+
+                             Mailing Address: Texas Instruments, Post Office Box 655303, Dallas, Texas 75265
+                                            Copyright © 2019, Texas Instruments Incorporated
+

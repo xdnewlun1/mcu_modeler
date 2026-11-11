@@ -1,0 +1,11 @@
+# STM32F105RC dual CAN: bxCAN1 (PA11/PA12) and bxCAN2 (PB12/PB13) of one chip on the same CAN bus at 500 kbit/s.
+#   can_dual: CAN1 sends ID 0x101 every 1 ms, CAN2 (filter bank 14: FMR.CAN2SB = 14) answers with ID 0x201, CAN1
+#   (filter bank 0) receives it; USART1 prints "TX n", "RX2 n", "RX1 n".
+# Run:   chipem run --board boards/stm32f105rc_dual_can.yaml --for 10ms
+# Build: firmware/samples_stm32f1_cl/build.sh
+name: stm32f105rc_dual_can
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f105rc, firmware: ../firmware/samples_stm32f1_cl/build/can_dual.elf}
+links:
+  - {type: can, name: CANBUS, nodes: [A.CAN1, A.CAN2]}

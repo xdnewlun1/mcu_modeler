@@ -13,6 +13,16 @@ polarity (`inv`, Kinetis TXINV). A break is a frame of `brk` low bit times follo
 for data frames only, the byte-level `tx_listeners` (cb(uart, byte): Session, shell, web, tests). Old consumers keep
 working unchanged.
 
+The TX pin
+----------
+`_tx_emit` also hands the frame's bit-level waveform (start bit, data LSB or MSB first, address bit, parity, stop
+bits, inversion; a break: its low bits then the stop bits) to the PinBoard as a waveform source on the model's
+`tx_signal` (`PinBoard.drive_wave`, `frame_edges`): the pins owned by that signal toggle with exact timestamps, so
+VCD files, the Logic tab, GPIO input reads of the pin and anything on a board net see the bits. A TX signal that no
+pin carries (not muxed) gives no waveform. `tx_wave_od()` (family hook) selects an open-drain line (STM32 half
+duplex / smartcard: 0 pulls low, 1 releases). Edges cost no scheduler event unless something must see them live (see
+chipem/pins.py); a model reset ends the waveform and the line returns to idle.
+
 Receive decoding (the model)
 ----------------------------
 A receiver decodes against ITS OWN configuration (`rx_format()`: baud, data bits, address bit, parity, polarity, bit
@@ -513,12 +523,36 @@ def decode_frame(fr: Frame, rx: RxFormat) -> list[RxChar]:
     return out
 
 
+def frame_edges(fr: Frame, t0: float) -> list[tuple[float, str]]:
+    """The physical transitions [(t_ns, "H"|"L")] of `fr` on the TX line, its start bit beginning at `t0`, at
+    `fr.baud`: the first is the start bit (or the break), the last the stop level; [] without a baud rate."""
+    if fr.baud <= 0:
+        return []
+    tb = 1e9 / fr.baud
+    inv = 1 if fr.inv else 0
+    if fr.brk:
+        cells = [(0, fr.brk), (1, fr.stop)]
+    else:
+        raw, n = fr.raw(), fr.ncells()
+        cells = [(0, 1)] + [((raw >> i) & 1, 1) for i in range(n)] + [(1, fr.stop)]
+    out: list[tuple[float, str]] = []
+    t, cur = t0, None
+    for lvl, nb in cells:
+        lv = lvl ^ inv
+        if lv != cur:
+            out.append((t, "H" if lv else "L"))
+            cur = lv
+        t += nb * tb
+    return out
+
+
 class UartRx:
     """Mixin for an MMIOBlock UART model. The model provides `char_ns()`, `rx_format()`, `rx_signal`,
     `_rx_block_reason()` and `_rx_accept(ch: RxChar)`, calls `_rx_init()` before its first reset() and
     `_wire_reset()` from reset(); it transmits through `_tx_emit(frame)`."""
 
     rx_signal: str = ""
+    tx_signal: str = ""                 # pin signal of the transmitter output (UART0_TX, USART1_TX, SCITXDA, ...)
 
     def _rx_init(self) -> None:
         self._wire: deque = deque()
@@ -544,11 +578,19 @@ class UartRx:
                 self.emit("uart", uart=self.name, dir="tx", byte=b, b8=1)
             else:
                 self.emit("uart", uart=self.name, dir="tx", byte=b)
+        sig = self.tx_signal
+        if sig:
+            pb = getattr(self.chip, "pins", None)
+            if pb is not None and hasattr(pb, "drive_wave"):
+                pb.drive_wave(sig, frame_edges(fr, self.chip.now_ns()), od=self.tx_wave_od())
         for cb in self.frame_listeners:
             cb(self, fr)
         if not fr.brk:
             for cb in self.tx_listeners:
                 cb(self, fr.data & 0xFF)
+
+    def tx_wave_od(self) -> bool:                       # family: TX pin open-drain (half duplex, smartcard)
+        return False
 
     # ------------------------------------------------------------------ receive format
     def rx_format(self) -> RxFormat:                   # family: what the receiver expects now
@@ -611,6 +653,13 @@ class UartRx:
         if ev is not None and self.chip is not None:
             self.chip.sched.cancel(ev)
         self._wire_ev = None
+        pb = getattr(self.chip, "pins", None)
+        sig = self.tx_signal
+        if sig and pb is not None and hasattr(pb, "end_wave") and (sig in pb._waves or sig in pb.signal_levels):
+            pb.end_wave(sig)                            # the transmitter stops: the line returns to its idle level
+            pb.release_signal(sig)
+            if sig in pb.od_low:
+                pb.drive_open_drain(sig, False)
         if getattr(self, "_ln", None) is not None:
             self._ln.reset()
         if getattr(self, "_wire", None) and self.chip is not None:

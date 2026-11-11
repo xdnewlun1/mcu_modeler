@@ -1,0 +1,19 @@
+# TI TMS320F28064 (Piccolo F2806x), 100-pin LQFP "PZ": the TMS320F28069 die description (chips/tms320f28069.yaml) with this
+# part's memory and options, SPRS698J Table 5-1 (64K-word flash, 50K-word SARAM, CLA no, VCU
+# yes -- the interpreter has no VCU either way), Figure 8-6, Table 8-4, Table 8-10 (PARTID).
+include: tms320f28069.yaml
+name: TMS320F28064
+memory:
+  - {name: M0, base: 0x000000, size: 0x0400, kind: ram}
+  - {name: M1, base: 0x000400, size: 0x0400, kind: ram}
+  - {name: CLAMSGRAM, base: 0x001480, size: 0x0100, kind: ram}
+  - {name: L0L8, base: 0x008000, size: 0xC000, kind: ram}      # L0-L8 up to 0x14000
+  - {name: OTP, base: 0x3D7800, size: 0x0680, kind: rom, fill: 0xFF}
+  - {name: OTP2, base: 0x3D7EC0, size: 0x0140, kind: rom, fill: 0xFF}
+  - {name: FLASH, base: 0x3E8000, size: 0x10000, kind: flash, fill: 0xFF}
+  - {name: BOOTROM, base: 0x3F8000, size: 0x8000, kind: rom, fill: 0xFF}
+drop: [CLA1, CLA1_INT1, CLA1_INT2, CLA1_INT3, CLA1_INT4, CLA1_INT5, CLA1_INT6, CLA1_INT7, CLA1_INT8]
+peripheral_params:
+  PARTID: {value: 0x006E}                 # SPRS698 Table 8-10 (TMS320F28064PZ)
+  DEV_EMU: {reset: {CLASSID: 0x006F}}
+  CSM: {secure_ranges: [[0x8000, 0xC000], [0x3D7800, 0x3D7C00], [0x3E8000, 0x3F8000]]}

@@ -1,0 +1,18 @@
+# STM32F411RE SPI5 in I2S mode (I2S5, master transmitter; the F411 has I2S on SPI1-5) driving an I2S codec part.
+#   A (STM32F411RE) runs f411_i2s5_tone on the 16 MHz HSI: PLLI2S = HSI / PLLI2SM 32 x 256 / 5 = 25.6 MHz (the F411's own
+#                   PLLI2S input divider), Fs = 32 kHz, 16-bit Philips, CK = 1.024 MHz on PB0, WS on PB1, SD on PB8;
+#                   prints "I2S5 <PLLI2SCFGR> tx 256 ok" on USART2 (PA2).
+#   CODEC (i2s_codec part): records every frame from SDIN (`frames`).
+# Run:   chipem run --board boards/stm32f411_i2s5_codec.yaml --for 15ms
+# Build: firmware/samples_stm32f4x1/build.sh
+name: stm32f411_i2s5_codec
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f411re, firmware: ../firmware/samples_stm32f4x1/build/f411_i2s5_tone.elf}
+nets:
+  - {name: BCLK, pins: [A.PB0]}
+  - {name: WS, pins: [A.PB1]}
+  - {name: SDIN, pins: [A.PB8]}
+  - {name: SDOUT, pins: [], pull: down}
+parts:
+  - {id: CODEC, type: i2s_codec, bits: 16, format: i2s, ports: {bclk: BCLK, ws: WS, sdin: SDIN, sdout: SDOUT}}

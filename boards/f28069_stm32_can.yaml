@@ -1,0 +1,16 @@
+# A LAUNCHXL-F28069M-style TMS320F28069 (Piccolo F2806x, eCAN-A) and an STM32F405 (bxCAN) on one CAN bus.
+#   A (F28069) runs f28069_can: every 10 ms mailbox 0 sends 100#00<n>4B32 (LED D9 = GPIO34 toggles), mailbox 16
+#     receives the echo 202#..., LED D10 (GPIO39) toggles and an FPU32 running average is updated; console on SCI-A
+#     (GPIO29, 115979 baud).  eCAN-A on the LaunchPad transceiver pins GPIO30 (CANRXA) / GPIO31 (CANTXA); the F2806x
+#     eCAN clock is SYSCLKOUT / 2 = 45 MHz: BRPreg 8, 10 tq per bit -> 500 kbit/s.
+#   B (STM32F405ZG) runs can_echo: answers every frame with ID 0x202 and the same payload.
+# Run:  chipem run --board boards/f28069_stm32_can.yaml --for 40ms
+# Build: firmware/samples_c2000_c/build.sh f28069_can   (TI cl2000, --float_support=fpu32)
+# The F28069 starts on INTOSC1 (10 MHz) and locks its PLL to 90 MHz after 6.55 ms (PLLLOCKPRD reset value).
+name: f28069_stm32_can
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28069, firmware: ../firmware/samples_c2000_c/build/f28069_can.out}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/can_echo.elf}
+links:
+  - {type: can, name: CANBUS, nodes: [A.ECANA, B.CAN1]}

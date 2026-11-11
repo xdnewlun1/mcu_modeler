@@ -1,0 +1,11 @@
+# TMS320F28027 eCAP1 measuring its own ePWM1A: GPIO0 (EPWM1A, 20 kHz 30 %) wired to GPIO5 (ECAP1, mux 3).
+#   firmware/samples_c2000/f28027_ecap.asm: ecap_period = 3000, ecap_high = 900 SYSCLKOUT cycles at 60 MHz.
+# Run:  chipem run --board boards/f28027_ecap_loopback.yaml --for 10ms
+name: f28027_ecap_loopback
+quantum: 10us
+chips:
+  - {id: A, chip: tms320f28027, firmware: ../firmware/samples_c2000/build/f28027_ecap.c28img}
+nets:
+  - {name: PWM_LOOP, pins: [A.GPIO0, A.GPIO5]}        # A.EPWM1A -> A.ECAP1
+parts:
+  - {id: P, type: probe, ports: {in: PWM_LOOP}}

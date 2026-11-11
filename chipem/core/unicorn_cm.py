@@ -6,9 +6,19 @@ Facts this relies on (verified on Unicorn 2.1.4):
   * A branch to an EXC_RETURN value raises UC_HOOK_INTR intno 8 with PC = value & ~1 (Unicorn would then spin
     on intno 3), so the hook records it and calls emu_stop(); the arch layer unstacks.
   * `svc` raises intno 2 with PC already past the svc; `bkpt` raises intno 7 with PC at the bkpt.
-  * emu_stop() inside an MMIO *write* callback leaves PC at the store (the store has happened); we step PC past
-    it when the instruction is a plain single-register store (checked with capstone), otherwise we don't stop.
+  * emu_stop() inside an MMIO *write* callback leaves PC at the store (the store has happened), and inside a *read*
+    callback it aborts the load (it runs again on resume).  So a stop requested from an MMIO callback lowers the
+    instruction limit of the running emu_start instead (`end_slice_at`, `request_stop(from_mmio=True)`): Unicorn's
+    count hook then ends the run in front of the next instruction, after the accessing one completed exactly once,
+    whatever it is (load/store multiple, writeback, IT block).  Only without the calibrated counter do we fall back
+    to emu_stop + stepping PC past a plain single-register store (any other stop request is refused).
   * Writing IPSR/XPSR/CONTROL through reg_write keeps QEMU's MSP/PSP banking consistent.
+  * uc_mem_unmap inside a memory hook (an MMIO callback) works until that emu_start ends, which then raises a
+    spurious UC_HOOK_INTR intno 3 (EXCP_PREFETCH_ABORT) at the next instruction ("prefetch abort on the next fetch").
+    Mapping inside the unmapped-access hook (auto stubs) is fine. So mapping changes requested while the core runs
+    (map_memory / map_mmio / map_shared / unmap from a callback, e.g. Bus.map_window) are queued, the slice ends
+    after the accessing instruction (end_slice_at) and the queue is applied once emu_start has returned: the next
+    instruction sees the new mapping.
 """
 from __future__ import annotations
 
@@ -107,6 +117,78 @@ def _calibrate_counter() -> int | None:
     return _COUNTER_OFF
 
 
+# FP availability (CPACR CP10/CP11, Cortex-M3 without FPU). Unicorn 2.1 executes VFP instructions on every M-profile
+# model (its cortex-m3 carries the M4's MVFR0/MVFR1) and ignores CPACR. QEMU's Thumb decoder raises NOCP (intno 17)
+# for a coprocessor instruction when the CPU's MVFR0 FP fields are zero, checked at translation time. So the core
+# clears ARMCPU.isar.mvfr0/mvfr1 (located once by calibration: a pointer field of uc_struct whose target holds the
+# M4's MVFR0/MVFR1 pair) while FP is unavailable and flushes the translation cache when that changes: no hook at all.
+_FP_LOC: tuple[int, int] | None = None
+_FP_CAL = False
+_MVFR_M4 = (0x10110021, 0x11000011)
+
+
+def _rw_maps() -> list[tuple[int, int]]:
+    out = []
+    try:
+        with open("/proc/self/maps") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) > 1 and parts[1].startswith("rw"):
+                    a, b = parts[0].split("-")
+                    out.append((int(a, 16), int(b, 16)))
+    except OSError:
+        pass
+    return out
+
+
+def _calibrate_fp() -> tuple[int, int] | None:
+    global _FP_LOC, _FP_CAL
+    if _FP_CAL:
+        return _FP_LOC
+    _FP_CAL = True
+    try:
+        span = 0x10000
+        uc = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
+        uc.ctl_set_cpu_model(A.UC_CPU_ARM_CORTEX_M4)
+        uc.mem_map(0, 0x1000)               # Unicorn creates the vCPU lazily, on first use
+        maps = _rw_maps()                   # after that: the CPU may sit in a fresh mapping
+        if not maps:
+            return None
+        base = uc._uch.value
+        found = set()
+        for off in range(0, 0x1000, 8):
+            p = ctypes.c_uint64.from_address(base + off).value
+            if not p or p % 4 or not any(a <= p and p + span <= b for a, b in maps):
+                continue
+            arr = (ctypes.c_uint32 * (span // 4)).from_address(p)
+            for i in range(span // 4 - 1):
+                if arr[i] == _MVFR_M4[0] and arr[i + 1] == _MVFR_M4[1]:
+                    found.add((off, 4 * i, p + 4 * i))
+        # the heap may hold other instances' CPUs too: keep the candidate whose clearing makes THIS instance trap
+        uc.mem_write(0x100, bytes.fromhex("30ee200a00bffee7"))      # vadd.f32 s0, s0, s1; nop; b .
+        hit: list = []
+        uc.hook_add(UC_HOOK_INTR, lambda u, intno, ud: (hit.append(intno), u.emu_stop()))
+        good = []
+        for off, d, addr in sorted(found):
+            mv = (ctypes.c_uint32 * 2).from_address(addr)
+            mv[0] = mv[1] = 0
+            uc.ctl_flush_tb()
+            hit.clear()
+            try:
+                uc.emu_start(0x101, _UNTIL, 0, 1)
+            except UcError:
+                pass
+            mv[0], mv[1] = _MVFR_M4
+            uc.ctl_flush_tb()
+            if hit == [17]:
+                good.append((off, d))
+        if good:
+            _FP_LOC = good[0]
+    except Exception:  # pragma: no cover - unexpected Unicorn build / layout
+        _FP_LOC = None
+    return _FP_LOC
+
+
 class _RegBatch:
     """Pre-built ctypes arrays for uc_reg_read_batch / uc_reg_write_batch over a fixed list of 32-bit regs."""
     __slots__ = ("uc", "n", "ids", "vals", "ptrs")
@@ -154,10 +236,13 @@ class UnicornCortexM(Core):
         self._stop: StopReason | None = None
         self._user_stop = False
         self._mmio_fix: int | None = None
+        self._cut: int | None = None                # lowered instruction limit of the running slice (end_slice_at)
         self._fault_mem: tuple | None = None
         self._unmapped_handler: Callable[[int, int, str], bool] | None = None
         self._batches: dict[tuple, _RegBatch] = {}
         self._mmio_keep: list = []
+        self._map_queue: list = []                 # mapping changes requested while running (applied after the run)
+        self._in_unmapped = False                  # inside the unmapped-access hook: map now (the access retries)
         self._poll = None                          # PollWatch while poll skip is on (set_poll_watch)
         self._poll_stop = False
         self._max_insns = 0
@@ -180,6 +265,25 @@ class UnicornCortexM(Core):
             except Exception:  # pragma: no cover
                 self._counter = None
         self.exact_counts = self._counter is not None
+        # FP availability gate (see _calibrate_fp): ARMCPU.isar.mvfr0/1 of this instance
+        self._mvfr = None
+        self._mvfr_on = (0, 0)
+        self.fp_enabled = True
+        loc = _calibrate_fp()
+        if loc is not None:
+            try:
+                p = ctypes.c_uint64.from_address(uc._uch.value + loc[0]).value   # (ctl_get_page_size above
+                maps = _rw_maps()                                                # initialised the vCPU)
+                ok = any(a <= p + loc[1] and p + loc[1] + 8 <= b for a, b in maps)
+                mv = (ctypes.c_uint32 * 2).from_address(p + loc[1]) if ok else None
+                if mv is not None and mv[0] & 0xF0:                                # the model has single-precision FP fields
+                    self._mvfr = mv
+                    self._mvfr_on = (mv[0], mv[1]) if fpu else (0, 0)   # no FPU (Cortex-M3, M4 w/o F): never on
+            except Exception:  # pragma: no cover
+                self._mvfr = None
+        self.fp_gate = self._mvfr is not None
+        if self._mvfr is not None and not fpu:
+            self._fp_now(False)
         # the emu_start count limit sits next to the counter (calibration found the pair counter, count): a
         # watchpoint lowers it to "this instruction" so the run ends right after the accessing instruction
         self._limit = None
@@ -213,12 +317,57 @@ class UnicornCortexM(Core):
             self._block_hook = None
         self.precise = precise
 
+    def _defer_map(self, fn, *args) -> bool:
+        """While emu_start runs (an MMIO callback asks for a mapping change): queue fn(*args) for the end of the run
+        and end the slice after the current instruction (see the module docstring). False: apply it now."""
+        if not self.running or (self._in_unmapped and not self._map_queue):
+            return False
+        self._map_queue.append((fn, args))
+        if not self.end_slice_at(0):
+            self.request_stop(from_mmio=True)       # no calibrated counter: at the end of the slice at the latest
+        return True
+
+    def _apply_maps(self) -> None:
+        q, self._map_queue = self._map_queue, []
+        for fn, args in q:
+            fn(*args)
+
+    def set_fp_enabled(self, on: bool) -> bool:
+        """CPACR CP10/CP11 (arch.armv7m SCS): with FP disabled (or no FPU) every VFP / coprocessor instruction raises
+        NOCP (intno 17 -> UsageFault NOCP). From a callback the change applies after the accessing instruction.
+        False if the gate is not available (calibration failed: FP instructions always execute)."""
+        if self._mvfr is None:
+            return False
+        if self.running and self._defer_map(self._fp_now, bool(on)):
+            return True
+        self._fp_now(bool(on))
+        return True
+
+    def _fp_now(self, on: bool) -> None:
+        mv = self._mvfr
+        want = self._mvfr_on if on else (0, 0)
+        self.fp_enabled = want != (0, 0)
+        if (mv[0], mv[1]) != want:
+            mv[0], mv[1] = want
+            self.flush_code_cache()
+
     def map_memory(self, base: int, size: int, *, writable: bool = True, executable: bool = True) -> None:
+        if self.running and self._defer_map(self._map_memory_now, base, size, writable, executable):
+            return
+        self._map_memory_now(base, size, writable, executable)
+
+    def _map_memory_now(self, base: int, size: int, writable: bool, executable: bool) -> None:
         perms = UC_PROT_READ | (UC_PROT_WRITE if writable else 0) | (UC_PROT_EXEC if executable else 0)
         self.uc.mem_map(base, size, perms)
 
     def map_mmio(self, base: int, size: int, read: Callable[[int, int], int],
                  write: Callable[[int, int, int], None]) -> None:
+        if self.running and self._defer_map(self._map_mmio_now, base, size, read, write):
+            return
+        self._map_mmio_now(base, size, read, write)
+
+    def _map_mmio_now(self, base: int, size: int, read: Callable[[int, int], int],
+                      write: Callable[[int, int, int], None]) -> None:
         core = self
 
         def rd(uc, off, sz, ud, _r=read, _b=base):
@@ -273,10 +422,20 @@ class UnicornCortexM(Core):
         p.snap, p.cnt = snap, cnt
 
     def map_shared(self, base: int, size: int, ptr: int, *, writable: bool = True) -> None:
+        if self.running and self._defer_map(self._map_shared_now, base, size, ptr, writable):
+            return
+        self._map_shared_now(base, size, ptr, writable)
+
+    def _map_shared_now(self, base: int, size: int, ptr: int, writable: bool) -> None:
         perms = UC_PROT_READ | UC_PROT_EXEC | (UC_PROT_WRITE if writable else 0)
         self.uc.mem_map_ptr(base, size, perms, ptr)
 
     def unmap(self, base: int, size: int) -> None:
+        if self.running and self._defer_map(self._unmap_now, base, size):
+            return
+        self._unmap_now(base, size)
+
+    def _unmap_now(self, base: int, size: int) -> None:
         self.uc.mem_unmap(base, size)
         self._safe_cache.clear()
 
@@ -359,6 +518,7 @@ class UnicornCortexM(Core):
         self._stop = None
         self._user_stop = False
         self._mmio_fix = None
+        self._cut = None
         self._fault_mem = None
         precise = self.precise
         if precise:
@@ -380,9 +540,13 @@ class UnicornCortexM(Core):
             err = e
         finally:
             self.running = False
+            if self._map_queue:          # mapping changes requested by callbacks during the run
+                self._apply_maps()
             if self._wp_flush:           # deleted watch hooks are gone now: retranslate without their helpers
                 self._wp_flush = False
                 self.flush_code_cache()
+        if self._cut is not None:        # end_slice_at lowered the budget of this slice
+            max_insns = self._cut
 
         if err is not None:
             if getattr(err, "errno", None) == UCC.UC_ERR_INSN_INVALID and self._is_wfe_fault():
@@ -467,9 +631,32 @@ class UnicornCortexM(Core):
         return min(total, max_insns)
 
     # ------------------------------------------------------------------ stops
+    def end_slice_at(self, n: int) -> bool:
+        """Lower the running slice's budget to `n` instructions from its start (at least the instruction executing
+        now completes): the run then ends with StopReason.COUNT (or USER after request_stop) and n executed. Called
+        from MMIO callbacks (an event scheduled inside the slice, chip.Chip._early_event). Costs nothing per
+        instruction: it rewrites the limit Unicorn's count hook already compares against. False if the core cannot
+        (no calibrated counter, not running)."""
+        lim = self._limit
+        if lim is None or not self.running:
+            return False
+        c = int(self._counter.value)              # includes the instruction executing now
+        if n < c:
+            n = c
+        cur = self._cut if self._cut is not None else self._max_insns
+        if n < cur:
+            lim.value = n
+            self._cut = n
+            self._max_insns = n
+        return True
+
     def request_stop(self, from_mmio: bool = False) -> bool:
         if not self.running:
             return False
+        if from_mmio and self._limit is not None:   # end after the accessing instruction (see the module docstring)
+            self.end_slice_at(0)
+            self._user_stop = True
+            return True
         if from_mmio:
             pc = self.uc.reg_read(A.UC_ARM_REG_PC)
             n = self._store_len(pc)
@@ -594,11 +781,14 @@ class UnicornCortexM(Core):
         acc, kind = _ACCESS.get(access, ("?", "unmapped"))
         h = self._unmapped_handler
         if h is not None and acc != "x":
+            self._in_unmapped = True              # an auto stub is mapped at once: the access is retried
             try:
                 if h(addr, size, acc):
                     return True
             except Exception:
                 pass
+            finally:
+                self._in_unmapped = False
         self._fault_mem = (kind, acc, addr, size, value)
         return False
 

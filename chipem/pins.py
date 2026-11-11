@@ -3,6 +3,14 @@
 No family knowledge lives here. Family mux/GPIO models (e.g. Kinetis PORT/GPIO) call `PinBoard.mcu_update`
 to tell the board what the MCU does with a pin; the user (CLI/REPL/web) calls `PinBoard.set_external`.
 Every observable change is published as a `PinEvent` to subscribers. See docs/CONTRACTS.md.
+
+Waveform sources (`drive_wave`): a peripheral that knows a signal's edges in advance (a UART frame) hands them over
+at once instead of driving each edge at its time. The edges are applied lazily, with their exact timestamps, when
+time has passed them: before any other pin event of this board is published (so subscribers still see events in
+time order), when a GPIO model reads input levels (`sync_waves`), and at the end of every core slice (Chip). Only
+when an edge must be seen while it happens (an input listener with `wave_rt(pin)` true, such as an armed pin
+interrupt, or `wave_rt_hook(pin)` true: a board net whose other members observe the level) is one scheduler event
+per edge used. Nothing is scheduled per bit otherwise.
 """
 from __future__ import annotations
 
@@ -175,6 +183,13 @@ class PinBoard:
         self._mux_drive: dict[int, Level | None] = {}       # pin num -> drive the mux model last asked for
         # open-drain peripheral outputs (I2C SDA/SCL) currently pulling their pins low (drive_open_drain)
         self.od_low: set[str] = set()
+        # waveform sources (drive_wave): signal -> _WaveSrc with edges not applied yet
+        self.sched: Any = None                         # the chip's scheduler (set by the Chip; realtime waves)
+        self.wave_rt_hook: Callable[[Pin], bool] | None = None   # board: does a net need this pin's edges live?
+        self._waves: dict[str, _WaveSrc] = {}
+        self._wave_next = float("inf")                 # earliest pending wave edge (ns)
+        self._wave_ev = None                           # realtime waves: event at the next realtime edge
+        self._wave_syncing = False
 
     # --- construction --------------------------------------------------
     @classmethod
@@ -235,6 +250,8 @@ class PinBoard:
         return float(c.now_ns()) if c is not None and hasattr(c, "now_ns") else 0.0
 
     def _emit(self, pin: Pin, fld: str, old: Any, new: Any, t: float):
+        if self._wave_next <= t and not self._wave_syncing:
+            self.sync_waves(t)                # earlier edges of waveform sources first: events stay in time order
         if not self._subs:
             return
         ev = PinEvent(t, pin.id, fld, old, new)
@@ -301,13 +318,13 @@ class PinBoard:
             self._level_changed(pin, old, t)
             self._emit(pin, "od", not want, want, t)     # after the level: a board net re-resolves on this event
 
-    def drive_open_drain(self, name: str, low: bool) -> None:
+    def drive_open_drain(self, name: str, low: bool, t: float | None = None) -> None:
         """Open-drain peripheral output `name` (I2C "I2C0_SDA", "SCLA", ...): `low=True` pulls every pin currently
         owned by it low (`Pin.od_low`: the pin reads L and is a strong L driver on a board net, whatever direction
         its mux model reported); `low=False` releases it, and the pin shows what its mux model says again (an
         open-drain role is an input: the level comes from the net, a pull or stimulus, else X). A pin muxed to the
         signal later follows at once (mcu_update). Emits a PinEvent field "od" (old, new: bool) and the level
-        change, at instruction-precise time."""
+        change, at instruction-precise time (or at `t`, ns)."""
         low = bool(low)
         if (name in self.od_low) == low:
             return
@@ -315,7 +332,6 @@ class PinBoard:
             self.od_low.add(name)
         else:
             self.od_low.discard(name)
-        t = None
         for p in self.signal_pins(name):
             if not self.signal_matches(p.owner, name):
                 continue
@@ -387,18 +403,18 @@ class PinBoard:
             self._signal_pins[name] = pins
         return pins
 
-    def drive_signal(self, name: str, level: Level) -> None:
+    def drive_signal(self, name: str, level: Level, t: float | None = None) -> None:
         """A peripheral output signal (e.g. "TIM2_CH1", "FTM0_CH3", "EPWM1A") is now at `level`: every pin currently
-        owned by it as an output follows (instruction-precise time, like any MCU drive change)."""
+        owned by it as an output follows (instruction-precise time, like any MCU drive change; or at `t`, ns)."""
         lvl = _norm_level(level)
         if self.signal_levels.get(name) == lvl:
             return
         self.signal_levels[name] = lvl
-        t = None
         for p in self.signal_pins(name):
             if p.direction != "out" or not self.signal_matches(p.owner, name):
                 continue
-            plvl = self._signal_level(p.owner)     # the owner's best signal (an exact match wins over a bundle)
+            # the owner's best signal (an exact match wins over a bundle); owner == name: that is this signal
+            plvl = lvl if p.owner == name else self._signal_level(p.owner)
             if plvl is not None and p.drive != plvl:
                 if t is None:
                     t = self._now()
@@ -424,10 +440,134 @@ class PinBoard:
                 p.drive = lvl                    # not via mcu_update: keep the mux model's requested drive
                 self._level_changed(p, old, self._now())
 
+    # --- waveform sources (UART frames; see the module docstring) ---------------------------------------------------
+    def drive_wave(self, name: str, edges: list[tuple[float, Level]], *, od: bool = False) -> bool:
+        """Peripheral output signal `name` will take each level of `edges` [(t_ns, level), ...] (increasing times,
+        the first at or after now) at its time: a whole UART frame at once. `od`: open-drain output (L pulls low, H
+        releases; drive_open_drain). Pending edges of an earlier wave of the signal at or after the first new edge are
+        dropped. Edges are applied lazily (module docstring), each with its own timestamp, unless a pin of the signal
+        needs them live: then one scheduler event per edge. Returns False (nothing stored) when no pin is currently
+        owned by the signal as an output (pin not muxed: no waveform)."""
+        pins = [p for p in self.signal_pins(name) if self.signal_matches(p.owner, name)
+                and (p.direction == "out" or od) and p.direction != "analog"]
+        if not pins or not edges:
+            self.end_wave(name)
+            return False
+        rt = False
+        hook = self.wave_rt_hook
+        for p in pins:
+            if hook is not None and hook(p):
+                rt = True
+                break
+            for cb in self.input_listeners.get(p.id) or ():
+                f = getattr(cb, "wave_rt", None)
+                if f is not None and (f(p) if callable(f) else f):
+                    rt = True
+                    break
+            if rt:
+                break
+        w = self._waves.get(name)
+        if w is None:
+            w = self._waves[name] = _WaveSrc()
+        else:
+            t0 = edges[0][0]
+            while w.q and w.q[-1][0] >= t0:
+                w.q.pop()
+        w.q.extend((float(t), _norm_level(lvl)) for t, lvl in edges)
+        w.od = od
+        w.rt = rt and self.sched is not None
+        self._wave_plan()
+        self.sync_waves()                       # edges due now (the start bit) at once
+        return True
+
+    def end_wave(self, name: str, level: Level | None = None) -> None:
+        """Drop the edges of `name` not applied yet (transmitter reset / disabled mid-frame); with `level`, drive the
+        signal to it now (e.g. the idle level)."""
+        w = self._waves.pop(name, None)
+        if w is not None:
+            self._wave_plan()
+        if level is not None:
+            if w is not None and w.od:
+                self.drive_open_drain(name, _norm_level(level) == "L")
+            else:
+                self.drive_signal(name, level)
+
+    def wave_pending(self) -> bool:
+        """True while some waveform source has edges not applied yet (GPIO models: do not cache input levels)."""
+        return bool(self._waves)
+
+    def sync_waves(self, now: float | None = None) -> None:
+        """Apply every pending wave edge due at or before `now` (default: the current time), in time order, with
+        its own timestamp. Cheap when nothing is pending; called by GPIO input reads, the Chip after each slice and
+        before any other pin event."""
+        if not self._waves or self._wave_syncing:
+            return
+        if now is None:
+            now = self._now()
+        if self._wave_next > now:
+            return
+        self._wave_syncing = True
+        try:
+            waves = self._waves
+            while True:
+                best = None
+                for name, w in waves.items():
+                    if w.q and w.q[0][0] <= now and (best is None or w.q[0][0] < best[0]):
+                        best = (w.q[0][0], name, w)
+                if best is None:
+                    break
+                t, name, w = best
+                lvl = w.q.popleft()[1]
+                if w.od:
+                    self.drive_open_drain(name, lvl == "L", t)
+                else:
+                    self.drive_signal(name, lvl, t)
+                if not w.q:
+                    del waves[name]
+        finally:
+            self._wave_syncing = False
+        self._wave_plan()
+
+    def _wave_plan(self) -> None:
+        nxt = rt_next = float("inf")
+        for w in self._waves.values():
+            if w.q:
+                t = w.q[0][0]
+                nxt = min(nxt, t)
+                if w.rt:
+                    rt_next = min(rt_next, t)
+        self._wave_next = nxt
+        ev = self._wave_ev
+        if ev is not None and (ev.cancelled or getattr(ev, "t_ns", None) != rt_next):
+            self.sched.cancel(ev)
+            ev = self._wave_ev = None
+        if ev is None and rt_next < float("inf") and self.sched is not None:
+            self._wave_ev = self.sched.at_ns(rt_next, self._wave_tick, rt_next)
+
+    def _wave_tick(self, t: float) -> None:
+        self._wave_ev = None
+        self.sync_waves(max(self._now(), t))     # the event's cycle may convert back to a hair before t
+        if self._wave_ev is None:
+            self._wave_plan()
+
     def reset(self):
         """MCU reset: restore power-on owner/direction/drive/pull (external stimulus is kept). Emits events."""
+        if self._waves:
+            self._waves.clear()
+            self._wave_plan()
         self.signal_levels.clear()
         self.od_low.clear()
         for p in self.pins:
             owner, direction, drive, pull = self._initial[p.num]
             self.mcu_update(p, owner=owner, direction=direction, drive=drive, pull=pull)
+
+
+class _WaveSrc:
+    """Edges of one waveform source not applied yet (PinBoard.drive_wave)."""
+    __slots__ = ("q", "od", "rt")
+
+    def __init__(self) -> None:
+        from collections import deque
+        self.q: deque = deque()
+        self.od = False
+        self.rt = False

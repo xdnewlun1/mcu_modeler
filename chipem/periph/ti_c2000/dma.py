@@ -9,7 +9,9 @@ SPRUI07 Table 8-2's "i * E3h" channel stride is a typo).  Every register write i
 
 Triggers (MODE.PERINTSEL, SPRUI07 Table 8-9): 1 SEQ1INT, 2 SEQ2INT (ADC, the gated interrupt pulse: INT_ENA_SEQx),
 3-9 XINT1-7, 10 XINT13 (XNMI with XNMICR.SELECT), 11-13 TINT0-2 (TCR.TIE), 14/15 McBSP-A MXEVTA / MREVTA (XRDY / RRDY
-0 -> 1), 16/17 McBSP-B, 18 + 2(n-1) / 19 + 2(n-1) ePWMn SOCA / SOCB.  0, 30-31 and the events of a McBSP the part
+0 -> 1), 16/17 McBSP-B, 18 + 2(n-1) / 19 + 2(n-1) ePWMn SOCA / SOCB.  F2806x (SPRUH18 Table 11-9, `params.epwm_first:
+2`, `epwm_last: 7`): 1/2 = ADCINT1/ADCINT2 of the type-3 ADC (`ti_c2000.adc_soc.adcint_listeners`), 3-5 XINT1-3, 18-29
+ePWM2-7 SOCA/SOCB; the USB endpoint triggers (7-10, 30, 31) never fire.  0, 30-31 and the events of a McBSP the part
 does not have (McBSP-B on the F28232) never fire (one `warn` when such a channel is started).  The models call back
 through their listener lists (adc.dma_listeners, epwm.soc_listeners, cputimer.tint_listeners, xint.int_listeners,
 mcbsp.dma_listeners).  A trigger is latched in CONTROL.PERINTFLG when
@@ -133,11 +135,11 @@ class DMA(C2000Block):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         ov: dict[str, dict] = {
-            "DMACTRL": {"on_write": self._dmactrl_write, "on_read": lambda b, r: 0},
+            "DMACTRL": {"on_write": self._dmactrl_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
             "DEBUGCTRL": {"ro_mask": 0x7FFF},
             "REVISION": {"ro_mask": 0xFFFF},
             "PRIORITYCTRL1": {"ro_mask": 0xFFFE},
-            "PRIORITYSTAT": {"ro_mask": 0xFFFF, "on_read": self._prioritystat_read},
+            "PRIORITYSTAT": {"ro_mask": 0xFFFF, "on_read": self._prioritystat_read, "on_peek": self._prioritystat_read},
         }
         self.ch = [_Chan(i) for i in range(NCH)]
         for c in self.ch:
@@ -172,8 +174,12 @@ class DMA(C2000Block):
         self._mcbsp: set[str] = set()
         for b in (getattr(chip, "peripherals", {}) or {}).values():
             m = getattr(b, "model", None)
+            if "ti_c2000.epwm" in getattr(b, "implements", ()):
+                m = "ti_c2000.epwm"                  # Piccolo ti_c2000.epwm_dc
             if m == "ti_c2000.adc" and hasattr(b, "dma_listeners"):
                 b.dma_listeners.append(self._on_adc)
+            elif m == "ti_c2000.adc_soc" and hasattr(b, "adcint_listeners"):
+                b.adcint_listeners.append(self._on_adcint)     # F2806x: ADCINT1/2 = PERINTSEL 1/2
             elif m == "ti_c2000.epwm" and hasattr(b, "soc_listeners"):
                 b.soc_listeners.append(self._on_epwm)
             elif m == "ti_c2000.cputimer" and hasattr(b, "tint_listeners"):
@@ -246,7 +252,14 @@ class DMA(C2000Block):
             adc.set("ADCST", adc.get("ADCST") & ~(1 << (seq - 1)))      # clear INT_SEQx at the source
 
     def _on_epwm(self, index: int, which: str) -> None:
-        self.trigger(18 + 2 * (index - 1) + (which == "B"))
+        first = int(self.params.get("epwm_first", 1))     # F2806x: ePWM2..7 SOCA/B = 18..29 (SPRUH18 Table 11-9)
+        last = int(self.params.get("epwm_last", 6))
+        if first <= index <= last:
+            self.trigger(18 + 2 * (index - first) + (which == "B"))
+
+    def _on_adcint(self, n: int) -> None:
+        if n in (1, 2):
+            self.trigger(n)
 
     def _on_timer(self, index: int) -> None:
         self.trigger(11 + index)

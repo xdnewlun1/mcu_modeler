@@ -11,6 +11,9 @@
 # v6; EABI exists from v18.12 (the default since v20.2) and COFF ABI was deprecated afterwards — this script
 # probes `--abi=coffabi` and skips the COFF build with a message if the installed version rejects it.
 #   ABI=eabi ./build.sh     only EABI;   ABI=coff ./build.sh   only COFF
+#   ./build.sh f28335_fpu f28335_pid   only the named samples (other build outputs stay untouched)
+# f28027_*.c are TMS320F28027 samples (f2802x.cmd, no FPU), f28069_*.c TMS320F28069 samples (f2806x.cmd, FPU32).
+# f28335_*.c are TMS320F28335 samples: --float_support=fpu32, rts2800_fpu32[_eabi].lib, f28335.cmd (flash 0x300000).
 set -eu
 case "${TI_CGT:-}" in                                  # a relative TI_CGT is relative to the caller's directory
     ""|/*) ;;
@@ -48,33 +51,47 @@ CFLAGS="-v28 -ml -mt --float_support=softlib -O2 -g --diag_warning=225 --display
 # COPY and expect the loader to do it; CHIP_EM's loader skips COPY sections and does not auto-initialise).
 LFLAGS="-z --rom_model --diag_suppress=10063 --stack_size=0x300 --heap_size=0 --entry_point=code_start --warn_sections -i$TI_CGT/lib"
 
-lib_for() {   # $1 = coff|eabi: the run-time library name, falling back to libc.a (TI's selecting index library)
+lib_for() {   # $1 = coff|eabi [, $2 = fpu32]: the run-time library name, falling back to libc.a (TI's index library)
+    if [ "${2:-}" = fpu32 ]; then
+        if [ "$1" = coff ] && [ -f "$TI_CGT/lib/rts2800_fpu32.lib" ]; then echo rts2800_fpu32.lib; return; fi
+        if [ "$1" = eabi ] && [ -f "$TI_CGT/lib/rts2800_fpu32_eabi.lib" ]; then echo rts2800_fpu32_eabi.lib; return; fi
+        echo libc.a; return
+    fi
     if [ "$1" = coff ] && [ -f "$TI_CGT/lib/rts2800_ml.lib" ]; then echo rts2800_ml.lib
     elif [ "$1" = eabi ] && [ -f "$TI_CGT/lib/rts2800_ml_eabi.lib" ]; then echo rts2800_ml_eabi.lib
     else echo libc.a; fi
 }
 
-coff_ok() {
-    probe="build/.probe"
-    mkdir -p "$probe"
+coff_ok() {   # probe in a temporary directory (build/ is tracked in git: do not rewrite files there)
+    probe="$(mktemp -d "${TMPDIR:-/tmp}/c2000probe.XXXXXX")"
     echo 'int x;' > "$probe/p.c"
-    "$CL" -v28 -ml --abi=coffabi --obj_directory="$probe" -c "$probe/p.c" >/dev/null 2>&1
+    ok=0
+    "$CL" -v28 -ml --abi=coffabi --obj_directory="$probe" -c "$probe/p.c" >/dev/null 2>&1 || ok=1
+    rm -rf "$probe"
+    return $ok
 }
 
 # TMS320F2808 samples (f2808_*.c): their own linker file (f2808.cmd: flash at 0x3E8000, codestart 0x3F7FF6, H0 for
 # variables) and no --float_support (the 280x has no FPU; soft-float comes from the RTS as on the F28232 build).
 CFLAGS_F2808="-v28 -ml -mt -O2 -g --diag_warning=225 --display_error_number -I. -I$TI_CGT/include"
 
+# TMS320F28335 samples (f28335_*.c): FPU32 code generation and the FPU32 run-time library, f28335.cmd.
+CFLAGS_F28335="-v28 -ml -mt --float_support=fpu32 -O2 -g --diag_warning=225 --display_error_number -I. -I$TI_CGT/include"
+
 build_one() {   # $1 = coff|eabi, $2 = sample name, $3 = output suffix
-    abi=$1; name=$2; out="build/$name$3.out"; obj="build/obj_$abi/$name"
+    abi=$1; name=$2; out="build/$name$3.out"; obj="build/obj_$abi/$name"; fpu=""; extra=""
     case "$name" in
-        f2808_*) cflags="$CFLAGS_F2808"; cmd=f2808.cmd ;;
-        *)       cflags="$CFLAGS"; cmd=f28232.cmd ;;
+        f2808_*)  cflags="$CFLAGS_F2808"; cmd=f2808.cmd ;;
+        f28027_*) cflags="$CFLAGS_F2808"; cmd=f2802x.cmd ;;                     # Piccolo A: no FPU
+        f28069_*) cflags="$CFLAGS_F28335"; cmd=f2806x.cmd; fpu=fpu32 ;;          # F2806x: FPU32
+        f28335_*) cflags="$CFLAGS_F28335"; cmd=f28335.cmd; fpu=fpu32
+                  [ -f "${name}_asm.asm" ] && extra="${name}_asm.asm" ;;
+        *)        cflags="$CFLAGS"; cmd=f28232.cmd ;;
     esac
     mkdir -p "$obj"
     echo "CL  $name ($abi) -> $out"
     "$CL" $cflags --abi="$( [ "$abi" = coff ] && echo coffabi || echo eabi )" --obj_directory="$obj" \
-        "$name.c" codestart.asm $LFLAGS -m "build/$name$3.map" -o "$out" -l "$(lib_for "$abi")" "$cmd"
+        "$name.c" codestart.asm $extra $LFLAGS -m "build/$name$3.map" -o "$out" -l "$(lib_for "$abi" "$fpu")" "$cmd"
     if [ -x "$DIS" ]; then "$DIS" "$out" > "build/$name$3.dis" 2>/dev/null || true; fi
 }
 
@@ -87,7 +104,9 @@ case "$ABI" in
     eabi) abis="eabi" ;;
     *) echo "ABI must be both, coff or eabi" >&2; exit 2 ;;
 esac
-for src in *.c; do
+if [ $# -gt 0 ]; then srcs=""; for n in "$@"; do srcs="$srcs ${n%.c}.c"; done; else srcs="$(ls *.c)"; fi
+for src in $srcs; do
+    [ -f "$src" ] || { echo "no such sample: $src" >&2; exit 2; }
     name=${src%.c}
     for abi in $abis; do
         if [ "$abi" = eabi ]; then build_one eabi "$name" ""

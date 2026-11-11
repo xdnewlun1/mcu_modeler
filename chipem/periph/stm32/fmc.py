@@ -52,7 +52,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock, Reg
+from ..base import MMIOBlock, Reg, pure_read
 from ..registry import register
 from ._util import irq_number, rcc
 from .fsmc import FSMC
@@ -84,7 +84,7 @@ class FMC(FSMC):
             "SDCR2": {"ro_mask": 0xFFFF8000 | 0x6C00, "on_write": self._sdcr_write},   # RPIPE/SDCLK: SDCR1 only
             "SDTR1": {"ro_mask": 0xF0000000}, "SDTR2": {"ro_mask": 0xF0000000},
             "SDCMR": {"ro_mask": 0xFFC00000, "on_write": self._sdcmr_write, "on_read": self._sdcmr_read},
-            "SDRTR": {"ro_mask": 0xFFFF8000, "on_write": self._sdrtr_write, "on_read": lambda b, r: b.get("SDRTR") & ~1},
+            "SDRTR": {"ro_mask": 0xFFFF8000, "on_write": self._sdrtr_write, "on_read": pure_read(lambda b, r: b.get("SDRTR") & ~1)},
             "SDSR": {"ro_mask": 0xFFFFFFFF, "on_read": self._sdsr_read},
         }
         for rn, kw in hooks.items():
@@ -270,6 +270,7 @@ class FMC(FSMC):
             self._sd_sync_req(b)
         return None
 
+    @pure_read
     def _sdcmr_read(self, blk, reg):
         return self.get("SDCMR") & ~0x1F                 # MODE / CTB1 / CTB2 are write-only
 
@@ -370,6 +371,7 @@ class FMC(FSMC):
         self._update_irq()
         return new
 
+    @pure_read
     def _sdsr_read(self, blk, reg):
         return ((0x20 if self.busy() else 0) | (self.modes[2] << 3) | (self.modes[1] << 1) |
                 (1 if self._re else 0))
@@ -488,26 +490,15 @@ class FMC(FSMC):
                 dev.self_refresh(False)
             self.emit("info", block=self.name, msg=f"{self.name}: SDRAM bank {bank} access exits "
                       f"{'self-refresh' if was == 1 else 'power-down'} mode")
-            if self._sd_sync_ev is None and self.chip is not None:
-                self._sd_sync_ev = self.chip.sched.in_cycles(0, self._deferred_sync)
+            for b in (1, 2):
+                self._sd_sync(b)
 
     def _sd_sync_req(self, bank: int) -> None:
-        """Window changes requested from an MMIO access (register write) while the core runs are applied after the
-        access (scheduler event at the current cycle, which ends the slice): Unicorn does not survive unmapping a
-        region from inside a memory callback (prefetch abort on the next fetch)."""
-        chip = self.chip
-        if chip is None:
-            return
-        if getattr(chip.core, "running", False):
-            if self._sd_sync_ev is None:
-                self._sd_sync_ev = chip.sched.in_cycles(0, self._deferred_sync)
-        else:
+        """Window changes requested from an MMIO access (register write, window access): applied at once. The core
+        defers the mapping itself to the end of the accessing instruction (docs/CONTRACTS.md "Bus", mapping changes
+        from callbacks), so the next instruction sees the new window."""
+        if self.chip is not None:
             self._sd_sync(bank)
-
-    def _deferred_sync(self) -> None:
-        self._sd_sync_ev = None
-        for b in (1, 2):
-            self._sd_sync(b)
 
     def _loc(self, bank: int, dev: Any, a: int) -> tuple[int, int]:
         """Byte address in the bank window -> (device location, byte lane)."""

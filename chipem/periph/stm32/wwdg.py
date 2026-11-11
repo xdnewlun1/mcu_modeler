@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..base import MMIOBlock
+from ..base import MMIOBlock, pure_read
 from ..registry import register
 from ._util import GatedBlock, build_regs, irq_number, rcc
 
@@ -157,6 +157,7 @@ class WWDG(GatedBlock):
             self._gate_ok()
         MMIOBlock.write(self, offset, size, value)
 
+    @pure_read
     def _cr_read(self, blk, reg):
         return (self.get("CR") & WDGA) | self.counter()
 

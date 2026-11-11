@@ -1,0 +1,8 @@
+# TI TMS320F28069M (InstaSPIN-MOTION) -- the LAUNCHXL-F28069M part: the F28069 die (chips/tms320f28069.yaml) with the
+# USB controller bonded out (SPRS698J Table 5-1 note 2: USB on the F2806xU/M/F parts) and the FAST/SpinTAC libraries in
+# boot ROM 0x3F8000-0x3FD58F (Figure 8-1 notes B/C: not modelled, the ROM area reads erased).  PARTID 0x009E (Table 8-10).
+# USB0 (0x4000-0x4FFF, SPRUH18I chapter 17) is register storage only (docs/LIMITATIONS.md); USB0_INT (5.8) never fires.
+include: tms320f28069.yaml
+name: TMS320F28069M
+add_peripherals:
+  - {name: USB0, model: ti_c2000.storage, base: 0x4000, size: 0x1000, params: {gate: USB0ENCLK}}

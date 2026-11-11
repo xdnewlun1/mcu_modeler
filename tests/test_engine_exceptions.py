@@ -301,6 +301,8 @@ spin:
 
 def test_fp_extended_frame_round_trip():
     setup = "\n".join(f"  ldr r0, =0x{0x3F800000 + i * 0x1000:08X}\n  vmov s{i}, r0" for i in range(16))
+    # CPACR resets to 0 (FP access denied: NOCP): enable CP10/CP11 first, as firmware startup code does
+    setup = "  ldr r0, =0xE000ED88\n  ldr r1, =0x00F00000\n  str r1, [r0]\n  dsb\n  isb\n" + setup
     thread = setup + f"""
   ldr r0, =0x03C00000
   vmsr fpscr, r0

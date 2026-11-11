@@ -85,17 +85,17 @@ class SDHC(GatedBlock):
         params = dict(params or {})
         self.gate = params.get("gate", "SDHC")
         ro = {"ro_mask": 0xFFFFFFFF}
-        ov = {"BLKATTR": {"on_read": self._blkattr_read, "on_write": self._blkattr_write},
+        ov = {"BLKATTR": {"on_read": self._blkattr_read, "on_write": self._blkattr_write, "on_peek": self._blkattr_read},
               "CMDARG": {"on_write": self._cmdarg_write},
               "XFERTYP": {"on_write": self._xfertyp_write},
               "CMDRSP0": ro, "CMDRSP1": ro, "CMDRSP2": ro, "CMDRSP3": ro,
-              "PRSSTAT": {**ro, "on_read": self._prsstat_read},
+              "PRSSTAT": {**ro, "on_read": self._prsstat_read, "on_peek": self._prsstat_read},
               "PROCTL": {"on_write": self._proctl_write},
               "SYSCTL": {"on_write": self._sysctl_write},
-              "IRQSTAT": {"on_read": self._irqstat_read},
+              "IRQSTAT": {"on_read": self._irqstat_read, "on_peek": self._irqstat_read},
               "IRQSTATEN": {"on_write": self._irqen_write}, "IRQSIGEN": {"on_write": self._irqen_write},
               "AC12ERR": ro, "HTCAPBLT": ro, "HOSTVER": ro, "ADMAES": ro,
-              "FEVT": {"on_write": self._fevt_write, "on_read": lambda b, r: 0},
+              "FEVT": {"on_write": self._fevt_write, "on_read": lambda b, r: 0, "on_peek": lambda b, r: 0},
               "WML": {"on_write": self._wml_write}}
         r = build_regs((name, "SDHC"), size, ov, params.get("regs_file"), skip=("DATPORT",))
         super().__init__(name, base, size, r, log=log, params=params)

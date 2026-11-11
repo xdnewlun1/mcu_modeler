@@ -150,7 +150,7 @@ class UART(UartRx, MMIOBlock):
         self.fifo_size = depth
         enc = FIFO_SIZES[depth]
         ov = {"S1": dict(ro_mask=0xFF),
-              "D": dict(on_read=self._d_read, on_write=self._d_write),
+              "D": dict(on_read=self._d_read, on_write=self._d_write, on_peek=self._d_peek),
               "C1": dict(on_write=self._ctl_write), "C2": dict(on_write=self._c2_write),
               "BDH": dict(on_write=self._c3_write), "BDL": dict(on_write=self._ctl_write),
               "C4": dict(on_write=self._ctl_write), "C5": dict(on_write=self._c5_write),
@@ -176,6 +176,7 @@ class UART(UartRx, MMIOBlock):
                                                   "ED", "C2")}
         self.output = bytearray()
         self.rx_signal = f"UART{self.index}_RX"
+        self.tx_signal = f"UART{self.index}_TX"          # bit-level waveform on the TX pin (uartwire._tx_emit)
         self._s1_seen = 0                      # S1 flags seen set by an S1 read (cleared by the next D read)
         self._idle_ev = None
         self._idle_at = 0.0                    # when the idle character completes (if no frame starts before)
@@ -752,6 +753,9 @@ class UART(UartRx, MMIOBlock):
         mem[o["D"]] = (self._rxq[0] if self._rxq else b) & 0xFF
         self._refresh()
         return b & 0xFF
+
+    def _d_peek(self, blk, reg):
+        return (self._rxq[0] if self._rxq else self._rx_last) & 0xFF     # the FIFO head, not popped
 
     def _s1_read(self, blk, reg):
         self._s1_seen |= self.mem[self._o["S1"]] & S1_CLR     # hook installed only while one of them is set
