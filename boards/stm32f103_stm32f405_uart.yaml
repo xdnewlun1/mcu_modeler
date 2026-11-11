@@ -1,0 +1,20 @@
+# STM32F103T6 (VFQFPN36) <-> STM32F405ZG over a UART cable (TX/RX nets: the board creates the byte link once both
+# pins are muxed).
+#   A (STM32F103T6) runs uart_link_sender: 72 MHz (HSE x 9), USART1 PA9/PA10 at 115200 (BRR 625), "ping N\r\n" every
+#                   2 ms, PB0 toggles per reply line.
+#   B (STM32F405ZG) runs uart_link_echo: 16 MHz HSI, USART1 PA9/PA10 at 115200 (BRR 139, 0.08 % fast), echoes every
+#                   byte uppercased, PB0 toggles per byte.
+# Run:   chipem run --board boards/stm32f103_stm32f405_uart.yaml --for 20ms
+#        chipem serve --board boards/stm32f103_stm32f405_uart.yaml
+# Build: firmware/samples_stm32f1/build.sh; firmware/samples_stm32/build.sh
+name: stm32f103_stm32f405_uart
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f103t6, firmware: ../firmware/samples_stm32f1/build/uart_link_sender.elf}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/uart_link_echo.elf}
+nets:
+  - {name: A_TX, pins: [A.PA9, B.PA10]}
+  - {name: B_TX, pins: [B.PA9, A.PA10]}
+  - {name: REPLY_LED, pins: [A.PB0]}
+parts:
+  - {id: LED_A, type: led, color: green, ports: {in: REPLY_LED}}

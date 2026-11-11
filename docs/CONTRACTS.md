@@ -132,7 +132,7 @@ Unicorn-backed implementation lives in core/unicorn_cm.py (the Bus calls `core.m
 
 ## chipem/core/base.py
 ```python
-class StopReason(Enum): COUNT, WFI, EXC_RETURN, SVC, FAULT, BREAKPOINT, USER
+class StopReason(Enum): COUNT, WFI, EXC_RETURN, SVC, FAULT, BREAKPOINT, USER, DEBUG   # DEBUG: see "Debugger"
 class Core(ABC):
     def reset(self, pc: int, sp: int)
     def run(self, max_insns: int) -> (StopReason, insns_executed: int)   # insns_executed may be approximate for early stops
@@ -315,11 +315,25 @@ class Net:  level; conflict; conflicts; members [(cid, chip, pin)]; pull; drive;
     # open_drain=True (YAML `open_drain: true`, add_net(open_drain=)): wired-AND, any L driver wins, H drivers count as
     # released, no conflict
     # per episode; level written to every member's `external` (scheduled at the source time on chips behind it)
-class UartLink: bytes_ab; bytes_ba; warned    # sender tx_listeners -> peer.receive() one sender character time later
-                                              # (peer's scheduler); >3 % baud or frame mismatch -> one warn per link
+class UartLink: bytes_ab; bytes_ba; warned    # sender frame_listeners -> peer.receive_frame(frame, t_end) at the
+                                              # frame's end (peer's scheduler); models without frames: tx_listeners ->
+                                              # receive(); >3 % baud or frame mismatch -> one warn per link
 ```
-UART models used by links provide `tx_listeners: list[cb(uart, byte)]`, `receive(data)` (no extra character time),
-`baud()`, `char_bits()`, `char_ns()` (kinetis.uart does).
+UART models used by links provide `tx_listeners: list[cb(uart, byte)]` (data bytes only; Session, shell, web and
+tests use it), `receive(data)` (bytes in the receiver's own format, arriving now), `baud()`, `char_bits()`,
+`char_ns()`, and the frame hooks (all three families, `chipem/periph/uartwire.py`, 2026-11-10):
+```python
+frame_listeners: list[cb(uart, Frame)]        # every transmitted frame, breaks included (called before tx_listeners)
+def receive_frame(self, fr: Frame, t_end: float | None = None)   # fr's stop bits ended at t_end (default now);
+                                              # decoded at the receiver's own settings (pin rule as for links)
+def rx_format(self) -> RxFormat               # how the receiver samples now
+def feed_break(self, bits: int | None = None)  # host line: a break after the bytes still queued by feed()
+class Frame(data, bits=8, parity="N"|"E"|"O"|"M"|"S", stop=1.0, baud=0.0, *, pbit=None, addr=None, brk=0,
+            msbf=False, inv=False)            # Frame.brk_frame(bits, stop, baud); duration_ns(); fmt()
+class RxChar: data, addr, pbit, pe, fe, nf, brk (low bit times of a break, else 0), idle (bits before), t
+def decode_frame(fr, rx) -> list[RxChar]      # stateless decode on an idle line (host ports)
+```
+A consumer that wants frames registers on `frame_listeners` when the model has it and falls back to `tx_listeners`.
 
 ## 16-bit address units and the C28x core (added for TI C2000 support)
 
@@ -369,7 +383,8 @@ All address/offset/size numbers stay in the chip's address units (`desc.core.add
   still accepts "x.y". `pins` with functions keyed `GPIO`, `MUX1`, `MUX2`, `MUX3`
   (the GPxMUX field values 0..3) for GPIO pins and `kind` as today.
 - UART links on boards (`chipem/board.py`): any peripheral model that exposes `tx_listeners` (list of callables taking a byte)
-  and `receive(data: bytes)` plus `baud()` / `frame()` can be an endpoint. The C2000 SCI model must expose the same.
+  and `receive(data: bytes)` plus `baud()` / `frame()` can be an endpoint; with `frame_listeners` / `receive_frame`
+  (above) frames carry their format. The C2000 SCI model exposes the same.
 - Implemented interfaces (TMS320F28232 port, see docs/C2000_ROADMAP.md):
   - `Reg(..., unit_bits=8)`; `MMIOBlock(..., unit_bits=None)` takes `unit_bits` from the argument, `params["unit_bits"]`
     (injected by the Chip for non-8-bit chips) or the class attribute `unit_bits`; `block.unit_bytes`; `Reg.boff/bw` are the
@@ -564,6 +579,8 @@ class HostPort:
     bytes_in; bytes_out; dropped_out; error     # dropped_out: written while nobody was connected (or host not reading)
     listeners: list[callable()]                 # called on the I/O thread on input / connection / modem changes
     def read(self) -> bytes                     # drain host -> emulation bytes
+    def read_stream(self) -> list               # the same with host breaks in order: [bytes, ("break", s), ...]
+    def send_break(self, seconds: float)        # device -> host break: pyserial send_break; else a 0x00 byte
     def write(self, data: bytes) -> int         # queue emulation -> host; 0 (dropped) when not connected
     def line(self) -> LineSettings | None       # host settings if the transport knows them (PTY: baud set by the program)
     def modem_from_host(self) -> {"rts", "dtr"} # bool | None; PTY/TCP: asserted while connected; serial: null-modem
@@ -572,16 +589,19 @@ class HostPort:
     def describe(self) -> str; def info(self) -> dict; def close(self)
 PtyPort(link=None)  .path (slave), .link ;  SerialPort(path, line) (pyserial, lazy import; ValueError if missing)
 TcpPort(port, host="127.0.0.1") .port ;     MemoryPort(line=None): host_send(data), host_recv(timeout), set_line(),
-                                            set_host_modem(rts=, dtr=), set_connected()
+                                            set_host_modem(rts=, dtr=), set_connected(), host_break(seconds=0)
+LineSettings.frame(b) -> Frame; LineSettings.rx_format() -> RxFormat
+def host_rx_format(line, fr) -> RxFormat | None; def host_bytes_for(fr, rx) -> [(byte | "break", RxChar | None)]
 def open_port(spec, *, line=None) -> HostPort | None   # "pty[:LINK]" "tcp:[HOST:]PORT" "serial:DEV[:BAUD[:8N1]]" "memory"
                                                        # "none"; a bare path / COMn = serial
 def framing_mismatch(baud, bits, line) -> str | None   # > 3 % baud or another frame length
 class UartBridge(chip, uart_block, port, *, label)     # host port on a UART's pins (TTL); pump(), info(), close()
 ```
 Rules: host bytes are paced at the host's character time (`line()`, else the UART's) and enter through the UART's
-`_rx_arrive(b, "host")` (not listening / pin not muxed / overrun as for `feed`); chip bytes are written when their
-stop bit completes. A `framing_mismatch` drops the byte (`uart` event dir=drop reason=framing; the UART's `_rx_drop`
-for host->chip) with one `warn` per direction.
+`_rx_frame(frame, "host")` as frames in the host's format (PTY: the UART's layout at the host's baud), decoded at the
+UART's settings (not listening / pin not muxed / overrun as for `feed`); chip frames are decoded with the host's
+line settings when their stop bit completes and written as a raw tty reads them (0x00 for FE / break; a break also
+`send_break`). A `framing_mismatch` gives one `warn` per direction; nothing is dropped for it.
 
 Session additions:
 ```python
@@ -603,18 +623,23 @@ Board YAML: `host_serial: [{uart: A.UART0, pty: LINK|true | tcp: PORT | port: DE
 ## Serial cable parts (chipem/parts/serial.py; 2026-11-10)
 Types `usb_serial_adapter`, `rs232_transceiver`, `connector` / `db9` / `rj50`, `cable` (params and ports: USER_GUIDE
 6.2). Optional part hooks used by the board's `SerialRouter` (`serial_router(board)`, created by the first serial
-part; it hooks every UART's `tx_listeners`):
+part; it hooks every UART's `frame_listeners`, or `tx_listeners` for models without frames):
 - `serial_paths(port) -> [(out_port, invert: bool, out_domain: "ttl"|"rs232"|None, blocked_reason|None)]`: where a
   signal entering `port` comes out (None domain = passive conductor). std `buf`/`not` are treated as such stages.
 - `serial_input_domain(port)`; `serial_sink(port) -> {"inv": 0|1, "domain"}` (a byte receiver: `serial_receive(b)`,
-  `serial_drop(b, reason)`, `line()`); `gnd_port` (ground reference for the common-ground check);
+  optional `serial_receive_frame(frame)` (decodes at its own `line()`; preferred when present), `serial_drop(b,
+  reason)`, `line()`); `gnd_port` (ground reference for the common-ground check);
   `conductor_groups()` (cable wires: ports joined electrically); `connector = (kind, gender, pins)` +
   `connector_port(pin) -> port name` (plug targets).
 - `Board.add_part` calls `part_added(new_part)` on every part that has it (a cable plugs into a connector added
   after it). `Board.close()` closes the router.
 - A byte reaches a sink only if the path's inversion parity matches the sink, no RS-232 level reaches a TTL input,
   every segment's driver and receiver share a ground component and no stage is off; otherwise `uart` drop with
-  reason `polarity | over_voltage | no_ground | stage_off | framing | pin_not_muxed` and one `warn` per path/reason.
+  reason `polarity | over_voltage | no_ground | stage_off | framing | pin_not_muxed` and one `warn` per path/reason
+  (`framing` only for byte-level sends without a frame; with frames a settings mismatch warns once and the receiver
+  decodes). `SerialRouter.send(src, src_chip, sinks, b, t, *, src_blk=None, src_line=None, frame=None)`: `frame`
+  (or one built from `src_line`) travels to `receive_frame` / `serial_receive_frame`; with neither the byte arrives
+  in each receiver's own format (unchanged behaviour for byte-only callers).
   Chip-pin sinks on the source's own net are left to the board's automatic UART links.
 
 ## Ethernet (chipem/ethernet.py; 2026-11-10)
@@ -653,3 +678,127 @@ link, phy, phy_addr, iface, segment}`, `phy` (the EthPhy). Board: `links: [{type
 - Camera part (`chipem/parts/camera.py`) -> receivers: peripherals of the chips on the part's pixclk net that expose
   `dvp_accepts(pin) -> bool` and `dvp_line(src, t0_ns, period_ns, samples, ports)` get each line (see the part's
   docstring); HSYNC/VSYNC are real net levels.
+
+## Debugger (chipem/debug.py, chipem/dwarf.py, chipem/gdbserver.py; 2026-11-10)
+Core hooks (chipem/core/base.py; Unicorn and the C28x interpreter implement them; nothing is hooked while empty):
+```python
+class Core:
+    def set_breakpoints(self, addrs: Iterable[int])            # replace the set (address units; ARM bit 0 ignored)
+    def set_watchpoints(self, wps: Iterable[(lo, hi_excl, "r"|"w"|"rw")])
+    debug_hook: Callable[[kind "break"|"watch", info dict], bool] | None   # True = stop (conditions, hit counts)
+    bp_skip: int | None        # the next run() starting at this PC executes it without a breakpoint stop (set by a
+                               # breakpoint stop and by Chip.step); reset() clears it
+# run() -> (StopReason.DEBUG, insns) with core.stop_info =
+#   {"type": "breakpoint", "addr"}                       PC = addr, the instruction not executed
+#   {"type": "watchpoint", "addr", "size", "access": "r"|"w", "value" (writes; None for ARM reads), "pc"}
+#                                                        PC = the next instruction, `pc` = the accessing one
+```
+`Chip._run` returns DEBUG at once; `Board.run_for` returns it with `last_stop_chip`; `Chip.step` executes the
+instruction at PC even if a breakpoint is on it.
+
+MMIO peek (chipem/periph/base.py): `MMIOBlock.pure_reads: frozenset[str]` (registers whose `on_read` has no side
+effects), `peek_reg(reg) -> (value, exact)`, `peek_bytes(offset, n_units) -> (bytes, [exact per unit])`: never run a
+read hook with side effects (exact=False: the stored value).
+
+```python
+Session.debug -> SessionDebug                 # created on first use; Session._run calls debug.after_run(reason)
+class SessionDebug:
+    dbg(chip=None) -> Debugger                # one per chip (rebuilt if the chip object changed)
+    add_break(location, *, chip=None, temp=False, cond=None, ignore=0) -> [Breakpoint]   # "B:main" on a board
+    add_watch(target, access="w", *, chip=None, size=None, cond=None) -> Breakpoint
+    breakpoints() -> [Breakpoint]; find(id) -> (Debugger, Breakpoint); delete(id); enable(id, on); modify(id, cond=,
+    ignore=); delete_all()
+    last_stop: {chip, reason, pc, where, type?, addr?, bp: [ids], msg?, access?, value?, insn_pc?, t_ns, skew_ns?}
+    stops: int                                # bumped at every debugger-visible stop (UIs poll it)
+    plan(kind, chip=None, location=None) -> "step" | "run"   # kind: stepi nexti next step finish until
+    run_until_stop(max_ns=None, chunk_ns=20e6, should_stop=None) -> StopReason
+    do(kind, chip=None, location=None, *, max_ns=None, should_stop=None, count=1) -> StopReason
+class Debugger:                               # per chip; all methods on the emulation thread
+    symbols (chipem.symbols.Symbols), dwarf (DwarfInfo | None), data_syms {name: (addr, size)}, bps {id: Breakpoint}
+    resolve_location(text) -> [(addr, label)]; resolve_watch(text, size=None) -> (lo, hi, label)
+    eval_expr(text, values=True) -> int       # registers, symbols, mem8/16/32[a], addr(sym), C-ish operators
+    registers() -> [(name, value)]; set_register(name, v); read_memory(addr, n_units) -> (bytes, [exact]) (peek);
+    write_memory(addr, data); decode(addr) -> {addr, size, bytes, text, call, target}; disassemble(addr, n)
+    listing(addr=None, before, after, mode "asm"|"mixed"|"source") -> {rows, pc, file, line, func, ...}
+    backtrace(max_frames) -> [{level, pc, sp, func, file, line, how: pc|cfi|lr|exception|rpc|scan, desc}]
+    describe(addr) -> "main+0x4 (blinky.c:12)"; cfa(pc=None) -> int | None
+Breakpoint: id, kind "break"|"watch", addr, end, access, location, label, temp, enabled, hits, ignore, cond, chip,
+    internal (step helpers: negative ids, removed at any stop), to_dict()
+class DwarfInfo:                              # chipem/dwarf.py, pyelftools only
+    load(path, source_dirs=None) -> DwarfInfo | None
+    line_for(addr) -> LineInfo(addr, file, line, end, is_stmt) | None   # line 0 rows report the preceding line
+    function_for(addr) / function_named(name) -> Function(name, lo, hi, file, line) | None
+    addresses_for(file, line) -> [addr]; prologue_end(fn); function_lines(fn); find_source(file); source_lines(file)
+    unwind_rules(pc) -> (cfa_rule, {regnum: rule}) | None
+```
+GDB server: `GdbServer(executor, port, *, host="127.0.0.1", chip=None, log=None).start()`, `.port`, `.close()`,
+`.killed` (client sent `k`); executors `QueueExecutor(session)` (`pump(timeout)`, `serve(until)` on the emulation
+thread) and `WorkerExecutor(worker)` (web); both `call(fn)`, `resume(kind, chip)`, `wait_stop(timeout)`,
+`interrupt()` (thread-safe). `target_xml(chip)`, `memory_map_xml(chip)`. CLI: `--gdb PORT`, `--gdb-chip ID`,
+`--source-dir DIR` (run / shell / serve). Web: `/api/debug/*`, `/api/regs/*` (chipem/web/debugapi.py docstring).
+
+## Speed / fidelity settings and the emulation rate (chipem/perf.py; 2026-11-10)
+```python
+class PerfSettings:            # dataclass; presets PRESETS["accurate" | "default" | "fast"], preset(name) -> copy
+    preset: str                # "accurate" | "default" | "fast" | "custom" (any field changed after a preset)
+    max_slice: int             # Chip.max_slice (instructions; x core.slice_scale)
+    quantum_ns: float | None   # board quantum; None = Session.base_quantum_ns (board YAML / --quantum / 10 us)
+    auto_quantum: bool         # Board.set_auto_quantum
+    poll_skip_ns: float        # 0 = off; else Chip.poll_skip_ns + core.set_poll_watch(True)
+    pin_log: str               # "all" (EventLog.pin_burst None) | "auto" (decimate, default) | "off" (drop "pin")
+    drop_kinds: frozenset      # EventLog.drop (fault/reset cannot be dropped)
+    ui_interval_s: float       # web Worker publish interval
+    updated(**changes) -> PerfSettings     # validated copy; preset= first; quantum_ns=None = the board's own
+    to_dict() -> dict
+apply(settings, session)       # chips, board, logs (emulation thread)
+class SpeedMeter:              # Session.speed; begin(session) / sample(session, wall_s) from Session._run
+    info() -> {ratio, window_s, chips: {id: {mips, mhz, ratio, share}}, bottleneck}
+Session.perf: PerfSettings; Session.set_perf(**kw) -> PerfSettings; Session.base_quantum_ns: float | None
+Session.speed_info() -> SpeedMeter.info() + {requested: pacing speed | None (max), behind: bool, settings, quantum_ns,
+                        base_quantum_ns, auto_quantum}
+parse_speed("0.1" | "x10" | "max") -> float | None (session.py)
+```
+Core (chipem/core/base.py): `spin_pc: int | None` (run() ended in a branch-to-itself; the Chip then ignores max_slice
+for the next slice), `poll_skip: int | None` (run() returned USER because a polling loop was detected: its period in
+instructions), `set_poll_watch(on) -> bool`, `PollWatch` (the shared detector). The C28x interpreter also has
+`spin_skip` (False: execute self-branches one by one) and `flush_mmio_cache()` (per-address MMIO dispatch; the Bus
+calls it when a sub-page block joins a page; `_PageDispatch.resolve(off) -> (block, offset)`).
+
+Chip: `poll_skip_ns`, `poll_skipped` (instructions skipped), `parked` (last slice ended in a self-branch or a skipped
+polling loop), `idle_watch: Callable[[chip], None] | None` (an event was scheduled on this chip while it does not
+run), `yield_run()` (end run_for soon with StopReason.USER, not a user stop).
+Board: `auto_quantum`, `set_auto_quantum(on)`, `chip_wall: {id: wall seconds in that chip's run_for}`; `quantum_ns` may
+change between run_for iterations. Board YAML keys `performance:`, `auto_quantum:`, `max_slice:` (BoardDesc.perf).
+EventLog: `drop: frozenset[str]` (event() returns None for these kinds), `default_pin_burst`.
+Web: `GET /api/perf` -> {settings, presets, pin_log_modes, kinds, board, speed}; `POST /api/perf` {preset?,
+max_slice?, quantum? (time string, null = board), auto_quantum?, poll_skip? (time, 0 = off), pin_log?, drop_kinds?,
+ui_interval?}; `POST /api/realtime` also takes speed "max"; state frames carry `speed` (Session.speed_info).
+Paced worker chunks are at most speed x 100 ms of virtual time (slow rates stay responsive).
+
+## MCS-51 address spaces and cycle-counted cores (chipem/core/mcs51, chipem/arch/mcs51; 2026-11-10)
+Details: docs/MCS51_CORE.md.
+- **Tagged spaces** (8-bit units, one flat space): CODE `0x00000-0x0FFFF`, XDATA (external bus) `0x10000-0x1FFFF`,
+  IDATA `0x20000-0x200FF`, SFR `0x30080-0x300FF`, on-chip XRAM `0x40000-0x4FFFF`.  Chip YAML memory/peripheral bases,
+  `mem`, events, symbols (`.map` sidecars: `D:` -> 0x2xxxx, `X:` -> 0x1xxxx) all use them.
+- **Sparse MMIO blocks**: a block with a non-empty `ranges: [(abs_base, size)]` is mapped only there
+  (`Bus._map_sparse`); offsets stay `addr - block.base`.  MCS-51 SFR blocks: `base = 0x30000`, `size = 0x100`, offset =
+  SFR address.  The callbacks passed to `core.map_mmio` carry `target` (block method) and `delta`.
+- **Cycle-counted cores** (`core.cycle_counted = True`, MCS-51): `run(n)` budgets and returns CLOCK periods (the Chip
+  clock is the oscillator); `core.last_insns` = instructions of the last run (Chip.insns counts those);
+  `core.slice_scale` multiplies the Chip's max_slice.  `core.live_pc()` = PC of the executing instruction.
+- Chip YAML: `core: {arch: mcs51, backend: mcs51, cpu: 80c51, clock_hz: <crystal>}`, `family: mcs51`,
+  `gpio_name_format: "P{port}.{bit}"` (ports "0".."3"), `mcs51: {sfr: {ie, ip, iph, auxr1}, reset_sp, interrupts:
+  [{name, vector, enable, lines, poll, pd_wake}]}`, `irqs: {n: name}` with vector = 8n + 3.
+- `MCS51Arch` (`chip.arch`): `set_irq(line, level)` (line = flag name: TF0 TF1 IE0 IE1 UART SPI TF2 PCA; unknown
+  lines warn once), `on_vector[line]` (hardware flag clear on vectoring), `ie_listeners`, `enabled(line)`,
+  `request_reset(reason)`, `reset_cause`, `boot_pc`, `pending`, `best_pending()`, `service()`, `wakeup_pending()`,
+  `on_stop()` (EXC_RETURN = RETI), `blocks` = `[CPU, INTC]`, `disasm(addr, n)`, `debug_support()` (used by
+  chipem/debug.py: `reg_names()`, `decode(addr)`, `backtrace(n)`, `return_address()`, `code_mask`,
+  `stack_grows_up`), `cpu_state()`, `vector_table()`.
+- `MCS51Core` extras: `set_latch_reader(sfr, fn)` (read-modify-write reads the port latch), `install_native(addr,
+  fn)`, `add_cycles(mc)`, `set_clocks_per_mc(12|6)`, `enter_sleep("idle"|"pd")` (-> StopReason.WFI with stop_info),
+  `extram`, `xram_size`, `code_swap(base, data)`, `inhibit` (one more instruction before an interrupt),
+  `take_interrupt(vector)`.  `set_poll_watch` is not implemented (returns False); jumps to self and `JB/JNB bit,$`
+  are spin-skipped (`spin_pc`).
+- Chip generic changes: `_make_core` loads `chipem.core.<backend>` for `c28x`/`mcs51`; `arch_kind` "mcs51"; the
+  non-ARM reset path; `image.thumb = False` for non-ARM images (symbols); `ARCH_OWNED_MODELS` += mcs51.cpu/intc.

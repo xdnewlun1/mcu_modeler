@@ -60,6 +60,8 @@ def catalog() -> dict:
         if p.is_file() and p.suffix.lower() in FIRMWARE_EXTS:
             fw.append({"path": str(p.resolve()), "name": p.name, "dir": p.parent.parent.name})
     boards = [{"name": p.stem, "path": str(p.resolve())} for p in sorted(BOARDS_DIR.glob("*.y*ml"))]
+    boards += [{"name": f"{p.parent.name}/{p.stem}", "path": str(p.resolve())}       # boards/parts/*.yaml, ...
+               for p in sorted(BOARDS_DIR.glob("*/*.y*ml"))]
     return {"chips": chips, "firmware": fw, "boards": boards}
 
 
@@ -270,6 +272,9 @@ def _yaml_text(d: dict, bd: Any) -> str:
     for dv in rel.get("devices") or []:
         if dv.get("file"):
             dv["file"] = r(dv["file"])
+    for pt in rel.get("parts") or []:
+        if isinstance(pt, dict) and pt.get("file"):
+            pt["file"] = r(pt["file"])
     import yaml
 
     def flow(v: Any) -> str:
@@ -322,4 +327,7 @@ def open_board(path: str) -> dict:
     for dv in out.get("devices") or []:
         if dv.get("file") and not Path(dv["file"]).is_absolute():
             dv["file"] = str((p.parent / dv["file"]).resolve())
+    for pt in out.get("parts") or []:              # script parts: `file` is relative to the board file
+        if isinstance(pt, dict) and pt.get("file") and not Path(str(pt["file"])).is_absolute():
+            pt["file"] = str((p.parent / str(pt["file"])).resolve())
     return out

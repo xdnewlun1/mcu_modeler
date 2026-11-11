@@ -1,0 +1,109 @@
+# NXP P89CV51RD2 (80C51, 64 KB flash, 1 KB RAM = 256 B internal + 768 B expanded XRAM, 6/12-clock CPU,
+# PCA, SPI, enhanced UART, Timers 0/1/2, watchdog, IAP/ISP boot block), PLCC44 package (P89CV51RD2FA).
+# Source: P89CV51RB2/RC2/RD2 data sheet Rev. 03, 25 August 2009 (docs/datasheets/nxp/P89CV51RB2_RC2_RD2.pdf):
+#   Table 3 pp.5-8 (pin numbers PLCC44 / TQFP44), Table 4 pp.10-12 (SFRs -> chips/p89cv51_regs.yaml), sec. 6.2
+#   (memory: DATA/IDATA 256 B, 768 B XDATA on chip, CODE 16/32/64 KB), Table 41 p.53 (interrupt sources, vectors,
+#   polling order), sec. 6.3 (flash, boot block FC00H-FFFFH, IAP entry FFF0H), Table 52 p.58 (clock modes).
+# 0 to 40 MHz in 12-clock mode, 0 to 20 MHz in 6-clock mode (Table 2 / sec. 2.1); the default crystal here is
+# 11.0592 MHz (core.clock_hz is the OSCILLATOR frequency; --clock and board clock_hz set it).
+# Address spaces are tagged ranges of one 8-bit-unit space (docs/MCS51_CORE.md): CODE 0x00000, XDATA (external bus)
+# 0x10000, IDATA 0x20000, SFR 0x30080-0x300FF, on-chip XRAM 0x40000.  SFR blocks are sparse: base 0x30000, size
+# 0x100, a register's offset is its SFR address.
+# Pin table generated from Table 3 by a transcription script; PLCC44 numbering verified against the figure.
+name: P89CV51RD2
+package: PLCC44
+family: mcs51
+regs_file: p89cv51_regs.yaml
+gpio_name_format: "P{port}.{bit}"
+core: {arch: mcs51, backend: mcs51, cpu: 80c51, fpu: false, clock_hz: 11059200, addr_unit_bits: 8, num_irqs: 0}
+auto_stub_ranges: [[0x30080, 0x300FF]]     # undefined SFRs become RAM-like stubs (one warn each)
+
+mcs51:
+  sfr: {ie: 0xA8, ip: 0xB8, iph: 0xB7, auxr1: 0xA2}
+  reset_sp: 0x07
+  # Table 41 p.53 (vector, enable bit = IE/IP/IPH bit, service priority = polling order).  The table gives
+  # Timer 2 vector 003BH and PCA 0033H (the predecessor P89C51RD2 uses 002BH for Timer 2); Fig. 25 draws
+  # the PCA before the UART in the polling chain, Table 41 lists UART 5, T2 6, PCA 7: the table is used.
+  interrupts:
+    - {name: INT0, vector: 0x0003, enable: 0, lines: [IE0], poll: 1, pd_wake: true}
+    - {name: TIMER0, vector: 0x000B, enable: 1, lines: [TF0], poll: 2}
+    - {name: INT1, vector: 0x0013, enable: 2, lines: [IE1], poll: 3, pd_wake: true}
+    - {name: TIMER1, vector: 0x001B, enable: 3, lines: [TF1], poll: 4}
+    - {name: SERIAL, vector: 0x0023, enable: 4, lines: [UART, SPI], poll: 5}
+    - {name: TIMER2, vector: 0x003B, enable: 5, lines: [TF2], poll: 6}
+    - {name: PCA, vector: 0x0033, enable: 6, lines: [PCA], poll: 7}
+
+memory:
+  - {name: FLASH, base: 0x00000, size: 0x10000, kind: flash, fill: 0xFF}   # CODE: 64 KB user flash
+  - {name: IRAM, base: 0x20000, size: 0x100, kind: ram}                   # IDATA (00-7F direct+indirect)
+  - {name: XRAM, base: 0x40000, size: 0x300, kind: ram}                   # 768 B expanded RAM (MOVX)
+
+peripherals:   # SFR blocks: base 0x30000 (SFR tag), offsets = SFR addresses (see chips/p89cv51_regs.yaml)
+  - {name: CPU, model: mcs51.cpu, base: 0x30000, size: 0x100}        # arch-owned: ACC B PSW SP DPL DPH AUXR1
+  - {name: INTC, model: mcs51.intc, base: 0x30000, size: 0x100}      # arch-owned: IE IP IPH
+  - {name: PORTS, model: mcs51.port, base: 0x30000, size: 0x100}     # P0 P1 P2 P3
+  - {name: SYSCTRL, model: mcs51.sysctrl, base: 0x30000, size: 0x100}  # PCON AUXR CKCON
+  - {name: FLASHCTL, model: mcs51.flash, base: 0x30000, size: 0x100,  # IAP (FFF0H), boot vector, security
+     params: {boot_vector: 0xFC, status_bit: 0, fx2: false, iap_us_per_byte: 0, page_erase_ms: 0}}
+  - {name: TIMER01, model: mcs51.timer01, base: 0x30000, size: 0x100}  # TCON TMOD TL0 TL1 TH0 TH1
+  - {name: TIMER2, model: mcs51.timer2, base: 0x30000, size: 0x100}  # T2CON T2MOD RCAP2L/H TL2 TH2
+  - {name: UART, model: mcs51.uart, base: 0x30000, size: 0x100}      # SCON SBUF SADDR SADEN
+  - {name: SPI, model: mcs51.spi, base: 0x30000, size: 0x100}        # SPCR SPSR SPDAT
+  - {name: PCA, model: mcs51.pca, base: 0x30000, size: 0x100}        # CCON CMOD CCAPMn CL CH CCAPnL/H
+  - {name: WDT, model: mcs51.wdt, base: 0x30000, size: 0x100}        # WDTRST
+  - {name: XBUS, model: mcs51.xbus, base: 0x10000, size: 0x10000}    # external data bus (MOVX): P0/P2/RD/WR
+
+irqs:          # interrupt number n: vector 8n+3 (Table 41)
+  0: INT0
+  1: TIMER0
+  2: INT1
+  3: TIMER1
+  4: SERIAL
+  6: PCA
+  7: TIMER2
+
+pins:          # PLCC44, Table 3 (PLCC44 column)
+  - {num: 1, name: "n.c.", kind: special}
+  - {num: 2, name: "P1.0/T2", kind: gpio, port: "1", bit: 0, default: GPIO, functions: {GPIO: "P1.0", ALT1: "T2"}}
+  - {num: 3, name: "P1.1/T2EX", kind: gpio, port: "1", bit: 1, default: GPIO, functions: {GPIO: "P1.1", ALT1: "T2EX"}}
+  - {num: 4, name: "P1.2/ECI", kind: gpio, port: "1", bit: 2, default: GPIO, functions: {GPIO: "P1.2", ALT1: "ECI"}}
+  - {num: 5, name: "P1.3/CEX0", kind: gpio, port: "1", bit: 3, default: GPIO, functions: {GPIO: "P1.3", ALT1: "CEX0"}}
+  - {num: 6, name: "P1.4/CEX1/SS", kind: gpio, port: "1", bit: 4, default: GPIO, functions: {GPIO: "P1.4", ALT1: "CEX1", ALT2: "SPI_SS"}}
+  - {num: 7, name: "P1.5/CEX2/MOSI", kind: gpio, port: "1", bit: 5, default: GPIO, functions: {GPIO: "P1.5", ALT1: "CEX2", ALT2: "SPI_MOSI"}}
+  - {num: 8, name: "P1.6/CEX3/MISO", kind: gpio, port: "1", bit: 6, default: GPIO, functions: {GPIO: "P1.6", ALT1: "CEX3", ALT2: "SPI_MISO"}}
+  - {num: 9, name: "P1.7/CEX4/SPICLK", kind: gpio, port: "1", bit: 7, default: GPIO, functions: {GPIO: "P1.7", ALT1: "CEX4", ALT2: "SPI_SCK"}}
+  - {num: 10, name: "RST", kind: special}
+  - {num: 11, name: "P3.0/RXD", kind: gpio, port: "3", bit: 0, default: GPIO, functions: {GPIO: "P3.0", ALT1: "UART_RXD"}}
+  - {num: 12, name: "n.c.", kind: special}
+  - {num: 13, name: "P3.1/TXD", kind: gpio, port: "3", bit: 1, default: GPIO, functions: {GPIO: "P3.1", ALT1: "UART_TXD"}}
+  - {num: 14, name: "P3.2/INT0", kind: gpio, port: "3", bit: 2, default: GPIO, functions: {GPIO: "P3.2", ALT1: "INT0"}}
+  - {num: 15, name: "P3.3/INT1", kind: gpio, port: "3", bit: 3, default: GPIO, functions: {GPIO: "P3.3", ALT1: "INT1"}}
+  - {num: 16, name: "P3.4/T0", kind: gpio, port: "3", bit: 4, default: GPIO, functions: {GPIO: "P3.4", ALT1: "T0"}}
+  - {num: 17, name: "P3.5/T1", kind: gpio, port: "3", bit: 5, default: GPIO, functions: {GPIO: "P3.5", ALT1: "T1"}}
+  - {num: 18, name: "P3.6/WR", kind: gpio, port: "3", bit: 6, default: GPIO, functions: {GPIO: "P3.6", ALT1: "WR"}}
+  - {num: 19, name: "P3.7/RD", kind: gpio, port: "3", bit: 7, default: GPIO, functions: {GPIO: "P3.7", ALT1: "RD"}}
+  - {num: 20, name: "XTAL2", kind: special}
+  - {num: 21, name: "XTAL1", kind: special}
+  - {num: 22, name: "VSS", kind: power}
+  - {num: 23, name: "n.c.", kind: special}
+  - {num: 24, name: "P2.0/A8", kind: gpio, port: "2", bit: 0, default: GPIO, functions: {GPIO: "P2.0", ALT1: "A8"}}
+  - {num: 25, name: "P2.1/A9", kind: gpio, port: "2", bit: 1, default: GPIO, functions: {GPIO: "P2.1", ALT1: "A9"}}
+  - {num: 26, name: "P2.2/A10", kind: gpio, port: "2", bit: 2, default: GPIO, functions: {GPIO: "P2.2", ALT1: "A10"}}
+  - {num: 27, name: "P2.3/A11", kind: gpio, port: "2", bit: 3, default: GPIO, functions: {GPIO: "P2.3", ALT1: "A11"}}
+  - {num: 28, name: "P2.4/A12", kind: gpio, port: "2", bit: 4, default: GPIO, functions: {GPIO: "P2.4", ALT1: "A12"}}
+  - {num: 29, name: "P2.5/A13", kind: gpio, port: "2", bit: 5, default: GPIO, functions: {GPIO: "P2.5", ALT1: "A13"}}
+  - {num: 30, name: "P2.6/A14", kind: gpio, port: "2", bit: 6, default: GPIO, functions: {GPIO: "P2.6", ALT1: "A14"}}
+  - {num: 31, name: "P2.7/A15", kind: gpio, port: "2", bit: 7, default: GPIO, functions: {GPIO: "P2.7", ALT1: "A15"}}
+  - {num: 32, name: "PSEN", kind: special}
+  - {num: 33, name: "ALE", kind: special}
+  - {num: 34, name: "n.c.", kind: special}
+  - {num: 35, name: "EA", kind: special}
+  - {num: 36, name: "P0.7/AD7", kind: gpio, port: "0", bit: 7, default: GPIO, functions: {GPIO: "P0.7", ALT1: "AD7"}}
+  - {num: 37, name: "P0.6/AD6", kind: gpio, port: "0", bit: 6, default: GPIO, functions: {GPIO: "P0.6", ALT1: "AD6"}}
+  - {num: 38, name: "P0.5/AD5", kind: gpio, port: "0", bit: 5, default: GPIO, functions: {GPIO: "P0.5", ALT1: "AD5"}}
+  - {num: 39, name: "P0.4/AD4", kind: gpio, port: "0", bit: 4, default: GPIO, functions: {GPIO: "P0.4", ALT1: "AD4"}}
+  - {num: 40, name: "P0.3/AD3", kind: gpio, port: "0", bit: 3, default: GPIO, functions: {GPIO: "P0.3", ALT1: "AD3"}}
+  - {num: 41, name: "P0.2/AD2", kind: gpio, port: "0", bit: 2, default: GPIO, functions: {GPIO: "P0.2", ALT1: "AD2"}}
+  - {num: 42, name: "P0.1/AD1", kind: gpio, port: "0", bit: 1, default: GPIO, functions: {GPIO: "P0.1", ALT1: "AD1"}}
+  - {num: 43, name: "P0.0/AD0", kind: gpio, port: "0", bit: 0, default: GPIO, functions: {GPIO: "P0.0", ALT1: "AD0"}}
+  - {num: 44, name: "VDD", kind: power}

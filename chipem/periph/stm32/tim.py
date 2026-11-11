@@ -285,8 +285,8 @@ class TIM(GatedBlock):
         self._irqn = irq_number(chip, str(self.params.get("irq") or IRQ_NAMES.get(self.name, self.name)))
         self._cc_irqn = irq_number(chip, f"{self.name}_CC")        # TIM1/8: capture/compare has its own vector
         if self._cc_irqn is not None:                               # TIM1/8: break and trigger/commutation vectors
-            self._brk_irqn = irq_number(chip, BRK_IRQ.get(self.name, f"{self.name}_BRK"))
-            self._trg_irqn = irq_number(chip, TRG_IRQ.get(self.name, f"{self.name}_TRG_COM"))
+            self._brk_irqn = irq_number(chip, BRK_IRQ.get(self.name, f"{self.name}_BRK"), f"{self.name}_BRK")
+            self._trg_irqn = irq_number(chip, TRG_IRQ.get(self.name, f"{self.name}_TRG_COM"), f"{self.name}_TRG_COM")
         r = rcc(chip)
         if r is not None:
             r.listeners.append(self._clock_changed)
@@ -357,6 +357,7 @@ class TIM(GatedBlock):
         if self._gate_hooked or r is None or self._gate_loc is None:
             return
         from .rcc import GATES
+        GATES = getattr(r, "GATES", GATES)                 # the RCC's own table (stm32f1.rcc: F1 bit positions)
         gl = getattr(r, "gate_listeners", None)
         if gl is not None and self.gate in GATES:
             self._gate_enr, self._gate_bit = GATES[self.gate]
@@ -436,7 +437,17 @@ class TIM(GatedBlock):
         return max(n, 1) * 1e9 / hz if hz > 0 else 0.0
 
     def _now(self) -> int:
+        if self.lp_frozen:
+            return self.lp_c0
         return self.chip.now_cycles()
+
+    lp_frozen: Any = False       # PWR freezer (Stop, or Sleep with the LPENR bit clear): the kernel clock is off
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """The clock comes back after Stop / gated Sleep (RM0090 5.3): the PWR held our events for the time slept;
+        move the counter anchor by the same number of cycles, so CNT and the prescaler phase continue where they
+        stopped (the outputs held their level meanwhile)."""
+        self._start_cyc += dcycles
 
     def _elapsed(self) -> tuple[int, bool]:
         """(whole counter ticks since the anchor, now exactly on a tick boundary)."""
@@ -1282,7 +1293,7 @@ class TIM(GatedBlock):
             if self._brk_active():
                 self._break()
             return
-        if self._frozen:                                 # clock gated off: no input sampling
+        if self._frozen or self.lp_frozen:               # clock gated off / Stop: no input sampling
             return
         if k == "E":
             self._etr_edge(new)
@@ -1374,7 +1385,7 @@ class TIM(GatedBlock):
         m.remove_trigger_listener(sig, cb)
 
     def _itr_level(self, t_cyc: int, level: bool) -> None:
-        if not self._frozen:
+        if not self._frozen and not self.lp_frozen:
             self._trgi_set(bool(level))
 
     def _trgi_now(self) -> bool:
@@ -1721,6 +1732,7 @@ class TIM(GatedBlock):
         gp = self._gpios
         if not gp:
             gp = self._gpios = [b for b in getattr(chip, "peripherals", {}).values()
-                                if getattr(b, "model", None) == "stm32.gpio" and hasattr(b, "resync_signal")]
+                                if getattr(b, "model", None) in ("stm32.gpio", "stm32f1.gpio")
+                                and hasattr(b, "resync_signal")]
         for b in gp:
             b.resync_signal(sig)

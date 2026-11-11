@@ -1,4 +1,4 @@
-"""`chipem` command line: info | run | shell | serve."""
+"""`chipem` command line: info | run | shell | serve | new-part."""
 from __future__ import annotations
 
 import argparse
@@ -103,7 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--at", action="append", default=[], metavar="TIME:PIN=LEVEL|TIME:PART=VALUE|TIME:UARTn=TEXT",
                        help="drive a pin at a virtual time, e.g. 50ms:PTC6=0, act on a part, e.g. 5ms:SW1=H, "
                             "2ms:BTN1=pressed, 3ms:CLK1.period=500us, or start typing TEXT into a UART "
-                            "receiver then, e.g. 100ms:UART2=help\\r\\n (repeatable)")
+                            "receiver then, e.g. 100ms:UART2=help\\r\\n; <break> or <break:N> in TEXT sends a "
+                            "break (repeatable)")
         p.add_argument("--uart-in", action="append", default=[], metavar="[UARTn:]TEXT",
                        help="bytes a host sends to a UART receiver from t=0, paced at its baud (escapes allowed), "
                             "default UART0; bytes the receiver is not ready for are dropped, use --at for later input")
@@ -153,12 +154,54 @@ def build_parser() -> argparse.ArgumentParser:
                        help="shorthand for --usb-cdc pty[:LINK]")
         p.add_argument("--realtime", action=argparse.BooleanOptionalAction, default=None,
                        help="lock virtual time to the wall clock (default: on when a host serial port is attached)")
-        p.add_argument("--speed", type=float, default=None, metavar="X",
-                       help="real-time speed factor (virtual seconds per wall second; implies --realtime)")
+        p.add_argument("--speed", default=None, metavar="X",
+                       help="emulation rate: virtual seconds per wall second (0.001 .. 1000, e.g. 0.1, 1, 10; implies "
+                            "--realtime), or max = as fast as possible (no pacing)")
+        # speed / fidelity settings (chipem/perf.py; docs/USER_GUIDE.md "Making it faster")
+        g = p.add_argument_group("speed / fidelity (chipem/perf.py)")
+        g.add_argument("--preset", choices=("accurate", "default", "fast"), default=None,
+                       help="set the speed/fidelity options together (default: default; a board YAML may set "
+                            "`performance:`); the options below override single values")
+        g.add_argument("--fast", dest="preset", action="store_const", const="fast",
+                       help="= --preset fast: auto quantum, poll skip 100us, no mmio events, UI every "
+                            "200 ms (the board quantum is not changed: --quantum)")
+        g.add_argument("--accurate", dest="preset", action="store_const", const="accurate",
+                       help="= --preset accurate: max slice 500, every pin edge kept in the event log")
+        g.add_argument("--max-slice", type=int, default=None, metavar="N",
+                       help="max instructions per core slice (default 2000); slices always end at the next event")
+        g.add_argument("--auto-quantum", action=argparse.BooleanOptionalAction, default=None,
+                       help="board: a sleeping chip holds the others back only up to its next event")
+        g.add_argument("--poll-skip", default=None, metavar="TIME",
+                       help="fast-forward polling loops (same MMIO values, same CPU state each iteration) up to the "
+                            "next event, at most TIME at a time (e.g. 100us; 0 = off, the default); a status value a "
+                            "model derives from the time on each read is then seen up to TIME late")
+        g.add_argument("--pin-log", choices=("all", "auto", "off"), default=None,
+                       help="pin edges in the event log: all, auto (decimate PWM-like pins; default), off")
+        g.add_argument("--drop-events", default=None, metavar="KINDS",
+                       help="event kinds not recorded at all, e.g. mmio,i2s (comma list)")
+        g.add_argument("--ui-interval", default=None, metavar="TIME",
+                       help="serve: state snapshot / stream frame interval (default 30ms)")
+
+        # debugger (chipem/debug.py, chipem/gdbserver.py)
+        dg = p.add_argument_group("debugger (chipem/debug.py, chipem/gdbserver.py)")
+        dg.add_argument("--gdb", type=int, default=None, metavar="PORT",
+                        help="GDB remote serial protocol server on 127.0.0.1:PORT (gdb, gdb-multiarch, "
+                             "arm-none-eabi-gdb: target extended-remote :PORT; also Ghidra, IDA, VS Code "
+                             "cortex-debug, lldb gdb-remote). run: starts halted and waits for the debugger")
+        dg.add_argument("--gdb-chip", default=None, metavar="ID",
+                        help="board chip served by --gdb (default: the first / view chip)")
+        dg.add_argument("--source-dir", action="append", default=[], metavar="DIR",
+                        help="where to look for source files named in the ELF's DWARF line info (repeatable; also "
+                             "searched: as recorded, next to the ELF and its parent directory)")
 
     # Subcommands run/shell/serve live in their own modules (chipem/cmd_run.py, cmd_shell.py, cmd_serve.py),
     # each exposing add_args(parser) and main(args) -> int.  They are imported lazily so a missing module only
     # breaks its own subcommand.
+    from . import cmd_new_part
+    p = sub.add_parser("new-part", help="write a commented template for a custom part in Python (script part)")
+    cmd_new_part.add_args(p)
+    p.set_defaults(func=cmd_new_part.main)
+
     for name, hlp in (("run", "run firmware and log pin activity"), ("shell", "interactive REPL"),
                       ("serve", "browser UI")):
         p = sub.add_parser(name, help=hlp)

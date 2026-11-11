@@ -36,6 +36,12 @@ def main(args) -> int:
           f"UI at {app.url}   (Ctrl-C to quit)", file=sys.stderr)
     from .hostserial import print_endpoints
     print_endpoints(session)
+    gdb = None
+    if getattr(args, "gdb", None) is not None:           # GDB RSP server: requests run on the Worker thread
+        from .gdbserver import GdbServer, WorkerExecutor
+        gdb = GdbServer(WorkerExecutor(app.worker), args.gdb, chip=getattr(args, "gdb_chip", None),
+                        log=lambda m: print(m, file=sys.stderr, flush=True)).start()
+        print(f"gdb server on 127.0.0.1:{gdb.port} (target extended-remote :{gdb.port})", file=sys.stderr)
     if getattr(args, "start", False):
         app.worker.running = True
     if getattr(args, "open", False):
@@ -44,5 +50,7 @@ def main(args) -> int:
     try:
         app.serve_forever()
     finally:
+        if gdb is not None:
+            gdb.close()
         app.session.close()          # the board editor may have replaced the session it started with
     return 0

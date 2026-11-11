@@ -16,6 +16,12 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable
 
 ReadHook = Callable[["MMIOBlock", "Reg"], "int | None"]
+
+
+def pure_read(fn):
+    """Mark an on_read hook as free of side effects (it only computes the value): the debugger's peek may call it."""
+    fn.pure_read = True
+    return fn
 WriteHook = Callable[["MMIOBlock", "Reg", int, int], "int | None"]
 
 
@@ -174,6 +180,48 @@ class MMIOBlock:
             self.log.event("mmio", self.now_ns(), block=self.name, addr=self.base + off, offset=off, size=size,
                            access=access, value=value, msg=f"{self.name}+0x{off:x}: unmodelled register "
                            f"({'read' if access == 'r' else 'write'} 0x{value:x})")
+
+    # --------------------------------------------------------------- debugger peek (no side effects)
+    # Registers whose on_read hook only computes a value (no FIFO pop, no flag clearing, no event): the debugger may
+    # call it to show the live value. Models list them here (or override peek_reg for anything smarter).
+    pure_reads: frozenset = frozenset()
+
+    def peek_reg(self, reg: Reg) -> tuple[int, bool]:
+        """(value, exact) of `reg` as the CPU would read it, without side effects (debugger / register browser).
+        No read hook: the stored value (exact). A hook named in `pure_reads`: its value (exact). Otherwise the
+        stored value with exact=False: reading the register runs a hook that may have side effects (FIFO pop,
+        flag clear) or computes the value, so the debugger shows what the model last stored."""
+        v = int.from_bytes(self.mem[reg.boff:reg.boff + reg.bw], "little")
+        if reg.on_read is None:
+            return v, True
+        if reg.name in self.pure_reads or getattr(reg.on_read, "pure_read", False):
+            try:
+                x = reg.on_read(self, reg)
+            except Exception:
+                return v, False
+            return (v if x is None else x & reg.mask), True
+        return v, False
+
+    def peek_bytes(self, offset: int, n: int) -> tuple[bytes, list[bool]]:
+        """`n` units from `offset` as a little-endian byte image without side effects, and per unit whether the
+        value is exact (see peek_reg). Unknown offsets read as stored (RAM-like) or 0."""
+        ub = self.unit_bytes
+        out = bytearray()
+        exact: list[bool] = []
+        cache: dict[str, tuple[int, bool]] = {}
+        for o in range(offset, offset + n):
+            r = self._by_off.get(o)
+            if r is None:
+                out += bytes(self.mem[o * ub:(o + 1) * ub]) if self.ram_like and 0 <= o < self.size else b"\0" * ub
+                exact.append(True)
+                continue
+            if r.name not in cache:
+                cache[r.name] = self.peek_reg(r)
+            v, ex = cache[r.name]
+            k = o - r.offset
+            out += ((v >> (k * self.unit_bits)) & ((1 << self.unit_bits) - 1)).to_bytes(ub, "little")
+            exact.append(ex)
+        return bytes(out), exact
 
     # --------------------------------------------------------------- read
     def read(self, offset: int, size: int) -> int:

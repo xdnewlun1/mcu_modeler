@@ -15,7 +15,8 @@ from __future__ import annotations
 import ctypes
 from typing import Callable, Sequence
 
-from unicorn import (UC_ARCH_ARM, UC_HOOK_BLOCK, UC_HOOK_INTR, UC_HOOK_MEM_PROT, UC_HOOK_MEM_UNMAPPED,
+from unicorn import (UC_ARCH_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_INTR, UC_HOOK_MEM_PROT, UC_HOOK_MEM_READ,
+                     UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_MEM_WRITE,
                      UC_MEM_FETCH_PROT, UC_MEM_FETCH_UNMAPPED, UC_MEM_READ_PROT, UC_MEM_READ_UNMAPPED,
                      UC_MEM_WRITE_PROT, UC_MEM_WRITE_UNMAPPED, UC_MODE_MCLASS, UC_MODE_THUMB, UC_PROT_EXEC,
                      UC_PROT_READ, UC_PROT_WRITE, Uc, UcError)
@@ -157,6 +158,10 @@ class UnicornCortexM(Core):
         self._unmapped_handler: Callable[[int, int, str], bool] | None = None
         self._batches: dict[tuple, _RegBatch] = {}
         self._mmio_keep: list = []
+        self._poll = None                          # PollWatch while poll skip is on (set_poll_watch)
+        self._poll_stop = False
+        self._max_insns = 0
+        self.poll_skip: int | None = None
         self._safe_cache: dict[int, int] = {}
         self._cs = None
         # precise-mode counters
@@ -175,6 +180,25 @@ class UnicornCortexM(Core):
             except Exception:  # pragma: no cover
                 self._counter = None
         self.exact_counts = self._counter is not None
+        # the emu_start count limit sits next to the counter (calibration found the pair counter, count): a
+        # watchpoint lowers it to "this instruction" so the run ends right after the accessing instruction
+        self._limit = None
+        if self._counter is not None:
+            try:
+                self._limit = ctypes.c_uint64.from_address(uc._uch.value + off + 8)
+            except Exception:  # pragma: no cover
+                self._limit = None
+        # debugger (chipem/debug.py): one UC_HOOK_CODE per breakpoint address and one ranged memory hook per
+        # watchpoint; none at all while nothing is set
+        self.debug_hook = None
+        self.bp_skip = None
+        self._bp_hooks: dict[int, int] = {}
+        self._wp_hooks: list[int] = []
+        self._wps: list = []
+        # hooks deleted: Unicorn drops them at the end of the next emu_start, and blocks translated while a hook
+        # existed keep its (slower) helper calls, so the code cache is flushed once more after that run
+        self._wp_flush = False
+        self._skip_once: int | None = None
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_MEM_PROT, self._on_prot)
@@ -195,13 +219,58 @@ class UnicornCortexM(Core):
 
     def map_mmio(self, base: int, size: int, read: Callable[[int, int], int],
                  write: Callable[[int, int, int], None]) -> None:
-        def rd(uc, off, sz, ud, _r=read):
-            return _r(off, sz)
+        core = self
+
+        def rd(uc, off, sz, ud, _r=read, _b=base):
+            v = _r(off, sz)
+            if core._poll is not None and core._max_insns >= 128:   # poll skip (perf.py): watch MMIO reads
+                core._poll_read(_b + off, v)                         # (short slices: never worth a skip)
+            return v
 
         def wr(uc, off, sz, val, ud, _w=write):
+            if core._poll is not None:
+                core._poll.anchor = None          # a write: not a pure polling loop (the next read restarts)
             _w(off, sz, val)
         self._mmio_keep.append((rd, wr))
         self.uc.mmio_map(base, size, rd, None, wr, None)
+
+    # ------------------------------------------------------------------ poll skip (Core.poll_skip, chipem/perf.py)
+    _POLL_REGS = tuple(f"r{i}" for i in range(13)) + ("sp", "lr", "pc", "xpsr", "msp", "psp", "control", "primask",
+                                                       "basepri", "faultmask")
+
+    def set_poll_watch(self, on: bool) -> bool:
+        from .base import PollWatch
+        if on and (self._counter is None or self.precise):
+            self._poll = None
+            return False                          # needs the exact instruction counter
+        self._poll = PollWatch() if on else None
+        return True
+
+    def _poll_read(self, a: int, v: int) -> None:
+        """MMIO read callback while poll watching: two consecutive identical iterations (PollWatch) with identical
+        registers -> stop in front of this load (emu_stop in a read callback aborts it; it runs again on resume) and
+        report the period in `poll_skip`."""
+        p = self._poll
+        if not p.read(a, v) or not self.running or self._user_stop or self._stop is not None:
+            return
+        cnt = int(self._counter.value)
+        if self._max_insns - cnt < p.MIN_GAIN:
+            return                                # the slice ends soon anyway (next event): not worth a stop
+        snap = tuple(self._batch(self._POLL_REGS).read())
+        if snap == p.snap:
+            d = cnt - p.cnt
+            if 0 < d <= p.MAX_PERIOD:
+                self.poll_skip = d
+                self._poll_stop = True
+                self._user_stop = True
+                self.uc.emu_stop()
+                p.cool = 0
+                p.reset()
+                return
+        elif p.snap is not None:
+            p.missed()                            # registers changed: not a pure loop (back off)
+            return
+        p.snap, p.cnt = snap, cnt
 
     def map_shared(self, base: int, size: int, ptr: int, *, writable: bool = True) -> None:
         perms = UC_PROT_READ | UC_PROT_EXEC | (UC_PROT_WRITE if writable else 0)
@@ -283,6 +352,7 @@ class UnicornCortexM(Core):
             self.write_regs(["fpscr"] + [f"s{i}" for i in range(32)], [0] * 33)
         self.last_fault = None
         self.stop_info = None
+        self.bp_skip = self._skip_once = None
 
     def run(self, max_insns: int) -> tuple[StopReason, int]:
         uc = self.uc
@@ -294,7 +364,14 @@ class UnicornCortexM(Core):
         if precise:
             self._cnt = self._cnt_before = 0
             self._blk = (0, 0)
+        self.poll_skip = None
+        self._poll_stop = False
+        self._max_insns = max_insns
+        if self._poll is not None:
+            self._poll.reset()
         start = uc.reg_read(A.UC_ARM_REG_PC)
+        if self.bp_skip is not None and self.bp_skip == start:
+            self._skip_once, self.bp_skip = start, None     # resume from a breakpoint: execute it once
         self.running = True
         err: UcError | None = None
         try:
@@ -303,6 +380,9 @@ class UnicornCortexM(Core):
             err = e
         finally:
             self.running = False
+            if self._wp_flush:           # deleted watch hooks are gone now: retranslate without their helpers
+                self._wp_flush = False
+                self.flush_code_cache()
 
         if err is not None:
             if getattr(err, "errno", None) == UCC.UC_ERR_INSN_INVALID and self._is_wfe_fault():
@@ -314,12 +394,22 @@ class UnicornCortexM(Core):
             return StopReason.FAULT, self._executed(max_insns, early=True, fault=True, err=err)
         reason = self._stop
         if reason is not None:
+            if reason is StopReason.DEBUG:
+                self._skip_once = None
+                if self.stop_info.get("type") == "breakpoint":
+                    self.bp_skip = self.stop_info["addr"]   # a resume from here executes it (steps over it)
+                if self._counter is not None and not self.precise:
+                    # breakpoint: the counter counted the instruction it stopped in front of; watchpoint: the
+                    # count limit stopped the run in front of the next instruction, also counted
+                    return reason, max(0, min(int(self._counter.value) - 1, max_insns))
             return reason, self._executed(max_insns, early=True)
         if self._user_stop:
             if self._mmio_fix is not None:
                 pc = uc.reg_read(A.UC_ARM_REG_PC)
                 if pc == self._mmio_fix:
                     uc.reg_write(A.UC_ARM_REG_PC, pc + self._safe_cache.get(pc, 2))
+            if self._poll_stop:                   # stopped in front of the polling load: it was counted, not run
+                return StopReason.USER, max(0, self._executed(max_insns, early=True) - 1)
             return StopReason.USER, self._executed(max_insns, early=True)
         # Did the slice run to its full budget?  Unicorn's count hook increments the counter before each
         # instruction and stops once it exceeds the budget, so a count-stop leaves counter == max_insns + 1,
@@ -417,6 +507,70 @@ class UnicornCortexM(Core):
         if self._counter is not None:
             return max(int(self._counter.value) - 1, 0)
         return self._cnt if self.precise else 0
+
+    # ------------------------------------------------------------------ debugger (chipem/debug.py)
+    def set_breakpoints(self, addrs) -> None:
+        """One UC_HOOK_CODE hook per address (bit 0 ignored); the translated blocks of changed addresses are
+        dropped so the hook takes effect (or disappears) at once."""
+        uc = self.uc
+        new = {int(a) & ~1 for a in addrs}
+        old = self._bp_hooks
+        for a in [a for a in old if a not in new]:
+            uc.hook_del(old.pop(a))
+            self._drop_tb(a)
+            self._wp_flush = True
+        for a in new - set(old):
+            old[a] = uc.hook_add(UC_HOOK_CODE, self._on_bp, None, a, a)
+            self._drop_tb(a)
+
+    def _drop_tb(self, a: int) -> None:
+        try:
+            self.uc.ctl_remove_cache(a, a + 4)
+        except Exception:
+            self.flush_code_cache()
+
+    def set_watchpoints(self, wps) -> None:
+        """Ranged UC_HOOK_MEM_READ / UC_HOOK_MEM_WRITE hooks (they also see MMIO accesses)."""
+        uc = self.uc
+        wps = [(int(lo), int(hi), str(acc)) for lo, hi, acc in wps]
+        if wps == self._wps:
+            return
+        self._wps = wps
+        for h in self._wp_hooks:
+            uc.hook_del(h)
+            self._wp_flush = True        # blocks translated until then still call the memory-hook helpers
+        self._wp_hooks = []
+        for lo, hi, acc in wps:
+            kind = (UC_HOOK_MEM_READ if "r" in acc else 0) | (UC_HOOK_MEM_WRITE if "w" in acc else 0)
+            if kind and hi > lo:
+                self._wp_hooks.append(uc.hook_add(kind, self._on_watch, None, int(lo), int(hi) - 1))
+        self.flush_code_cache()
+
+    def _on_bp(self, uc, addr, size, ud):
+        if addr == self._skip_once:
+            self._skip_once = None
+            return
+        h = self.debug_hook
+        if h is not None and not h("break", {"addr": addr}):
+            return
+        self._stop = StopReason.DEBUG
+        self.stop_info = {"type": "breakpoint", "addr": addr}
+        uc.emu_stop()
+
+    def _on_watch(self, uc, access, addr, size, value, ud):
+        acc = "w" if access == UC_MEM_WRITE else "r"
+        info = {"addr": addr, "size": size, "access": acc, "value": value if acc == "w" else None,
+                "pc": uc.reg_read(A.UC_ARM_REG_PC)}
+        h = self.debug_hook
+        if h is not None and not h("watch", info):
+            return
+        self._stop = StopReason.DEBUG
+        self.stop_info = {"type": "watchpoint", **info}
+        lim, cnt = self._limit, self._counter
+        if lim is not None and cnt is not None:
+            lim.value = cnt.value             # end the run in front of the next instruction (this one completes)
+        else:                                 # pragma: no cover - no counter: stop now (the access is repeated)
+            uc.emu_stop()
 
     # ------------------------------------------------------------------ hooks
     def _on_intr(self, uc, intno, ud):

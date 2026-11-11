@@ -1,0 +1,12 @@
+# STM32F103T6 <-> STM32F405ZG on one CAN bus at 500 kbit/s.
+#   A (STM32F103T6) runs can_node: 72 MHz, bxCAN on PA11/PA12, sends ID 0x100 every 10 ms and counts the echoes.
+#   B (STM32F405ZG) runs can_echo: 16 MHz HSI, bxCAN1 on PB8/PB9, echoes ID 0x100 frames as ID 0x202.
+# Run:   chipem run --board boards/stm32f103_stm32f405_can.yaml --for 50ms
+# Build: firmware/samples_stm32f1/build.sh; firmware/samples_stm32/build.sh
+name: stm32f103_stm32f405_can
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f103t6, firmware: ../firmware/samples_stm32f1/build/can_node.elf}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/can_echo.elf}
+links:
+  - {type: can, name: CANBUS, nodes: [A.CAN, B.CAN1]}

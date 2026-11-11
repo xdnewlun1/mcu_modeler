@@ -1,0 +1,3 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0030 main
+C:0x003E loop

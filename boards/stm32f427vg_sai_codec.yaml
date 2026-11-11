@@ -1,0 +1,23 @@
+# An STM32F427VG SAI1 (block A master transmitter + block B synchronous slave receiver, I2S standard) and an I2S
+# codec part: the STM32 plays a 1 kHz tone (sine left, square right; 47.991 kHz stereo, 16 bit, 1.536 MHz bit clock,
+# 12.29 MHz MCLK from PLLSAI) and records what the codec sends back on SD_B.
+#   A (STM32F427VG) runs f42x_sai_tone: PE5 SAI1_SCK_A / PE4 SAI1_FS_A / PE6 SAI1_SD_A (to the codec), PE3 SAI1_SD_B
+#                   (from the codec), PE2 SAI1_MCLK_A; after 96 frames it stops feeding (FIFO underrun) and disables
+#                   both blocks.
+#   CODEC (i2s_codec part): records every frame from SDIN (`frames`), plays back the pattern on SDOUT.
+# Run:   chipem run --board boards/stm32f427vg_sai_codec.yaml --for 4ms
+#        chipem serve --board boards/stm32f427vg_sai_codec.yaml
+# Build: firmware/samples_stm32_variants/build.sh
+name: stm32f427vg_sai_codec
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f427vg, firmware: ../firmware/samples_stm32_variants/build/f42x_sai_tone.elf}
+nets:
+  - {name: SCK, pins: [A.PE5]}
+  - {name: FS, pins: [A.PE4]}
+  - {name: SDIN, pins: [A.PE6]}
+  - {name: SDOUT, pins: [A.PE3], pull: down}
+  - {name: MCLK, pins: [A.PE2]}
+parts:
+  - {id: CODEC, type: i2s_codec, bits: 16, format: i2s, pattern: "4660,-4660,22136,-22136",
+     ports: {bclk: SCK, ws: FS, sdin: SDIN, sdout: SDOUT}}

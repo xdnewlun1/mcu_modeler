@@ -112,11 +112,16 @@ class UsbDcd(GatedBlock):
     def _field(self, reg: str, lsb: int, width: int) -> int:
         return (self.get(reg) >> lsb) & ((1 << width) - 1)
 
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Stop/VLPS/LLS (Table 7-2: USB DCD static): the sequence timers held while the bus clock was off."""
+        self._t0 += dns
+
     def _tunit_now(self) -> int:
         if self._tunitcon is not None:
             return self._tunitcon
         init = self._field("TIMER0", 16, 10)
-        el = int((self.chip.now_ns() - self._t0) // self._unit)
+        now = self.lp_t0_ns if getattr(self, "lp_frozen", False) else self.chip.now_ns()
+        el = int((now - self._t0) // self._unit)
         return min(0xFFF, init + max(0, el))
 
     def _timer0_read(self, blk, reg) -> int:

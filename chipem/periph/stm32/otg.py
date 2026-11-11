@@ -934,6 +934,8 @@ class OtgCore(GatedBlock):
         """The core can take part in bus traffic now."""
         if self.chip is None or self._cmod or not self._session or not self._r(0x038) & PWRDWN:
             return False
+        if getattr(self, "lp_frozen", False):
+            return False                 # Stop: no clock, tokens time out (resume K still raises the EXTI wake-up)
         if self._rcc_gate_off():
             self._warn_once("gate", f"{self.name}: bus traffic while the {self.gate} clock (RCC) is off: ignored")
             return False

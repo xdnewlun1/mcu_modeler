@@ -498,3 +498,13 @@ cable → USB-serial adapter → host port) is built from parts on nets:
   part symbols (`parts.js`: `PartView`, `partGeom`) in extra grid columns (sources | chips | logic |
   indicators), packed into row bands so streets stay free; a port anchor is a pin-like member of the net router
   (side L/R, gutter of its column), so part-only nets route like any other.
+
+## The MCS-51 (NXP P89CV51) path
+
+Same layering as the C28x: `core/mcs51` (interpreter with predecoded closures, assembler/disassembler, opcode
+table), `arch/mcs51` (IE/IP/IPH priority levels, polling order, RETI, the one-more-instruction rule, CPU SFR block,
+debugger support), `periph/mcs51` (ports, timers 0/1/2, UART, SPI, PCA, watchdog, IAP flash, system control,
+external bus).  The 8051's separate address spaces are tagged ranges of one flat space (CODE 0x00000, XDATA
+0x10000, IDATA 0x20000, SFR 0x30080, XRAM 0x40000) and SFR models are *sparse* MMIO blocks (base 0x30000, offset =
+SFR address, `ranges` mapped by the Bus).  The clock is the oscillator: the core counts oscillator periods (12 or 6
+per machine cycle) and returns them from `run()`.  See docs/MCS51_CORE.md.

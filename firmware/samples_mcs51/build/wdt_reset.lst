@@ -1,0 +1,40 @@
+0000               ; wdt_reset: the watchdog (WDTRST A6h: write 1Eh, E1h) resets the chip when it is not fed.
+0000               ; Internal RAM survives a reset (data sheet sec. 6.2.3), PCON.POF tells a power-on reset from the others:
+0000               ;   power-on: clear the reset counter at 7Fh; every reset: increment it and toggle P1.0.
+0000               ; After enabling the watchdog the program feeds it 4 times (every ~10 ms), then stops feeding: 16383 machine cycles
+0000               ; (~17.8 ms at 11.0592 MHz) later the WDT resets the chip.  On the third reset it keeps feeding forever and sets
+0000               ; P1.1 low.
+0000               RSTCNT  DATA    7Fh
+0000                       ORG     0000h
+0000  02 00 30             LJMP    main
+0003                       ORG     0030h
+0030  75 81 5F     main:   MOV     SP, #5Fh
+0033  E5 87                MOV     A, PCON
+0035  30 E4 08             JNB     ACC.4, warm             ; POF clear: not a power-on reset
+0038  53 87 EF             ANL     PCON, #0EFh             ; clear POF
+003B  75 7F 00             MOV     RSTCNT, #0
+003E  80 04                SJMP    start
+0040  05 7F        warm:   INC     RSTCNT
+0042  B2 90                CPL     P1.0
+0044  75 A6 1E     start:  MOV     WDTRST, #1Eh
+0047  75 A6 E1             MOV     WDTRST, #0E1h           ; enable
+004A  7F 04                MOV     R7, #4
+004C  12 00 6B     feed:   LCALL   delay10ms
+004F  75 A6 1E             MOV     WDTRST, #1Eh
+0052  75 A6 E1             MOV     WDTRST, #0E1h
+0055  DF F5                DJNZ    R7, feed
+0057  E5 7F                MOV     A, RSTCNT
+0059  B4 03 0D             CJNE    A, #3, starve
+005C               forever:
+005C  C2 91                CLR     P1.1
+005E  12 00 6B             LCALL   delay10ms
+0061  75 A6 1E             MOV     WDTRST, #1Eh
+0064  75 A6 E1             MOV     WDTRST, #0E1h
+0067  80 F3                SJMP    forever
+0069  80 FE        starve: SJMP    $                       ; no more feeding: the WDT resets the chip
+006B               delay10ms:                              ; 9216 machine cycles: 2 + 36 * (2 + 128 * 2) - ish
+006B  7E 24                MOV     R6, #36
+006D  7D 7F        d1:     MOV     R5, #127
+006F  DD FE        d2:     DJNZ    R5, d2
+0071  DE FA                DJNZ    R6, d1
+0073  22                   RET

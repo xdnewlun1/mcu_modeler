@@ -431,3 +431,162 @@ def test_lockup_resets_the_k22(desc):
     chip.halt_on_fault = True                             # --stop-on-fault still stops the run
     chip.reset()
     assert chip.run_for(1e5).value == "fault"
+
+
+# --------------------------------------------------------------------------------------------- STOP freezes FTM/PDB/DMA
+FTM0, PDB0 = 0x40038000, 0x40036000
+RTC_WAKE = (st(SCGC6, 0x20000000, ) + st(RTC + 0x00, 0) + st(RTC + 0x08, 1) + st(RTC + 0x1C, 4) + st(RTC + 0x14, 0x10)
+            + st(0xE000E284, 1 << (46 - 32)) + st(NVIC_ISER1, 1 << (46 - 32)))     # RTC alarm interrupt wakes STOP
+RTC_ISR = st(RTC + 0x08, 100) + INC + "  bx lr\n"
+
+
+def test_stop_holds_ftm_and_pdb_counters(desc):
+    # Table 7-2: FTM and PDB static in STOP; the counters continue from where they stopped (no jump by the sleep time)
+    code = {"reset": WDOG_OFF + RTC_WAKE + st(SCGC6, (1 << 29) | (1 << 24) | (1 << 22))
+            + st(FTM0 + 0x08, 0xFFFF) + st(FTM0, 0x0F)                 # MOD, CLKS = system clock, PS = /128
+            + st(PDB0 + 0x04, 0xFFFF) + st(PDB0, 0x7F8F)                  # MOD; PRESCALER 7, MULT x40, CONT, LDOK
+            + st(PDB0, 0x17F8E)                                          # SWTRIG: start
+            + st(SCR, 4) + "  wfi\n" + st(CNT + 4, 0xAA) + "spin:\n b spin\n",
+            "rtc": RTC_ISR}
+    chip = mk(desc, code, {16 + 46: "rtc"})
+    chip.run_for(1e6)
+    ftm, pdb = chip.peripherals["FTM0"], chip.peripherals["PDB0"]
+    assert chip.sleeping and r(chip, SMC + 3, 1) == 0x02 and ftm.running and pdb.running
+    f0, p0 = ftm._cnt_now(), pdb.cnt()
+    chip.run_for(500e6)
+    assert chip.sleeping and ftm._cnt_now() == f0 and pdb.cnt() == p0      # held while the bus clock is off
+    while r(chip, CNT) == 0 and chip.clock.now_ns() < 3e9:
+        chip.run_for(100e6)
+    assert r(chip, CNT) == 1 and r(chip, CNT + 4) == 0xAA                 # the RTC alarm woke the core (~1-2 s)
+    f1, p1 = ftm._cnt_now(), pdb.cnt()
+    hz = chip.clock.hz                                                    # bus = core in FEI (OUTDIV2 = 1)
+    awake_ns = 10e6                                                        # generous: the core ran < 10 ms awake
+    assert 0 < (f1 - f0) & 0xFFFF < awake_ns * 1e-9 * hz / 128 + 2
+    assert 0 < p1 - p0 < awake_ns * 1e-9 * hz / (128 * 40) + 2
+    assert ftm._t(ftm._p0) <= chip.now_ns()                                # anchor moved, not in the future
+
+
+def test_wait_keeps_ftm_running(desc):
+    code = {"reset": WDOG_OFF + st(SCGC6, 1 << 24) + st(FTM0 + 0x08, 0xFFFF) + st(FTM0, 0x0F)
+            + "  wfi\nspin:\n b spin\n"}
+    chip = mk(desc, code)
+    chip.run_for(1e5)
+    ftm = chip.peripherals["FTM0"]
+    f0 = ftm._cnt_now()
+    chip.run_for(1e6)
+    assert chip.sleeping and modes(chip) == ["WAIT"] and ftm._cnt_now() != f0
+
+
+def test_stop_defers_dma_request_until_wakeup(desc):
+    code = {"reset": WDOG_OFF + RTC_WAKE + st(SCR, 4) + "  wfi\nspin:\n b spin\n", "rtc": RTC_ISR}
+    chip = mk(desc, code, {16 + 46: "rtc"})
+    chip.run_for(1e6)
+    assert chip.sleeping
+    dma = chip.peripherals["DMA"]
+    seen = []
+    dma._enqueue = lambda ch: seen.append((ch, chip.sleeping))          # observe the engine entry
+    dma._setbit("ERQ", 3, True)
+    dma.hw_request(3)                                                    # a request while the system clock is off
+    assert seen == [] and 3 in dma._lp_pending
+    chip.run_for(2.5e9)
+    assert not chip.sleeping and seen and seen[0][0] == 3 and dma._lp_pending == set()
+
+
+def test_i2c_address_match_wakes_from_stop_with_wuen(desc):
+    from chipem.periph.kinetis.i2c import IAAS, IICIF, IICEN, IICIE, WUEN
+    code = {"reset": WDOG_OFF + st(SCR, 4) + "  wfi\n" + st(CNT + 4, 0xEE) + "spin:\n b spin\n",
+            "i2c": INC + "  ldr r0, =0x40066003\n  movs r1, #2\n  strb r1, [r0]\n  cpsid i\n  bx lr\n"}
+    for wuen, woke in ((WUEN, True), (0, False)):
+        chip = mk(desc, code, {16 + 24: "i2c"})
+        i2c = chip.peripherals["I2C0"]
+        i2c.set("A1", 0x50 << 1)
+        i2c.set("C1", IICEN | IICIE | wuen)
+        chip.arch.enable_irq(24) if hasattr(chip.arch, "enable_irq") else chip.bus.write(NVIC_ISER0, 4, 1 << 24)
+        chip.run_for(1e5)
+        assert chip.sleeping and r(chip, SMC + 3, 1) == 0x02
+        assert i2c.lp_frozen == "STOP"
+        acked = i2c.i2c_address(0x50, False)                             # the bus decoder sees our address
+        assert acked is woke
+        chip.run_for(1e5)
+        if woke:
+            assert r(chip, CNT) == 1 and r(chip, CNT + 4) == 0xEE and i2c.get("S") & IAAS
+            assert not i2c.lp_frozen
+        else:
+            assert chip.sleeping and r(chip, CNT) == 0 and not i2c.get("S") & (IAAS | IICIF)
+
+
+def test_stop_lets_the_dspi_frame_finish_then_stops(desc):
+    # 47.4.8.1: a transfer in progress completes at the frame boundary, then the DSPI is STOPPED until the wake-up
+    SPI0 = 0x4002C000
+    code = {"reset": WDOG_OFF + RTC_WAKE + st(SCGC6, (1 << 29) | (1 << 12))
+            + st(SPI0 + 0x0C, 0x3800000F)                                 # CTAR0: 8 bits, BR = 32768 (slow SCK)
+            + st(SPI0, 0x80000000)                                        # MCR: MSTR, MDIS = HALT = 0
+            + st(SPI0 + 0x34, 0x000100A5) + st(SPI0 + 0x34, 0x0001005A)    # two frames on PCS0
+            + st(SCR, 4) + "  wfi\n" + st(CNT + 4, 0xAA) + "spin:\n b spin\n",
+            "rtc": RTC_ISR}
+    chip = mk(desc, code, {16 + 46: "rtc"})
+    spi = chip.peripherals["SPI0"]
+    chip.run_for(1e6)
+    assert chip.sleeping and spi._frame is not None and not spi.frames      # asleep mid-frame
+    chip.run_for(200e6)
+    assert chip.sleeping and [f[1] for f in spi.frames] == [0xA5]            # first frame completed, second waits
+    assert spi._frame is None and not spi._status() & (1 << 30)              # SR.TXRXS = 0 (STOPPED)
+    while r(chip, CNT) == 0 and chip.clock.now_ns() < 3e9:
+        chip.run_for(100e6)
+    chip.run_for(100e6)
+    assert [f[1] for f in spi.frames] == [0xA5, 0x5A]                        # resumed after the wake-up
+
+
+def test_stop_stops_sai_with_internal_bit_clock_after_the_frame(desc):
+    # 51.1.3.2: without a bit clock that runs in Stop (or without STOPE) a side finishes its frame and stays disabled
+    I2S0 = 0x4002F000
+    code = {"reset": WDOG_OFF + RTC_WAKE + st(SCGC6, (1 << 29) | (1 << 15))
+            + st(I2S0 + 0x08, (1 << 24) | 3)                             # TCR2: BCD = 1, MSEL = bus clock, DIV 3
+            + st(I2S0 + 0x0C, 1 << 16) + st(I2S0 + 0x10, (1 << 16) | (1 << 4) | 1)   # TCE ch0; 2 words, MF, FSD
+            + st(I2S0 + 0x14, (7 << 24) | (7 << 16) | (7 << 8))          # 8-bit words
+            + st(I2S0, (1 << 31) | (1 << 30) | (1 << 28))                # TE, STOPE, BCE
+            + st(SCR, 4) + "  wfi\n" + st(CNT + 4, 0xAA) + "spin:\n b spin\n",
+            "rtc": RTC_ISR}
+    chip = mk(desc, code, {16 + 46: "rtc"})
+    sai = chip.peripherals["I2S0"]
+    chip.run_for(1e6)
+    assert chip.sleeping and sai.tx.lp_off
+    f0 = sai.tx.frames
+    chip.run_for(300e6)
+    assert sai.tx.frames <= f0 + 1 and not sai.tx.running and not sai.tx.enabled
+    assert sai.read(0x00, 4) & (1 << 31)                                  # TE still set: disabled by the stop only
+    while r(chip, CNT) == 0 and chip.clock.now_ns() < 3e9:
+        chip.run_for(100e6)
+    f1 = sai.tx.frames
+    chip.run_for(1e6)
+    assert sai.tx.running and sai.tx.frames > f1 + 10                      # running again after the wake-up
+    sai.tx.lp_off = False
+    sai.write(0x08, 4, 0)                                                  # BCD = 0: external bit clock
+    assert sai._clock_survives_stop(sai.tx)
+
+
+def test_flexcan_stop_ack_and_self_wake(desc):
+    # 46.4.10.3: Stop sets LPMACK/NOTRDY, ignores Rx; with SLFWAK bus activity sets ESR1.WAKINT (Wake_Up interrupt)
+    from chipem.canbus import CanFrame
+    from chipem.periph.kinetis.flexcan import ESR1_W1C, LPMACK, NOTRDY, SLFWAK, WAKINT, WAKMSK
+    chip = mk(desc, {"reset": WDOG_OFF + "spin:\n b spin\n"})
+    chip.bus.write(SCGC5, 4, chip.bus.read(SCGC5, 4) | (1 << 9))           # PORTA
+    chip.bus.write(SCGC6, 4, chip.bus.read(SCGC6, 4) | (1 << 4))           # FLEXCAN0
+    chip.bus.write(PORTA + 4 * 12, 4, 2 << 8)                               # PTA12 = CAN0_TX
+    chip.bus.write(PORTA + 4 * 13, 4, 2 << 8)                               # PTA13 = CAN0_RX
+    can = chip.peripherals["CAN0"]
+    chip.bus.write(0x40024000, 4, SLFWAK | WAKMSK)                          # MDIS = FRZ = HALT = 0: running
+    chip.run_for(1e5)
+    t0 = can._timer_value(chip.now_ns())
+    can.clock_stop(True, "STOP")
+    mcr = chip.bus.read(0x40024000, 4)
+    assert mcr & LPMACK and mcr & NOTRDY
+    assert can.can_tx_frame(can.can_bus) is None and can.can_rx_state(can.can_bus) == "listen"
+    chip.clock.advance(chip.clock.ns_to_cycles(1e6))
+    assert can._timer_value(chip.now_ns()) == t0                            # TIMER held
+    can.can_rx(can.can_bus, CanFrame(0x123, b"\x01"), chip.now_ns() - 1e5, chip.now_ns())
+    assert can.get("ESR1") & WAKINT and can._lines.get("wake")              # Wake_Up interrupt line
+    assert can.rx_frames == 0                                               # the frame itself is not received
+    can.clock_stop(False, "STOP")
+    assert not chip.bus.read(0x40024000, 4) & LPMACK and can._sync_t > chip.now_ns()
+    assert ESR1_W1C & WAKINT

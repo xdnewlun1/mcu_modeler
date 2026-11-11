@@ -1,0 +1,9 @@
+# STM32F437AI (UFBGA169) with an 8 MB SDR SDRAM (IS42S16400J-like: 4 internal banks x 4096 rows x 256 columns x
+# 16 bit; chipem.devices.sdram) on FMC SDRAM bank 2 (SDNE1 PB6 / SDCKE1 PB5, window 0xD0000000), wired like ST's
+# STM32F429I-DISCO. The firmware clocks the chip to 180 MHz (over-drive), runs the RM0090 37.7.3 SDRAM init sequence
+# (SDCLK = HCLK/2 = 90 MHz, CAS 3, refresh COUNT 1386), tests the memory and prints "SDRAM OK 8192 KB" on USART1.
+name: stm32f437ai_sdram
+chips:
+  - {id: A, chip: stm32f437ai, firmware: ../firmware/samples_stm32_variants/build/f42x_sdram.elf}
+devices:
+  - {type: sdram, chip: A, bus: FMC, bank: 2, banks: 4, rows: 4096, cols: 256, width: 16}

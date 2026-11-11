@@ -8,6 +8,8 @@
   ARM private peripheral bus 0xE0000000-0xE00FFFFF by default) create a RAM-like `stub` block of 0x1000 bytes on
   first touch (logged once), so firmware never faults on an unmodelled peripheral.  Anything else unmapped is a
   bus fault.
+* Sparse blocks (`block.ranges`, MCS-51 SFR models): only the listed address ranges are mapped; offsets stay
+  relative to `block.base` (see `_map_sparse`).
 * Optional Cortex-M3/M4 bit-band aliases (0x22000000 → SRAM 0x20000000, 0x42000000 → peripherals 0x40000000).
 * Address units (docs/CONTRACTS.md "16-bit address units"): addresses and sizes are in the chip's units
   (`addr_unit_bits`: 8 on ARM, 16 on C28x).  `read`/`write` sizes count units and values are little-endian in unit
@@ -51,8 +53,9 @@ class MemoryRegion:
 
 
 class _PageDispatch:
-    """One core page shared by several sub-page MMIO blocks."""
-    __slots__ = ("bus", "base", "size", "blocks", "fallback")
+    """One core page shared by several sub-page MMIO blocks. Routes are cached per offset (`_routes`, cleared when a
+    block joins the page); `resolve(off)` lets a core cache the (block, offset) itself (C28x interpreter)."""
+    __slots__ = ("bus", "base", "size", "blocks", "fallback", "_routes")
 
     def __init__(self, bus: "Bus", base: int, size: int):
         self.bus = bus
@@ -60,15 +63,27 @@ class _PageDispatch:
         self.size = size
         self.blocks: list[MMIOBlock] = []
         self.fallback: MMIOBlock | None = None
+        self._routes: dict[int, tuple[MMIOBlock, int]] = {}
+
+    def add(self, block: MMIOBlock) -> None:
+        self.blocks.append(block)
+        self._routes.clear()
 
     def _route(self, off: int) -> tuple[MMIOBlock, int]:
+        r = self._routes.get(off)
+        if r is not None:
+            return r
         addr = self.base + off
         for b in self.blocks:
             if b.base <= addr < b.base + b.size:
-                return b, addr - b.base
+                r = self._routes[off] = (b, addr - b.base)
+                return r
         if self.fallback is None:
             self.fallback = self.bus._make_stub(self.base, self.size, mapped=False)
-        return self.fallback, off
+        r = self._routes[off] = (self.fallback, off)
+        return r
+
+    resolve = _route
 
     def read(self, off: int, size: int) -> int:
         b, o = self._route(off)
@@ -161,6 +176,8 @@ class Bus:
         return r
 
     def map_mmio(self, block: MMIOBlock) -> None:
+        if getattr(block, "ranges", None):
+            return self._map_sparse(block)
         base, size, page = block.base, block.size, self.page
         end = base + size
         obj = self._entry_overlap(base, end)
@@ -182,10 +199,43 @@ class Bus:
                     d = _PageDispatch(self, pb, page)
                     self._pages[pb] = d
                     self.core.map_mmio(pb, page, d.read, d.write)
-                d.blocks.append(block)
+                d.add(block)
                 pb += page
+            self._flush_core_mmio()
         self._add_entry(base, end, block)
         self.blocks[block.name] = block
+
+    def _map_sparse(self, block: MMIOBlock) -> None:
+        """A block whose registers sit at scattered addresses (MCS-51 SFRs): `block.ranges` = [(abs_base, size)];
+        offsets stay relative to `block.base` (an SFR block's offset is the SFR address).  Only the ranges are
+        mapped and looked up; each must be aligned to the core page (the MCS-51 core's page is one byte).  The
+        callbacks handed to the core carry `target` (block.read / block.write) and `delta` so a core may call the
+        block directly."""
+        page = self.page
+        for rb, rs in block.ranges:
+            if rb % page or rs % page:
+                raise ValueError(f"MMIO block {block.name}: range 0x{rb:x}+{rs} not aligned to the core page")
+            other = self._overlaps(rb, rb + rs)
+            if other is not None:
+                raise ValueError(f"MMIO block {block.name} range 0x{rb:x} overlaps {other!r}")
+        for rb, rs in block.ranges:
+            d = rb - block.base
+
+            def rd(off: int, n: int, _b=block, _d=d) -> int:
+                return _b.read(off + _d, n)
+
+            def wr(off: int, n: int, v: int, _b=block, _d=d) -> None:
+                _b.write(off + _d, n, v)
+            rd.target, rd.delta, wr.target, wr.delta = block.read, d, block.write, d
+            self.core.map_mmio(rb, rs, rd, wr)
+            self._add_entry(rb, rb + rs, block)
+        self.blocks[block.name] = block
+
+    def _flush_core_mmio(self) -> None:
+        """A dispatcher's routing changed: drop a core's own per-address MMIO cache (C28x interpreter)."""
+        f = getattr(self.core, "flush_mmio_cache", None)
+        if f is not None:
+            f()
 
     # ---------------------------------------------------------------- dynamic windows (external memory buses)
     def map_window(self, name: str, base: int, size: int, *, buffer: Any = None, period: int | None = None,

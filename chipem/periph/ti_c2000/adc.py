@@ -124,6 +124,11 @@ class ADC(C2000Block):
         self._mirror = find_model(chip, "ti_c2000.adcmirror")
         self._gpio = find_model(chip, "ti_c2000.gpio")
 
+    def clock_resumed(self, dt_cycles: int) -> None:
+        """STANDBY/HALT exit: a session that was converting continues where it stopped (its result times move)."""
+        if self._sess is not None:
+            self._sess.t_first += dt_cycles
+
     def reset(self) -> None:
         if self.chip is not None:
             if self._ev is not None:

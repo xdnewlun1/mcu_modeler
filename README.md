@@ -9,10 +9,13 @@ New here? Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
 Three families are supported: NXP/Freescale Kinetis K22F (Cortex-M4F, LQFP100: `MK22FN1M0VLL12`,
 `MK22FX512VLL12`), ST STM32F405xx/STM32F407xx (Cortex-M4F: every part and package of data sheet DS8626, from the
-64-pin STM32F405RG to the 176-pin STM32F407IG/IE in LQFP176 and UFBGA176) and TI C2000 TMS320F28232 (C28x, LQFP176). ARM
-instructions run on [Unicorn](https://www.unicorn-engine.org/) (QEMU TCG); the C28x runs on a pure-Python
-interpreter (`chipem/core/c28x`). CHIP_EM itself implements the ARMv7-M exception model (SysTick/NVIC/SCB), the
-C28x PIE interrupt architecture and the vendor peripherals. Several chips can share a board (nets and UART links),
+64-pin STM32F405RG to the 176-pin STM32F407IG/IE in LQFP176 and UFBGA176; the 180 MHz STM32F427xx/STM32F437xx die in
+LQFP100, LQFP144, LQFP176, UFBGA169 and UFBGA176), ST STM32F103T6 (Cortex-M3 low-density STM32F1, VFQFPN36; family
+`stm32f1`, RM0008 register layout), TI C2000 TMS320F28232 (C28x, LQFP176) and TMS320F2808 (280x,
+LQFP100), and the NXP P89CV51RB2/RC2/RD2 (80C51, PLCC44/TQFP44, family `mcs51`). ARM
+instructions run on [Unicorn](https://www.unicorn-engine.org/) (QEMU TCG); the C28x and the 8051 run on pure-Python
+interpreters (`chipem/core/c28x`, `chipem/core/mcs51`). CHIP_EM itself implements the ARMv7-M exception model
+(SysTick/NVIC/SCB), the C28x PIE and 8051 IE/IP interrupt architectures and the vendor peripherals. Several chips can share a board (nets and UART links),
 for example a C2000 talking to an STM32 over a UART, shown live in the browser UI.
 
 What works today:
@@ -319,7 +322,10 @@ or `DELETE /api/net/<name>`; `POST /api/link {from: "A.UART0", to: "B.USART1", b
 {from, to}` or `DELETE /api/link?from=..&to=..`; `GET /api/board/yaml[?download=1]`. Parts: `GET /api/parts/types`
 (`[{type, params: {name: default}, ports: {name: dir}}]`); `POST /api/part {id?, type, params, ports: {port: net
 | "CHIP.PIN"}}` (on a single chip this creates the one-chip board); `POST /api/part/set {id, values: {level: "H"}}`;
-`POST /api/part/remove {id}`; `POST /api/part/port {id, port, to}` (`to: null` disconnects). `/api/board` and
+`POST /api/part/remove {id}`; `POST /api/part/port {id, port, to}` (`to: null` disconnects). Script parts:
+`POST /api/part/reload {id}`, `GET /api/part/script?id=` / `POST /api/part/script {id, code}` (editor); adding one or
+opening a board with script parts needs `allow_scripts: true` (409 with the script list otherwise), and these
+requests are refused cross-site and for non-IP/localhost Host headers. `/api/board` and
 `/api/chip` have `parts` (`id`, `type`, `params`, `ports` → net, `dirs`, `state`), `state.board.parts` the live
 states, and `part` events arrive on the SSE stream. `state.board.wiring`
 increases on every wiring change, including automatic links that appear when firmware muxes a pin.
@@ -354,6 +360,72 @@ $ curl -s -X POST localhost:8765/api/pin -d '{"name":"PTC6","level":"L"}'
 {"ok": true, "name": "PTC6", "external": "L", "level": "L"}
 ```
 
+## Debugging firmware: breakpoints, source, registers, GDB
+
+Every front end has a debugger (chipem/debug.py) for ARM (Unicorn) and C28x chips, single chips and boards:
+
+- **Breakpoints** at `main` (after its prologue when the ELF has line info), `*0x4ac`, `main+0x10`,
+  `blinky.c:16`, `16`; temporary ones, enable / disable, hit counts, ignore counts and conditions
+  (`r0 == 3 && mem32[0x20000000] & 1`, `counter > 10`). The core stops *before* the instruction.
+- **Watchpoints** (write / read / access) on an address range, a data symbol or an MMIO register by name
+  (`USART1.SR`, `GPIOC.PDOR`, `B.SCIA.SCIRXBUF` on a board): the run stops right *after* the accessing instruction,
+  which is reported with the value written.
+- **Stepping**: instruction (`stepi`), over calls (`nexti`: BL/BLX, LCR/LC/FFC), source line (`next`, `s`), out of
+  the function (`finish`), run to a location (`until`). On a board the whole board runs, so the chips stay in
+  lockstep; a stop leaves the other chips at most one board quantum ahead (the skew is reported).
+- **Source and disassembly** from DWARF line info (`--source-dir DIR` if the sources moved): mixed listings,
+  call stacks from DWARF CFI (exception frames included), registers, side-effect-free memory (MMIO registers are
+  *peeked*: a register whose read would pop a FIFO shows its stored value, marked). TI's C2000 ELF `.out` carries
+  DWARF too; TI COFF `.out`, `.c28img` and raw `.bin` images get symbols + assembly.
+- Nothing is hooked while no breakpoint or watchpoint is set: blinky and the C2000 samples run at full speed.
+
+```
+$ .venv/bin/chipem shell firmware/samples/build/blinky.elf --clock 120e6 \
+    --exec "break main; watch GPIOC.PTOR; continue; next; continue; bt; info break"
+Breakpoint 1 at 0x000004B6: main+0xa (blinky.c:6)
+Watchpoint 2: GPIOC.PTOR (0x400FF08C, 4 bytes)
+stopped: DEBUG  t=192 ns  cycles=23  pc=0x000004B6 <main+0xa>
+breakpoint 1 at main+0xa (blinky.c:6)
+6	    WDOG_Disable();
+stopped: DEBUG  t=317 ns  cycles=38  pc=0x000004C2 <main+0x16>
+7	    SIM_SCGC5 |= SIM_SCGC5_PORTC;
+stopped: DEBUG  t=42.125 us  cycles=5055  pc=0x000004FE <main+0x52>
+watchpoint 2: write 0x400FF08C = 0x20 by main+0x4e (blinky.c:16)
+17	        }
+#0  pc 0x000004FE main+0x52 (blinky.c:17)
+Num  Type       Enb  Address     What
+1    breakpoint y   0x000004B6  main+0xa (blinky.c:6)  (hit 1)
+2    watch      y   0x400FF08C  GPIOC.PTOR [4]  (hit 1)
+```
+
+Shell commands: `break`/`b`, `tbreak`, `watch [-r|-a]`, `rwatch`, `awatch`, `delete`, `enable`, `disable`,
+`condition`, `ignore`, `info break|regs|frame|line|source`, `continue`/`c`, `next`/`n`, `s` (line step into),
+`nexti`/`ni`, `stepi`/`si` (= `step`), `finish`, `until`/`advance`, `list`/`l`; `dis` shows source lines and marks
+breakpoints (`B`), `bt` unwinds with DWARF CFI.
+
+**Web UI**: the pins tray has a **Debug** tab (code view following the PC in mixed / asm / source mode, click the
+gutter for a breakpoint, breakpoint + watchpoint list, call stack, registers with changed values highlighted and
+editable while paused, memory view that can follow a register; F5 continue, Shift+F5 pause, F10 over, F11 into,
+Shift+F11 out, F4 run to cursor, F9 breakpoint at the cursor) and a **Registers** tab (every peripheral → register →
+bit field with enumerated meanings, live values while paused and once a second while running, filter, copy, write a
+register or a field while paused). `/?tab=debug` opens the page on the tab. API: `/api/debug/*`, `/api/regs/*`
+(chipem/web/debugapi.py).
+
+**GDB** (`--gdb PORT` on `chipem run`, `shell` and `serve`; `--gdb-chip ID` on a board): a GDB remote serial
+protocol server, so gdb / gdb-multiarch / arm-none-eabi-gdb, Ghidra's debugger, IDA, VS Code (cortex-debug) and
+lldb can attach. `chipem run --gdb` starts halted and waits.
+
+```
+$ .venv/bin/chipem run firmware/samples/build/blinky.elf --clock 120e6 --gdb 3333 &
+$ gdb firmware/samples/build/blinky.elf -ex "target extended-remote :3333" -ex "break blinky.c:16" -ex continue
+Breakpoint 1, main () at blinky.c:16
+16	            GPIOC->PTOR = 1u << 5;
+```
+
+`monitor reset`, `monitor halt` and any shell command (`monitor pins gpio`, `monitor periph UART0`) work from gdb.
+The C28x has no gdb architecture: the server sends a custom target description (word addresses) for generic RSP
+clients. See docs/USER_GUIDE.md 4.7.
+
 ## Stimulus and session options
 
 (`--set`/`--at` also act on board parts, `--part` adds one: see "Parts: switches, LEDs, logic".)
@@ -381,8 +453,11 @@ UART input behaves like a terminal on the RX pin: there is no input queue. Each 
 character time (at the receiving UART's current baud) after the previous one, and is lost if the receiver cannot
 take it then: receiver disabled, peripheral clock gated off or in reset, RX pin not muxed to the UART, or the
 holding register/FIFO still full (overrun flag set). Lost bytes show up as `uart` events with `dir=drop
-reason=...` and in the run summary ("RX dropped N byte(s)"). Firmware that needs time to boot therefore needs its
-input later: use `--at` rather than `--uart-in`. Board links behave the same way.
+reason=...` and in the run summary ("RX dropped N byte(s)"); characters received with framing / parity / noise
+errors or as breaks are counted there too ("RX errors"). Firmware that needs time to boot therefore needs its
+input later: use `--at` rather than `--uart-in`. Board links behave the same way. The input is sent in the
+receiver's own format; `<break>` (or `<break:N>`, N bit times) in the text sends a break, e.g.
+`--at '5ms:USART1=<break>U'`.
 
 Pin names accept the short GPIO name (`PTC6`), any part of the datasheet name (`LLWU_P10`), or the pin
 number (`78`). Levels are `1/H/high`, `0/L/low`, `X` (undetermined) and `Z`/`none`/`float` (disconnect).
@@ -406,7 +481,23 @@ exceptions taken:
   exc 15 SysTick                  4
 ```
 
+## Speed, fidelity and the emulation rate
+
+`chipem run`, `shell` and `serve` take `--fast` / `--accurate` (or `--preset NAME`) plus single knobs:
+`--max-slice N`, `--quantum T` (boards), `--auto-quantum`, `--poll-skip T`, `--pin-log all|auto|off`,
+`--drop-events KINDS`, `--ui-interval T`. `--speed X` paces the run at X times real time; `--speed max` runs unpaced.
+The default preset keeps exact behaviour. `fast` gives about 5-20x on firmware that polls status registers (most
+firmware): it fast-forwards polling loops whose CPU state repeats, up to the next event and at most 100 us at a time.
+It also lets sleeping chips stop holding a board back. The run summary prints the achieved speed, MIPS per chip and
+the bottleneck chip. The shell has `speed`, `perf` and `quantum`; the web UI has a rate control in the toolbar and a
+**performance** block in the Status pane. `tools/bench.py` prints a speed table. Each knob's fidelity cost and the
+measured speeds are in [docs/USER_GUIDE.md](docs/USER_GUIDE.md#48-making-it-faster-speed-fidelity-and-the-emulation-rate).
+
 ## Sample firmware
+
+8051 (P89CV51RD2): `firmware/samples_mcs51/*.asm` (blinky, uart_hello, uart_t2, timer_irq, ext_int, pca_pwm,
+spi_flash, iap_flash, wdt_reset, idle_pd, uart_ping, uart_console), built by `firmware/samples_mcs51/build.sh` with
+`tools/mcs51_asm.py` into Intel HEX; boards `boards/p89cv51_{stm32_uart,rs232_console,spi_flash,pca_loopback}.yaml`.
 
 `firmware/samples/` contains small bare-metal C programs for the MK22FN1M0 (no libc). Prebuilt `.elf`,
 `.bin` and `.map` files are in `firmware/samples/build/` and are used by the tests.
@@ -509,17 +600,27 @@ Board files in `boards/`:
 | `two_k22_uart_pins.yaml` | K22 + K22 | the same over nets only: TX/RX pins on a net create automatic UART links |
 | `k22_stm32_uart.yaml` | K22 + STM32F405ZG | K22 UART0 → STM32 USART1 echo |
 | `c2000_k22_uart.yaml` | K22 + TMS320F28232 | K22 UART0 → F28232 SCI-A echo |
+| `f2808_k22_uart.yaml` | K22 + TMS320F2808 | K22 UART0 → F2808 SCI-B (GPIO18/19) uppercase echo |
+| `f2808_stm32_can.yaml` | TMS320F2808 + STM32F405ZG | F2808 eCAN-B (`f2808_can`, TI C) sends `100#00<n>4B32` every 10 ms, the STM32 `can_echo` answers `202#...`; 500 kbit/s |
+| `f2808_spi_flash.yaml` | TMS320F2808 | `f2808_spi_flash`: SPI-B on GPIO24-27 reads the JEDEC ID and four bytes of a SPI NOR flash (chip select SPISTEB) |
 | `k22_stm32_can.yaml` | K22 + STM32F405ZG | CAN bus at 500 kbit/s: K22 FlexCAN0 `can_echo` sends `100#<n>4B32` every 10 ms, the STM32 bxCAN1 `can_echo` (filter bank 0 → FIFO 0, CAN1_RX0 interrupt) echoes it as `202#...` (`chipem run --board boards/k22_stm32_can.yaml --for 50ms`) |
 | `k22_c2000_stm32_can.yaml` | K22 + F28232 + STM32F405ZG | three CAN families on one bus: the F28232 echoes as `201#...`, the STM32 as `202#...`, the K22 prints both |
 | `k22_c2000_can.yaml` | K22 + TMS320F28232 | one CAN bus at 500 kbit/s (`links: [{type: can, nodes: [A.CAN0, B.ECANA]}]`): K22 FlexCAN0 `can_echo` sends `100#<n>4B32` every 10 ms, the F28232 eCAN-A `can_echo` (TI C) echoes it as `201#...`; both print the frames (`chipem run --board boards/k22_c2000_can.yaml --for 100ms`) |
 | `stm32_usb_cdc.yaml` | STM32F405ZG + USB host | USB CDC-ACM: the bare-metal OTG_FS driver enumerates on an emulated PC (`links: [{type: usb, device: A.OTG_FS}]`), prints `STM32 CDC ready` when the host raises DTR and echoes what the host types (`chipem run --board boards/stm32_usb_cdc.yaml --for 300ms`; add `--usb-cdc pty` to open the virtual COM port from PC software) |
 | `stm32_usb_cdc_hal.yaml` | STM32F405ZG + USB host | the same with ST's HAL PCD + USB Device Library CDC class |
+| `stm32f103_usb_cdc.yaml` | STM32F103T6 + USB host | bare-metal CDC-ACM on the F1 USB device (EPnR/PMA): enumerates as 0483:5740, prints `F103 CDC ready`, echoes uppercased |
+| `stm32f103_stm32f405_uart.yaml` | STM32F103T6 + STM32F405ZG | F103 at 72 MHz sends `ping N` every 2 ms over USART1 nets, the F405 `uart_link_echo` answers uppercased |
+| `stm32f103_stm32f405_can.yaml` | STM32F103T6 + STM32F405ZG | 500 kbit/s CAN: F103 `can_node` sends `100#...` every 10 ms, the F405 `can_echo` answers `202#...` |
+| `stm32f103_i2c_eeprom.yaml`, `stm32f103_pwm_capture.yaml` | STM32F103T6 | I2C1 with a 24C02 part; TIM3 PWM on PA6 wired to the TIM2 PWM input on PA1 |
 | `k22_usb_cdc.yaml` | K22 + USB host | USB CDC-ACM on the K22 USB0 (BDT-based bare-metal driver) |
 | `c2000_stm32_uart.yaml` | TMS320F28232 + STM32F405ZG | F28232 SCI-A → STM32 USART1 echo (below) |
 | `c2000_stm32_chat.yaml` | TMS320F28232 + STM32F405ZG | two-way "chat" protocol (HELLO/PING/PONG) between the F28232 (`uart_chat.asm`) and the bare-metal STM32 `uart_chat` sample, nets only (auto links); the STM32's first lines are lost while the F28232 relocks its PLL |
 | `c2000_stm32_chat_hal.yaml` | TMS320F28232 + STM32F405ZG | "chat" protocol (HELLO/PING/PONG) between the F28232 and an STM32 running ST's STM32CubeF4 HAL at 168 MHz, nets only (auto links) |
 | `c2000_stm32_chat_c.yaml` | TMS320F28232 + STM32F405ZG | the same chat with the F28232 running TI-compiled C (`firmware/samples_c2000_c`, cl2000 EABI, built by its `build.sh` when TI's compiler is installed) |
 | `stm32f405rg_f407ig_uart.yaml` | STM32F405RG (LQFP64) + STM32F407IG (LQFP176) | two package variants with their UART lines wired TX→RX on nets (auto link USART2 ↔ USART6, 230400 baud): the RG at 168 MHz sends `REQ n` every 2 ms, the IG on its 16 MHz HSI answers `ACK n n²` (see "STM32F405xx / STM32F407xx variants") |
+| `stm32f427vg_f405rg_uart7.yaml` | STM32F405RG (LQFP64) + STM32F427VG (LQFP100) | the F405RG `link_requester` on USART2 talks to `f42x_link_responder` on the F427VG's UART7 (PE8/PE7) at 180 MHz with over-drive, 230400 baud (see "STM32F427xx / STM32F437xx") |
+| `stm32f437ai_sdram.yaml` | STM32F437AI (UFBGA169) | `f42x_sdram`: 180 MHz, FMC SDRAM controller init (clock enable, PALL, auto-refresh, load mode register) on bank 2 (PB5/PB6) with an 8 MB `sdram` device, memory test, `SDRAM OK 8192 KB` on USART1 |
+| `stm32f427vg_sai_codec.yaml` | STM32F427VG (LQFP100) | `f42x_sai_tone`: SAI1 block A master I2S tone (PE2-PE6, PLLSAI) into the `i2s_codec` part |
 | `three_chip_demo.yaml` | K22 + STM32F405ZG + TMS320F28232 | one K22 TX net fans out to the STM32 and C2000 RX pins (two automatic links), replies over explicit links, GPIO nets, LEDs on the activity nets and a switch |
 | `logic_demo.yaml` | K22 + K22 | board parts: a switch and LED around `button_mirror`, a 1 kHz clock through an inverter into `port_irq`, an AND gate, a D flip-flop, probes and a counter (see "Parts" below) |
 | `k22_ftm_capture.yaml` | K22 | `ftm_capture` measuring its own PWM: a net from PTC1 (FTM0 CH0 PWM) to PTA12 (FTM1 CH0 input capture), prints `period 6000` (100 us at 60 MHz) |
@@ -559,6 +660,7 @@ push-pull pin); an input port reads the net level (H/L/X). Gates propagate with 
 | Camera | `camera` (pixclk, hsync, vsync, d0..d13 out; `width`, `height`, `bits` 8..14, `format` gray/raw/rgb565/yuv422, `pixclk`, `hblank`, `vblank`, `fps`, `pattern` bars/gradient/counter/checker or `image` PGM/raw, `sync` hardware/embedded): parallel (DVP) camera; HSYNC/VSYNC toggle on the nets, pixel data reach the camera interface line by line, PIXCLK is summarised as a `wave` |
 | indicators | `led` (in; `active` H/L, `color`): on/off + change count; `probe` (in): level, rises, falls, last change, frequency; `counter` (in; `edge` rise/fall/both) |
 | logic | `not`, `buf` (in, out); `and`, `nand`, `or`, `nor`, `xor`, `xnor` (in0..in{n-1}, out; `inputs` 2); `mux2` (a, b, sel, out); `dff` (d, clk, rst, q, qn; `edge`, `init`, `rst_active`); `latch` (d, en, q) |
+| your own | `script` (ports as the script declares; `file` relative to the board or inline `code`, `class`, `params`): a custom part written in Python (`chipem/parts/script.py`): digital/open-drain/analog ports, edge callbacks, timers, SPI slave / I2C target / UART helpers, controls and actions in the UI, hot reload. `chipem new-part NAME --kind spi\|i2c\|uart\|gpio` writes a template; examples in `boards/parts/`; guide: docs/USER_GUIDE.md 6.4. **Runs arbitrary Python with your privileges: only load boards you trust.** |
 
 In a board YAML (`boards/logic_demo.yaml`):
 
@@ -685,10 +787,14 @@ How it runs:
   driving different levels are a conflict: the net goes to `X` and the board logs one `warn` per conflict. The
   net level is written into every member pin's external input, and a driving pin still shows its own drive.
   Stimulus on a net pin (`--at 10ms:B.PTC6=0`) drives the whole net. `Z` releases it.
-- **UART links** work at the byte level. Any model with the board-link hooks (`kinetis.uart`, `stm32.usart`,
-  `ti_c2000.sci`) can be an endpoint; names resolve across families (`USART1`, `UART1`, `SCIA`, `SCI-A`). A byte
-  written to the sender's data register arrives in the peer's receiver one character time later, timed by the sender's baud rate and frame. If the two UARTs' baud rates differ by
-  more than 3 % (or their frames differ), the board logs one `warn` per link. The bytes are still delivered.
+- **UART links** carry frames. Any model with the board-link hooks (`kinetis.uart`, `stm32.usart`,
+  `ti_c2000.sci`) can be an endpoint; names resolve across families (`USART1`, `UART1`, `SCIA`, `SCI-A`). A
+  character written to the sender's data register arrives in the peer's receiver one character time later, as a
+  frame with the sender's real baud, data bits (9th bit / address bit), parity bit, stop bits and breaks. The
+  receiver decodes it at its own settings by sample point, like silicon: a parity mismatch sets PE/PF with the data,
+  a wrong baud or word length gives framing / noise errors and garbage characters, a break gives FE + 0x00 and the
+  LIN break / BRKDT flags (see docs/LIMITATIONS.md "UART frames and line conditions"). A baud difference above 3 %
+  or a different frame length is also reported once per link as a `warn`.
 
 - **Automatic UART links from nets.** Peripheral pin functions such as `UART0_TX` do not drive pin levels
   in this emulator, because the UART models work on bytes. Instead, when a net joins a pin owned by a UART TX
@@ -716,7 +822,12 @@ selects chip B at start. Each event has a `chip` field.
 | STM32F405ZG | `chips/stm32f405zg.yaml` | 1 MB flash @0x08000000; SRAM 128 KB @0x20000000; CCM 64 KB @0x10000000; backup SRAM 4 KB @0x40024000 |
 | STM32F405RG/VG/OG, STM32F407VG/ZG/IG/IGH | `chips/stm32f405rg.yaml`, ... (table below) | as the STM32F405ZG |
 | STM32F405OE, STM32F407VE/ZE/IE/IEH | `chips/stm32f405oe.yaml`, ... (table below) | 512 KB flash @0x08000000; RAM as the STM32F405ZG |
+| STM32F427VG/ZG/IG/IGH | `chips/stm32f427vg.yaml` (base), ... (table below) | 1 MB flash @0x08000000 (single or dual bank, DB1M); SRAM1/2/3 192 KB @0x20000000; CCM 64 KB @0x10000000; backup SRAM 4 KB @0x40024000 |
+| STM32F437AI/ZI/II | `chips/stm32f437ai.yaml`, ... (table below) | 2 MB dual-bank flash @0x08000000; RAM as the STM32F427VG |
+| STM32F103T6 | `chips/stm32f103t6.yaml` | 32 KB flash @0x08000000 (32 pages of 1 KB); SRAM 10 KB @0x20000000; system memory (signature) @0x1FFFF000; option bytes @0x1FFFF800 |
 | TMS320F28232 | `chips/tms320f28232.yaml` | 16-bit words: flash 64K @0x330000; M0/M1 1K+1K @0x0; L0-L5 SARAM 24K @0x8000 (L0-L3 also @0x3F8000); OTP @0x380400; boot ROM @0x3FE000 |
+| P89CV51RD2 / RC2 / RB2 | `chips/p89cv51rd2.yaml` (PLCC44), `p89cv51rd2fbc.yaml` (TQFP44), `p89cv51r{c,b}2[fbc].yaml` | tagged 8051 spaces: CODE 64/32/16 KB @0x00000; IDATA 256 B @0x20000; SFR @0x30080; XRAM 768 B @0x40000; external XDATA @0x10000 (docs/MCS51_CORE.md) |
+| TMS320F2808 | `chips/tms320f2808.yaml` | 16-bit words: flash 64K @0x3E8000 (sectors A-D); M0/M1 1K+1K @0x0; L0/L1 4K+4K + H0 8K SARAM @0x8000 (also @0x3F8000); OTP 1K @0x3D7800; boot ROM 4K @0x3FF000 |
 
 The two K22 parts are 120 MHz Cortex-M4F parts in LQFP100. `mk22fx512vll12.yaml` includes the FN1M0 file and overrides
 the name and memory map. All 100 pins are transcribed from datasheet section 5.1 (ALT0–ALT7 and EzPort),
@@ -839,6 +950,85 @@ STM32F405ZG (DEV_ID 0x413, same memory map, peripherals, IRQs and models): each 
   the UFBGA files), `tools/svd2chip.py ... --check` (0 mismatches against both STM32F405.svd and STM32F407.svd).
   Tests: `tests/test_stm32_variants.py`.
 
+### STM32F427xx / STM32F437xx
+
+A second STM32F4 die (DEV_ID 0x419; DS9405 / DS9484 Rev 14, RM0090 Rev 22): Cortex-M4F up to 180 MHz with PWR
+over-drive, 256 KB RAM, FMC with an SDRAM controller, SAI1, DMA2D (Chrom-ART), UART7/8, SPI4-6, dual-bank flash; the
+STM32F437 adds CRYP (with GCM/GMAC/CCM) and HASH (with SHA-224/256). `chips/stm32f427vg.yaml` is the base file
+(register table `chips/stm32f427_regs.yaml` from ST's STM32F427.svd); the other files `include:` it.
+
+| `--chip` | part | package | pins / GPIOs | flash | CRYP/HASH |
+|---|---|---|---|---|---|
+| `stm32f427vg` | STM32F427VG | LQFP100 | 100 / 82 | 1 MB | no |
+| `stm32f427zg` | STM32F427ZG | LQFP144 | 144 / 114 | 1 MB | no |
+| `stm32f427ig` | STM32F427IG | LQFP176 | 176 / 140 | 1 MB | no |
+| `stm32f427igh` | STM32F427IG (H suffix = BGA) | UFBGA176+25 | 201 / 140 | 1 MB | no |
+| `stm32f437ai` | STM32F437AI | UFBGA169 | 169 / 130 | 2 MB | yes |
+| `stm32f437zi` | STM32F437ZI | LQFP144 | 144 / 114 | 2 MB | yes |
+| `stm32f437ii` | STM32F437II | LQFP176 | 176 / 140 | 2 MB | yes |
+
+- **Pins**: DS9405 Table 10 (package column) + Table 12 (AF0..AF15), cross-checked against ST's STM32_open_pin_data
+  (0 differences in positions and AF numbers for every package); `LCD_*` (F429/F439 only) are left out. UFBGA169:
+  rows A..N without I, row-major `num` (A1 = 1 .. N13 = 169) plus `ball:`. The LQFP100 has no FMC SDRAM clock (PG8),
+  so SDRAM runs on the 144/169/176-pin parts. LQFP208, TFBGA216 and WLCSP143 are not done.
+- **Clock / power** (`stm32.rcc_f42x`, `stm32.pwr_f42x`): PLLSAI, RCC_DCKCFGR (SAI1 clock sources, TIMPRE),
+  over-drive ODEN/ODRDY/ODSWEN/ODSWRDY with the DS9405 Table 23 switch times, VOS scales; HCLK/APB limits follow
+  the scale and over-drive state (180/45/90 MHz with over-drive). Flash (`stm32.flash_f42x`): 2 MB = sectors 0-23,
+  1 MB single bank or dual bank with OPTCR.DB1M (loaded at reset), MER/MER1, option-byte unlock/programming.
+- **New blocks**: FMC SDRAM controller (`stm32.fmc`, board device `sdram`), SAI1 (`stm32.sai`), DMA2D
+  (`stm32.dma2d`), UART7/8 and SPI4-6 (existing USART/SPI models), I2C_FLTR, the F42x DMA requests (RM0090 Tables
+  43/44), CRYP GCM/CCM and HASH SHA-224/256 on the F437.
+- **Samples** (`firmware/samples_stm32_variants/f42x_*.c`, own startup/linker script/header in `f42x/`):
+  `f42x_clock180_uart7` (180 MHz with over-drive, `hello 180` + echo on UART7 PE8/PE7, TIM2 1 ms then 0.5 ms after
+  TIMPRE), `f42x_link_responder` (UART7 230400 baud `ACK n n²`), `f42x_sdram` (FMC SDRAM init + 8 MB memory test,
+  STM32F437AI), `f42x_sai_tone` (SAI1 block A I2S tone to the codec part), `f42x_dma2d` (R2M fill, ARGB8888→RGB565
+  conversion, 50 % blend), `f42x_gcm` (AES-128-GCM, SHA-256, HMAC-SHA256 on the STM32F437AI).
+  `firmware/samples_stm32_hal_f427/` builds ST's HAL for the STM32F427xx device header (`HAL_PWREx_EnableOverDrive`,
+  `HAL_RCCEx_PeriphCLKConfig` for PLLSAI, HAL UART7).
+- **Boards**: `boards/stm32f427vg_f405rg_uart7.yaml` (F427VG UART7 ↔ F405RG USART2), `boards/stm32f437ai_sdram.yaml`
+  (F437AI + 8 MB SDRAM on FMC bank 2), `boards/stm32f427vg_sai_codec.yaml` (SAI1 → I2S codec part).
+- Checks: `tools/pin_table_check.py chips/stm32f437ai.yaml --strict` (`--expect 201` for `stm32f427igh`),
+  `tools/svd2chip.py svd/dl-stm32f427/STM32F427.svd --check chips/stm32f427vg.yaml` (0 mismatches). Tests:
+  `tests/test_stm32f427_*.py`, `tests/test_stm32f437_crypto.py`.
+
+### STM32F103T6
+
+ST Cortex-M3, 72 MHz, low-density performance line, VFQFPN36 (6 x 6 mm QFN; `family: stm32f1`, models in
+`chipem/periph/stm32f1/`). The F1 has its own register generation (RM0008): GPIO CRL/CRH with AFIO remaps instead of
+MODER/AFR, a single-PLL RCC, the FPEC flash interface, the counter RTC, BKP, DMA channels, the F1 ADC and the "USB"
+full-speed device with its packet memory. IPs that are the same as on the F4 run on the `stm32.*` models by parameter:
+TIM1/2/3 (`stm32.tim`, TIM2 with `bits: 16`), USART1/2, SPI1, I2C1, bxCAN (`stm32f1.can` = `stm32.can` with 14 filter
+banks and the F1 vector names), IWDG (LSI 40 kHz), WWDG, CRC.
+
+- **Part**: STM32 F 103 T 6 = 36 pins, 32 KB flash (DS15060 Table 58); 10 KB SRAM; TIM1 + TIM2/3, SPI1, I2C1,
+  USART1/2, USB, CAN, 2 ADCs (10 channels), DMA1 7 channels, 26 GPIOs (Table 2).
+- **Pins**: all 36 pins from DS15060 Rev 7 Table 5 (VFQFPN36 column), checked pin by pin against Figure 7. Keys:
+  `AF` (default alternate functions), `REMAP` (functions after an AFIO_MAPR remap), `ADC`, `analog` (OSC_IN/OUT),
+  `additional` (WKUP, BOOT1, USBDM/USBDP), `debug` (SWJ pins). The exposed die pad is not a numbered pin. Data sheet
+  fix: SPI1_SCK added to PB3's remap list. The GPIO model picks the owner of a pin from the routed signals and how
+  their peripheral is configured (clock gate, UE/TE/RE, CTSE, CCxS, SPE, PE); the AFIO remap moves them
+  (`USART1_REMAP` puts USART1 on PB6/PB7). PA13/PA14/PA15/PB3/PB4 belong to SWJ until `SWJ_CFG` releases them;
+  PD0/PD1 are OSC_IN/OSC_OUT unless `PD01_REMAP` with the HSE off; PA11/PA12 go to the USB transceiver when the USB
+  is on.
+- **Boot / clock**: `vtor: 0x08000000`; 8 MHz HSI after reset; `stm32f1.rcc`: HSE (`ext_hz`, 8 MHz) or HSI/2 x
+  PLLMUL (2..16), HPRE/PPRE1/PPRE2/ADCPRE/USBPRE, limit warnings (72 MHz, PCLK1 36 MHz, ADCCLK 14 MHz, USBCLK 48 MHz
+  from the HSE), FLASH_ACR wait-state check. SysTick CLKSOURCE=0 = HCLK/8.
+- **Samples**: `firmware/samples_stm32f1/` (`build.sh`, clang `thumbv7m` + ld.lld): `blinky` (PB0, 1 ms SysTick),
+  `uart_echo` (72 MHz from HSE x 9, USART1 115200 echo), `button_exti` (PA0 → EXTI0 → PB1), `tim_pwm_capture` (TIM3
+  PWM 1 kHz 25 % on PA6 measured by TIM2 PWM input on PA1), `adc_dma` (ADC1 scan PA0/PA1/temperature, DMA1 channel 1
+  circular), `spi_flash` (`--spi-flash SPI1:cs=PA4`), `i2c_eeprom`, `can_loopback` (LBKM + SILM), `can_node`,
+  `usb_cdc` (bare-metal CDC-ACM on the USB/PMA), `rtc_alarm` (LSE 1 Hz, second and alarm interrupts, BKP boot
+  counter), `flash_prog` (page erase and half-word programming, PGERR), `stop_exti` (Stop mode woken by PA0),
+  `uart_link_sender`.
+- **Boards**: `stm32f103_stm32f405_uart.yaml` (F103 USART1 ↔ F405 USART1 on nets), `stm32f103_stm32f405_can.yaml`
+  (500 kbit/s CAN with the F405 `can_echo`), `stm32f103_usb_cdc.yaml` (USB CDC on an emulated host),
+  `stm32f103_i2c_eeprom.yaml`, `stm32f103_pwm_capture.yaml`.
+- RM0008 could not be obtained: every `stm32f1.*` model is written from the data sheet, the SVD and ST's documented
+  F1 behaviour and is marked "not verified against RM0008" (docs/LIMITATIONS.md).
+- Checks: `tools/pin_table_check.py chips/stm32f103t6.yaml --strict`, `tools/svd2chip.py
+  svd/dl-stm32f103/STM32F103xx.svd --check chips/stm32f103t6.yaml` (0 mismatches). Tests:
+  `tests/test_stm32f103t6_chip.py`, `tests/test_stm32f1_*.py`.
+
 ### TMS320F28232
 
 TI C2000 (C2823x), fixed-point C28x at up to 100 MHz, LQFP176 "PGF" (`family: ti_c2000`, models in
@@ -904,6 +1094,37 @@ interpreter). The first non-ARM chip: details and limitations in `docs/C2000_ROA
   chipem info firmware/samples_c2000/build/timer_irq.c28img --chip tms320f28232
   ```
 
+### TMS320F2808
+
+TI C2000 280x, fixed-point C28x at 100 MHz, 100-pin LQFP "PZ" (`chips/tms320f2808.yaml`), on the same
+`ti_c2000` models as the F28232, with the 280x differences selected by the register table and parameters.
+
+- **Pins**: all 100 pins from SPRS230P Table 7-1 with `MUX1`..`MUX3` from Table 9-17 (cross-checked against the
+  Figure 7-1 pinout and SPRU712H Table 4-9). 35 GPIOs: port A GPIO0-31, port B GPIO32-34 (GPAMUX1/2, GPBMUX1).
+- **Register table**: `chips/tms320f2808_regs.yaml`, generated by `tools/gen_tms320f2808_regs.py` and checked against
+  the data sheet register tables (`--check-ds`, 551 registers, 0 mismatches).
+- **Boot**: a boot ROM stand-in (`chips/tms320f2808_bootrom.asm`, seeded at TI's addresses) runs when the image has no
+  entry point: CSM dummy read, then GPIO18/GPIO29/GPIO34 select flash 0x3F7FF6, M0 or OTP; the serial/parallel loaders
+  are not implemented (watchdog off, wait loop). Images with an entry (`.c28img`, TI `.out`) start there directly.
+- **Clock**: 20 MHz OSCCLK, 10 MHz after reset (PLLSTS.CLKINDIV = 0: /2); PLLCR = 10 gives 100 MHz after the
+  131072-OSCCLK lock (no DIVSEL on the 280x). PCLKCR0/1 gate SPI-A..D, SCI-A/B, eCAN-A/B, I2C, ADC, ePWM1-6, eCAP1-4,
+  eQEP1-2 (no PCLKCR3). The eCAN module clock is SYSCLKOUT (the F2833x halves it).
+- **Peripherals**: ePWM1-6 (HRPWM on 1A-4A), eCAP1-4, eQEP1-2, ADC (SEQ1/SEQ2, 0x0B00 mirror), CPU timers 0-2,
+  XINT1/XINT2/XNMI, SCI-A/B, SPI-A/B/C/D, I2C-A, eCAN-A/B, watchdog, IDLE/STANDBY/HALT, flash/OTP registers, CSM
+  (password at 0x3F7FF8; L0/L1, OTP and flash secure). No XINTF, DMA, McBSP or FPU.
+- **Samples**: `firmware/samples_c2000/f2808_*.asm`: `f2808_blinky`, `f2808_timer_irq`, `f2808_sci_echo` (SCI-B on
+  GPIO18/19, uppercase echo), `f2808_epwm`, `f2808_adc` (ePWM1 SOCA at 10 kHz → SEQ1INT ISR), `f2808_spi_flash` (SPI-B
+  on GPIO24-27 + SPI NOR flash), `f2808_ecan_loopback` (eCAN-A self-test at 500 kbit/s). TI-compiled C
+  (`firmware/samples_c2000_c/f2808_*.c`, linked with `f2808.cmd`): `f2808_blinky`, `f2808_adc` (C interrupt handler,
+  console on SCI-A), `f2808_can` (eCAN-B node for `boards/f2808_stm32_can.yaml`).
+  ```sh
+  chipem run firmware/samples_c2000/build/f2808_timer_irq.c28img --chip tms320f2808 --for 12ms
+  chipem run firmware/samples_c2000/build/f2808_adc.c28img --chip tms320f2808 --for 14ms --adc ADCINA0=1234
+  chipem run --board boards/f2808_k22_uart.yaml --for 20ms      # K22 sends "ping N", the F2808 SCI-B echoes "PING N"
+  chipem run --board boards/f2808_stm32_can.yaml --for 40ms     # F2808 eCAN-B <-> STM32 bxCAN1, 500 kbit/s
+  chipem run --board boards/f2808_spi_flash.yaml --for 8ms --pin-report
+  ```
+
 ### Peripheral coverage
 
 Modelled (behaviour beyond register storage):
@@ -929,12 +1150,12 @@ Modelled (behaviour beyond register storage):
 | I2C0–2 | `kinetis.i2c` | pin-level bus (chipem/periph/i2cwire.py): F (MULT x ICR Table 48-54) bit timing, START/repeated START/STOP, D read-ahead receive, TXAK, RXAK, TCF/IICIF/BUSY/ARBL, slave mode (A1, general call, range, A2) with SCL stretching until D is accessed, STARTF/STOPF, IRQ and DMA requests (DMAMUX 18/19); PCR.ODE = 0 makes the pins push-pull |
 | USB0, USBDCD | `kinetis.usbfs`, `kinetis.usbdcd` | USB OTG FS device mode on a `chipem.usbbus` cable: buffer descriptor table in RAM (OWN/DATA01/KEEP/NINC/DTS/BDT_STALL, BC and TOK_PID write-back, even/odd ping-pong), STAT FIFO with TOKDNE, TXSUSPENDTOKENBUSY on SETUP, ENDPTn handshake/stall/enables, ADDR, ISTAT/ERRSTAT/INTEN, SOF/FRMNUM, sleep/resume, USBTRC0 soft reset, CONTROL DP pull-up, 48 MHz from SIM SOPT2/CLKDIV2 and the SCGC4 gate; USBDCD charger-detection sequence with its timers (standard host -> SEQ_RES 1) |
 | CAN0 | `kinetis.flexcan` | FlexCAN with 16 MBs on a `chipem.canbus` bus (real frame time at the CTRL1 bit rate, arbitration, ACK): disable/freeze modes, Tx/Rx MB CODE state machines, RXMGMASK/RX14/RX15/RXIMR masks, lock mechanism, remote frames (RANSWER/TANSWER), AEN abort, Rx FIFO (formats A/B/C), TIMER time stamps, ECR/ESR1 error confinement, LOM, loop-back, ORed MB / bus-off / error / warning IRQs; CAN0_TX/RX pins must be muxed |
-| UART0–4 | `kinetis.uart` | TX capture, TX/RX data buffers (FIFOs: `params.fifo_depth`, 8 on UART0/1, 1 on UART2–4; used when PFIFO.TXFE/RXFE are set), no input queue (bytes arriving while the receiver is off or full are dropped), baud-rate pacing of TDRE/TC/RDRF, RX/TX/error IRQs, DMA requests, RTS/CTS hardware flow control on the pins (MODEM), RX active-edge wake-up |
+| UART0–4 | `kinetis.uart` | TX capture, TX/RX data buffers (FIFOs: `params.fifo_depth`, 8 on UART0/1, 1 on UART2–4; used when PFIFO.TXFE/RXFE are set), no input queue (bytes arriving while the receiver is off or full are dropped), baud-rate pacing of TDRE/TC/RDRF, RX/TX/error IRQs, DMA requests, RTS/CTS hardware flow control on the pins (MODEM), RX active-edge wake-up; frame format (M/PE/PT/M10, T8/R8, SBNS, MSBF, TXINV/RXINV) on links, NF/FE/PF + ED by sample point, SBK breaks (BRK13) and LIN break detect (LBKDE), IDLE (ILT), RWU idle/address-mark wake-up, match address (MA1/MA2) |
 | RTC | `kinetis.rtc` | seconds counter and prescaler on virtual time, alarm, lock registers, survives system reset |
 | ADC0, ADC1 | `kinetis.adc` | instant calibration, software-triggered conversions (4 µs default), per-channel values, COCO IRQ, DMA request; hardware triggers from the PDB or, via SIM_SOPT7, from FTM0–3 / CMP0–2 / PDB0_EXTRG; ADC0_SE23 = DAC0, ADC1_SE18 = VREF_OUT |
 | PDB0 | `kinetis.pdb` | software- or hardware-triggered (PDB0_EXTRG, CMP, PIT, FTM, RTC, LPTMR) counter with prescaler/MULT, continuous and one-shot, buffered MOD/IDLY/DLY with LDOK, channel pre-triggers (delayed, back-to-back) into ADC0/ADC1 hardware triggers, sequence errors, IDLY interrupt/DMA, DAC interval trigger into DAC0 |
 | FTFE | `kinetis.ftfe` | synchronous command model (read/program/erase/resource/once/partition commands), flash config field → FSEC/FOPT/FPROT |
-| SMC, PMC, RCM, LLWU | `kinetis.smc/pmc/rcm/llwu` | power modes WAIT/STOP/VLPR/VLPW/VLPS/LLS/VLLS3-0 on WFI (clocks stopped per RM Table 7-2, time skips while asleep), LLWU pin/module wake-ups and IRQ, VLLS exit through a wake-up reset (SRAM loss, ACKISO), RCM reset causes (POR, PIN via RESET_b, WDOG, LOC, LOL, WAKEUP, SW) |
+| SMC, PMC, RCM, LLWU | `kinetis.smc/pmc/rcm/llwu` | power modes WAIT/STOP/VLPR/VLPW/VLPS/LLS/VLLS3-0 on WFI (all clocked peripherals freeze per RM Table 7-2 and continue where they stopped; I2C WUEN address match, FlexCAN self wake, SAI with STOPE, UART RX edge wake-ups; time skips while asleep), LLWU pin/module wake-ups and IRQ, VLLS exit through a wake-up reset (SRAM loss, ACKISO), RCM reset causes (POR, PIN via RESET_b, WDOG, LOC, LOL, WAKEUP, SW) |
 | VBAT register file | `kinetis.vbat` | 32 bytes of RAM that survives chip reset |
 | CRC | `kinetis.crc` | 16/32-bit CRC engine, GPOLY, WAS seed protocol, TOT/TOTR transposes, FXOR; 8/16/32-bit data writes |
 | DAC0 | `kinetis.dac` (+ alias at 0x4003F000) | 12-bit output (VDDA or VREF_OUT reference) as `voltage()` and `info` events, 16-word buffer (normal/swing/one-time scan), software trigger or PDB DAC interval trigger, SR flags, IRQ or DMA request |
@@ -945,7 +1166,7 @@ Modelled (behaviour beyond register storage):
 | STM32 RCC | `stm32.rcc` | HSI/HSE/PLL/SYSCLK switch with ready bits mirrored, HPRE/PPRE1/PPRE2 → core/APB/timer clocks, AHB/APB clock gates (gated-off access warns), xxRSTR peripheral resets, CSR reset flags |
 | STM32 GPIOA–I | `stm32.gpio` | MODER/OTYPER/PUPDR/AFRL/AFRH → pin owner (AF function names from the pin table), pulls, open-drain; ODR/BSRR drive the pin board; IDR from resolved pin levels; LCKR lock sequence; SWD/JTAG pins owned by AF0 after reset |
 | STM32 SYSCFG, EXTI | `stm32.syscfg`, `stm32.exti` | EXTICR port selection; rising/falling edge detection, SWIER, PR w1c, level IRQs EXTI0–4, EXTI9_5, EXTI15_10 (+ lines 16–22 via SWIER) |
-| STM32 USART1–3/6, UART4/5 | `stm32.usart` | BRR baud (OVER8), M/PCE/STOP framing, TX capture, RX queue, character-time pacing of TXE/TC/RXNE, IDLE, rc_w0 flags, TXE/TC/RXNE/IDLE IRQ, CR3.DMAT/DMAR DMA requests; board-link endpoint |
+| STM32 USART1–3/6, UART4/5 | `stm32.usart` | BRR baud (OVER8), M/PCE/STOP framing carried on links, PE/FE/NF by sample point (ONEBIT), SBK breaks and LIN break detection (LBD), mute mode (idle / address mark), half duplex, RTS/CTS, TX capture, character-time pacing of TXE/TC/RXNE, IDLE, rc_w0 flags, TXE/TC/RXNE/IDLE/PE IRQ, CR3.DMAT/DMAR DMA requests; board-link endpoint |
 | STM32 DMA1, DMA2 | `stm32.dma` | 8 streams, RM0090 Table 42/43 request mapping (CHSEL), P2M/M2P/M2M (DMA2), direct and FIFO mode (packing, FTH), circular and double buffer (CT), PL arbitration, NDTR, TC/HT/TE/FE flags with LIFCR/HIFCR, per-stream IRQs, TEIF on bus errors; transfers take zero bus time; request API `_util.dma_request(chip, name, level)` |
 | STM32 TIM1–14 | `stm32.tim` | time base: PSC/ARR preload, up/down/center-aligned counting, live CNT, UG, OPM, URS/UDIS, RCR, UIF/UIE IRQ (TIM2/5 32-bit; TIM9–14 up-only with 1–2 channels); output compare and PWM1/PWM2 (CCRx preload, CCxIF/CCxIE, CCxP/CCxNP, TIM1/8 complementary outputs with MOE/OSSI/OSSR, dead time, break input/BG/AOE) driving TIMx_CHn / TIMx_CHnN pins; input capture from pin edges (direct/indirect, polarity, prescaler, overcapture, TRC, TI1S xor), encoder mode; master mode TRGO (reset/enable/update/compare pulse/OCxREF) and the slave mode controller (reset, gated, trigger, external clock mode 1) on ITR0–3 / TI1F_ED / TI1FP1 / TI2FP2 / ETRF, external clock mode 2 (ETR pin, ETP/ETPS); DMA requests UP/CHx/TRIG; no input filters |
 | STM32 ADC1–3, C_ADC | `stm32.adc`, `stm32.adc_common` | regular group: SWSTART and Table 51 timer triggers (TRGO / CCx, EXTEN edges), SQR sequence with SCAN/CONT/DISCEN, SMPx + RES timing at ADCCLK = PCLK2/ADCPRE (event per conversion), RES/ALIGN, EOC/EOCS, OVR, analog watchdog, shared `ADC` IRQ, DMA request per conversion, VREFINT/temperature/VBAT channels; values in volts per pin (`--adc PA0=1.65V`); injected group (JSQR, JSWSTART, Table 52 timer triggers, JOFRx, JDRx, JEOC, JAUTO, JDISCEN, injected preempting regular); multi-ADC modes (CCR.MULTI regular/injected simultaneous, interleaved with DELAY, alternate trigger, dual and triple; CDR with DMA modes 1–3) |
@@ -965,6 +1186,17 @@ Modelled (behaviour beyond register storage):
 | STM32 DAC | `stm32.dac` | 2 channels, DHR8/12 R/L/dual → DOR (1 APB1 cycle, 3 after a TIM6/8/7/5/2/4 TRGO trigger, SWTRIG), noise/triangle waves, DMA requests with underrun, `voltage()` + info events, DAC_OUT1/2 pin owner and the voltage on PA4/PA5 for the ADC |
 | STM32 RTC | `stm32.rtc` | BCD calendar from LSE/LSI/HSE with PRER, SSR, shadow registers/RSF, WPR protection, PWR DBP, INIT mode, alarms A/B (EXTI17 → RTC_Alarm), wakeup timer (EXTI22 → RTC_WKUP), BKP0R–19R; backup domain kept across system resets, BDRST clears it; no tamper/timestamp/calibration |
 | STM32 FLASH, PWR, DBGMCU | `stm32.flash`, `stm32.pwr`, `stm32.dbgmcu` | ACR latency readback, KEYR unlock/CR.LOCK, sector/mass erase; VOSRDY=1; IDCODE 0x413 |
+| STM32F42x RCC, PWR, FLASH | `stm32.rcc_f42x`, `stm32.pwr_f42x`, `stm32.flash_f42x` | as the F405 models plus PLLSAI (PLLSAIN/Q/R), DCKCFGR (PLLI2SDIVQ/PLLSAIDIVQ, SAI1A/BSRC, TIMPRE), F42x clock gates; over-drive ODEN → ODRDY, ODSWEN → ODSWRDY with DS9405 Table 23 times, only with HSI/HSE as SYSCLK, cleared by Stop; VOS scales (writable only with the PLL off), UDEN/UDRDY; frequency-limit warnings per scale/over-drive; 2 MB / DB1M dual-bank sector map, MER1, option bytes (OPTKEYR, OPTSTRT, applied at reset); IDCODE 0x419 |
+| STM32F42x FMC | `stm32.fmc` | the FSMC NOR/PSRAM model (gate FMCEN) plus the SDRAM controller: SDCR/SDTR, SDCMR command modes with BUSY time, init sequence gating (clock enable, ≥100 µs, PALL, auto-refresh, load mode register checked against CAS/burst), refresh timer SDRTR with RE/REIE (IRQ FMC), self-refresh/power-down MODES, write protect, bank windows 0xC0000000/0xD0000000 mapped into the core; board `sdram` device loses its data without refresh (64 ms) |
+| STM32F42x SAI1 | `stm32.sai` | blocks A/B (RM0090 ch. 29), bit level on the pins: kernel clock from RCC_DCKCFGR (PLLSAI / PLLI2S / I2S_CKIN), MCKDIV/NODIV, MCLK output; master/slave TX/RX, free protocol frames (FRL, FSALL, FSDEF, FSPOL, FSOFF), slots (NBSLOT, SLOTSZ, SLOTEN, FBOFF), DS 8-32, LSBFIRST, CKSTR, MONO, TRIS; synchronous A/B (SYNCEN); 8-word FIFOs with FLVL/FREQ/FTH, FFLUSH; OVRUDR, AFSDET/LFSDET (slave), WCKCFG, MUTE/MUTEVAL/MUTECNT/MUTEDET; SAIxEN disable at frame end; IRQ SAI1, DMA requests SAI1_A/SAI1_B; works with the `i2s_codec` part |
+| STM32F42x DMA2D | `stm32.dma2d` | Chrom-ART: R2M fill, M2M copy, M2M with PFC and blending, 11 input / 5 output formats, alpha modes, CLUT (auto load via START, CPU access, CAEIF), configuration (CEIF) and transfer (TEIF) errors, line watermark TWIF, SUSP/ABORT, IRQ DMA2D; per-line timing on HCLK with AMTCR dead time |
+| STM32F1 RCC | `stm32f1.rcc` | HSI 8 MHz / HSE / PLL (HSI/2 or HSE[/2] x 2..16), SW/SWS, HPRE/PPRE1/PPRE2, ADCPRE, USBPRE, ready bits mirrored with CIR ready flags and the RCC vector, AHB/APB2/APB1 gates (F1 bit positions, also used by the reused `stm32.*` models), APBxRSTR resets, CSR reset flags, BDCR (DBP protection, LSE, RTCSEL, BDRST), frequency-limit warnings |
+| STM32F1 GPIO, AFIO | `stm32f1.gpio`, `stm32f1.afio` | CRL/CRH modes (analog, floating, pull via ODR, push-pull/open-drain, AF), IDR cache, ODR/BSRR/BRR, LCKR; pin owner from the AFIO_MAPR remap and the peripheral's configuration; SWJ_CFG, PD01_REMAP, USB transceiver pins; EXTICR |
+| STM32F1 EXTI, PWR, BKP, RTC | `stm32f1.exti`, `stm32f1.pwr`, `stm32f1.bkp`, `stm32f1.rtc` | EXTI = `stm32.exti` wired to AFIO (lines 16-18 PVD/RTC alarm/USB wakeup); PWR Sleep/Stop (HSE/PLL off, frozen blocks, EXTI wake-up)/Standby (WKUP, RTC alarm), PVD, DBP; BKP DR1-10 survive resets, tamper; RTC 20-bit prescaler + 32-bit counter on LSE/LSI/HSE÷128, CNF/RTOFF write operation, RSF resync, SECF/ALRF/OWF, alarm on EXTI 17 |
+| STM32F1 FLASH, option bytes, signature | `stm32f1.flash`, `stm32f1.optbytes`, `stm32f1.sysmem`, `stm32f1.dbgmcu` | KEYR/OPTKEYR unlock, page/mass erase with BSY time, half-word programming checked (PGERR, WRPRTERR), EOP/ERR interrupt, option bytes (RDP, USER: hardware watchdog, nRST_STOP/STDBY; WRP) applied at reset, OBR/WRPR, F_SIZE and UID, IDCODE 0x412 |
+| STM32F1 DMA1, ADC1/2 | `stm32f1.dma`, `stm32f1.adc` | 7 channels with the fixed RM0008 request map (same request API as `stm32.dma`), PL arbitration, packing, circular, MEM2MEM, HT/TC/TE/GIF; ADC power-up, calibration timing, regular/injected groups, scan/continuous/discontinuous, EXTSEL timer triggers, (SMP + 12.5) ADCCLK, AWD, DMA, temperature sensor/VREFINT, dual modes |
+| STM32F1 USB, PMA | `stm32f1.usb`, `stm32f1.pma` | full-speed device on a `chipem.usbbus` cable: EPnR toggle/rc_w0 semantics, BTABLE descriptors in the 512-byte packet memory (16 bits per 32-bit slot), control/bulk/interrupt, double-buffered bulk, LP/HP vectors, suspend/resume/remote wakeup (EXTI 18), D+ pull-up option, 48 MHz check, CAN shared-SRAM warning |
+| STM32F42x UART7/8, SPI4-6, I2C FLTR | `stm32.usart`, `stm32.spi`, `stm32.i2c` | existing models; DMA requests per RM0090 Tables 43/44 (F42x rows); I2C_FLTR writable only with PE = 0 |
 
 Stubs (RAM-like storage, first access to each word logged): AIPS0/1, AXBS, FB, MPU, FMC, I2S0, CRC,
 EWM, CMT, CMP, VREF, DAC0, MCM (STM32: see below). Any
@@ -973,7 +1205,7 @@ creates a 4 KB RAM-like stub on first touch and logs `access to unmodelled regio
 bus-fault.
 
 STM32F405ZG: blocks that exist only on some members of the die family are gated by `params.only` in the shared base YAML and behave as stubs elsewhere (one `warn` on first
-access): Ethernet and DCMI (F407/F417), CRYP and HASH (F415/F417).
+access): Ethernet and DCMI (F407/F417), CRYP and HASH (F415/F417; on the F427/F437 die: F437/F439 only).
 SysTick `CLKSOURCE=0` counts at core clock / `systick_ext_div` (chip YAML, default 8 = STM32 HCLK/8). The K22
 YAMLs do not set it, so Kinetis also uses /8 (not confirmed against the K22 reference manual).
 
@@ -1264,6 +1496,7 @@ svd/                  cached SVD and vendor pin-data downloads (untrusted data)
 firmware/samples/     Kinetis sample C programs, startup, linker script, build.sh, build/
 firmware/samples_stm32/  STM32 samples (C, clang); firmware/samples_c2000/  C28x samples (assembly, tools/c28x_asm.py)
 firmware/samples_stm32_variants/  STM32F405/F407 package-variant samples (port walk, two-chip UART link)
+firmware/samples_stm32f1/  STM32F103T6 samples (C, clang thumbv7m)
 firmware/samples_stm32_hal/  STM32 sample on ST's STM32CubeF4 HAL; firmware/vendor/  fetched vendor sources (HAL, CMSIS)
 tests/                pytest suite
 docs/                 design and reference documents
@@ -1288,7 +1521,7 @@ tests are skipped if the `build/` outputs are missing.
 - [docs/ADDING_A_CHIP.md](docs/ADDING_A_CHIP.md): adding another Cortex-M3/M4 chip, a new vendor family, or a peripheral model.
 - [docs/AI_NEW_CHIP_PLAYBOOK.md](docs/AI_NEW_CHIP_PLAYBOOK.md): procedure for an AI agent adding a chip from a data sheet (`/new-chip`, `tools/new_chip.py`, `tools/pin_table_check.py`).
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md): what is approximate or missing.
-- [docs/C2000_ROADMAP.md](docs/C2000_ROADMAP.md): TI C2000 (TMS320F28232) status, design notes and remaining work.
+- [docs/C2000_ROADMAP.md](docs/C2000_ROADMAP.md): TI C2000 (TMS320F28232, TMS320F2808) status, design notes and remaining work.
 - [docs/C28X_CORE.md](docs/C28X_CORE.md): the C28x interpreter, its ISA table and its verification against TI's cl2000 25.11.1 tools.
 - [docs/PLAN.md](docs/PLAN.md): original design plan and findings from analysing the Withings boot path.
 - [docs/CONTRACTS.md](docs/CONTRACTS.md): module interface contracts.

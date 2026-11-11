@@ -70,12 +70,24 @@ Board wiring API (board sessions only; all executed on the worker):
   POST /api/link                   {from: "A.UART0", to: "B.USART1", bidir: true}
   POST /api/link/remove            {from, to} or {index}   (or DELETE /api/link?from=..&to=..)
 
+Debugger and register browser: GET/POST /api/debug/* and /api/regs/* (chipem/web/debugapi.py, every closure on the
+Worker): breakpoints / watchpoints, stepping, listing, call stack, side-effect-free memory and register peeks.
+
 Board parts (switches, LEDs, gates, ...; chipem/parts; board sessions only):
   GET  /api/parts/types            [{type, params: {name: default}, ports: {name: dir}}] (any session)
   POST /api/part                   {id?, type, params, ports: {port: net | "CHIP.PIN"}} (id auto-assigned if absent)
   POST /api/part/set               {id, values: {...}}     user action (switch level, pressed, period, ...)
   POST /api/part/remove            {id}
   POST /api/part/port              {id, port, to: net | "CHIP.PIN" | null}   re-wire / disconnect one port
+  Script parts (chipem/parts/script.py; Python with the user's privileges):
+  POST /api/part/reload            {id}   re-read the script (state restarts; ports must stay the same)
+  GET  /api/part/script?id=U5      {id, file, inline, code}   the script source (editor)
+  POST /api/part/script            {id, code}   write the file (or the inline code) and reload; nothing is written
+                                   when the new code does not load
+  Adding a script part (/api/part) or opening a board with script parts (/api/board/open) needs `allow_scripts:
+  true` in the body (409 with the script list otherwise: the page asks the user first). These and the two script
+  endpoints are refused for cross-site requests (an Origin other than the Host) and for a Host that is not an IP
+  address or localhost (DNS rebinding).
   `parts` ([{id, type, params, ports: {port: net}, dirs: {port: dir}, state}]) is part of /api/board and /api/chip;
   live part states are in state.board.parts [{id, state, ...}]; `part` log events go out on the SSE stream.
 """
@@ -132,6 +144,40 @@ class EventBuffer:
     def __iter__(self):
         import heapq
         return heapq.merge(self.pin, self.other, key=lambda e: e.get("seq", 0))
+
+
+def perf_info(s: Any) -> dict:
+    """GET /api/perf: the session's speed/fidelity settings, the presets, the board quantum and the achieved speed."""
+    from ..perf import PIN_LOG_MODES, PRESETS
+    from ..log import KINDS
+    info = s.speed_info() if hasattr(s, "speed_info") else {}
+    return jsonable({"settings": s.perf.to_dict() if hasattr(s, "perf") else {}, "presets": {k: v.to_dict() for k, v in
+                     PRESETS.items()}, "pin_log_modes": list(PIN_LOG_MODES), "kinds": list(KINDS),
+                     "board": getattr(s, "board", None) is not None and len(getattr(s, "chips", {})) > 1,
+                     "speed": info})
+
+
+def perf_kwargs(body: dict) -> dict:
+    """POST /api/perf body -> Session.set_perf keywords. Times accept units ("100us"); quantum null/"" = the board's
+    own value."""
+    from ..session import parse_time
+    kw: dict[str, Any] = {}
+    if body.get("preset"):
+        kw["preset"] = str(body["preset"])
+    for k in ("max_slice", "auto_quantum", "pin_log", "drop_kinds"):
+        if k in body and body[k] is not None:
+            kw[k] = body[k]
+    if "quantum" in body:
+        q = body["quantum"]
+        kw["quantum_ns"] = None if q in (None, "", "board") else float(parse_time(q) if isinstance(q, str) else q)
+    if "poll_skip" in body:                       # time ("100us") or ns; 0 / "" / "off" = off
+        v = body["poll_skip"]
+        kw["poll_skip_ns"] = 0.0 if v in (None, "", 0, "0", "off") else \
+            float(parse_time(v) if isinstance(v, str) else v)
+    if body.get("ui_interval") not in (None, ""):
+        v = body["ui_interval"]
+        kw["ui_interval_s"] = parse_time(v) / 1e9 if isinstance(v, str) else float(v)
+    return kw
 
 
 class Worker:
@@ -258,6 +304,9 @@ class Worker:
         s = self.s
         now = s.chip.clock.now_ns()
         n = self.chunk_ns
+        rt = getattr(s, "pacer", None)
+        if rt is not None:                    # paced: one chunk takes at most ~100 ms of wall time, so slow rates
+            n = min(n, max(rt.speed * 1e8, 1e3))   # (x0.001) still publish, pause and step at once
         tgt = self.run_target_ns              # read once: pause() may clear it from an HTTP thread
         if tgt is not None:
             n = min(n, tgt - now)
@@ -303,7 +352,8 @@ class Worker:
 
     def _publish(self, force: bool = False) -> None:
         now = time.monotonic()
-        if not force and now - self._last_pub < self.publish_interval:
+        interval = getattr(getattr(self.s, "perf", None), "ui_interval_s", None) or self.publish_interval
+        if not force and now - self._last_pub < interval:
             return
         self._last_pub = now
         s = self.s
@@ -350,6 +400,11 @@ class Worker:
         st["last_stop"] = self.last_stop
         st["error"] = self.error
         st["realtime"] = self.realtime or getattr(s, "pacer", None) is not None
+        if hasattr(s, "speed_info"):          # achieved vs requested speed, per-chip MIPS, bottleneck (chipem/perf.py)
+            try:
+                st["speed"] = jsonable(s.speed_info())
+            except Exception:
+                pass
         if hasattr(s, "host_status"):
             try:
                 st["host"] = jsonable(s.host_status())     # host serial bridges + real-time lag (/api/hostserial)
@@ -548,7 +603,7 @@ def _pin_keys(spec: str, board: bool, chip0: str) -> set[tuple[str, str]]:
         if not item:
             continue
         cid, _, name = item.partition(".")
-        if not name:
+        if not name or (not board and cid.upper() != str(chip0).upper()):   # "P1.0" (80C51 pin) is unqualified
             cid, name = chip0, item
         out.add((cid.upper(), name.upper()))
     return out
@@ -1009,8 +1064,14 @@ def parts_info(b: Any) -> list[dict]:
             st = p.state()
         except Exception as e:                 # a broken part must not hide the others
             st = {"error": f"{type(e).__name__}: {e}"}
-        out.append({"id": pid, "type": p.type, "params": dict(getattr(p, "params", {}) or {}), "ports": ports,
-                    "dirs": {k: _port_dir(v) for k, v in p.ports.items()}, "state": st})
+        d = {"id": pid, "type": p.type, "params": dict(getattr(p, "params", {}) or {}), "ports": ports,
+             "dirs": {k: _port_dir(v) for k, v in p.ports.items()}, "state": st}
+        if hasattr(p, "ui_info"):                 # script parts: file, controls, actions, fault (chipem/parts/script.py)
+            try:
+                d["script"] = p.ui_info()
+            except Exception as e:
+                d["script"] = {"error": f"{type(e).__name__}: {e}"}
+        out.append(d)
     return out
 
 
@@ -1037,6 +1098,64 @@ def part_types() -> list[dict]:
         c.setdefault("params", {})
         out.append(c)
     return jsonable(out)
+
+
+class ScriptConfirm(ValueError):
+    """The request would run Python script parts the user has not confirmed (answered 409 with the list)."""
+
+    def __init__(self, scripts: list[str]):
+        self.scripts = list(scripts)
+        super().__init__("this board runs Python script parts with your user's privileges: "
+                         + ", ".join(self.scripts) + ". Only continue if you trust them (send allow_scripts: true)")
+
+
+class ScriptRefused(ValueError):
+    """A script request that does not come from this UI (answered 403)."""
+
+
+def _is_ip(name: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
+
+
+def _script_parts(d: dict) -> list[str]:
+    """Script files (or "inline code in part X") of the parts of board mapping `d`."""
+    out = []
+    for p in d.get("parts") or []:
+        if isinstance(p, dict) and str(p.get("type") or "").strip().lower() == "script":
+            out.append(str(p.get("file") or f"inline code in part {p.get('id') or '?'}"))
+    return out
+
+
+def _script_part(session: Any, pid: str) -> Any:
+    b = _board(session)
+    p = b.part(_part_id(b, {"id": pid}))
+    if not hasattr(p, "reload"):
+        raise ValueError(f"part {p.id} is not a script part")
+    return p
+
+
+def _script_source(session: Any, pid: str) -> dict:
+    p = _script_part(session, pid)
+    return {"id": p.id, **p.source()}
+
+
+def _script_cmd(session: Any, path: str, body: dict) -> dict:
+    """Runs on the worker: reload a script part, or save its new source and reload."""
+    p = _script_part(session, str(body.get("id") or ""))
+    b = _board(session)
+    if path == "/api/part/reload":
+        st = p.reload()
+    else:
+        code = body.get("code")
+        if not isinstance(code, str):
+            raise ValueError("'code' must be a string")
+        st = p.save_source(code)
+    return {"id": p.id, "state": st, "script": p.ui_info(), "wiring": b.wiring}
 
 
 def _part_id(b: Any, body: dict) -> str:
@@ -1129,6 +1248,20 @@ class _Handler(BaseHTTPRequestHandler):
     def _json(self, obj: Any, code: int = 200) -> None:
         self._send(code, json.dumps(obj, default=str).encode(), "application/json")
 
+    def _script_guard(self) -> None:
+        """Requests that run or change Python scripts (script parts) must come from this UI: no cross-site Origin,
+        and a Host that is an IP address or localhost (a DNS-rebinding page has its own host name)."""
+        host = (self.headers.get("Host") or "").strip()
+        name = host.rsplit(":", 1)[0] if not host.startswith("[") else host[1:].split("]", 1)[0]
+        if name.lower() != "localhost" and not _is_ip(name):
+            raise ScriptRefused(f"script parts: refused for Host {host!r} (open the UI by IP address or localhost)")
+        origin = self.headers.get("Origin")
+        if origin and origin != "null":
+            if urlparse(origin).netloc.lower() != host.lower():
+                raise ScriptRefused(f"script parts: cross-site request from {origin} refused")
+        elif origin == "null" or (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site":
+            raise ScriptRefused("script parts: cross-site request refused")
+
     def _error(self, code: int, msg: str) -> None:
         self._json({"ok": False, "error": msg}, code)
 
@@ -1189,7 +1322,13 @@ class _Handler(BaseHTTPRequestHandler):
             return app.swap_session(be.new_board(str(body.get("name") or "board"), str(body.get("chip") or ""),
                                                  firmware=body.get("firmware"), clock_hz=body.get("clock_hz")))
         if path == "/api/board/open":
-            return app.swap_session(be.open_board(str(body.get("path") or body.get("name") or "")))
+            d = be.open_board(str(body.get("path") or body.get("name") or ""))
+            scripts = _script_parts(d)
+            if scripts:
+                self._script_guard()
+                if body.get("allow_scripts") is not True:
+                    raise ScriptConfirm(scripts)
+            return app.swap_session(d)
         raise ValueError(f"unknown board command {path}")
 
     # ---- GET ---------------------------------------------------------------------------------------------
@@ -1210,6 +1349,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._static(path[len("/static/"):])
             if path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
+            if path.startswith(("/api/debug/", "/api/regs/")):      # debugger + register browser (debugapi.py)
+                from . import debugapi
+                return self._json(debugapi.get(app, path, qs))
             if path == "/api/chip":
                 return self._json({**app.live_chip_info(), "boot": app.boot})
             if path == "/api/catalog":
@@ -1223,6 +1365,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({**snap.get("state", {}), "pins": snap.get("pins", []),
                                    "waves": snap.get("waves", {}), "pins_version": snap.get("pins_version", 0),
                                    "version": snap.get("version", 0), "event_seq": snap.get("event_seq", 0)})
+            if path == "/api/perf":                 # speed / fidelity settings + achieved speed (chipem/perf.py)
+                return self._json(app.worker.call(lambda: perf_info(app.worker.s)))
             if path == "/api/hostserial":           # host serial bridges and real-time pacing (snapshot)
                 st = app.worker.snapshot.get("state", {})
                 return self._json(st.get("host") or {"realtime": {"enabled": False}, "endpoints": []})
@@ -1305,6 +1449,10 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(app.worker.call(_info))
             if path == "/api/parts/types":
                 return self._json(part_types())
+            if path == "/api/part/script":
+                self._script_guard()
+                pid = (qs.get("id") or [""])[0]
+                return self._json(app.worker.call(lambda: _script_source(app.session, pid)))
             if path == "/api/board/yaml":
                 text = app.worker.call(lambda: _board(app.session).to_yaml())
                 name = app.worker.call(lambda: _board(app.session).name)
@@ -1314,6 +1462,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(404, f"not found: {path}")
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except ScriptRefused as e:
+            self._error(403, str(e))
         except ValueError as e:
             self._error(400, str(e))
         except FutureTimeout:
@@ -1416,6 +1566,9 @@ class _Handler(BaseHTTPRequestHandler):
         s = app.session
         try:
             body = self._body()
+            if path.startswith(("/api/debug/", "/api/regs/")):      # debugger + register browser (debugapi.py)
+                from . import debugapi
+                return self._json({"ok": True, **debugapi.post(app, path, body)})
             if path == "/api/run":
                 ms = body.get("ms")
                 if ms is not None:
@@ -1482,10 +1635,18 @@ class _Handler(BaseHTTPRequestHandler):
                     val = parse_adc_value(str(raw))
                 w.call(lambda: s.set_adc(ch, val))
                 return self._json({"ok": True, "channel": ch, "value": val})
-            if path == "/api/realtime":             # {on: bool, speed?: float} real-time pacing (Session.set_realtime)
+            if path == "/api/perf":                 # {preset?, max_slice?, quantum?, auto_quantum?, poll_skip?,
+                kw = perf_kwargs(body)              #  pin_log?, drop_kinds?, ui_interval?} (chipem/perf.py)
+                return self._json({"ok": True, **w.call(lambda: (w.s.set_perf(**kw), perf_info(w.s))[1])})
+            if path == "/api/realtime":             # {on: bool, speed?: float | "max"} pacing (Session.set_realtime)
                 on = body.get("on", True)
                 on = on if isinstance(on, bool) else str(on).strip().lower() in ("1", "true", "yes", "on")
                 speed = body.get("speed")
+                if isinstance(speed, str) and speed.strip():
+                    from ..session import parse_speed
+                    speed = parse_speed(speed)
+                    if speed is None:               # "max": as fast as possible
+                        on = False
                 speed = None if speed in (None, "") else float(speed)
                 if speed is not None and (not math.isfinite(speed) or speed <= 0):
                     raise ValueError("speed must be a finite number > 0")
@@ -1496,6 +1657,14 @@ class _Handler(BaseHTTPRequestHandler):
                     w._rt_anchor = None
                     return w.s.host_status()["realtime"]
                 return self._json({"ok": True, "realtime": w.call(fn)})
+            if path in ("/api/part/reload", "/api/part/script"):
+                self._script_guard()
+                return self._json({"ok": True, **w.call(lambda: _script_cmd(app.session, path, body))})
+            if path == "/api/part" and str(body.get("type") or "").strip().lower() == "script":
+                self._script_guard()
+                if body.get("allow_scripts") is not True:
+                    p = body.get("params") or {}
+                    raise ScriptConfirm([str(p.get("file") or "inline code") if isinstance(p, dict) else "?"])
             if path in ("/api/net", "/api/net/rename", "/api/net/remove", "/api/link", "/api/link/remove",
                         "/api/part", "/api/part/set", "/api/part/remove", "/api/part/port"):
                 return self._json({"ok": True, **w.call(lambda: self._wiring(path, body))})
@@ -1506,6 +1675,10 @@ class _Handler(BaseHTTPRequestHandler):
             pass
         except FutureTimeout:
             self._error(503, "emulator busy (timeout)")
+        except ScriptConfirm as e:
+            self._json({"ok": False, "error": str(e), "scripts": e.scripts, "needs": "allow_scripts"}, 409)
+        except ScriptRefused as e:
+            self._error(403, str(e))
         except FileExistsError as e:
             self._error(409, str(e))
         except (ValueError, KeyError, TypeError, FileNotFoundError) as e:

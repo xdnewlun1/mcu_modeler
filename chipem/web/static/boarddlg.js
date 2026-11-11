@@ -166,7 +166,7 @@ function clockHz(v) {
 }
 
 // ---------------------------------------------------------------- actions
-async function rebuild(path, body, what) {
+async function rebuild(path, body, what, scriptsCheck = false) {
   $("bdBusy").textContent = `${what}…`;
   for (const b of $("boardDlg").querySelectorAll("button:not(#bdClose)")) b.disabled = true;
   try {
@@ -174,6 +174,11 @@ async function rebuild(path, body, what) {
     deps.toast(`${what}: done, reloading`);
     location.reload();
   } catch (e) {
+    if (scriptsCheck && e.status === 409 && e.scripts) {            // the caller asks for consent and retries
+      for (const b of $("boardDlg").querySelectorAll("button")) b.disabled = false;
+      $("bdBusy").textContent = "";
+      throw e;
+    }
     deps.toastErr(`${what}: ${e.message}`);
     for (const b of $("boardDlg").querySelectorAll("button")) b.disabled = false;
     $("bdOpen").disabled = !(cat.boards || []).length;
@@ -223,7 +228,14 @@ async function openBoard() {
   const p = $("bdOpenSel").value;
   if (!p) return;
   if (!await ask(`Open ${p.replace(/^.*\//, "")}? The current setup is discarded unless you saved it.`, "Open")) return;
-  return rebuild("/api/board/open", { path: p }, "open board");
+  try {
+    return await rebuild("/api/board/open", { path: p }, "open board", true);
+  } catch (e) {                                   // 409: the board has Python script parts (chipem/parts/script.py)
+    const list = (e.scripts || []).map((x) => x.replace(/^.*\//, "")).join(", ");
+    if (!await ask(`This board runs Python script parts with your user's privileges (${list}). A script can do ` +
+                   "anything you can do. Only continue if you trust the board and its scripts.", "Run scripts")) return;
+    return rebuild("/api/board/open", { path: p, allow_scripts: true }, "open board");
+  }
 }
 
 async function save(overwrite) {

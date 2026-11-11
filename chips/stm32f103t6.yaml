@@ -1,0 +1,188 @@
+# STMicroelectronics STM32F103T6 (Cortex-M3, 72 MHz max, 32 KB flash, 10 KB SRAM, VFQFPN36 6x6 mm; low-density
+# performance line).  Part number (DS15060 Table 58): STM32 F 103 T = 36 pins, 6 = 32 KB flash; package letter U =
+# VFQFPN (the only 36-pin package, Table 2), e.g. STM32F103T6U6A.
+# Sources: DS15060 Rev 7 (STM32F103x4/x6 data sheet, docs/datasheets/st/DS_stm32f103t6.pdf): Table 2 (device features:
+# T6 = 32 KB flash, 10 KB SRAM, TIM1 + TIM2/TIM3, SPI1, I2C1, USART1/2, USB, CAN, 26 GPIOs, 2 ADCs / 10 channels),
+# Figure 7 (VFQFPN36 pinout), Table 5 (pin definitions, VFQFPN36 column, default and remap alternate functions),
+# Figure 8 (memory map), Figure 2 (clock tree); CMSIS-SVD STM32F103xx.svd (cmsis-svd-data @ c65f8551, see
+# chips/README.md) for bases and IRQ numbers.  RM0008 (the F1 reference manual) was not available when this file was
+# written: the IRQ names follow ST's CMSIS device header / RM0008 vector table (see `svd_irq_names` below).
+# Pin table: transcribed by hand from Table 5 (VFQFPN36 column, pages 26-28) and cross-checked pin by pin against
+# Figure 7 (page 25); 36 pins, 26 GPIOs (PA0-15, PB0-7, PD0/PD1 = OSC_IN/OSC_OUT after PD01_REMAP) as in Table 2.
+# Data sheet correction: Table 5 lists PB3's remap functions as "TIM2_CH2 / PB3 / TRACESWO" but omits SPI1_SCK,
+# although it lists the other SPI1_REMAP pins (PA15 SPI1_NSS, PB4 SPI1_MISO, PB5 SPI1_MOSI); SPI1_SCK is added
+# (RM0008 SPI1 remap and the STM32F103x8/xB data sheet list PB3 = SPI1_SCK with SPI1_REMAP = 1).
+# The VFQFPN36 has an exposed die pad (Table 51 D2/E2 = 3.7 mm) that is not a numbered pin: it is not listed (no
+# pin 37); connect it to VSS on a board.
+# functions keys (family stm32f1, no AF numbers on the F1): AF (default alternate functions, "/"-separated, Table 5
+# "Default" column), REMAP (alternate functions available after an AFIO_MAPR remap, Table 5 "Remap" column), ADC (ADC
+# channel, owner in analog mode), analog (OSC_IN/OSC_OUT), additional (WKUP, BOOT1, USBDM/USBDP: digital functions
+# that do not depend on CNF), debug (the SWJ-DP functions owning PA13/PA14/PA15/PB3/PB4 after reset).
+name: STM32F103T6
+package: VFQFPN36
+family: stm32f1
+regs_file: stm32f103_regs.yaml
+gpio_name_format: "P{port}{bit}"
+# 8 MHz = HSI after reset; stm32f1.rcc derives HCLK from CFGR/PLL and retunes the clock (72 MHz max with HSE x 9).
+core: {arch: armv7-m, backend: unicorn, cpu: cortex-m3, fpu: false, clock_hz: 8000000, addr_unit_bits: 8, num_irqs: 43}
+# SysTick CLKSOURCE=0 reference: HCLK/8 (DS15060 Figure 2 clock tree "to Cortex System timer /8").
+systick_ext_div: 8
+# BOOT0 = 0: the vector table is fetched through the alias at 0x00000000; CHIP_EM does not map the alias, so VTOR
+# starts at the flash base (images are linked at 0x08000000).
+vtor: 0x08000000
+
+memory:
+  - {name: FLASH, base: 0x08000000, size: 0x8000, kind: flash}     # 32 KB main flash, 32 pages of 1 KB
+  - {name: SRAM, base: 0x20000000, size: 0x2800, kind: ram}        # 10 KB
+  # System memory 0x1FFFF000 (2 KB, ST bootloader; flash size and unique ID registers at 0x1FFFF7E0/0x1FFFF7E8) and
+  # option bytes 0x1FFFF800 are MMIO blocks (SYSMEM, OB) below, not plain memory.
+
+# armv7m.scs (0xE000E000, SysTick/NVIC/SCB) is created by the arch layer, not listed here.
+peripherals:
+  # APB1
+  - {name: TIM2, model: stm32.tim, base: 0x40000000, size: 0x400, params: {bits: 16}}    # 16-bit on the F1
+  - {name: TIM3, model: stm32.tim, base: 0x40000400, size: 0x400}
+  - {name: RTC, model: stm32f1.rtc, base: 0x40002800, size: 0x400}
+  - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400}
+  - {name: IWDG, model: stm32.iwdg, base: 0x40003000, size: 0x400, params: {lsi_hz: 40000}}   # LSI 40 kHz (Table 25)
+  - {name: USART2, model: stm32.usart, base: 0x40004400, size: 0x400, params: {index: 2, kind: usart}}
+  - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400}
+  - {name: USB, model: stm32f1.usb, base: 0x40005C00, size: 0x400}            # USB full-speed device registers
+  - {name: USB_CAN_SRAM, model: stm32f1.pma, base: 0x40006000, size: 0x400}   # 512-byte packet memory shared with bxCAN
+  - {name: CAN, model: stm32f1.can, base: 0x40006400, size: 0x400}            # bxCAN, 14 filter banks
+  - {name: BKP, model: stm32f1.bkp, base: 0x40006C04, size: 0x3FC}            # SVD base: DR1 is at 0x40006C04
+  - {name: PWR, model: stm32f1.pwr, base: 0x40007000, size: 0x400}
+  # APB2
+  - {name: AFIO, model: stm32f1.afio, base: 0x40010000, size: 0x400}
+  - {name: EXTI, model: stm32f1.exti, base: 0x40010400, size: 0x400}
+  - {name: GPIOA, model: stm32f1.gpio, base: 0x40010800, size: 0x400, params: {port: A}}
+  - {name: GPIOB, model: stm32f1.gpio, base: 0x40010C00, size: 0x400, params: {port: B}}
+  - {name: GPIOC, model: stm32f1.gpio, base: 0x40011000, size: 0x400, params: {port: C}}   # on the die, no pins in VFQFPN36
+  - {name: GPIOD, model: stm32f1.gpio, base: 0x40011400, size: 0x400, params: {port: D}}   # PD0/PD1 on OSC_IN/OSC_OUT
+  - {name: ADC1, model: stm32f1.adc, base: 0x40012400, size: 0x400}
+  - {name: ADC2, model: stm32f1.adc, base: 0x40012800, size: 0x400}
+  - {name: TIM1, model: stm32.tim, base: 0x40012C00, size: 0x400, params: {irq: TIM1_UP}}
+  - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400, params: {i2s: false}}
+  - {name: USART1, model: stm32.usart, base: 0x40013800, size: 0x400, params: {index: 1, kind: usart}}
+  # AHB
+  - {name: DMA1, model: stm32f1.dma, base: 0x40020000, size: 0x400}           # 7 channels
+  - {name: RCC, model: stm32f1.rcc, base: 0x40021000, size: 0x400, params: {ext_hz: 8000000}}
+  - {name: FLASH, model: stm32f1.flash, base: 0x40022000, size: 0x400}        # flash interface (FPEC)
+  - {name: CRC, model: stm32.crc, base: 0x40023000, size: 0x400}
+  # system memory: device electronic signature (F_SIZE, UID) and option bytes
+  - {name: SYSMEM, model: stm32f1.sysmem, base: 0x1FFFF000, size: 0x800}
+  - {name: OB, model: stm32f1.optbytes, base: 0x1FFFF800, size: 0x400}
+  # Cortex-M3 debug MCU
+  - {name: DBG, model: stm32f1.dbgmcu, base: 0xE0042000, size: 0x400}
+
+# SVD peripherals of the STM32F103xx superset that the low-density F103T6 does not have (DS15060 Table 2, Figure 8).
+omitted:
+  - {name: TIM4, reason: "medium/high density only (DS15060 Table 2: 2 general-purpose timers)"}
+  - {name: TIM5, reason: "high density only"}
+  - {name: TIM6, reason: "high density only"}
+  - {name: TIM7, reason: "high density only"}
+  - {name: TIM8, reason: "high density only"}
+  - {name: TIM9, reason: "XL density only"}
+  - {name: TIM10, reason: "XL density only"}
+  - {name: TIM11, reason: "XL density only"}
+  - {name: TIM12, reason: "XL density only"}
+  - {name: TIM13, reason: "XL density only"}
+  - {name: TIM14, reason: "XL density only"}
+  - {name: SPI2, reason: "low density: 1 SPI (Table 2)"}
+  - {name: SPI3, reason: "high density only"}
+  - {name: USART3, reason: "low density: 2 USARTs (Table 2)"}
+  - {name: UART4, reason: "high density only"}
+  - {name: UART5, reason: "high density only"}
+  - {name: I2C2, reason: "low density: 1 I2C (Table 2)"}
+  - {name: DAC, reason: "high density only"}
+  - {name: GPIOE, reason: "not in the low-density memory map (Figure 8: ports A-D)"}
+  - {name: GPIOF, reason: "high density only"}
+  - {name: GPIOG, reason: "high density only"}
+  - {name: ADC3, reason: "high density only"}
+  - {name: SDIO, reason: "high density only"}
+  - {name: DMA2, reason: "high density only (DS15060: 7-channel DMA)"}
+  - {name: FSMC, reason: "high density only"}
+
+# External interrupt numbers (exception = 16 + n), RM0008 / CMSIS stm32f1xx names for the performance line (low
+# density: 43 vectors; 30 TIM4, 33/34 I2C2, 36 SPI2, 39 USART3 are reserved on this part).  The SVD agrees on every
+# number; where it uses other names they are listed in `svd_irq_names` (svd2chip --check accepts those as renames).
+irqs:
+  0: WWDG
+  1: PVD
+  2: TAMPER
+  3: RTC
+  4: FLASH
+  5: RCC
+  6: EXTI0
+  7: EXTI1
+  8: EXTI2
+  9: EXTI3
+  10: EXTI4
+  11: DMA1_Channel1
+  12: DMA1_Channel2
+  13: DMA1_Channel3
+  14: DMA1_Channel4
+  15: DMA1_Channel5
+  16: DMA1_Channel6
+  17: DMA1_Channel7
+  18: ADC1_2
+  19: USB_HP_CAN1_TX
+  20: USB_LP_CAN1_RX0
+  21: CAN1_RX1
+  22: CAN1_SCE
+  23: EXTI9_5
+  24: TIM1_BRK
+  25: TIM1_UP
+  26: TIM1_TRG_COM
+  27: TIM1_CC
+  28: TIM2
+  29: TIM3
+  31: I2C1_EV
+  32: I2C1_ER
+  35: SPI1
+  37: USART1
+  38: USART2
+  40: EXTI15_10
+  41: RTC_Alarm
+  42: USBWakeUp
+svd_irq_names: {18: ADC, 19: CAN1_TX, 20: CAN1_RX0, 24: TIM1_BRK_TIM9, 25: TIM1_UP_TIM10, 26: TIM1_TRG_COM_TIM11,
+                41: RTCAlarm, 42: USB_FS_WKUP}
+
+# All 36 package pins (DS15060 Table 5, VFQFPN36 column; Figure 7).
+pins:
+  - {num: 1, name: VDD_3, kind: power, default: VDD_3}
+  - {num: 2, name: OSC_IN/PD0, kind: gpio, port: D, bit: 0, default: OSC_IN, functions: {analog: OSC_IN}}
+  - {num: 3, name: OSC_OUT/PD1, kind: gpio, port: D, bit: 1, default: OSC_OUT, functions: {analog: OSC_OUT}}
+  - {num: 4, name: NRST, kind: special, default: NRST}
+  - {num: 5, name: VSSA, kind: power, default: VSSA}
+  - {num: 6, name: VDDA, kind: power, default: VDDA}
+  - {num: 7, name: PA0/WKUP, kind: gpio, port: A, bit: 0, default: GPIO, functions: {AF: USART2_CTS/TIM2_CH1_ETR, ADC: ADC12_IN0, additional: WKUP}}
+  - {num: 8, name: PA1, kind: gpio, port: A, bit: 1, default: GPIO, functions: {AF: USART2_RTS/TIM2_CH2, ADC: ADC12_IN1}}
+  - {num: 9, name: PA2, kind: gpio, port: A, bit: 2, default: GPIO, functions: {AF: USART2_TX/TIM2_CH3, ADC: ADC12_IN2}}
+  - {num: 10, name: PA3, kind: gpio, port: A, bit: 3, default: GPIO, functions: {AF: USART2_RX/TIM2_CH4, ADC: ADC12_IN3}}
+  - {num: 11, name: PA4, kind: gpio, port: A, bit: 4, default: GPIO, functions: {AF: SPI1_NSS/USART2_CK, ADC: ADC12_IN4}}
+  - {num: 12, name: PA5, kind: gpio, port: A, bit: 5, default: GPIO, functions: {AF: SPI1_SCK, ADC: ADC12_IN5}}
+  - {num: 13, name: PA6, kind: gpio, port: A, bit: 6, default: GPIO, functions: {AF: SPI1_MISO/TIM3_CH1, ADC: ADC12_IN6, REMAP: TIM1_BKIN}}
+  - {num: 14, name: PA7, kind: gpio, port: A, bit: 7, default: GPIO, functions: {AF: SPI1_MOSI/TIM3_CH2, ADC: ADC12_IN7, REMAP: TIM1_CH1N}}
+  - {num: 15, name: PB0, kind: gpio, port: B, bit: 0, default: GPIO, functions: {AF: TIM3_CH3, ADC: ADC12_IN8, REMAP: TIM1_CH2N}}
+  - {num: 16, name: PB1, kind: gpio, port: B, bit: 1, default: GPIO, functions: {AF: TIM3_CH4, ADC: ADC12_IN9, REMAP: TIM1_CH3N}}
+  - {num: 17, name: PB2/BOOT1, kind: gpio, port: B, bit: 2, default: GPIO, functions: {additional: BOOT1}}
+  - {num: 18, name: VSS_1, kind: power, default: VSS_1}
+  - {num: 19, name: VDD_1, kind: power, default: VDD_1}
+  - {num: 20, name: PA8, kind: gpio, port: A, bit: 8, default: GPIO, functions: {AF: USART1_CK/TIM1_CH1/MCO}}
+  - {num: 21, name: PA9, kind: gpio, port: A, bit: 9, default: GPIO, functions: {AF: USART1_TX/TIM1_CH2}}
+  - {num: 22, name: PA10, kind: gpio, port: A, bit: 10, default: GPIO, functions: {AF: USART1_RX/TIM1_CH3}}
+  - {num: 23, name: PA11, kind: gpio, port: A, bit: 11, default: GPIO, functions: {AF: USART1_CTS/CAN_RX/TIM1_CH4, additional: USBDM}}
+  - {num: 24, name: PA12, kind: gpio, port: A, bit: 12, default: GPIO, functions: {AF: USART1_RTS/CAN_TX/TIM1_ETR, additional: USBDP}}
+  - {num: 25, name: PA13, kind: gpio, port: A, bit: 13, default: JTMS/SWDIO, functions: {debug: JTMS/SWDIO}}
+  - {num: 26, name: VSS_2, kind: power, default: VSS_2}
+  - {num: 27, name: VDD_2, kind: power, default: VDD_2}
+  - {num: 28, name: PA14, kind: gpio, port: A, bit: 14, default: JTCK/SWCLK, functions: {debug: JTCK/SWCLK}}
+  - {num: 29, name: PA15, kind: gpio, port: A, bit: 15, default: JTDI, functions: {debug: JTDI, REMAP: TIM2_CH1_ETR/SPI1_NSS}}
+  - {num: 30, name: PB3, kind: gpio, port: B, bit: 3, default: JTDO, functions: {debug: JTDO/TRACESWO, REMAP: TIM2_CH2/SPI1_SCK}}
+  - {num: 31, name: PB4, kind: gpio, port: B, bit: 4, default: NJTRST, functions: {debug: NJTRST, REMAP: TIM3_CH1/SPI1_MISO}}
+  - {num: 32, name: PB5, kind: gpio, port: B, bit: 5, default: GPIO, functions: {AF: I2C1_SMBA, REMAP: TIM3_CH2/SPI1_MOSI}}
+  - {num: 33, name: PB6, kind: gpio, port: B, bit: 6, default: GPIO, functions: {AF: I2C1_SCL, REMAP: USART1_TX}}
+  - {num: 34, name: PB7, kind: gpio, port: B, bit: 7, default: GPIO, functions: {AF: I2C1_SDA, REMAP: USART1_RX}}
+  - {num: 35, name: BOOT0, kind: special, default: BOOT0}
+  - {num: 36, name: VSS_3, kind: power, default: VSS_3}

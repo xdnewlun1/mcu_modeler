@@ -1,0 +1,83 @@
+0000               ; spi_flash: SPI master reads a serial NOR flash (boards/p89cv51_spi_flash.yaml): JEDEC ID (9Fh) to 30h-32h, then
+0000               ; READ (03h) of 16 bytes from address 000000h to 40h-4Fh, then prints "ID xxxxxx" on the UART (9600, Timer 1).
+0000               ; SPI: master, CPOL = 0, CPHA = 0, MSB first, SPICLK = fosc / 16 (SPR = 01); chip select on P2.0 (a GPIO: the
+0000               ; SS pin P1.4 is not used by a master).  SPCR = 51h: SPEN, MSTR, SPR0.
+0000               CS      BIT     P2.0
+0000                       ORG     0000h
+0000  02 00 30             LJMP    main
+0003                       ORG     0030h
+0030  75 81 6F     main:   MOV     SP, #6Fh
+0033  75 89 20             MOV     TMOD, #20h
+0036  75 8D FD             MOV     TH1, #0FDh
+0039  75 8B FD             MOV     TL1, #0FDh
+003C  75 98 50             MOV     SCON, #50h
+003F  D2 8E                SETB    TR1
+0041  D2 A0                SETB    CS
+0043  75 D5 51             MOV     SPCR, #51h
+0046                       ; JEDEC ID
+0046  C2 A0                CLR     CS
+0048  74 9F                MOV     A, #9Fh
+004A  12 00 A4             LCALL   spi_xfer
+004D  78 30                MOV     R0, #30h
+004F  7F 03                MOV     R7, #3
+0051  12 00 A4     id_lp:  LCALL   spi_xfer
+0054  F6                   MOV     @R0, A
+0055  08                   INC     R0
+0056  DF F9                DJNZ    R7, id_lp
+0058  D2 A0                SETB    CS
+005A                       ; READ 16 bytes from 000000h
+005A  C2 A0                CLR     CS
+005C  74 03                MOV     A, #03h
+005E  12 00 A4             LCALL   spi_xfer
+0061  E4                   CLR     A
+0062  12 00 A4             LCALL   spi_xfer
+0065  E4                   CLR     A
+0066  12 00 A4             LCALL   spi_xfer
+0069  E4                   CLR     A
+006A  12 00 A4             LCALL   spi_xfer
+006D  78 40                MOV     R0, #40h
+006F  7F 10                MOV     R7, #16
+0071  12 00 A4     rd_lp:  LCALL   spi_xfer
+0074  F6                   MOV     @R0, A
+0075  08                   INC     R0
+0076  DF F9                DJNZ    R7, rd_lp
+0078  D2 A0                SETB    CS
+007A                       ; report
+007A  74 49                MOV     A, #'I'
+007C  12 00 C4             LCALL   putc
+007F  74 44                MOV     A, #'D'
+0081  12 00 C4             LCALL   putc
+0084  74 20                MOV     A, #' '
+0086  12 00 C4             LCALL   putc
+0089  E5 30                MOV     A, 30h
+008B  12 00 B1             LCALL   puthex
+008E  E5 31                MOV     A, 31h
+0090  12 00 B1             LCALL   puthex
+0093  E5 32                MOV     A, 32h
+0095  12 00 B1             LCALL   puthex
+0098  74 0D                MOV     A, #13
+009A  12 00 C4             LCALL   putc
+009D  74 0A                MOV     A, #10
+009F  12 00 C4             LCALL   putc
+00A2  80 FE                SJMP    $
+00A4               spi_xfer:                               ; A out, A in
+00A4  F5 86                MOV     SPDAT, A
+00A6  E5 AA                MOV     A, SPSR
+00A8  30 E7 FB             JNB     ACC.7, $-2              ; wait for SPIF
+00AB  53 AA 7F             ANL     SPSR, #7Fh              ; clear SPIF
+00AE  E5 86                MOV     A, SPDAT
+00B0  22                   RET
+00B1  C0 E0        puthex: PUSH    ACC
+00B3  C4                   SWAP    A
+00B4  12 00 B9             LCALL   nib
+00B7  D0 E0                POP     ACC
+00B9  54 0F        nib:    ANL     A, #0Fh
+00BB  24 30                ADD     A, #'0'
+00BD  B4 3A 00             CJNE    A, #'9'+1, $+3
+00C0  40 02                JC      nib_out
+00C2  24 07                ADD     A, #'A'-'9'-1
+00C4               nib_out:
+00C4  C2 99        putc:   CLR     TI
+00C6  F5 99                MOV     SBUF, A
+00C8  30 99 FD             JNB     TI, $
+00CB  22                   RET

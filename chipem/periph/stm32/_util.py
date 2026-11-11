@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from ...regtable import regs_for
 from ..base import MMIOBlock, Reg
+from ..registry import lookup as _lookup
 
 DEFAULT_REGS = str(Path(__file__).resolve().parents[3] / "chips" / "stm32f405_regs.yaml")
 HSI_HZ = 16_000_000.0
@@ -52,16 +53,21 @@ def build_regs(names: Iterable[str], size: int, overrides: dict[str, dict] | Non
 
 
 def find_model(chip: Any, model: str, name: str | None = None) -> MMIOBlock | None:
-    """Peer peripheral by name (preferred) or by model name."""
+    """Peer peripheral by name (preferred) or by model name. A subclass model (e.g. stm32.rcc_f42x, which extends
+    stm32.rcc) matches its base model's name."""
     if chip is None:
         return None
     periphs = getattr(chip, "peripherals", {}) or {}
+    cls = _lookup(model)
+
+    def match(b: Any) -> bool:
+        return getattr(b, "model", None) == model or (cls is not None and isinstance(b, cls))
     if name is not None:
         b = periphs.get(name)
-        if b is not None and getattr(b, "model", None) == model:
+        if b is not None and match(b):
             return b
     for b in periphs.values():
-        if getattr(b, "model", None) == model:
+        if match(b):
             return b
     return None
 
@@ -95,6 +101,10 @@ def rcc(chip: Any) -> Any:
     r = getattr(chip, "_stm32_rcc", None)
     if r is None:
         r = find_model(chip, "stm32.rcc", "RCC")
+        if r is None:          # another STM32 RCC generation with the same interface (stm32f1.rcc)
+            b = (getattr(chip, "peripherals", None) or {}).get("RCC")
+            if b is not None and hasattr(b, "gate_location") and hasattr(b, "effective_apb_hz"):
+                r = b
         if r is not None:
             try:
                 chip._stm32_rcc = r
@@ -241,7 +251,7 @@ def gpio_resync(chip: Any, sig: str) -> None:
     """Ask every STM32 GPIO port to re-evaluate the pins carrying `sig` (after a peripheral's `signal_state`
     changed)."""
     for b in (getattr(chip, "peripherals", None) or {}).values():
-        if getattr(b, "model", None) == "stm32.gpio" and hasattr(b, "resync_signal"):
+        if getattr(b, "model", None) in ("stm32.gpio", "stm32f1.gpio") and hasattr(b, "resync_signal"):
             b.resync_signal(sig)
 
 

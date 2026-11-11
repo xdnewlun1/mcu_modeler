@@ -1,0 +1,6 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0050 main
+C:0x006F pca_isr
+C:0x007B store
+C:0x0083 pca_out
+D:0x0030 NCAP

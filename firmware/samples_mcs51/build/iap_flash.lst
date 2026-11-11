@@ -1,0 +1,79 @@
+0000               ; iap_flash: In-Application Programming through the boot ROM entry PGM_MTP (FFF0h, data sheet sec. 6.3.8):
+0000               ; enable the boot block (AUXR1.ENBOOT), erase the 128-byte page at E000h (R1 = 08h), program the 8-byte string
+0000               ; "IAP OK!\0" there byte by byte (R1 = 02h), read it back with IAP read (R1 = 03h) and with MOVC, and store the
+0000               ; result in 30h (55h = pass, EEh = fail), the IAP return codes ORed in 31h, the manufacturer ID (R1 = 00h) in 32h.
+0000               ; Then prints the string from flash on the UART (9600, Timer 1).
+0000               PGM_MTP EQU     0FFF0h
+0000               ENBOOT  EQU     20h
+0000               PAGE    EQU     0E000h
+0000                       ORG     0000h
+0000  02 00 30             LJMP    main
+0003                       ORG     0030h
+0030  75 81 6F     main:   MOV     SP, #6Fh
+0033  75 89 20             MOV     TMOD, #20h
+0036  75 8D FD             MOV     TH1, #0FDh
+0039  75 8B FD             MOV     TL1, #0FDh
+003C  75 98 50             MOV     SCON, #50h
+003F  D2 8E                SETB    TR1
+0041  75 31 00             MOV     31h, #0
+0044  43 A2 20             ORL     AUXR1, #ENBOOT
+0047                       ; read manufacturer ID
+0047  79 00                MOV     R1, #00h
+0049  90 00 00             MOV     DPTR, #0000h
+004C  12 FF F0             LCALL   PGM_MTP
+004F  F5 32                MOV     32h, A
+0051                       ; erase the page
+0051  79 08                MOV     R1, #08h
+0053  90 E0 00             MOV     DPTR, #PAGE
+0056  12 FF F0             LCALL   PGM_MTP
+0059  42 31                ORL     31h, A
+005B                       ; program 8 bytes
+005B  7A 00                MOV     R2, #0
+005D  EA           prog:   MOV     A, R2
+005E  90 00 B5             MOV     DPTR, #text
+0061  93                   MOVC    A, @A+DPTR              ; source byte
+0062  FB                   MOV     R3, A
+0063  75 83 E0             MOV     DPH, #HIGH(PAGE)
+0066  EA                   MOV     A, R2
+0067  F5 82                MOV     DPL, A
+0069  EB                   MOV     A, R3
+006A  79 02                MOV     R1, #02h
+006C  12 FF F0             LCALL   PGM_MTP
+006F  42 31                ORL     31h, A
+0071  0A                   INC     R2
+0072  BA 08 E8             CJNE    R2, #8, prog
+0075                       ; verify with IAP read and with MOVC
+0075  75 30 55             MOV     30h, #55h
+0078  7A 00                MOV     R2, #0
+007A  75 83 E0     verify: MOV     DPH, #HIGH(PAGE)
+007D  EA                   MOV     A, R2
+007E  F5 82                MOV     DPL, A
+0080  79 03                MOV     R1, #03h
+0082  12 FF F0             LCALL   PGM_MTP
+0085  FC                   MOV     R4, A                   ; IAP read
+0086  90 E0 00             MOV     DPTR, #PAGE
+0089  EA                   MOV     A, R2
+008A  93                   MOVC    A, @A+DPTR              ; MOVC read
+008B  6C                   XRL     A, R4
+008C  70 0E                JNZ     bad
+008E  90 00 B5             MOV     DPTR, #text
+0091  EA                   MOV     A, R2
+0092  93                   MOVC    A, @A+DPTR
+0093  6C                   XRL     A, R4
+0094  70 06                JNZ     bad
+0096  0A                   INC     R2
+0097  BA 08 E0             CJNE    R2, #8, verify
+009A  80 03                SJMP    report
+009C  75 30 EE     bad:    MOV     30h, #0EEh
+009F  53 A2 DF     report: ANL     AUXR1, #NOT ENBOOT AND 0FFh
+00A2  90 E0 00             MOV     DPTR, #PAGE
+00A5  E4           pr:     CLR     A
+00A6  93                   MOVC    A, @A+DPTR
+00A7  60 0A                JZ      done
+00A9  C2 99                CLR     TI
+00AB  F5 99                MOV     SBUF, A
+00AD  30 99 FD             JNB     TI, $
+00B0  A3                   INC     DPTR
+00B1  80 F2                SJMP    pr
+00B3  80 FE        done:   SJMP    $
+00B5  49 41 50 20 4F 4B 21 00 text:   DB      "IAP OK!", 0

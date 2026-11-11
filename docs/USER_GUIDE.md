@@ -13,8 +13,10 @@ For how the emulator works inside, read [ARCHITECTURE.md](ARCHITECTURE.md). For 
 2. [Concepts in one page](#2-concepts-in-one-page)
 3. [Loading firmware](#3-loading-firmware)
 4. [Running simulations](#4-running-simulations)
+   (incl. [4.8 Making it faster](#48-making-it-faster-speed-fidelity-and-the-emulation-rate))
 5. [Boards: several chips](#5-boards-several-chips)
 6. [Parts: switches, LEDs, clocks, logic](#6-parts-switches-leds-clocks-logic)
+   (incl. [6.4 Writing your own part in Python](#64-writing-your-own-part-in-python))
 7. [Adding a new chip](#7-adding-a-new-chip)
 8. [Building firmware](#8-building-firmware)
 9. [Troubleshooting](#9-troubleshooting)
@@ -112,6 +114,7 @@ up as `chips/NAME.yaml`) or `--chip path/to/file.yaml`. The default is `mk22fn1m
 | ST STM32F405ZG | `stm32f405zg` | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PB0` |
 | ST STM32F405RG / OG / OE / VG | `stm32f405rg` (LQFP64), `stm32f405og`, `stm32f405oe` (WLCSP90), `stm32f405vg` (LQFP100) | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PB0` |
 | ST STM32F407VG / VE / ZG / ZE / IG / IE | `stm32f407vg`, `stm32f407ve` (LQFP100), `stm32f407zg`, `stm32f407ze` (LQFP144), `stm32f407ig`, `stm32f407ie` (LQFP176), `stm32f407igh`, `stm32f407ieh` (UFBGA176) | Cortex-M4F | 16 MHz (HSI) | `PA9`, `PI1` |
+| ST STM32F103T6 (VFQFPN36, family `stm32f1`) | `stm32f103t6` | Cortex-M3 (no FPU) | 8 MHz (HSI) | `PA9`, `PB0` |
 | TI TMS320F28232 | `tms320f28232` | C28x (16-bit words) | 10 MHz | `GPIO34` |
 
 **Firmware formats.** The format is sniffed; `--format` forces it.
@@ -629,7 +632,8 @@ interaction (handy in scripts). All `run` options (`--clock`, `--set`, `--part`,
 | `regs`, `state` | core registers; time, clock, mode, pending exceptions |
 | `mem ADDR [N]` | hex dump through the bus (MMIO reads have side effects) |
 | `dis [ADDR\|SYMBOL[+OFF]] [N]` | disassemble (ARM via capstone; C28x via the built-in disassembler) |
-| `bt [WORDS]` | best-effort backtrace from LR and stack scan |
+| `bt [WORDS]` | call stack: DWARF CFI and exception frames when the ELF has them, else LR + stack scan |
+| `break`, `tbreak`, `watch`, `continue`, `next`, `s`, `finish`, `until`, `list`, `info break`, ... | the debugger: see 4.7 |
 | `periph [NAME]` | list blocks, or dump one block's registers without read side effects |
 | `uart [NAME] TEXT`, `uartout [NAME]` | send to a UART receiver; show what a UART sent |
 | `adc CHANNEL VALUE` | set an analog input (same rule as `--adc`: integer = raw code, `1.65V` / `1200mV` = volts) |
@@ -904,6 +908,204 @@ code, drive inputs (`--set`/`--at`), type into the console (`--at TIME:UART=...`
 
 ---
 
+### 4.7 Debugging: breakpoints, stepping, source, registers, GDB
+
+The debugger works the same in the shell, the browser and over GDB, for ARM and C28x chips. What it can show
+depends on the image:
+
+| image | breakpoints by | listing | call stack |
+|---|---|---|---|
+| ELF with DWARF (`-g`; the samples; TI cl2000 ELF `.out`) | symbol, `file.c:line`, address | source + assembly | DWARF CFI (ARM), RPC + scan (C28x) |
+| ELF without DWARF, TI COFF `.out`, `.c28img` | symbol, address | symbols + assembly | stack scan (marked `scan`) |
+| raw `.bin` / `.hex` / `.srec` | address | assembly (`sub_XXXX` guesses) | stack scan |
+
+Sources are looked up as recorded in the DWARF (absolute or under the compile directory), then next to the ELF and
+in its parent directory, then in every `--source-dir DIR`. `info source` (shell) lists where each file was found.
+
+**Locations** (`break`, `tbreak`, `until`, the web "add" field): `main` (after the prologue with line info),
+`*main` / `*0x4ac` (exact address), `main+0x10`, `blinky.c:16`, `16` (current file); on a board prefix the chip:
+`B:main`. C28x: word addresses; COFF symbols may carry a leading `_` (both spellings work).
+
+**Watch targets**: `0x20000000[:LEN]`, a data symbol (its size), `PERIPH.REG` (`USART1.SR`, `GPIOC.PDOR`,
+`SCIA.SCIRXBUF`). `watch` = write, `rwatch` / `watch -r` = read, `awatch` / `watch -a` = either. A watchpoint stops
+after the accessing instruction (PC is the next instruction; the message names the instruction and the value
+written). Only CPU accesses are watched: DMA, exception stacking and debugger accesses are not.
+
+**Conditions** (`break LOC if COND`, `condition N COND`): registers (`r0`, `sp`, `xpsr`, `acc`, `xar4`), symbols (a
+data symbol stands for its value; `addr(sym)` for its address), `mem8[a]`, `mem16[a]`, `mem32[a]`, arithmetic,
+comparisons, `&&`/`and`, `||`/`or`, `!`/`not`. `ignore N COUNT` skips the next COUNT hits (hits still count).
+
+```
+$ .venv/bin/chipem shell firmware/samples/build/blinky.elf --clock 120e6
+chipem> break blinky.c:16 if r0 == 0x20
+Breakpoint 1 at 0x000004FA: main+0x4e (blinky.c:16) if r0 == 0x20
+chipem> continue
+stopped: DEBUG  t=42.117 us  cycles=5054  pc=0x000004FA <main+0x4e>
+breakpoint 1 at main+0x4e (blinky.c:16)
+16	            GPIOC->PTOR = 1u << 5;
+chipem> list
+blinky.c:
+      11
+      12      volatile uint32_t counter = 0;
+      13      for (;;) {
+      14          if (++counter >= 1000) {
+      15              counter = 0;
+=>B   16              GPIOC->PTOR = 1u << 5;
+...
+chipem> watch -a GPIOC.PDOR
+chipem> next
+chipem> finish            # error in main: "finish" not meaningful in the outermost frame
+```
+
+`next` / `s` step source lines (with no line info at the PC: one instruction); `nexti` runs a call (BL/BLX on ARM,
+LCR/LC/FFC on the C28x) and stops after it; `finish` runs until the current function returns to its caller's frame;
+`until LOC` runs until LOC. These run the whole board (all chips in lockstep) until the next debugger stop;
+`step`/`stepi` moves only the selected chip by one instruction. In `--exec` scripts a run that does not stop within 10
+s of wall time is interrupted.
+
+**On a board** a breakpoint or watchpoint on any chip stops every chip. The board runs chips in lockstep slices of
+at most one quantum (`quantum:` in the board YAML, default 10 us), and the stopping chip is the one furthest behind,
+so the others are ahead of it by at most one quantum: the stop message shows the skew (`[board skew 8625 ns]`).
+Lower the quantum for tighter stops.
+
+**Browser** (`chipem serve`, pins tray): the **Debug** tab follows the PC of the selected chip. Toolbar: continue,
+pause, into, over, out, stepi, run to cursor; view mixed / asm / source; "follow pc"; a go-to field (any location).
+Click a row to place the cursor, click the gutter (or F9) for a breakpoint; in asm view into/over are instruction
+steps. Right column: registers (changed since the last stop in amber; double-click a value to edit it while paused),
+call stack (click a frame to show its code), breakpoints and watchpoints (enable box, hits, click the condition to
+edit, x deletes; the field takes `main`, `file.c:12 if r0==3`, `w USART1.SR`, `r 0x20000000:4`, `a counter`). Memory
+view at the bottom: an address or expression (`sp`, `buffer`, `0x20000000`), or follow a register. Keys: F5
+continue, Shift+F5 pause, F10 over, F11 into, Shift+F11 out, F4 run to cursor, F9 breakpoint (F5/F4/F9 only while the
+Debug tab is shown). The **Registers** tab lists every peripheral of the selected chip; expand one for its registers,
+a register for its bit fields with the enumerated meaning of each value. Values are peeked without side effects:
+registers whose read hook may have side effects (a UART data register, a status flag cleared by reading) show the
+stored value dimmed with `~`; **read** does a real read while paused. Double-click a register or a field value to
+write it (through the bus, so write side effects such as w1c happen). `/?tab=debug` / `/?tab=regs` open the page on
+a tab.
+
+#### Attaching gdb, Ghidra, IDA, VS Code, lldb
+
+`--gdb PORT` on `chipem run`, `chipem shell` or `chipem serve` starts a GDB remote serial protocol server on
+127.0.0.1:PORT (`--gdb-chip ID` picks the board chip; the server uses the board's debugger, so `continue` runs every
+chip). `chipem run --gdb` starts halted at reset and ends when the client kills or detaches; with `shell` and
+`serve` the shell / web UI keep working beside the debugger (requests run on the emulation thread). Real-time
+pacing (`--realtime`, host serial ports) stays on while gdb continues.
+
+- **gdb** (`gdb`, `gdb-multiarch`, `arm-none-eabi-gdb`):
+  ```
+  .venv/bin/chipem run firmware/samples/build/blinky.elf --clock 120e6 --gdb 3333
+  gdb firmware/samples/build/blinky.elf -ex "target extended-remote :3333"
+  (gdb) break main
+  (gdb) continue
+  (gdb) watch counter          # hardware watchpoint on a stack local: works (gdb computes the address)
+  (gdb) monitor reset          # also: monitor halt, monitor pins gpio, monitor periph UART0, any shell command
+  ```
+  gdb reads the target description (Cortex-M profile, system registers msp/psp/primask/basepri/faultmask/control,
+  VFP d0-d15/fpscr with an FPU) and a memory map (flash as ROM, so gdb uses hardware breakpoints there; both kinds
+  are the same here). Memory reads never have side effects (MMIO is peeked).
+- **Ghidra** (Debugger tool): a "gdb" connector launching `gdb-multiarch` with the program, then in its
+  interpreter `target extended-remote :3333`; or the "gdb remote" connector with `localhost:3333`. Ghidra maps the
+  module by the ELF; for a raw `.bin` set the image base to the load address first.
+- **IDA**: Debugger → "Remote GDB debugger", host 127.0.0.1, port 3333, processor ARM (Thumb), "Debugger options →
+  Set specific options → Use target-description XML" on.
+- **VS Code** (cortex-debug): `"servertype": "external"`, `"gdbTarget": "localhost:3333"`, `"executable":
+  "firmware/samples/build/blinky.elf"`, `"gdbPath": "gdb-multiarch"`; start `chipem run ... --gdb 3333` (or
+  `serve`) first.
+- **lldb**: `lldb blinky.elf` then `gdb-remote 3333`.
+
+Tested here with GNU gdb (Fedora's multi-arch build) and the protocol tests in tests/test_gdbserver.py; the Ghidra,
+IDA, VS Code and lldb settings above are the standard ones for a gdb remote target, not exercised in the test suite.
+
+C28x: gdb has no C28x architecture, so only generic RSP clients work: the server sends a custom target.xml
+(`<architecture>c28x</architecture>`, feature `org.chipem.c28x`, every register 32 bits) and uses 16-bit word
+addresses for `m`/`M`/`Z` (lengths in bytes, two per word).
+
+### 4.8 Making it faster: speed, fidelity and the emulation rate
+
+**Where the time goes** (profiled with cProfile on the cases below, 2026-11-10):
+
+* **Polling loops.** Most firmware waits by reading a status register in a loop (`while (!(SR & RXNE));`, a PLL lock
+  bit, a CPU-timer flag, SysTick COUNTFLAG). Each such read is a Python call through Unicorn's MMIO callback or the
+  C28x memory path, about 1–4 µs. A loop of four instructions at 100 MHz takes 40 ns on silicon. In the profiled
+  board runs, 50–80 % of the wall time went to these reads.
+* **The C28x interpreter.** It is pure Python: about 150 ns per instruction, so 6–7 MIPS against 100 MHz silicon. That
+  is about ×0.07 at best and ×0.03 with MMIO.
+* **Unicorn.** With the instruction count hook that exact timing needs, a busy loop runs at about 120 MIPS (×1 at
+  120 MHz). With the default 2000-instruction slices it reaches 85–100 MIPS.
+* **Board lockstep.** Each chip runs at most one quantum (10 µs by default) ahead of the others. A 16 MHz STM32 then
+  gets 160-instruction slices, and the per-slice Python overhead (10–20 µs) costs more than the instructions do.
+* **The web stream** (pin deltas, event formatting) costs less than 5 % (`chipem serve` with a stream client attached,
+  measured on three boards).
+
+**What changed without any fidelity cost** (on by default):
+
+* C28x: the decode cache is a dict with `__missing__` and the run loop is `for count in range(...)`: `pc = cache[pc]()`.
+* C28x: MMIO reads and writes are dispatched per address to the block that serves them. Before, every access did a
+  region bisect and a page-dispatch search.
+* C28x: TBIT, LCR and LRETR have specialised handlers.
+* A C28x branch to itself (`SB $,UNC`, the `for(;;);` of an interrupt-driven main loop) spends the rest of the slice
+  at once. The next slice then runs to the next event, because nothing can change before it.
+* Board: the wall time of each chip is measured, which gives the speed meter and the bottleneck.
+
+**Settings that trade fidelity for speed** (`chipem/perf.py`). Each can be set by CLI option (run/shell/serve), by
+shell command (`perf KEY=VALUE`, `quantum`), in the board YAML (where it is a board property), through
+`/api/perf`, and in the web UI's Status pane, **performance** block:
+
+| setting | CLI / YAML | what it costs |
+|---|---|---|
+| preset | `--fast`, `--accurate`, `--preset`; YAML `performance:` | sets the rows below together (accurate: max slice 500, every pin edge logged; fast: auto quantum, poll skip 100 µs, no mmio events, UI every 200 ms) |
+| poll skip | `--poll-skip 100us` | A polling loop is fast-forwarded by whole iterations up to the next event, at most 100 µs at a time. It qualifies when its MMIO reads return the same values, it writes no MMIO register, and all CPU registers are identical in two consecutive iterations. Exact for status bits that models flip in scheduler events, which covers every board in `boards/` (identical event logs). A value a model computes from the time on each read is seen up to the cap late, so a large cap (1 s) breaks such models (USB, RTC, FMC tests fail at 1 s and pass at 100 µs). On ARM the polling load runs once more after a skip. A loop that changes only RAM, with no register trace, would be skipped wrongly. |
+| auto quantum | `--auto-quantum`; YAML `auto_quantum: true` | A sleeping chip (WFI/IDLE) or a parked one (self-branch, skipped polling loop) holds the others back only up to its next event, so its timer-driven edges arrive exactly on time. Anything sent to it ends the sender's run. Awake chips keep the quantum bound. Event order between chips may differ from the default, within the quantum. |
+| quantum | `--quantum`, YAML `quantum:`; shell `quantum 20us`; live in the UI | the worst-case cross-chip latency of a pin edge or link byte; bit-level SPI/I2C/McBSP between chips needs it below half a bit period |
+| max slice | `--max-slice N`; YAML `max_slice:` | Larger slices delay pause/stop, and events that a model schedules inside an MMIO read callback (noticed at slice end, up to one slice late). 50000 made `k22_i2c_eeprom` three times *slower*, which is why no preset raises it. |
+| pin log | `--pin-log all/auto/off` | `off`: no pin events in the log, event list or Discovery tab (VCD and the pin table still see every edge) |
+| drop events | `--drop-events mmio,i2s` | the kinds are neither stored nor streamed |
+| UI interval | `--ui-interval 200ms` | how often the UI refreshes |
+
+**Measured** with `tools/bench.py` (20 ms warm-up, then 20 ms of virtual time; ×real = virtual / wall time). "before"
+is the code before this work (HEAD export, default settings). The machine was shared with other jobs, so expect
+about ±10 % noise.
+
+| case | before | default now | fast | skipped (fast) |
+|---|---:|---:|---:|---:|
+| C2000 asm blinky (pure delay loop, no MMIO) | ×0.060 | ×0.068 | ×0.068 | – |
+| C2000 C blinky (TI cl2000; polls) | ×0.026 | ×0.039 | ×7.8 | 99.8 % |
+| K22 busy loop 120 MHz | ×0.75 | ×0.80 | ×0.82 | – |
+| STM32 busy loop 168 MHz | ×0.51 | ×0.51 | ×0.50 | – |
+| STM32 HAL uart_chat | ×0.67 | ×0.60 | ×7.3 | 98.7 % |
+| board c2000_stm32_uart | ×0.023 | ×0.033 | ×0.45 | 98 % |
+| board k22_c2000_stm32_can | ×0.016 | ×0.018 | ×0.17 | 96 % |
+| board pwm_capture_3way (all chips sleep) | ×0.20 | ×0.18 | ×0.51 | – |
+| board k22_i2c_eeprom (EEPROM write-cycle wait) | ×0.24 | ×0.23 | ×10.7 | 99.7 % |
+| board k22_sdcard | ×1.66 | ×1.68 | ×1.72 | – |
+| board stm32_spi_pair (bit-level SPI between chips) | ×0.074 | ×0.070 | ×0.068 | – |
+
+What does not get faster: pure computation on the C28x (×0.07 at 100 MHz is the ceiling of this interpreter), and
+busy-but-not-idle firmware such as polling with a timeout counter, or a bit-level bus between chips that needs a
+short quantum.
+
+**Emulation rate.** The toolbar has a rate control with presets ×0.01 … ×10 and max (unpaced), or type any factor
+and press Enter. The `speed` readout shows achieved/requested and turns amber when the emulation cannot keep up.
+Its tooltip lists MIPS per chip and the bottleneck. The same is available as `chipem run --speed 0.1` (or
+`--speed max`), shell `speed 0.1`, and `POST /api/realtime {"speed": "0.1"}`. At slow rates a worker chunk is at
+most speed × 100 ms of virtual time, so ×0.001 still updates the UI and pause/step react within milliseconds.
+`chipem run` prints `speed: requested max, achieved x0.45 · A 45.0 MIPS @ 100 MHz (47 % of wall); B ... ·
+bottleneck B` for boards; the shell's `speed` prints the same.
+
+**Things that did not pay:**
+
+* Running board chips on threads: an ARM and a C28x chip in two threads, without any lockstep synchronisation, gave
+  ×0.99 (the Unicorn binding and the interpreter both hold the GIL; this Python 3.14 is not free-threaded,
+  `Py_GIL_DISABLED=0`). Processes would need IPC on every net edge and link byte.
+* `PYTHON_JIT=1` (available in this build): about +10 % on the pure C28x delay loop, nothing on MMIO-heavy runs.
+  You can set it in the environment; it is not a chipem option.
+* Larger slices: see max slice above.
+
+**Ceiling.** A pure-Python C28x tops out near 7–10 MIPS, so ×0.1 at 100 MHz for firmware that really computes.
+Reaching real time would take a native interpreter: a C extension or Cython over the same `isa.yaml` table, about
+100× faster per instruction, which would bring the core near ×1. Firmware that mostly waits is already ×5–10
+with poll skip.
+
 ## 5. Boards: several chips
 
 ### 5.1 Writing `boards/<name>.yaml`
@@ -1107,6 +1309,9 @@ All fourteen were run for this guide (`--for 20ms`, chat boards 40 ms, `logic_de
 | `c2000_k22_uart.yaml` | K22 + F28232 | bytes lost before the C28x enables SCI-A | 72 / 50 |
 | `k22_c2000_can.yaml` | K22 + F28232 | CAN bus at 500 kbit/s: FlexCAN0 sends every 10 ms, eCAN-A (TI C) echoes | 9 / 9 frames in 100 ms |
 | `k22_stm32_can.yaml` | K22 + STM32F405 | the same with bxCAN1 echoing as 0x202 | 4 / 4 frames in 45 ms |
+| `stm32f103_stm32f405_uart.yaml` | STM32F103T6 + STM32F405 | F103 (72 MHz) `ping N` every 2 ms, F405 echoes uppercased, TX/RX nets | 4 / 4 lines in 10 ms |
+| `stm32f103_stm32f405_can.yaml` | STM32F103T6 + STM32F405 | F103 bxCAN `100#...` every 10 ms, F405 `can_echo` answers `202#...` | 3 / 3 frames in 35 ms |
+| `stm32f103_usb_cdc.yaml` | STM32F103T6 + USB host | F1 USB device CDC-ACM enumerates, echoes uppercased | `F103 CDC ready`, `HELLO` |
 | `k22_c2000_stm32_can.yaml` | K22 + F28232 + STM32F405 | three CAN families on one bus | 4 / 8 frames in 45 ms |
 | `c2000_stm32_uart.yaml` | F28232 + STM32F405 | C28x sender, STM32 echo | 48 / 48 |
 | `c2000_stm32_chat.yaml` | F28232 + STM32F405 | two-way "chat" protocol (HELLO/PING/PONG), bare-metal STM32, nets only | 122 / 130 |
@@ -1426,6 +1631,220 @@ ITU-656 style codes instead of HSYNC/VSYNC. `image:` takes a binary PGM (P5) or 
 directory, then to the board file); otherwise a `pattern` is generated. `--set CAM=checker` changes the pattern at
 run time. One `part` event per frame. Example: `chipem run --board boards/stm32f407_dcmi_camera.yaml --for 50ms`.
 
+### 6.4 Writing your own part in Python
+
+When no built-in part fits (a sensor, a modem, the device a PC tool talks to, a test bench), write the part in
+Python. A `script` part runs your class inside the emulator, on the emulation thread, at the virtual time of every
+event: no IPC, no second process, the same timing as the built-in parts.
+
+> **Security.** A script part is ordinary Python running with your user's privileges: it can read and write your
+> files, open sockets, start programs. Loading a board that contains a script part is the same as running a program
+> from wherever the board came from. There is no sandbox. `chipem run/shell/serve --board X.yaml` loads the scripts
+> of the board you name on the command line; the web UI asks before it opens a board with script parts or adds one
+> (it shows the script paths), refuses script requests from other web sites (an `Origin` other than the page) and
+> from host names other than an IP address or `localhost`, and the server binds to 127.0.0.1 unless you pass
+> `--host`. Do not open boards from sources you would not run code from.
+
+#### A first part
+
+`chipem new-part NAME [--kind gpio|spi|i2c|uart]` writes a commented template (it never overwrites a file):
+
+```sh
+chipem new-part boards/parts/my_sensor --kind spi
+# wrote boards/parts/my_sensor.py (spi template, class MySensor)
+# use it in a board: - {id: U1, type: script, file: my_sensor.py, ports: {CS: A.PTC4, SCK: A.PTC5, MOSI: A.PTC6, MISO: A.PTC7}}
+```
+
+The smallest useful part, a delayed inverter (inline in the board YAML; `file:` is better for anything longer):
+
+```yaml
+parts:
+  - id: U6
+    type: script
+    params: {delay: 2us}
+    ports: {A: BTN, Y: A.PTC5}
+    code: |
+      from chipem.parts.script import ScriptPart
+      class SlowInverter(ScriptPart):
+          PORTS = {"A": "in", "Y": "out"}
+          PARAMS = {"delay": "1us"}
+          def on_change(self, port, level, t_ns):
+              if level is not None:
+                  self.after(self.params["delay"], self.drive, "Y", 1 - level)
+```
+
+Board YAML keys of a script part:
+
+| key | meaning |
+|---|---|
+| `file` | the `.py` file, relative to the board file |
+| `code` | inline source instead of `file` |
+| `class` | which class, when the file defines several `ScriptPart` subclasses |
+| `params` | `{name: value}` overriding the class's `PARAMS` (any other unknown key is taken as a param too) |
+| `ports` | `{port: net or CHIP.PIN}` wiring, as for every part; unwired ports can be wired later in the UI |
+| `slow_ms` | wall-time budget of one callback before a `warn` (default 50) |
+| `quiet` | no per-change `part` events (as for every part) |
+
+#### Worked example: an SPI slave on real firmware
+
+`boards/parts/k22_spi_world.yaml` puts the K22 `spi_master` sample (sends "hello" every 2 ms and prints what comes
+back) on the same nets as `boards/parts/spi_world.py`:
+
+```python
+from chipem.parts.script import ScriptPart
+
+class SpiWorld(ScriptPart):
+    PORTS = {"CS": "in", "SCK": "in", "MOSI": "in", "MISO": "out"}
+    PARAMS = {"reply": "WORLD"}
+
+    def on_reset(self):
+        self.spi_slave(cs="CS", sck="SCK", mosi="MOSI", miso="MISO", mode=0)
+        self.rx = bytearray()
+        self.state["transactions"] = 0
+        self.state["last_rx"] = ""
+
+    def on_spi_start(self):            # CS went low: queue the whole reply
+        self.rx.clear()
+        return self.params["reply"]
+
+    def on_spi_byte(self, value):      # one byte from the master
+        self.rx.append(value)
+
+    def on_spi_end(self):              # CS went high
+        self.state["transactions"] += 1
+        self.state["last_rx"] = self.rx.decode("latin-1")
+```
+
+```
+$ chipem run --board boards/parts/k22_spi_world.yaml --for 7ms --summary-only
+...
+UART output:
+  UART0 (30 bytes): "M 1 WORLD\r\nM 2 WORLD\r\nM 3 WORL"
+...
+parts (1):
+  U1       script   CS=NSS SCK=SCK MOSI=MOSI MISO=MISO transactions=3 last_rx=hello params=reply=WORLD
+```
+
+`part U1 reply=EARTH` in the shell (or the `reply` field in the web UI's Parts panel) changes the answer while it
+runs.
+
+#### API reference
+
+Class attributes:
+
+| attribute | meaning |
+|---|---|
+| `PORTS = {name: kind}` | `"in"`, `"out"` (push-pull, can release), `"inout"` (bidirectional, tri-state), `"od"` (open drain: drives only L), `"analog_in"`, `"analog_out"`; add `" pullup"` / `" pulldown"` for a pull resistor on the port (`"od pullup"` = an I2C breakout) |
+| `PARAMS = {name: default}` | settings; the board's `params:` override them, the UI and `part ID name=value` change them at run time (converted to the default's type). `Param(default, min=, max=, step=, unit=, doc=, choices=[...])` adds UI hints and range checks |
+| `ADC_FULL_SCALE = 3.3` | volts of the full code for ADC models that take raw codes (TI C2000: 3.0) |
+
+Callbacks (define the ones you need; all optional):
+
+| callback | when |
+|---|---|
+| `on_reset()` | power-on, every reset and after a reload: set initial outputs, helpers, timers, `self.state` |
+| `on_change(port, level, t_ns)` | an input's net changed; `level` is 1, 0 or None (undriven/X). Also once after reset with the first level |
+| `@on_rising("CLK")`, `@on_falling("CLK")` | method `fn(self)` on an L→H / H→L edge of an input |
+| `@on_edge("CS")` | method `fn(self, level)` on every change of an input |
+| `@every("1ms")` | method `fn(self)` periodically, from one period after reset |
+| `@action` | method `fn(self)` becomes a button in the web UI and `part ID action=NAME` |
+| `on_param(name, value)` | a PARAM was changed at run time |
+| `on_analog(port, volts)` | an `analog_out` of another script part on this `analog_in` net changed |
+| `on_spi_start()` / `on_spi_byte(value)` / `on_spi_end()` | SPI slave (after `spi_slave()`): return the byte(s) to send first / next |
+| `on_i2c_write(data)` / `on_i2c_read(n)` | I2C target (after `i2c_slave()`): one write transfer's bytes / return byte(s) for the master to read |
+| `on_uart_byte(b)` / `on_uart_line(text)` | UART (after `uart()`): every byte / every LF-terminated line (CR dropped) |
+| `on_host_data(data)` | bytes from a host endpoint opened with `host_open()` |
+
+Methods (call them on `self`):
+
+| method | does |
+|---|---|
+| `read(port)` → 1/0/None, `level(port)` → "H"/"L"/"X" | level of the port's net |
+| `drive(port, v)` | 1/True/"H", 0/False/"L", "X", None/"Z" (release). On an `od` port 1 releases |
+| `release(port)`, `driving(port)` | stop driving; what this part drives now |
+| `analog(port, volts)`, `read_analog(port)` | set an `analog_out` (chip ADC inputs on its net convert it); read the voltage another script part puts on the net |
+| `after(t, fn, *args)`, `repeat(t, fn, *args)` | call later / periodically in virtual time; return a `Timer` (`.cancel()`, `.active`) |
+| `now_ns`, `now` | current virtual time in ns / seconds; `ns("250us")` converts a time |
+| `spi_slave(cs=, sck=, mosi=, miso=, mode=0..3, bits=8, lsb_first=False, cs_active=0, fill=0xFF)`, `spi_send(data)` | SPI slave engine; queue MISO bytes |
+| `i2c_slave(address, sda=, scl=)` | I2C target at a 7-bit address (ports must be `od`); acknowledges its address and every written byte |
+| `uart(tx=, rx=, baud=, format="8N1", host=None)`, `uart_send(data)` | UART on two ports (TTL, idle high), or with `host=` ("pty", "pty:/tmp/dev", "tcp:5555", "serial:/dev/ttyUSB0", "memory") talking to PC software instead |
+| `host_open(spec)`, `host_write(data)` | a raw host serial endpoint (chipem/hostserial.py), kept across resets and reloads |
+| `open(name, mode)`, `path(name)` | a file relative to the script's directory (inline code: the board's directory) |
+| `state` (dict) | shown in the web UI, the shell `part ID`, the run summary |
+| `params` (dict) | current settings |
+| `log(msg)`, `warn(msg)` | a `part` event (action=log) / a `warn` event in the event log |
+| `id` | the part id |
+
+Times are strings with a unit (`"250us"`, `"1.5ms"`, `"2s"`) or bare numbers in milliseconds, as everywhere in
+chipem. Do not define `__init__`; use `on_reset` (the object is created fresh at every reset).
+
+#### Timing and how it behaves electrically
+
+* Input callbacks run inside the board's zero-delay propagation, at the instruction-precise time of the pin change;
+  `drive()` inside a callback joins the same propagation wave (a chain of script gates settles in one event; a
+  combinational loop is reported like for the built-in gates).
+* Timers are board-clock events: every chip stops at them (lockstep sync points), they are cancelled by a reset and
+  `on_reset` starts them again. Very fast periodic timers (below a few µs) slow the emulation down.
+* The SPI engine samples and shifts on the SCK edges in the right order for each mode and releases MISO while CS is
+  inactive. The I2C engine is the one the I2C EEPROM part uses (START/STOP, ACK, repeated START). The UART helper's
+  bytes travel along the board's serial paths (polarity, levels, ground, framing checks of section 6.2), arrive at
+  their stop-bit time, and a chip receiver that is not listening drops them like silicon does.
+* `analog(port, volts)` reaches chip ADC inputs on the port's net (STM32 ADC pins, Kinetis ADC `SEn` channels with
+  the selected reference, C2000 `ADCINxn` as 12-bit codes of `ADC_FULL_SCALE`), and other script parts.
+
+#### Faults, slow callbacks, reload
+
+An exception in your code does not stop the run. The part is marked faulted, its timers are cancelled, it is not
+called again until a reset or a reload, and one `warn` gives the error with the script line:
+
+```
+warn part U1 faulted (calls stopped until reset or reload): tick: RuntimeError: sensor exploded at dev.py:11 in tick: `raise RuntimeError("sensor exploded")`
+```
+
+The Parts panel shows the row in red with the message; `part U1` in the shell prints the last frames. A callback that
+takes longer than `slow_ms` of wall time gets one `warn` (the emulation waits for every callback; an endless loop in
+a callback hangs the run, there is no way to interrupt Python code safely).
+
+A syntax error or an error while the file is imported fails the board load with the file and line:
+
+```
+chipem: error: part U1: syntax error in /home/me/boards/parts/broken.py, line 3, column 13: '{' was never closed
+        PORTS = {'A': 'in'
+```
+
+**Hot reload.** Edit the file and run `part reload U1` in the shell or press **reload** in the part's row: the file is
+read again, the part restarts (`on_reset` on a fresh object; settings changed at run time are kept) and the board
+keeps running. Ports cannot change on a reload (the wiring belongs to the board): a reload whose `PORTS` differ is
+refused with that message and the old code keeps running; reload the board instead. A file that does not compile is
+refused the same way. **edit** opens the source in a plain editor (Ctrl+S saves, Tab indents); Save writes the file
+only if the new code loads, then reloads.
+
+#### Examples in `boards/parts/`
+
+| board | script | what it shows |
+|---|---|---|
+| `k22_spi_world.yaml` | `spi_world.py` | SPI slave answering the K22 `spi_master` sample |
+| (tests) | `max31855.py` | MAX31855-like thermocouple converter: read-only 32-bit SPI word, temperature / fault controls |
+| `k22_i2c_regs.yaml` | `i2c_regs.py` | I2C register map in ~20 lines; the K22 `i2c_reg_master` sample prints PASS |
+| `k22_uart_device.yaml` | `uart_device.py` | line protocol device (ping/pong, id?, temp?) on the K22 UART0; `host: pty` makes it the peer of PC software |
+| `stm32_adc_csv.yaml` | `csv_stimulus.py` + `waveform.csv` | analog and digital waveform from a CSV into the STM32 ADC |
+| `stm32_pwm_check.yaml` | `pwm_checker.py` | measures a PWM and logs a `warn` when duty or frequency leave their range |
+
+```
+$ chipem shell --board boards/parts/stm32_pwm_check.yaml --exec "run 5ms; part CHK1 duty_min=40; run 3ms; events 3 warn; quit"
+...
+CHK1: freq_hz=1000 duty_pct=25 cycles=3 violations=0 params=duty_min=40.0,duty_max=30.0,freq_min=900.0,freq_max=1100.0
+[     5.003 ms] warn part CHK1: PWM out of spec: 1000.0 Hz, duty 25.00 % (want 900..1100 Hz, 40..30 %) chip=board
+```
+
+To develop PC software against an emulated device, give the UART helper a host transport: with
+`params: {host: pty}` in `k22_uart_device.yaml`, `uart_device.py` answers whatever program opens the printed
+`/dev/pts/N` (the run is then paced in real time, like the other host serial bridges).
+
+Limits: one UART, one SPI and one I2C engine per script part; the SPI engine is a slave only; I2C has no clock
+stretching or NACK control from the script; analog nets are not resolved electrically (one `analog_out` per net,
+no loading); there is no sandbox and no timeout that could interrupt a callback.
+
 ## 7. Adding a new chip
 
 Two cases:
@@ -1692,6 +2111,16 @@ $ .venv/bin/python tools/c28x_asm.py --disasm firmware/samples_c2000_c/build/uar
 330002  8F00 6F88  MOVL XAR4,#0x6F88
 ```
 
+### 8.3b 8051 assembly (P89CV51)
+
+`tools/mcs51_asm.py prog.asm -o prog.hex` assembles Intel ASM51 syntax (ORG, DB/DW/DS, EQU/SET/DATA/BIT, `$INCLUDE`,
+SFR and bit names of the chip from `chips/p89cv51_regs.yaml`) into Intel HEX plus a `prog.map` symbol sidecar that
+`chipem` loads with the `.hex` (SDCC `.map`/`.cdb`/`.noi` files are read too).  `--disasm prog.hex` disassembles.
+Run with `--chip p89cv51rd2` (the crystal is `--clock`, default 11.0592 MHz).  Address spaces in `mem`, watchpoints
+and symbols are tagged: CODE 0x00000, XDATA 0x10000, IDATA 0x20000 (`mem 0x20030 16`), SFR 0x30080 (`mem 0x30087 1`
+= PCON), on-chip XRAM 0x40000.  The UART is `UART` (`--at 50ms:UART=hello`); pins are `P1.0`-style.
+`firmware/samples_mcs51/` has the samples; docs/MCS51_CORE.md the details.
+
 ### 8.4 C for the F28232 with TI's compiler
 
 ```
@@ -1770,6 +2199,9 @@ overruns after one unread byte, as above.
 
 `chipem info FIRMWARE`: `--chip`, `--load-addr`, `--format`, `--vtor`, `--no-disasm`.
 
+`chipem new-part NAME [--kind gpio|spi|i2c|uart]`: write a commented script-part template `NAME.py` (6.4; never
+overwrites).
+
 Options shared by `run`, `shell` and `serve`:
 
 | option | meaning |
@@ -1819,7 +2251,7 @@ Times: `<number><ns|us|ms|s>`, bare number = ms. Levels: `1/H/high`, `0/L/low`, 
 | `fault` | CPU fault | `FAULT undefined_instruction at pc=0x0003ae1c → HardFault handler` |
 | `info` | clock changes, peripheral enable, auto links | `INFO core clock 168.000 MHz (SYSCLK PLL ...)` |
 | `warn` | gated clock access, floating reads, unmodelled access, baud mismatch | |
-| `part` | part added or changed | `LED1 ON`, `SW1.out L` |
+| `part` | part added or changed; script parts: `self.log()` (action=log), reload | `LED1 ON`, `SW1.out L` |
 | `i2s` | every 64 I2S frames per direction (Kinetis SAI, STM32 I2S) | `I2S I2S0 tx: 64 frames, ch0 ...` |
 | `usb` | USB transfer completed, bus event (attach, reset, suspend, resume, enumerated) | `USB OTG_FS: GET_DESCRIPTOR(DEVICE, 18): 18 bytes in (1 NAKs)`, `USB OTG_FS: bulk IN ep 0x81: 13 bytes 'echo: hello\r\n'` |
 | `eth` | Ethernet frame sent on a segment | `ETH HOST 02:00:00:00:00:01 > ff:ff:ff:ff:ff:ff ARP who-has 192.168.0.10 tell 192.168.0.1 (64 bytes)` |

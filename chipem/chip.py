@@ -27,18 +27,19 @@ from .time import Clock, Scheduler
 
 ARMV7M_ARCHES = ("armv7e-m", "armv7-m", "armv6-m", "armv7m", "armv6m")
 C28X_ARCHES = ("c28x",)
-ARCH_OWNED_MODELS = ("armv7m.scs", "ti_c2000.pie")      # MMIO blocks the arch creates itself
+MCS51_ARCHES = ("mcs51", "8051")
+ARCH_OWNED_MODELS = ("armv7m.scs", "ti_c2000.pie", "mcs51.cpu", "mcs51.intc")   # MMIO blocks the arch creates itself
 
 
 def _make_core(cd, precise: bool):
-    """Core backend for the chip: Unicorn (ARM) via create_core, or the pure-Python C28x interpreter (imported
-    lazily so ARM chips never need it)."""
-    if cd.backend == "c28x":
+    """Core backend for the chip: Unicorn (ARM) via create_core, or a pure-Python interpreter package
+    chipem.core.<backend> (c28x, mcs51; imported lazily so ARM chips never need it)."""
+    if cd.backend in ("c28x", "mcs51"):
         try:
-            mod = importlib.import_module("chipem.core.c28x")
+            mod = importlib.import_module(f"chipem.core.{cd.backend}")
         except ImportError as e:
-            raise ValueError(f"chip needs the C28x core backend (chipem.core.c28x), which is not available: {e}") \
-                from e
+            raise ValueError(f"chip needs the {cd.backend} core backend (chipem.core.{cd.backend}), which is not "
+                             f"available: {e}") from e
         factory = getattr(mod, "create_core", None)
         if factory is not None:
             return factory(cd.cpu, fpu=cd.fpu, precise=precise)
@@ -110,7 +111,7 @@ class Chip:
             bitband = bool(desc.extra.get("bitband", cd.cpu.lower() in ("cortex-m3", "cortex-m4", "cortex-m4f")))
         self.bus = Bus(self.core, addr_unit_bits=cd.addr_unit_bits, log=self.log, catch_all=_catch_all(desc))
         self.bus.chip = self
-        self.max_slice = max_slice
+        self.max_slice = max_slice * int(getattr(self.core, "slice_scale", 1))   # cycle-counted cores: periods
         self.handler_slice = handler_slice
         self.masked_slice = 1
         self._masked_runs = 0
@@ -123,6 +124,10 @@ class Chip:
         self.power_hooks: list = []
         self.wake_gate = None          # callable() -> bool: False keeps pending interrupts from ending the sleep
         self._wake_req = False         # chip.wake(): a non-interrupt wake-up source (C2000 GPIO, reset-type wakes)
+        self.idle_watch = None         # callable(chip): an event was scheduled on this chip while it is not running
+        self.poll_skip_ns = 0.0        # perf.py poll skip: max time skipped at once in a detected polling loop (0: off)
+        self.poll_skipped = 0          # instructions (cycles) skipped that way
+        self.parked = False            # the last slice ended in a self-branch / skipped polling loop (auto quantum)
         self.insns = 0                 # instructions executed since construction (cumulative, survives resets)
         self.last_fault: dict | None = None
         self._stop_flag = False
@@ -145,7 +150,7 @@ class Chip:
         # architecture
         arch = cd.arch.lower()
         num_irqs = max([cd.num_irqs] + [n + 1 for n in desc.irqs])
-        self.arch_kind = "c28x" if arch in C28X_ARCHES else "armv7m"
+        self.arch_kind = "c28x" if arch in C28X_ARCHES else ("mcs51" if arch in MCS51_ARCHES else "armv7m")
         if arch in ARMV7M_ARCHES:
             from .arch.armv7m import ArchFault, ArmV7M
             rv = vtor if vtor is not None else int(desc.extra.get("vtor", 0))
@@ -155,6 +160,10 @@ class Chip:
             from .arch.c28x import C28xArch, C28xFault
             self.arch = C28xArch(self)
             self._arch_fault = C28xFault
+        elif arch in MCS51_ARCHES:
+            from .arch.mcs51 import MCS51Arch, MCS51Fault
+            self.arch = MCS51Arch(self)
+            self._arch_fault = MCS51Fault
         else:
             raise ValueError(f"unsupported arch {cd.arch!r}")
         self.peripherals: dict[str, Any] = {}
@@ -231,6 +240,11 @@ class Chip:
                 self.core.write_mem(pos, data[(pos - addr) * ub:(pos - addr + n) * ub])
                 pos += n
         self.core.flush_code_cache()
+        if self.arch_kind != "armv7m":
+            try:
+                image.thumb = False         # byte-addressed code without a Thumb bit (symbols.Symbols.for_image)
+            except AttributeError:
+                pass
         self.firmware = image
         v = getattr(image, "vtor", None)
         if v is not None and hasattr(self.arch, "reset_vtor"):
@@ -250,7 +264,7 @@ class Chip:
         return isinstance(self.bus.lookup(pc & ~1), MemoryRegion)
 
     def reset(self, reason: str = "reset") -> None:
-        if self.arch_kind == "c28x":
+        if self.arch_kind != "armv7m":           # C28x, MCS-51: the arch sets the reset PC itself
             return self._reset_c28x(reason)
         with self._lock:
             arch = self.arch
@@ -317,6 +331,7 @@ class Chip:
             if not self._was_reset:
                 self.reset()
             clock, sched, core, arch = self.clock, self.sched, self.core, self.arch
+            cyc_core = getattr(core, "cycle_counted", False)     # run() returns clock periods (MCS-51), not insns
             self._stop_flag = False
             hz = clock.hz
             ArchFault = self._arch_fault
@@ -359,7 +374,9 @@ class Chip:
                     n = target - now
                     if nd is not None and nd - now < n:
                         n = max(nd - now, 1)
-                    if n > self.max_slice:
+                    if n > self.max_slice and not ((sp := getattr(core, "spin_pc", None)) is not None
+                                                   and sp == core.pc):
+                        # (a core parked in a branch-to-itself runs to the next event: nothing can change before it)
                         n = self.max_slice
                     if arch.active and not getattr(core, "exact_counts", core.precise) and n > self.handler_slice:
                         n = self.handler_slice
@@ -379,9 +396,14 @@ class Chip:
                     finally:
                         sched.horizon = math.inf
                     clock.advance(ex)
-                    self.insns += ex
+                    self.insns += core.last_insns if cyc_core else ex
                     if r is StopReason.COUNT or r is StopReason.USER:
+                        # parked: the core sits in a loop whose state repeats until an event (board auto quantum)
+                        self.parked = r is StopReason.COUNT and getattr(core, "spin_pc", None) is not None
+                        if r is StopReason.USER and getattr(core, "poll_skip", None):
+                            self._skip_poll(target)
                         continue
+                    self.parked = False
                     if r is StopReason.EXC_RETURN or r is StopReason.SVC:
                         if not arch.on_stop(r, core.stop_info):
                             return self._fault_stop({"type": "lockup", "pc": core.pc,
@@ -404,8 +426,8 @@ class Chip:
                                 continue                     # the top of the loop resets the chip ("lockup")
                             return StopReason.FAULT
                         continue
-                    if r is StopReason.BREAKPOINT:
-                        return r
+                    if r is StopReason.BREAKPOINT or r is StopReason.DEBUG:
+                        return r                     # bkpt instruction / debugger breakpoint or watchpoint
                 except ArchFault as e:
                     if arch.lockup and self.lockup_reset and not self.halt_on_fault:
                         self._log_fault({"type": "exception_model", "pc": core.pc, "msg": str(e)}, handled=False)
@@ -450,7 +472,40 @@ class Chip:
             self.core.request_stop(from_mmio=True)
 
     def _early_event(self) -> None:
-        """An MMIO access scheduled an event inside the running slice: end the slice after this access."""
+        """An MMIO access scheduled an event inside the running slice: end the slice after this access. While this
+        chip does not run, `idle_watch(chip)` (the board's auto quantum) hears about events scheduled on it."""
+        if self.core.running:
+            self.core.request_stop(from_mmio=True)
+        elif self.idle_watch is not None:
+            self.idle_watch(self)
+
+    def _skip_poll(self, target: int) -> None:
+        """The core stopped in a polling loop whose state repeats every `core.poll_skip` instructions (perf.py
+        poll_skip_ns): advance time by whole iterations up to the next event / the run window's end, at most
+        `poll_skip_ns` at a time (a status register that a model computes from the time on each read, not from an
+        event, is then seen up to that late)."""
+        core, clock = self.core, self.clock
+        d = core.poll_skip
+        core.poll_skip = None
+        if not d or self.poll_skip_ns <= 0:
+            return
+        now = clock.cycles
+        lim = min(target, now + clock.ns_to_cycles(self.poll_skip_ns))
+        nd = self.sched.next_due()
+        if nd is not None and nd < lim:
+            lim = nd
+        k = (lim - now) // d
+        if k > 0:
+            clock.advance(k * d)
+            self.insns += k * d
+            self.poll_skipped += k * d
+            self.parked = True
+
+    def yield_run(self) -> None:
+        """End the running run_for/run_cycles soon (StopReason.USER) without stopping the emulation: the board's
+        lockstep re-plans (auto quantum). Safe from this chip's MMIO callbacks and events: the current instruction
+        completes; if the core cannot stop after it, the slice ends normally first."""
+        self._stop_flag = True
         if self.core.running:
             self.core.request_stop(from_mmio=True)
 
@@ -481,9 +536,12 @@ class Chip:
                 self.arch.service()
             if self.sleeping:
                 self._end_sleep()
-            r, ex = self.core.run(1)
+            core = self.core
+            core.bp_skip = core.pc                 # a step executes the instruction even if a breakpoint is on it
+            r, ex = core.run(1)
+            core.bp_skip = core.pc                 # and a resume from where it ends steps over a breakpoint there
             self.clock.advance(max(ex, 1) if r is not StopReason.FAULT else 0)
-            self.insns += ex
+            self.insns += core.last_insns if getattr(core, "cycle_counted", False) else ex
             if r in (StopReason.EXC_RETURN, StopReason.SVC):
                 self.arch.on_stop(r, self.core.stop_info)
             elif r is StopReason.FAULT:

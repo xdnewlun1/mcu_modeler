@@ -1,0 +1,12 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0030 main
+C:0x005D prog
+C:0x007A verify
+C:0x009C bad
+C:0x009F report
+C:0x00A5 pr
+C:0x00B3 done
+C:0x00B5 text
+N:0x0020 ENBOOT
+N:0xE000 PAGE
+N:0xFFF0 PGM_MTP

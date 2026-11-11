@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,22 @@ def parse_time(s: str | float | int) -> float:
     if not m:
         raise ValueError(f"bad time {s!r} (expected e.g. 50ms, 1.5s, 200us, 10ns)")
     return float(m.group(1)) * _UNITS[m.group(2) or "ms"]
+
+
+def parse_speed(s: Any) -> float | None:
+    """Emulation rate: "1", "x0.1", "0.5x", "10" -> virtual seconds per wall second; "max" / "inf" / "off" -> None
+    (as fast as possible, no pacing)."""
+    t = str(s).strip().lower().replace("×", "x")
+    if t in ("max", "inf", "unpaced", "off", "none", "fast"):
+        return None
+    t = t.removeprefix("x").removesuffix("x").strip()
+    try:
+        v = float(t)
+    except ValueError:
+        raise ValueError(f"bad speed {s!r} (a factor such as 0.1, 1, 10, or max)") from None
+    if not v > 0 or v == float("inf"):
+        raise ValueError(f"speed must be > 0 (got {s!r}; use max for unpaced)")
+    return v
 
 
 def parse_level(s: Any) -> str | None:
@@ -96,9 +113,11 @@ def decode_escapes(text: str) -> bytes:
     return bytes(out)
 
 
+_BREAK_TOKEN = re.compile(rb"<break(?::(\d*))?>", re.I)     # UART input: a break, optionally N bit times long
+
 # one UART-name syntax for --uart-in and --set/--at (Chip.find_uart resolves it): UARTn, USARTn, LPUARTn, UARTA
 # (= SCIA on a C2000), SCIA, SCI-A, each optionally chip-qualified ("B.SCI-A")
-_UART_NAME = r"(?:[A-Za-z0-9_]+\.)?(?:(?:LP)?US?ART(?:\d+|[A-D])|SCI-?[A-D]\d*)"
+_UART_NAME = r"(?:[A-Za-z0-9_]+\.)?(?:(?:LP)?US?ART(?:\d+|[A-D])?|SCI-?[A-D]\d*)"   # bare "UART": 80C51 serial port
 _UART_IN_RE = re.compile(r"^(" + _UART_NAME + r"):(.*)$", re.S | re.I)
 
 
@@ -315,6 +334,11 @@ class Session:
         self.pacer = None                          # chipem.realtime.RealTime while real-time pacing is on
         self._wake = threading.Event()             # set by host I/O threads and stop(): wakes a waiting paced run
         self._pace_stop = False
+        # speed / fidelity settings and the achieved-speed meter (chipem/perf.py)
+        from .perf import PerfSettings, SpeedMeter
+        self.perf = PerfSettings()
+        self.speed = SpeedMeter()
+        self.base_quantum_ns: float | None = board.quantum_ns if board is not None else None
 
     # per-chip attributes of the view chip (backwards compatible single-chip API)
     chip = _ctx_prop("chip", "the view chip (first chip of a board)")
@@ -385,11 +409,26 @@ class Session:
             s.attach_usb_cdc(f"pty:{link}" if link else "pty")
         rt = g("realtime", None)
         speed = g("speed", None)
+        if isinstance(speed, str):
+            speed = parse_speed(speed)
+            if speed is None:                      # --speed max: as fast as possible (no pacing)
+                rt = False if rt is None else rt
         if rt is not None or speed is not None:
             s.set_realtime(rt if rt is not None else True, speed)
         elif s.pacer is None and s.host_endpoints(transport_only=True):
             s.set_realtime(True)                   # interactive host bridge: lock virtual time to the wall clock
+        perf = {k: v for k, v in (("preset", g("preset", None)), ("max_slice", g("max_slice", None)),
+                                  ("auto_quantum", g("auto_quantum", None)), ("pin_log", g("pin_log", None)),
+                                  ("drop_kinds", g("drop_events", None))) if v is not None}
+        if g("ui_interval", None) is not None:
+            perf["ui_interval_s"] = parse_time(g("ui_interval")) / 1e9
+        if g("poll_skip", None) is not None:
+            ps = str(g("poll_skip")).strip().lower()
+            perf["poll_skip_ns"] = 0.0 if ps in ("0", "off", "") else parse_time(ps)
+        if perf:
+            s.set_perf(**perf)                     # speed / fidelity settings (chipem/perf.py)
         s._vcd_parts()
+        s.source_dirs = list(g("source_dir", None) or []) if "g" in locals() else []
         return s
 
     @classmethod
@@ -439,18 +478,23 @@ class Session:
                 s.attach_sram(device_spec(d, "bus", "XINTF6"), chip=d.chip)
             elif d.type == "sd_card":
                 s.attach_sd_card(device_spec(d, "host", ""), chip=d.chip)
+            elif d.type == "sdram":
+                s.attach_sdram(device_spec(d, "bus", "FMC"), chip=d.chip)
             else:
                 s.attach_spi_flash(spi_flash_spec(d), chip=d.chip)
         for st in bd.stimulus:
             s.apply_stimulus(st)
         for h in getattr(bd, "host_serial", None) or []:
             s.attach_host_serial(*_host_serial_entry(h, bd.path))
+        if getattr(bd, "perf", None):
+            s.set_perf(**bd.perf)                  # board YAML `performance:` / `auto_quantum:` / `max_slice:`
         rt = getattr(bd, "realtime", None)
         if rt is not None and rt is not False:
             s.set_realtime(True, None if rt is True else float(rt))
         elif rt is None and s.host_endpoints(transport_only=True):
             s.set_realtime(True)                   # PC software on a host port: lock to the wall clock
         s._vcd_parts()
+        s.source_dirs = list(g("source_dir", None) or []) if "g" in locals() else []
         return s
 
     # ------------------------------------------------------------------ parts (switches, LEDs, logic; chipem/parts)
@@ -467,6 +511,9 @@ class Session:
             id=ctx.id, chip=str(getattr(ctx.desc, "name", "?")).lower(), firmware=str(src) if src else None,
             clock_hz=ctx.clock_override, vtor=ctx.vtor)])
         self.board = brd
+        self.base_quantum_ns = brd.quantum_ns
+        from .perf import apply
+        apply(self.perf, self)
         self._vcd_parts()
         return brd
 
@@ -583,6 +630,18 @@ class Session:
             raise ValueError("no Ethernet MAC on this chip (STM32F407/F417 have one)")
         return brd.add_eth_link(nodes, pcap=pcap, host=host)
 
+    def attach_sdram(self, spec: str, chip: str | None = None):
+        """Attach an SDR SDRAM to an SDRAM controller: "[CHIP.]FMC:bank=2,size=8M,width=16" (chipem.devices.sdram;
+        the controller is any peripheral with `attach_sdram`, e.g. stm32.fmc)."""
+        from .devices.sdram import attach_from_spec
+        if chip is not None:
+            ctx = self._ctx(chip)
+        else:
+            ctx, spec = self.resolve(spec)
+        dev = attach_from_spec(ctx.chip, spec)
+        ctx.devices.append(dev)
+        return dev
+
     def attach_sram(self, spec: str, chip: str | None = None):
         """Attach a parallel SRAM to an external bus: "[CHIP.]XINTF6:size=256K,width=16,file=img.bin"
         (chipem.devices.sram; the bus is any peripheral with `attach_memory`)."""
@@ -609,20 +668,38 @@ class Session:
             for net in self.board.nets:
                 net.update()
 
-    def _run(self, fn, *a) -> StopReason:
+    def _run(self, fn, *a, step_chip: str | None = None) -> StopReason:
         with self._run_lock:
             self.running = True
+            if step_chip is None:
+                self.speed.begin(self)
+            w0 = time.perf_counter()
             try:
                 for ctx in self.ctxs.values():
                     ctx.deliver_pending_uart()
                 r = fn(*a)
             finally:
                 self.running = False
+                if step_chip is None:
+                    self.speed.sample(self, time.perf_counter() - w0)
             for ctx in self.ctxs.values():
                 if ctx.clock_override and ctx.chip.clock.hz != ctx.clock_override:
                     ctx.apply_clock_override()
             self._flush_waves(stopped_only=True)
+            dbg = self.__dict__.get("_debug")
+            if dbg is not None and (r is not StopReason.COUNT or step_chip is not None):
+                dbg.after_run(r, step=step_chip is not None, chip=step_chip)   # chipem/debug.py: stop bookkeeping
             return r
+
+    @property
+    def debug(self):
+        """The debugger of this session (chipem.debug.SessionDebug: breakpoints, watchpoints, stepping, last stop),
+        created on first use."""
+        d = self.__dict__.get("_debug")
+        if d is None:
+            from .debug import SessionDebug
+            d = self._debug = SessionDebug(self, getattr(self, "source_dirs", None))
+        return d
 
     def _flush_waves(self, stopped_only: bool) -> None:
         """Store the open `wave` summaries of decimated pins (log.EventLog): after a run only those of pins that
@@ -774,6 +851,32 @@ class Session:
             self.pacer.set_speed(speed)
         self._wake.set()
 
+    # ------------------------------------------------------------------ speed / fidelity (chipem/perf.py)
+    def set_perf(self, **kw) -> Any:
+        """Change speed/fidelity settings (PerfSettings fields, or `preset=` accurate|default|fast first) and apply
+        them to the chips, board and logs. Emulation thread (or while not running). Returns the new settings."""
+        from .perf import apply
+        new = self.perf.updated(**kw)
+        self.perf = new
+        apply(new, self)
+        return new
+
+    def speed_info(self) -> dict:
+        """Achieved speed (SpeedMeter.info: ratio, MIPS and wall-time share per chip, bottleneck), the requested rate
+        (real-time pacing speed, None = as fast as possible), whether pacing falls behind, and the settings."""
+        d = self.speed.info()
+        rt = self.pacer
+        d["requested"] = rt.speed if rt is not None else None
+        req, got = d["requested"], d["ratio"]
+        d["behind"] = bool(rt is not None and (rt.lag_ns > rt.max_lag_ns / 2 or
+                                               (got is not None and got < 0.9 * req)))
+        d["settings"] = self.perf.to_dict()
+        b = self.board
+        d["quantum_ns"] = b.quantum_ns if b is not None else None
+        d["base_quantum_ns"] = self.base_quantum_ns
+        d["auto_quantum"] = bool(getattr(b, "auto_quantum", False)) if b is not None else False
+        return d
+
     def host_status(self) -> dict:
         """{realtime: {...} | {enabled: False}, endpoints: [info, ...]} for UIs (emulation thread)."""
         rt = self.pacer
@@ -794,7 +897,8 @@ class Session:
 
     def step(self, chip: str | None = None) -> StopReason:
         """One instruction on chip `chip` (default: the view chip); other board chips do not move."""
-        return self._run((self._ctx(chip).chip if chip is not None else self.chip).step)
+        ctx = self._ctx(chip)
+        return self._run(ctx.chip.step, step_chip=ctx.id)
 
     def stop(self) -> None:
         """Thread-safe: ask a running run_for/run_cycles to return early (StopReason.USER)."""
@@ -896,7 +1000,14 @@ class Session:
             data = data.encode("utf-8")
         ctx, uart, blk = self._uart_block(uart)
         if hasattr(blk, "feed"):
-            blk.feed(bytes(data))
+            # `<break>` / `<break:N>` in the text: the host sends a break (N low bit times; default two character
+            # times) at that point (chipem/periph/uartwire.py feed_break)
+            parts = _BREAK_TOKEN.split(bytes(data)) if hasattr(blk, "feed_break") else [bytes(data)]
+            for i, part in enumerate(parts):
+                if i % 2:
+                    blk.feed_break(int(part) if part else None)
+                elif part:
+                    blk.feed(part)
         else:
             ctx.pending_uart.setdefault(uart, bytearray()).extend(data)
             ctx.warn(f"{uart} has no UART model yet; {len(data)} input byte(s) held back")

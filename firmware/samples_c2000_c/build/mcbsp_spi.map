@@ -1,7 +1,7 @@
 ******************************************************************************
              TMS320C2000 Linker Unix v25.11.1                  
 ******************************************************************************
->> Linked Mon Nov  9 22:17:21 2026
+>> Linked Tue Nov 10 17:36:14 2026
 
 OUTPUT FILE NAME:   <build/mcbsp_spi.out>
 ENTRY POINT SYMBOL: "code_start"  address: 0033fff6

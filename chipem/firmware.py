@@ -159,6 +159,7 @@ def load_firmware(path: str | Path, *, load_addr: int | None = None, fmt: str | 
         img = parse_c28img(data.decode("utf-8"), source=str(path))
     elif fmt in ("hex", "ihex"):
         img = parse_ihex(data.decode("ascii", "replace"), source=str(path))
+        img.symbols = sidecar_symbols(path)
     elif fmt in ("srec", "s19", "s28", "s37"):
         img = parse_srec(data.decode("ascii", "replace"), source=str(path))
     elif fmt == "elf":
@@ -168,6 +169,40 @@ def load_firmware(path: str | Path, *, load_addr: int | None = None, fmt: str | 
     if load_addr is not None and img.fmt != "bin":
         img = img.rebased(load_addr)
     return img
+
+
+_MAP_LINE = re.compile(r"^\s*([CDIXB]):\s*(?:0[xX])?([0-9A-Fa-f]{4,8})\s+([A-Za-z_?$.][\w?$.]*)\s*$")
+_CDB_LINE = re.compile(r"^L:(?:G|F[^$]*)\$([A-Za-z_]\w*)\$[^:]*:([0-9A-Fa-f]+)\s*$")
+_NOI_LINE = re.compile(r"^DEF\s+([A-Za-z_?$.][\w?$.]*)\s+(?:0[xX])?([0-9A-Fa-f]+)\s*$")
+_SPACE_TAG = {"C": 0x00000, "X": 0x10000, "D": 0x20000, "I": 0x20000}      # MCS-51 tagged address spaces
+
+
+def sidecar_symbols(path: str | Path) -> dict[str, int]:
+    """Symbols of an Intel HEX image from files next to it (8051 toolchains keep them apart from the .hex):
+    `<stem>.map` (tools/mcs51_asm.py `C:0x0030 main` lines, or an SDCC/aslink linker map `C:   00000030  _main`),
+    SDCC `<stem>.cdb` (`L:G$main$0$0:30` function/global labels) and `<stem>.noi` (`DEF _main 0x30`).  Code labels
+    (C) keep their address; data (D/I) and XDATA (X) symbols are given the MCS-51 tagged addresses (IDATA 0x20000,
+    XDATA 0x10000; docs/MCS51_CORE.md).  Missing or unreadable files give no symbols."""
+    p = Path(path)
+    out: dict[str, int] = {}
+    for ext in (".map", ".cdb", ".noi"):
+        f = p.with_suffix(ext)
+        if not f.exists():
+            continue
+        try:
+            text = f.read_text(errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            m = _MAP_LINE.match(line)
+            if m:
+                if m.group(1) in _SPACE_TAG:
+                    out.setdefault(m.group(3), _SPACE_TAG[m.group(1)] + int(m.group(2), 16))
+                continue
+            m = _CDB_LINE.match(line) or _NOI_LINE.match(line)
+            if m:
+                out.setdefault(m.group(1), int(m.group(2), 16))
+    return out
 
 
 def parse_ihex(text: str, *, source: str = "") -> FirmwareImage:
@@ -1741,6 +1776,9 @@ def analyze(image: FirmwareImage, desc: Any, *, vtor: int | None = None, disasm:
         raise FirmwareError("empty firmware image")
     if str(desc.core.arch).lower() == "c28x" or getattr(desc.core, "addr_unit_bits", 8) == 16:
         return _analyze_c28x(image, desc, entry=vtor, disasm=disasm, time_budget=time_budget)
+    if str(desc.core.arch).lower() in ("mcs51", "8051"):
+        from .firmware_mcs51 import analyze_mcs51
+        return analyze_mcs51(image, desc, entry=vtor, disasm=disasm, time_budget=time_budget)
     # --- vector table ------------------------------------------------------------------------------------------
     if vtor is None:
         flash_segs = [a for a, _ in image.segments if (m := desc.memory_at(a)) is not None and m.kind == "flash"]
@@ -2044,6 +2082,9 @@ def _h(v: int | None) -> str:
 def format_report(r: AnalysisReport, *, max_pin_roles: int = 60) -> str:
     if r.arch == "c28x":
         return _format_c28x(r)
+    if r.arch == "mcs51":
+        from .firmware_mcs51 import format_mcs51
+        return format_mcs51(r)
     L = []
     A = L.append
     A(f"Firmware: {r.source} ({r.fmt}), chip {r.chip}")

@@ -122,15 +122,16 @@ SECURE_RANGES = ((0x8000, 0xC000), (0x300000, 0x340000), (0x380000, 0x380800), (
 class CSM(C2000Block):
     """Code security module (0x0AE0, SPRUI07 1.2): KEY0-7 (EALLOW, reset 0xFFFF) and CSMSCR (SECURE, FORCESEC).
 
-    The device is secure after reset.  The password match flow unsecures it: a dummy read of all eight password
-    locations PWL0-7 (0x33FFF8-0x33FFFF) and then KEY0-7 = PWL0-7.  PWL all ones: the dummy read alone unsecures; PWL
-    all zeros: secure for good.  The match is evaluated continuously after the dummy read (a later wrong KEY write
-    secures again).  CSMSCR.FORCESEC = 1 clears KEY (to 0) and secures; a new dummy read is then needed.  The boot ROM
-    performs the dummy read at every reset (`params.boot_dummy_read`, default true), so an erased password leaves the
-    device unsecure, as on silicon.  While secure, CPU data reads of the protected memory (`SECURE_RANGES`, plus the
-    flash registers) return 0 unless the instruction executing is itself in secure memory; instruction fetches are
-    never blocked.  Not modelled: blocking of writes from unsecure code to L0-L3 (they still land), the ECSL (no
-    emulator; KEY0-3 are storage for it) and the JTAG side."""
+    The device is secure after reset. The password match flow unsecures it: a dummy read of all eight password
+    locations PWL0-7 (0x33FFF8-0x33FFFF; `params.pwl_base`, 0x3F7FF8 on the 280x) and then KEY0-7 = PWL0-7. PWL all
+    ones: the dummy read alone unsecures; PWL all zeros: secure for good. The match is evaluated continuously after
+    the dummy read (a later wrong KEY write secures again). CSMSCR.FORCESEC = 1 clears KEY (to 0) and secures; a new
+    dummy read is then needed. The boot ROM performs the dummy read at every reset (`params.boot_dummy_read`,
+    default true), so an erased password leaves the device unsecure, as on silicon. While secure, CPU data reads of
+    the protected memory (`SECURE_RANGES` or `params.secure_ranges` [[lo, hi), ...] in words, plus the flash
+    registers) return 0 unless the instruction executing is itself in secure memory; instruction fetches are never
+    blocked. Not modelled: blocking of writes from unsecure code to L0-L3 (they still land), the ECSL (no emulator;
+    KEY0-3 are storage for it) and the JTAG side."""
     eallow_regs = ["KEY0", "KEY1", "KEY2", "KEY3", "KEY4", "KEY5", "KEY6", "KEY7", "CSMSCR"]
 
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
@@ -140,6 +141,13 @@ class CSM(C2000Block):
         regs = build_regs((name, "CSM"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
         self.boot_dummy_read = bool(params.get("boot_dummy_read", True))
+        # part-specific: password location and the protected memory (280x: PWL at 0x3F7FF8, L0/L1, OTP and flash)
+        pb = params.get("pwl_base", PWL_BASE)
+        self.pwl_base = int(pb, 0) if isinstance(pb, str) else int(pb)
+        rng = params.get("secure_ranges")
+        self.secure_ranges = (tuple((int(lo, 0) if isinstance(lo, str) else int(lo),
+                                     int(hi, 0) if isinstance(hi, str) else int(hi)) for lo, hi in rng)
+                              if rng else SECURE_RANGES)
         self.secure = True
         self._pwl_read = 0                   # bit i: PWLi read since reset / FORCESEC
         self._filter = False
@@ -157,7 +165,7 @@ class CSM(C2000Block):
     # ------------------------------------------------------------------ state
     def _pwl(self) -> list[int]:
         try:
-            data = self.chip.core.read_mem(PWL_BASE, 8)
+            data = self.chip.core.read_mem(self.pwl_base, 8)
         except Exception:
             return [0xFFFF] * 8
         return [int.from_bytes(data[2 * i:2 * i + 2], "little") for i in range(8)]
@@ -187,15 +195,14 @@ class CSM(C2000Block):
             return
         want_pwl = self._pwl_read != 0xFF
         if self.secure or want_pwl:
-            ranges = list(SECURE_RANGES) if self.secure else [(PWL_BASE, PWL_BASE + 8)]
+            ranges = list(self.secure_ranges) if self.secure else [(self.pwl_base, self.pwl_base + 8)]
             self._filter = bool(fn(self._read_filter, ranges))
         elif self._filter:
             fn(None, ())
             self._filter = False
 
-    @staticmethod
-    def in_secure(addr: int) -> bool:
-        for lo, hi in SECURE_RANGES:
+    def in_secure(self, addr: int) -> bool:
+        for lo, hi in self.secure_ranges:
             if lo <= addr < hi:
                 return True
         return False
@@ -209,10 +216,11 @@ class CSM(C2000Block):
         return not self.in_secure(pc)
 
     def _read_filter(self, addr: int, n: int, value: int) -> int:
-        if PWL_BASE <= addr + n - 1 and addr < PWL_BASE + 8 and self._pwl_read != 0xFF:
+        pwl = self.pwl_base
+        if pwl <= addr + n - 1 and addr < pwl + 8 and self._pwl_read != 0xFF:
             for a in range(addr, addr + n):
-                if PWL_BASE <= a < PWL_BASE + 8:
-                    self._pwl_read |= 1 << (a - PWL_BASE)
+                if pwl <= a < pwl + 8:
+                    self._pwl_read |= 1 << (a - pwl)
             blocked = self.secure and self.in_secure(addr) and self.blocks_access()
             if self._pwl_read == 0xFF:
                 self._evaluate()

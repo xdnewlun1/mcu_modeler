@@ -1,0 +1,15 @@
+# An NXP P89CV51RD2 (80C51) and an STM32F405ZG on a UART link at 115200 8N1: the 8051 sends, the STM32 echoes.
+#   A (P89CV51RD2, 11.0592 MHz crystal, 12-clock mode) runs uart_ping: "ping N\r\n" every 2 ms (Timer 0 paced), baud
+#     from Timer 2 (RCAP2 = FFFDh: 11059200 / (32 x 3) = 115200 exactly); the serial ISR stores the echo at IRAM
+#     31h-5Fh, counts bytes in 30h and toggles P1.0 per received line.
+#   B (STM32F405ZG) runs uart_link_echo: USART1 (PA9/PA10) echoes every byte uppercased (16 MHz HSI, 115108 baud).
+# The link is wired on the pins (P3.1 TXD -> PA10, PA9 -> P3.0 RXD): the board creates the UART links from the nets.
+# Run:  chipem run --board boards/p89cv51_stm32_uart.yaml --for 20ms
+name: p89cv51_stm32_uart
+quantum: 10us
+chips:
+  - {id: A, chip: p89cv51rd2, firmware: ../firmware/samples_mcs51/build/uart_ping.hex}
+  - {id: B, chip: stm32f405zg, firmware: ../firmware/samples_stm32/build/uart_link_echo.elf}
+nets:
+  - {name: A_TO_B, pins: [A.P3.1, B.PA10]}
+  - {name: B_TO_A, pins: [B.PA9, A.P3.0]}

@@ -37,6 +37,23 @@ class _Illegal(Exception):
         self.pc, self.opcode = pc, opcode
 
 
+class _Spin(Exception):
+    """Raised by a taken branch to itself (`SB $,UNC`, `LB $`, `SB $,EQ` with Z=1, ...): no state can change until
+    an interrupt, so the rest of the slice is spent in the loop at once (exactly what executing it would do)."""
+
+
+class _DecodeCache(dict):
+    """PC -> instruction closure; a miss decodes (`cache[pc]` in the run loop: no .get call, no None test)."""
+    __slots__ = ("miss",)
+
+    def __missing__(self, pc: int):
+        return self.miss(pc)
+
+
+# conditions that only read flags (a taken self-branch stays taken): all but NOV/OV (they clear V) and NBIO
+_SPIN_CONDS = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 15})
+
+
 class C28xCore(Core):
     page_size = 0x40                 # Bus MMIO dispatch granularity (words); the core itself maps any size
     cycles_per_insn = 1
@@ -55,8 +72,26 @@ class C28xCore(Core):
         self._regions: list[tuple[int, int, str, str, Any, Any]] = []   # (base, end, kind, name, rd, wr)
         self._starts: list[int] = []
         self._unmapped: Callable[[int, int, str], bool] | None = None
-        self._cache: dict[int, Callable[[], int]] = {}
+        self._cache: dict[int, Callable[[], int]] = _DecodeCache()
+        self._cache.miss = self._decode
         self._saved_cache: dict | None = None
+        # MMIO dispatch per word address: a -> (read, write, offset) of the block that serves it (filled on first
+        # access, dropped on any mapping change: flush_mmio_cache)
+        self._mmio: dict[int, tuple] = {}
+        self.spin_pc: int | None = None              # the last slice ended in a self-branch at this PC
+        self.spin_skip = True                        # False: execute self-branches one by one (debugging)
+        self._poll = None                            # PollWatch while poll skip is on (set_poll_watch)
+        self.poll_skip: int | None = None
+        self._max_insns = 0
+        # debugger (chipem/debug.py): breakpoints wrap the decoded closure of their PC (_bp_wrap, a set lookup at
+        # decode time only); watchpoints force their pages onto the slow path, which checks them (_watched_rd/_wr)
+        self._bps: set[int] = set()
+        self._watch: list | None = None              # [(lo, hi_exclusive, "r" | "w" | "rw")] or None
+        self._watch_pages: tuple[set, set] = (set(), set())
+        self._dbg_info: dict | None = None           # stop_info of a debugger stop being taken
+        self._skip_once: int | None = None
+        self.debug_hook = None
+        self.bp_skip = None
         self._code_pages: dict[int, set[int]] = {}
         self._stop_req = False
         self._extra = 0
@@ -151,16 +186,86 @@ class C28xCore(Core):
         return r
 
     def _slow_rd(self, a: int, n: int) -> int:
-        r = self._lookup(a, n, "r")
-        if r[2] == "mmio":
-            return r[4](a - r[0], n) & (0xFFFF if n == 1 else 0xFFFFFFFF)
-        mem = self.mem
-        return mem[a] if n == 1 else mem[a] | (mem[a + 1] << 16)
+        if self._watch is not None:
+            return self._watched_rd(a, n)
+        e = self._mmio.get(a)
+        if e is None:
+            r = self._lookup(a, n, "r")
+            if r[2] != "mmio":
+                mem = self.mem
+                return mem[a] if n == 1 else mem[a] | (mem[a + 1] << 16)
+            e = self._mmio_entry(a, r)
+        v = e[0](e[2], n) & (0xFFFF if n == 1 else 0xFFFFFFFF)
+        if self._poll is not None and self._max_insns >= 128:   # (short slices: never worth a skip)
+            self._poll_read(a, v)
+        return v
+
+    # ------------------------------------------------------------------ poll skip (Core.poll_skip)
+    def set_poll_watch(self, on: bool) -> bool:
+        from ..base import PollWatch
+        self._poll = PollWatch() if on else None
+        return True
+
+    def _poll_read(self, a: int, v: int) -> None:
+        """MMIO read of `v` from `a` while poll watching: two consecutive reads of the same value at the same point
+        of a loop with identical CPU state -> ask the Chip to skip whole iterations (StopReason.USER + poll_skip)."""
+        p = self._poll
+        if not p.read(a, v):
+            return
+        code = C28xCore.run.__code__
+        f = sys._getframe(1)
+        while f is not None and f.f_code is not code:
+            f = f.f_back
+        if f is None:
+            return
+        loc = f.f_locals
+        cnt = loc.get("count", 0)
+        if loc.get("max_insns", 0) - cnt < p.MIN_GAIN:
+            return                                   # the slice ends soon anyway (next event): not worth a stop
+        snap = (loc.get("pc"), self._extra, self.acc,         # _extra: wait states charged (XINTF): never a pure loop self.p, self.xt, tuple(self.xar), self.sp, self.dp, self.st0, self.st1,
+                self.rpc, self.ier, self.ifr, tuple(self.r), self.stf, self.rb)
+        if snap == p.snap:
+            d = cnt - p.cnt
+            if 0 < d <= p.MAX_PERIOD and self.request_stop(from_mmio=True):
+                self.poll_skip = d
+                p.cool = 0
+                p.reset()
+                return
+        elif p.snap is not None:
+            p.missed()                               # registers changed: not a pure loop (back off)
+            return
+        p.snap, p.cnt = snap, cnt
+
+    def _mmio_entry(self, a: int, r) -> tuple:
+        """(read, write, offset) serving word `a` of MMIO region `r`; a region served by a dispatcher that can
+        resolve an offset to its block (bus._PageDispatch.resolve) is resolved once here, not on every access."""
+        off = a - r[0]
+        rd, wr = r[4], r[5]
+        res = getattr(getattr(rd, "__self__", None), "resolve", None)
+        if res is not None:
+            blk, o = res(off)
+            e = (blk.read, blk.write, o)
+        else:
+            e = (rd, wr, off)
+        self._mmio[a] = e
+        return e
+
+    def flush_mmio_cache(self) -> None:
+        """Forget the per-address MMIO dispatch (called on every mapping change, also by the Bus)."""
+        self._mmio.clear()
 
     def _slow_wr(self, a: int, n: int, v: int) -> None:
+        if self._watch is not None:
+            return self._watched_wr(a, n, v)
         p = a >> PAGE_SHIFT
         if p in self._code_pages:
             self._invalidate_page(p)
+        if self._poll is not None:
+            self._poll.anchor = None                 # a write in the loop: not a pure polling loop
+        e = self._mmio.get(a)
+        if e is not None:
+            e[1](e[2], n, v)
+            return
         r = self._lookup(a, n, "w")
         kind = r[2]
         if kind == "ram":
@@ -169,7 +274,8 @@ class C28xCore(Core):
             if n == 2:
                 mem[a + 1] = (v >> 16) & 0xFFFF
         elif kind == "mmio":
-            r[5](a - r[0], n, v)
+            e = self._mmio_entry(a, r)
+            e[1](e[2], n, v)
         else:
             self.rom_writes += 1
 
@@ -194,6 +300,7 @@ class C28xCore(Core):
         i = bisect.bisect_left(self._starts, base)
         self._starts.insert(i, base)
         self._regions.insert(i, (base, end, kind, name, rd, wr))
+        self._mmio.clear()
         for p in range(base >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1):
             self._update_page(p)
 
@@ -327,6 +434,10 @@ class C28xCore(Core):
             f.norpt = True
         if pc in self._rptb_ends:
             f = self._rptb_wrap(pc, f)
+        elif self.spin_skip and pc not in self._bps and self._self_branch(e, o, pc):
+            f = self._spin_wrap(pc, f)
+        if pc in self._bps:
+            f = self._bp_wrap(pc, f)
         self._cache[pc] = f
         cp = self._code_pages
         for p in {pc >> PAGE_SHIFT, (npc - 1) >> PAGE_SHIFT}:
@@ -336,6 +447,24 @@ class C28xCore(Core):
                 self._wslow[p] = 1
             s.add(pc)
         return f
+
+    @staticmethod
+    def _self_branch(e, o, pc: int) -> bool:
+        if e.sem == "b":
+            return o.get("target") == pc and o.get("cond", 15) in _SPIN_CONDS
+        return e.sem == "lb" and o.get("addr") == pc
+
+    @staticmethod
+    def _spin_wrap(pc: int, f: Callable[[], int]) -> Callable[[], int]:
+        """A branch to itself: once taken, it is taken until an interrupt (only flags are read), so the run loop
+        spends the rest of the slice at once (_Spin) instead of executing it one instruction at a time."""
+        def g2():
+            t = f()
+            if t == pc:
+                raise _Spin
+            return t
+        g2.norpt = getattr(f, "norpt", False)
+        return g2
 
     # ------------------------------------------------------------------ RPTB (repeat block, FPU cores)
     def _rptb_arm(self, end: int) -> None:
@@ -404,6 +533,7 @@ class C28xCore(Core):
         self.nmi_pending = False
         self.last_fault = None
         self.stop_info = None
+        self._skip_once = self.bp_skip = self._dbg_info = None
         self._cache.clear()
         for p in list(self._code_pages):
             self._code_pages.pop(p)
@@ -413,26 +543,41 @@ class C28xCore(Core):
         self._extra = 0
         self._stop_req = False
         self.running = True
+        self.spin_pc = None
+        self.poll_skip = None
+        self._max_insns = max_insns
+        if self._poll is not None:
+            self._poll.reset()
         reason = StopReason.COUNT
         pc = self._pc
         count = 0
-        cache = self._cache
-        cget = cache.get
-        decode = self._decode
+        if self.bp_skip is not None or self._watch is not None:
+            self._debug_arm(pc)
+        cache = self._cache            # _DecodeCache: a miss decodes (and raises StopExc "user" after request_stop)
         try:
             while True:
                 try:
-                    while count < max_insns:
-                        f = cget(pc)
-                        if f is None:
-                            f = decode(pc)
-                        pc = f()
-                        count += 1
+                    # `count` = instructions completed before the one executing now (insns_in_slice reads it from
+                    # this frame, pinreport._c28x_live_pc reads `pc`)
+                    for count in range(count, max_insns):
+                        pc = cache[pc]()
+                    if count < max_insns:
+                        count = max_insns
+                    reason = StopReason.COUNT
+                    break
+                except _Spin:
+                    self.spin_pc = pc          # the self-branch ran once; the rest of the slice is spent in it
+                    count = max_insns
                     reason = StopReason.COUNT
                     break
                 except StopExc as s:
                     if s.reason == "user":
                         reason = StopReason.USER
+                        if self._dbg_info is not None:          # a breakpoint / watchpoint asked for this stop
+                            reason = StopReason.DEBUG
+                            self.stop_info, self._dbg_info = self._dbg_info, None
+                            if self.stop_info["type"] == "breakpoint":
+                                self.bp_skip = pc            # a resume from here executes it (steps over it)
                         break
                     count += 1
                     pc = s.npc
@@ -492,6 +637,106 @@ class C28xCore(Core):
 
     def stop(self) -> bool:
         return self.request_stop()
+
+    # ================================================================== debugger (chipem/debug.py)
+    def set_breakpoints(self, addrs) -> None:
+        """Code breakpoints: the decoded closure of each PC is wrapped (_bp_wrap) so executing it stops first; other
+        instructions are untouched (no per-instruction check)."""
+        new = {int(a) & M22 for a in addrs}
+        changed = new ^ self._bps
+        self._bps = new
+        for pc in changed:
+            self._cache.pop(pc, None)
+            if self._saved_cache is not None:
+                self._saved_cache.pop(pc, None)
+
+    def _bp_wrap(self, pc: int, f: Callable[[], int]) -> Callable[[], int]:
+        def g():
+            if self._skip_once == pc:                # resuming from this breakpoint: execute it once
+                self._skip_once = None
+                return f()
+            h = self.debug_hook
+            if h is None or h("break", {"addr": pc}):
+                self._dbg_info = {"type": "breakpoint", "addr": pc}
+                raise StopExc("user", pc)            # before executing: run() keeps pc = this instruction
+            return f()
+        for attr in ("norpt", "rpt"):
+            if hasattr(f, attr):
+                setattr(g, attr, getattr(f, attr))
+        return g
+
+    def set_watchpoints(self, wps) -> None:
+        """Data watchpoints [(lo, hi_exclusive, "r"|"w"|"rw")] (word addresses): their pages take the slow access
+        path (which checks them); an empty list restores the fast pages."""
+        wl = [(int(lo) & M22, int(hi), str(acc)) for lo, hi, acc in wps]
+        rp, wp = set(), set()
+        for lo, hi, acc in wl:
+            for pg in range(lo >> PAGE_SHIFT, ((max(hi, lo + 1) - 1) >> PAGE_SHIFT) + 1):
+                if "r" in acc:
+                    rp.add(pg)
+                if "w" in acc:
+                    wp.add(pg)
+        old_r, old_w = self._watch_pages
+        self._watch = wl or None
+        self._watch_pages = (rp, wp)
+        for pg in (old_r | old_w) - (rp | wp):
+            self._update_page(pg)
+        self._apply_watch_pages()
+
+    def _apply_watch_pages(self) -> None:
+        rp, wp = self._watch_pages
+        for pg in rp:
+            self._rslow[pg] = 1
+        for pg in wp:
+            self._wslow[pg] = 1
+
+    def _debug_arm(self, pc: int) -> None:
+        """Start of a run with debugger state: arm the breakpoint skip of a resume, re-force watched pages to the
+        slow path (code-page invalidation or a reset may have made them fast again)."""
+        self._dbg_info = None
+        if self.bp_skip is not None and self.bp_skip == pc:
+            self._skip_once = pc
+            self.bp_skip = None
+        if self._watch is not None:
+            self._apply_watch_pages()
+
+    def _watched_rd(self, a: int, n: int) -> int:
+        w, self._watch = self._watch, None
+        try:
+            v = self._slow_rd(a, n)
+        finally:
+            self._watch = w
+        self._watch_check(a, n, "r", v)
+        return v
+
+    def _watched_wr(self, a: int, n: int, v: int) -> None:
+        w, self._watch = self._watch, None
+        try:
+            self._slow_wr(a, n, v)
+        finally:
+            self._watch = w
+        self._watch_check(a, n, "w", v)
+
+    def _watch_check(self, a: int, n: int, acc: str, v: int) -> None:
+        for lo, hi, mode in self._watch or ():
+            if a < hi and a + n > lo and acc in mode:
+                info = {"addr": a, "size": n, "access": acc, "value": v, "pc": self._live_pc()}
+                h = self.debug_hook
+                if h is None or h("watch", info):
+                    self._dbg_info = {"type": "watchpoint", **info}
+                    if not self.request_stop():          # outside run() (debugger poke): nothing to stop
+                        self._dbg_info = None
+                return
+
+    def _live_pc(self) -> int:
+        """PC of the instruction executing now (run() keeps it in a local until the end of the slice)."""
+        code = C28xCore.run.__code__
+        f = sys._getframe(1)
+        while f is not None:
+            if f.f_code is code and f.f_locals.get("self") is self:
+                return int(f.f_locals.get("pc", self._pc))
+            f = f.f_back
+        return self._pc
 
     # ================================================================== interrupts
     def interrupt_pending(self) -> int | None:

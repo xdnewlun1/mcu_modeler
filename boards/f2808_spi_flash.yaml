@@ -1,0 +1,13 @@
+# TMS320F2808 SPI-B master with a SPI NOR flash (W25Q32-style, JEDEC ID 0xEF4016, 4 MB, erased).
+#   A (F2808) runs f2808_spi_flash: SPI-B on GPIO24-27 (SIMOB/SOMIB/CLKB/STEB, GPAMUX2 = 3), mode 0, 5 MHz, FIFO
+#              mode; RDID then READ of four bytes at 0x000000.  SPISTEB (GPIO27) is the flash chip select.  Results:
+#              spi_id0..2 = EF 40 16, spi_data0..3 = FF FF FF FF (erased), spi_done = 1.
+# The F2808 programs its PLL first (~6.6 ms PLL lock), so the SPI traffic starts at ~6.6 ms.
+# Run:   chipem run --board boards/f2808_spi_flash.yaml --for 8ms --pin-report
+# Build: firmware/samples_c2000/build.sh
+name: f2808_spi_flash
+quantum: 1us
+chips:
+  - {id: A, chip: tms320f2808, firmware: ../firmware/samples_c2000/build/f2808_spi_flash.c28img}
+devices:
+  - {type: spi_flash, chip: A, spi: SPIB, cs: GPIO27, jedec: 0xEF4016}

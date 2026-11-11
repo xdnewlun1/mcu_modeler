@@ -1,0 +1,7 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0030 main
+C:0x0047 echo
+C:0x0055 putc
+C:0x005D puts
+C:0x0067 puts_end
+C:0x0068 banner

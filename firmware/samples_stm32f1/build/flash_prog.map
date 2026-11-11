@@ -1,0 +1,124 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000       ec     4 .isr_vector
+ 8000000  8000000       ec     4         /tmp/startup-9acc3a.o:(.isr_vector)
+ 8000000  8000000       ec     1                 vectors
+ 80000ec  80000ec      1f4     4 .text
+ 80000ec  80000ec        2     4         /tmp/startup-9acc3a.o:(.text.Default_Handler)
+ 80000ec  80000ec        0     1                 $t
+ 80000ed  80000ed        2     1                 Default_Handler
+ 80000ed  80000ed        2     1                 NMI_Handler
+ 80000ed  80000ed        2     1                 HardFault_Handler
+ 80000ed  80000ed        2     1                 MemManage_Handler
+ 80000ed  80000ed        2     1                 BusFault_Handler
+ 80000ed  80000ed        2     1                 UsageFault_Handler
+ 80000ed  80000ed        2     1                 SVC_Handler
+ 80000ed  80000ed        2     1                 DebugMon_Handler
+ 80000ed  80000ed        2     1                 PendSV_Handler
+ 80000ed  80000ed        2     1                 SysTick_Handler
+ 80000ed  80000ed        2     1                 WWDG_IRQHandler
+ 80000ed  80000ed        2     1                 PVD_IRQHandler
+ 80000ed  80000ed        2     1                 TAMPER_IRQHandler
+ 80000ed  80000ed        2     1                 RTC_IRQHandler
+ 80000ed  80000ed        2     1                 FLASH_IRQHandler
+ 80000ed  80000ed        2     1                 RCC_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI0_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI1_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI2_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI3_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI4_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel1_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel2_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel3_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel4_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel5_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel6_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel7_IRQHandler
+ 80000ed  80000ed        2     1                 ADC1_2_IRQHandler
+ 80000ed  80000ed        2     1                 USB_HP_CAN1_TX_IRQHandler
+ 80000ed  80000ed        2     1                 USB_LP_CAN1_RX0_IRQHandler
+ 80000ed  80000ed        2     1                 CAN1_RX1_IRQHandler
+ 80000ed  80000ed        2     1                 CAN1_SCE_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI9_5_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_BRK_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_UP_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_TRG_COM_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_CC_IRQHandler
+ 80000ed  80000ed        2     1                 TIM2_IRQHandler
+ 80000ed  80000ed        2     1                 TIM3_IRQHandler
+ 80000ed  80000ed        2     1                 I2C1_EV_IRQHandler
+ 80000ed  80000ed        2     1                 I2C1_ER_IRQHandler
+ 80000ed  80000ed        2     1                 SPI1_IRQHandler
+ 80000ed  80000ed        2     1                 USART1_IRQHandler
+ 80000ed  80000ed        2     1                 USART2_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI15_10_IRQHandler
+ 80000ed  80000ed        2     1                 RTC_Alarm_IRQHandler
+ 80000ed  80000ed        2     1                 USBWakeUp_IRQHandler
+ 80000f0  80000f0       5c     4         /tmp/startup-9acc3a.o:(.text.Reset_Handler)
+ 80000f0  80000f0        0     1                 $t
+ 80000f1  80000f1       5c     1                 Reset_Handler
+ 800014c  800014c      174     4         /tmp/flash_prog-087ba1.o:(.text.main)
+ 800014c  800014c        0     1                 $t
+ 800014d  800014d      174     1                 main
+ 80002c0  80002c0        8     2         <internal>:(.rodata.cst8)
+ 80002c8  80002c8       18     1         <internal>:(.rodata.str1.1)
+ 80002e0  80002e0        0     1         . = ALIGN(4)
+ 80002e0  80002e0       10     4 .ARM.exidx
+ 80002e0  80002e0       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000       14     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/flash_prog-087ba1.o:(.bss.erase_cycles)
+20000000 20000000        4     1                 erase_cycles
+20000004 20000004        4     4         /tmp/flash_prog-087ba1.o:(.bss.pgerr)
+20000004 20000004        4     1                 pgerr
+20000008 20000008        8     2         /tmp/flash_prog-087ba1.o:(.bss.result)
+20000008 20000008        8     1                 result
+20000010 20000010        4     4         /tmp/flash_prog-087ba1.o:(.bss.status)
+20000010 20000010        4     1                 status
+20000014 20000014        0     1         . = ALIGN(4)
+20000014 20000014        0     1         _ebss = .
+       0        0       4a     1 .debug_loclists
+       0        0       32     1         /tmp/startup-9acc3a.o:(.debug_loclists)
+      32       32       18     1         /tmp/flash_prog-087ba1.o:(.debug_loclists)
+       0        0      22d     1 .debug_abbrev
+       0        0       c0     1         /tmp/startup-9acc3a.o:(.debug_abbrev)
+      c0       c0      16d     1         /tmp/flash_prog-087ba1.o:(.debug_abbrev)
+       0        0      260     1 .debug_info
+       0        0       8b     1         /tmp/startup-9acc3a.o:(.debug_info)
+      8b       8b      1d5     1         /tmp/flash_prog-087ba1.o:(.debug_info)
+       0        0       41     1 .debug_rnglists
+       0        0       17     1         /tmp/startup-9acc3a.o:(.debug_rnglists)
+      17       17       2a     1         /tmp/flash_prog-087ba1.o:(.debug_rnglists)
+       0        0       b0     1 .debug_str_offsets
+       0        0       34     1         /tmp/startup-9acc3a.o:(.debug_str_offsets)
+      34       34       7c     1         /tmp/flash_prog-087ba1.o:(.debug_str_offsets)
+       0        0      17d     1 .debug_str
+       0        0      17d     1         <internal>:(.debug_str)
+       0        0       54     1 .debug_addr
+       0        0       14     1         /tmp/startup-9acc3a.o:(.debug_addr)
+      14       14       40     1         /tmp/flash_prog-087ba1.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       41     1 .ARM.attributes
+       0        0       41     1         /tmp/startup-9acc3a.o:(.ARM.attributes)
+       0        0       58     4 .debug_frame
+       0        0       34     4         /tmp/startup-9acc3a.o:(.debug_frame)
+      34       34       24     4         /tmp/flash_prog-087ba1.o:(.debug_frame)
+       0        0      24b     1 .debug_line
+       0        0       c6     1         /tmp/startup-9acc3a.o:(.debug_line)
+      c6       c6      185     1         /tmp/flash_prog-087ba1.o:(.debug_line)
+       0        0       92     1 .debug_line_str
+       0        0       92     1         <internal>:(.debug_line_str)
+       0        0      440     4 .symtab
+       0        0      440     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      422     1 .strtab
+       0        0      422     1         <internal>:(.strtab)

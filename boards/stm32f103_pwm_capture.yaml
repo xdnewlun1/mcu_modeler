@@ -1,0 +1,9 @@
+# STM32F103T6 TIM3 CH1 PWM (PA6, 1 kHz, 25 %) wired to TIM2 CH2 (PA1) in PWM input mode: the firmware measures
+# period_us = 1000 and high_us = 250 and toggles PB0 on every capture.
+# Run:   chipem run --board boards/stm32f103_pwm_capture.yaml --for 10ms --pin-report
+name: stm32f103_pwm_capture
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f103t6, firmware: ../firmware/samples_stm32f1/build/tim_pwm_capture.elf}
+nets:
+  - {name: PWM, pins: [A.PA6, A.PA1]}

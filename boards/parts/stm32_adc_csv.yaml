@@ -1,0 +1,14 @@
+# An STM32F405 ADC fed from a CSV waveform by a Python stimulus part (boards/parts/csv_stimulus.py).
+#   A (STM32F405ZG, HSI 16 MHz) runs adc_tim_trigger: ADC1 channel 0 (PA0) converted on every TIM3 update (1 kHz);
+#   each result is printed as "adc <code>" on USART1 (PA9, 115200 8N1).
+#   GEN1 plays boards/parts/waveform.csv: 0 V, 0.5 V at 2 ms, 1 V at 4 ms, 1.65 V at 6 ms, ... (12-bit codes
+#   0, 620, 1241, 2048, ...), and its level column on PB0 (a probe shows it).
+# Run:   chipem run --board boards/parts/stm32_adc_csv.yaml --for 13ms
+# Build: firmware/samples_stm32/build.sh
+# Security: a script part runs Python with your privileges. Only load boards you trust.
+name: stm32_adc_csv
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../../firmware/samples_stm32/build/adc_tim_trigger.elf}
+parts:
+  - {id: GEN1, type: script, file: csv_stimulus.py, ports: {AOUT: A.PA0, DOUT: MARK}}
+  - {id: P1, type: probe, ports: {in: MARK}}

@@ -385,3 +385,151 @@ def test_k22_chip_yaml_fifo_depths():
     desc = load_chip("chips/mk22fn1m0vll12.yaml")
     depth = {p.name: (p.params or {}).get("fifo_depth", 1) for p in desc.peripherals if p.model == "kinetis.uart"}
     assert depth == {"UART0": 8, "UART1": 8, "UART2": 1, "UART3": 1, "UART4": 1}
+
+
+# ---------------------------------------------------------------- frames, errors, breaks, wake-up (§49.3, §49.4)
+from chipem.periph.uartwire import Frame  # noqa: E402
+
+C1, S2, C3, MA1, ED = 2, 5, 6, 8, 0xC
+
+
+def _rx(u, fr):
+    u._rx_frame(fr, "host")                                   # the test chip has no pin table: host path
+
+
+def test_parity_error_keeps_data_sets_pf_ed_and_err_irq():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    w8(C1, 0x02)                                              # PE, even: 7 data bits + parity
+    w8(C3, 0x01)                                              # PEIE
+    assert u.frame() == "7E1" and u.char_bits() == 10
+    _rx(u, Frame(0x41, 7, "O", baud=u.baud()))                # odd parity on the wire: PF
+    s1 = r8(S1)
+    assert s1 & 0x21 == 0x21 and r8(ED) & 0x40               # RDRF | PF, ED.PARITYE for this dataword
+    assert u._err_line
+    assert r8(D) == 0x41 | 0x80                               # D holds the received parity bit in bit 7 (§49.3.8)
+    assert not r8(S1) & 0x01 and not u._err_line             # S1 (PF set) then D read clears PF
+    ev = [e for e in chip.log.filter("uart") if e.dir == "rx"][-1]
+    assert ev.pe == 1 and ev.byte == 0xC1
+
+
+def test_wrong_baud_gives_framing_errors_and_fe_blocks_reception():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    _rx(u, Frame(0x00, 8, baud=u.baud() / 2))                 # half the baud: the stop sample falls on data 0
+    s1 = r8(S1)
+    assert s1 & 0x22 == 0x22                                  # RDRF | FE
+    _rx(u, Frame(0x55, 8, baud=u.baud()))                     # FE inhibits reception until cleared (§49.3.5)
+    assert _drops(chip)[-1] == ("U", "framing_error")
+    r8(D)                                                     # S1 read (above) then D: FE clears
+    assert not r8(S1) & 0x02
+    _rx(u, Frame(0x55, 8, baud=u.baud() * 1.03))              # 3 % fast: inside the sample-point tolerance
+    assert r8(S1) & 0x27 == 0x20 and r8(D) == 0x55
+
+
+def test_nine_bit_t8_r8_and_msbf():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    w8(C1, 0x10)                                              # M: 9 data bits
+    w8(C3, 0x40)                                              # T8
+    got = []
+    u.frame_listeners.append(lambda blk, fr: got.append(fr))
+    w8(D, 0x5A)
+    assert got[-1].data == 0x15A and got[-1].bits == 9
+    _rx(u, got[-1])
+    assert r8(C3) & 0x80 and r8(D) == 0x5A                    # R8 = ninth bit of the dataword in D
+    chip.run_for(2 * u.char_ns())
+    w8(S2, 0x20)                                              # MSBF: bit order reversed on the wire
+    w8(D, 0x03)                                               # word 0x103 (T8 still set)
+    assert got[-1].msbf and got[-1].raw() == 0x181            # T8 (bit 8) first, then bit 7 ... bit 0
+    chip.run_for(2 * u.char_ns())
+    _rx(u, got[-1])                                           # MSB-first receiver: the same word
+    assert r8(C3) & 0x80 and r8(D) == 0x03
+    w8(S2, 0x00)
+    _rx(u, got[-1])                                           # LSB-first receiver: the bits come out reversed
+    assert r8(C3) & 0x80 and r8(D) == 0x81
+
+
+def test_sbk_break_and_lin_break_detect():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    got = []
+    u.frame_listeners.append(lambda blk, fr: got.append(fr))
+    w8(S2, 0x04)                                              # BRK13
+    w8(C2, 0x0D)                                              # SBK set ...
+    w8(C2, 0x0C)                                              # ... and cleared: one break character
+    assert got[-1].brk == 13
+    assert not r8(S1) & 0x40                                  # TC = 0 while the break is sent
+    chip.run_for(3 * u.char_ns())
+    assert len(got) == 1 and r8(S1) & 0x40
+    assert any(e.get("brk") == 13 for e in chip.log.filter("uart") if e.dir == "tx")
+    _rx(u, got[-1])                                           # LBKDE = 0: FE with an all-0 dataword
+    assert r8(S1) & 0x22 == 0x22 and r8(D) == 0
+    w8(BDH, 0x80)                                             # LBKDIE (SBR high bits stay 0)
+    w8(BDL, 5)
+    w8(S2, 0x02)                                              # LBKDE: 11-bit LIN break detection
+    _rx(u, Frame.brk_frame(10, baud=u.baud()))
+    chip.run_for(2 * u.char_ns())
+    assert not r8(S2) & 0x80                                  # 10 bits: below the threshold
+    _rx(u, Frame.brk_frame(13, baud=u.baud()))
+    chip.run_for(2 * u.char_ns())
+    assert r8(S2) & 0x80 and u._line and not r8(S1) & 0x22    # LBKDIF (status IRQ); no RDRF / FE
+    w8(S2, 0x82)                                              # w1c
+    assert not r8(S2) & 0x80
+
+
+def test_address_mark_wakeup_and_match_address():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    w8(C1, 0x18)                                              # M (9 bits), WAKE: address-mark wake-up
+    w8(C2, 0x0E)                                              # RWU: standby
+    b = u.baud()
+    _rx(u, Frame(0x033, 9, baud=b))                           # data frame: ignored, no flags
+    assert not r8(S1) & 0x20 and _drops(chip)[-1][1] == "mute"
+    _rx(u, Frame(0x142, 9, baud=b))                           # address mark: wakes (RWU cleared), stored
+    assert not r8(C2) & 0x02 and r8(S1) & 0x20 and r8(C3) & 0x80 and r8(D) == 0x42
+    # match address: only the block addressed to MA1 is received
+    w8(0xA, 0x80 | 13)                                        # C4: MAEN1 (BRFA kept)
+    w8(MA1, 0x42)
+    for v in (0x143, 0x011, 0x142, 0x012):
+        _rx(u, Frame(v, 9, baud=b))
+        if r8(S1) & 0x20:
+            r8(D)
+    assert [r for _, r in _drops(chip)[-2:]] == ["address_mismatch", "address_mismatch"]
+    assert [e.byte for e in chip.log.filter("uart") if e.dir == "rx"][-2:] == [0x42, 0x12]
+
+
+def test_idle_flag_and_idle_line_wakeup():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    w8(C2, 0x1C)                                              # ILIE
+    u.feed(b"a")
+    chip.run_for(u.char_ns() + 100)
+    assert r8(S1) & 0x20 and not r8(S1) & 0x10
+    chip.run_for(2 * u.char_ns())                             # 10 idle bits after the start bit (ILT = 0), flagged
+    assert r8(S1) & 0x10 and u._line                          # at most one character later: IDLE, status IRQ
+    r8(D)                                                     # S1 then D: IDLE (and RDRF) clear
+    assert not r8(S1) & 0x30
+    chip.run_for(3 * u.char_ns())
+    assert not r8(S1) & 0x10                                  # IDLE needs a new frame first
+    w8(C2, 0x0E)                                              # RWU, WAKE = 0: wake on an idle line
+    u.feed(b"bc")                                             # back-to-back: no idle between them: both ignored
+    chip.run_for(2 * u.char_ns() + 100)
+    assert [r for _, r in _drops(chip)[-2:]] == ["mute", "mute"]
+    chip.run_for(2.5 * u.char_ns())                           # idle character: RWU clears, IDLE stays 0 (RWUID = 0)
+    assert not r8(C2) & 0x02 and not r8(S1) & 0x10
+    u.feed(b"d")
+    chip.run_for(u.char_ns() + 100)
+    assert r8(D) == ord("d")
+
+
+def test_txinv_rxinv_polarity():
+    chip, u, w8, r8 = _fifo_chip(pfifo=0)
+    got = []
+    u.frame_listeners.append(lambda blk, fr: got.append(fr))
+    w8(C3, 0x10)                                              # TXINV
+    w8(D, 0x41)
+    assert got[-1].inv
+    _rx(u, got[-1])                                           # RXINV = 0: the inverted line idles low: garbage
+    chip.run_for(4 * u.char_ns())
+    assert not [e for e in chip.log.filter("uart") if e.dir == "rx" and e.byte == 0x41]
+    if r8(S1) & 0x20:
+        r8(D)
+    w8(S2, 0x10)                                              # RXINV
+    _rx(u, Frame(0x41, baud=u.baud(), inv=True))
+    chip.run_for(u.char_ns())
+    assert [e.byte for e in chip.log.filter("uart") if e.dir == "rx"][-1] == 0x41

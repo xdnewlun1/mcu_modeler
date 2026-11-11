@@ -62,6 +62,13 @@ export function ownerCategory(pin, owner) {
   return "none";
 }
 
+// Square J-lead chip carriers (PLCC / LCC) number pin 1 in the middle of the top side, counter-clockwise; QFPs start
+// at the top of the left side. Returns how many pins sit before the first pin of the left side (PLCC44: pins 1-6).
+export function pin1Offset(pkg, nPins, perSide) {
+  if (!/^\s*(PLCC|LCC|CLCC|QFJ)\d*/i.test(String(pkg || "")) || nPins !== perSide * 4) return 0;
+  return (perSide + 1) >> 1;
+}
+
 export function geometry(nPins, labelChars = LABEL_CHARS) {
   const n = Math.max(4, nPins);
   const perSide = Math.ceil(n / 4);
@@ -173,7 +180,8 @@ export class PackageView {
 
     const pins = [...chip.pins].sort((a, b) => a.num - b.num);
     this.order = pins.map((p) => p.num);              // keyboard order (counter-clockwise)
-    pins.forEach((pin, i) => this.buildPin(pin, this.place(i), i === 0));
+    const rot = pin1Offset(chip.package, pins.length, this.geo.perSide);
+    pins.forEach((pin, i) => this.buildPin(pin, this.place((i - rot + pins.length) % pins.length), i === 0));
   }
 
   // Body text at `scale` screen px per world unit: each line at max(native, minPx on screen), stacked around the body

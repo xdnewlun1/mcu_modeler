@@ -367,6 +367,17 @@ dialog.dialog::backdrop { background: var(--shadow); }
 .pick.on { background: var(--sel-bg); border-color: var(--accent); color: var(--sel-fg); }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 6px; padding-top: 4px; }
 .board-dlg { width: 420px; }
+/* script part editor (chipem/parts/script.py): plain monospace textarea */
+.script-dlg { width: min(820px, calc(100vw - 20px)); }
+.sd-file { margin-left: 10px; color: var(--fg-2); font: 11.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sd-body { padding: 6px 8px 8px; display: grid; gap: 6px; }
+#sdCode { width: 100%; height: min(62vh, 640px); resize: vertical; box-sizing: border-box; padding: 6px 8px; tab-size: 4;
+  font: 12px/1.45 var(--mono); color: var(--fg); background: var(--bg); border: 1px solid var(--input-line); border-radius: var(--radius); }
+.sd-err { margin-right: auto; color: var(--danger); font: 11.5px var(--mono); white-space: pre-wrap; max-height: 6em; overflow: auto; }
+.part-row.faulted { border-left-color: var(--danger); }
+.part-row.faulted .part-st { color: var(--danger); }
+.part-ctl .pp .unit { color: var(--fg-3); }
+.part-ctl .pp select { height: 20px; font: 11.5px var(--mono); }
 .bd-body { padding: 6px 8px 8px; display: grid; gap: 4px; }
 .bd-note { margin: 0; color: var(--fg-3); font-size: 11.5px; line-height: 1.4; }
 .bd-busy { margin-left: 10px; color: var(--fg-2); font: 11.5px var(--mono); }

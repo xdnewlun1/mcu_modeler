@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
+from .shell_debug import DebugCommands
 from .symbols import Symbols as _Symbols, load_symbols  # noqa: F401  (ELF symbols for dis/bt; shared with pinreport)
 
 HISTORY = Path.home() / ".chipem_history"
@@ -25,6 +26,25 @@ _UNITS = {"ns": 1.0, "us": 1e3, "µs": 1e3, "ms": 1e6, "s": 1e9}
 
 # ---------------------------------------------------------------------------------------------------------------
 # helpers shared with chipem.web.server
+
+def format_speed(session: Any) -> str:
+    """One line: requested vs achieved speed, MIPS per chip and the bottleneck chip (Session.speed_info)."""
+    d = session.speed_info()
+    req = d.get("requested")
+    got = d.get("ratio")
+    parts = [f"speed: requested {'max' if req is None else f'x{req:g}'}, achieved "
+             + ("- (run first)" if got is None else f"x{got:.3g}")]
+    if d.get("behind"):
+        parts.append("CANNOT KEEP UP")
+    chips = d.get("chips") or {}
+    if chips:
+        parts.append("; ".join(f"{c} {v['mips']:.2f} MIPS @ {v['mhz']:g} MHz"
+                               + (f" ({v['share'] * 100:.0f} % of wall)" if v.get("share") is not None and len(chips) > 1
+                                  else "") for c, v in chips.items()))
+    if d.get("bottleneck"):
+        parts.append(f"bottleneck {d['bottleneck']}")
+    return " · ".join(parts)
+
 
 def parse_time(s: str) -> float:
     """"50ms" -> 5e7 ns. Uses chipem.session.parse_time when available (single source of truth)."""
@@ -211,7 +231,7 @@ def _part_state_str(st: dict) -> str:
     return " ".join(out)
 
 
-class Shell(cmd.Cmd):
+class Shell(DebugCommands, cmd.Cmd):
     intro = ""
     prompt = "chipem> "
     doc_header = "Commands (help <cmd> for details)"
@@ -348,6 +368,8 @@ class Shell(cmd.Cmd):
             f = getattr(self.chip, "last_fault", None)
             if f:
                 self.p(f"fault: {f}")
+        if name == "DEBUG" or "_debug" in getattr(self.s, "__dict__", {}):
+            self._report_stop(reason)               # shell_debug: breakpoint / watchpoint message, source line
 
     def do_run(self, arg: str) -> None:
         """run [TIME]   run for TIME of virtual time (default 10ms; units ns/us/ms/s). Ctrl-C stops."""
@@ -420,17 +442,35 @@ class Shell(cmd.Cmd):
 
     def do_part(self, arg: str) -> None:
         """part ID KEY=VALUE ...   set part values now, e.g. part SW1 level=H, part BTN1 pressed=1,
-        part CLK1 period=2ms; part ID alone shows its state; part add ID:TYPE:PORT=PIN,... adds one."""
+        part CLK1 period=2ms; part ID alone shows its state; part add ID:TYPE:PORT=PIN,... adds one.
+        Script parts: part reload ID re-reads the Python file (state restarts with on_reset; ports cannot change
+        without reloading the board), part ID action=NAME runs an @action, part ID shows its fault if any."""
         a = self._args(arg)
         if not a:
-            raise ValueError("usage: part ID KEY=VALUE ... | part add ID:TYPE[:KEY=VALUE,...]")
+            raise ValueError("usage: part ID KEY=VALUE ... | part add ID:TYPE[:KEY=VALUE,...] | part reload ID")
         if a[0] == "add" and len(a) == 2:
             p = self.s.add_part_spec(a[1])
             self.p(f"added {p.id} ({p.type}): {_part_state_str(p.state())}")
             return
+        if a[0] == "reload" and len(a) == 2:
+            part = self.s.find_part(a[1]) if hasattr(self.s, "find_part") else None
+            if part is None or not hasattr(part, "reload"):
+                raise KeyError(f"no script part {a[1]!r}")
+            st = part.reload()
+            self.p(f"{part.id}: reloaded {part.params.get('file') or '(inline code)'}: {_part_state_str(st)}")
+            return
         part = self.s.find_part(a[0]) if hasattr(self.s, "find_part") else None
         if part is None:
             raise KeyError(f"unknown part {a[0]!r}")
+        if len(a) == 1 and hasattr(part, "ui_info"):            # script part: where it comes from, fault details
+            ui = part.ui_info()
+            self.p(f"{part.id}: script {ui['file'] or '(inline code)'} class {ui['class']}; ports "
+                   + " ".join(f"{k}:{v}" for k, v in ui["ports"].items())
+                   + (f"; actions {', '.join(ui['actions'])}" if ui["actions"] else ""))
+            if ui["fault"]:
+                self.p(f"  FAULTED at {ui['fault']['t_ns'] / 1e6:.6g} ms: {ui['fault']['msg']}")
+                for ln in str(ui["fault"].get("traceback") or "").splitlines():
+                    self.p(f"  {ln}")
         values = {}
         for kv in a[1:]:
             if "=" not in kv:
@@ -602,6 +642,9 @@ class Shell(cmd.Cmd):
     def _dis(self, addr: int, n: int) -> None:
         if getattr(self.chip, "arch_kind", "") == "c28x":
             return self._dis_c28x(addr, n)
+        arch_dis = getattr(self.chip.arch, "disasm", None)      # architectures with their own disassembler (MCS-51)
+        if arch_dis is not None:
+            return self._dis_arch(arch_dis, addr, n)
         import capstone
         md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB | capstone.CS_MODE_MCLASS)
         addr &= ~1
@@ -613,18 +656,37 @@ class Shell(cmd.Cmd):
         pc = self.chip.core.pc
         count = 0
         last_sym = None
+        dbg, bps, last_line = self._dis_debug()
         for ins in md.disasm(code, addr):
             sym = self.symbols.lookup(ins.address)
             if sym and sym.endswith(">") and "+" not in sym and sym != last_sym:
                 self.p(f"{sym[1:-1]}:")
             last_sym = sym
+            last_line = self._dis_src(dbg, ins.address, last_line)
             mark = "=>" if ins.address == pc else "  "
+            if ins.address in bps:
+                mark = "B>" if ins.address == pc else "B "
             self.p(f"{mark} {ins.address:08X}: {ins.bytes.hex():<9} {ins.mnemonic:<8} {ins.op_str}")
             count += 1
             if count >= n:
                 break
         if count == 0:
             self.p(f"{addr:08X}: <undecodable>")
+
+    def _dis_arch(self, arch_dis, addr: int, n: int) -> None:
+        """Disassembly by the arch (`arch.disasm(addr, n) -> [(addr, bytes, text)]`), labels from the image symbols."""
+        try:
+            lines = arch_dis(addr, n)
+        except Exception as e:
+            self.p(f"cannot read 0x{addr:04X}: {e}")
+            return
+        pc = self.chip.core.pc
+        for a, raw, text in lines:
+            sym = self.symbols.lookup(a)
+            if sym and "+" not in sym:
+                self.p(f"{sym[1:-1]}:")
+            mark = "=>" if a == pc else "  "
+            self.p(f"{mark} {a:04X}: {raw.hex(' ').upper():<9} {text}")
 
     def _dis_c28x(self, addr: int, n: int) -> None:
         """C28x: word addresses, words shown as hex, labels from the image symbols."""
@@ -640,17 +702,42 @@ class Shell(cmd.Cmd):
             self.p(f"cannot read 0x{addr:06X}")
             return
         pc = core.pc
+        dbg, bps, last_line = self._dis_debug()
         for a, ln, text in lines:
             sym = self.symbols.lookup(a)
             if sym and "+" not in sym:
                 self.p(f"{sym[1:-1]}:")
+            last_line = self._dis_src(dbg, a, last_line)
             try:
                 ws = struct.unpack(f"<{ln}H", core.read_mem(a, ln))
                 hx = " ".join(f"{w:04x}" for w in ws)
             except Exception:
                 hx = "?"
             mark = "=>" if a == pc else "  "
+            if a in bps:
+                mark = "B>" if a == pc else "B "
             self.p(f"{mark} {a:06X}: {hx:<9} {text}")
+
+    def _dis_debug(self):
+        """(debugger or None, breakpoint addresses, None) for `dis`: source lines and B marks once it exists."""
+        try:
+            d = self.s.debug.dbg()
+        except Exception:
+            return None, set(), None
+        return d, {b.addr for b in d.user_bps() if b.kind == "break"}, None
+
+    def _dis_src(self, d, addr: int, last):
+        """Print the source line starting at `addr` (DWARF images) when the line changes; returns the new key."""
+        dw = getattr(d, "dwarf", None)
+        li = dw.line_for(addr) if dw else None
+        if li is None or not li.line:
+            return last
+        key = (li.file, li.line)
+        if key != last:
+            lines = dw.source_lines(li.file)
+            text = lines[li.line - 1].strip() if lines and 0 < li.line <= len(lines) else ""
+            self.p(f"      {li.basename}:{li.line}  {text}")
+        return key
 
     def do_dis(self, arg: str) -> None:
         """dis [ADDR|SYMBOL[+OFF]] [N]   disassemble N instructions (default 10) at ADDR (default pc).
@@ -680,8 +767,18 @@ class Shell(cmd.Cmd):
         return (hw2 & 0xFF87) == 0x4780                                # BLX Rm
 
     def do_bt(self, arg: str) -> None:
-        """bt [WORDS]   best-effort backtrace: pc, lr, then return addresses found on the stack (scan WORDS, default 256)."""
+        """bt [WORDS]   call stack: DWARF call-frame info and exception frames when the ELF has them (Cortex-M), else
+        best effort: pc, lr, then return addresses found on the stack (scan WORDS, default 256). C28x: pc, RPC, scan."""
         a = self._args(arg)
+        try:
+            d = self.s.debug.dbg()
+        except Exception:
+            d = None
+        if d is not None and (d.c28x or getattr(d, "ad", None) is not None or (d.dwarf is not None and d.dwarf._cfi)):
+            for f in d.backtrace():
+                how = "" if f["how"] in ("pc", "cfi") else f"  [{f['how']}]"
+                self.p(f"#{f['level']:<2} pc 0x{f['pc']:08X} {f['desc']}{how}")
+            return
         words = self._int(a[0]) if a else 256
         core = self.chip.core
         pc, lr, sp = core.read_reg("pc"), core.read_reg("lr"), core.read_reg("sp")
@@ -743,7 +840,8 @@ class Shell(cmd.Cmd):
     def do_uart(self, arg: str) -> None:
         r"""uart [NAME] TEXT   send TEXT to a UART receiver (default UART0); escapes \n \r \t \xNN.
         Quote TEXT to keep spaces at the ends: uart UART1 "hello\r\n". The bytes go out from now, one per
-        character time of that UART, during the next `run`; bytes it is not ready for are dropped (`events uart`)."""
+        character time of that UART, during the next `run`; bytes it is not ready for are dropped (`events uart`).
+        `<break>` (or `<break:N>`, N bit times) in TEXT sends a break at that point: uart UART0 "<break>U\x01"."""
         rest = arg.strip()
         uart = "UART0"
         names = self._uart_names()
@@ -768,6 +866,64 @@ class Shell(cmd.Cmd):
         buf = io.StringIO()
         print_host_summary(self.s, buf)
         self.p(buf.getvalue().strip("\n"))
+
+    def do_speed(self, arg: str) -> None:
+        """speed [X|max]   emulation rate: X virtual seconds per wall second (0.1, 1, 10, ...; `run` then takes wall
+        time), max = as fast as possible. Without an argument: requested and achieved speed, MIPS per chip."""
+        a = self._args(arg)
+        if a:
+            from .session import parse_speed
+            x = parse_speed(a[0])
+            self.s.set_realtime(x is not None, x)
+        self.p(format_speed(self.s))
+
+    def do_perf(self, arg: str) -> None:
+        """perf [accurate|default|fast] [KEY=VALUE ...]   speed / fidelity settings (chipem/perf.py): max_slice=N,
+        quantum=TIME|board, auto_quantum=on|off, poll_skip=TIME|off, pin_log=all|auto|off, drop_kinds=mmio,i2s,
+        ui_interval=TIME.
+        Without arguments: the current settings and the achieved speed."""
+        a = self._args(arg)
+        if a:
+            from .session import parse_time as _pt
+            kw: dict[str, Any] = {}
+            for tok in a:
+                if "=" not in tok:
+                    kw["preset"] = tok
+                    continue
+                k, v = tok.split("=", 1)
+                k = k.strip().lower().replace("-", "_")
+                if k == "quantum":
+                    kw["quantum_ns"] = None if v.lower() in ("", "board", "default") else _pt(v)
+                elif k == "ui_interval":
+                    kw["ui_interval_s"] = _pt(v) / 1e9
+                elif k == "poll_skip":
+                    kw["poll_skip_ns"] = 0.0 if v.lower() in ("0", "off", "") else _pt(v)
+                else:
+                    kw[k] = v
+            self.s.set_perf(**kw)
+        st = self.s.perf.to_dict()
+        q = getattr(self.s.board, "quantum_ns", None) if self.s.board is not None else None
+        self.p(f"preset {st['preset']}: max_slice {st['max_slice']}, "
+               + (f"quantum {q / 1e3:g} us{' (board)' if st['quantum_ns'] is None else ''}, "
+                  f"auto_quantum {'on' if st['auto_quantum'] else 'off'}, " if q is not None else "")
+               + f"poll_skip {st['poll_skip_ns'] / 1e3:g} us, "
+               f"pin_log {st['pin_log']}, drop_kinds {','.join(st['drop_kinds']) or '-'}, "
+               f"ui_interval {st['ui_interval_s'] * 1e3:g} ms")
+        self.p(format_speed(self.s))
+
+    def do_quantum(self, arg: str) -> None:
+        """quantum [TIME|board]   board lockstep quantum: the most one chip runs ahead of another, i.e. the worst-case
+        latency of a pin edge or link byte between chips. `board` = the board file's value."""
+        a = self._args(arg)
+        if self.s.board is None:
+            self.p("no board (a single chip has no quantum)")
+            return
+        if a:
+            from .session import parse_time as _pt
+            self.s.set_perf(quantum_ns=None if a[0].lower() in ("board", "default") else _pt(a[0]))
+        q = self.s.board.quantum_ns
+        self.p(f"quantum {q / 1e3:g} us: cross-chip latency up to {q / 1e3:g} us"
+               f"{'; auto quantum on (sleeping chips do not hold the others back)' if self.s.board.auto_quantum else ''}")
 
     def do_realtime(self, arg: str) -> None:
         """realtime [on|off] [SPEED]   lock virtual time to the wall clock (x SPEED); `run` then takes wall time."""
@@ -965,6 +1121,54 @@ def add_args(p) -> None:
                    help="run ';'-separated commands non-interactively and exit")
 
 
+def _gdb_repl(sh: "Shell", session: Any, args, *, interactive: bool) -> None:
+    """Shell + GDB server (--gdb): this (main) thread is the emulation thread and runs both the shell commands
+    and the debugger's requests; a reader thread only collects input lines. Non-interactive (--exec): serve the
+    debugger until it kills the target or disconnects."""
+    import queue as _queue
+    from .gdbserver import start_for_session
+    srv, ex = start_for_session(session, args.gdb, chip=getattr(args, "gdb_chip", None),
+                                log=lambda m: print(m, file=sys.stderr, flush=True))
+    sh.p(f"gdb server on 127.0.0.1:{srv.port} (target extended-remote :{srv.port}); shell commands work as usual")
+    lines: _queue.Queue = _queue.Queue()
+    ready = threading.Event()
+    ready.set()
+
+    def reader():
+        while True:
+            ready.wait()
+            ready.clear()
+            try:
+                lines.put(input(sh.prompt))
+            except EOFError:
+                lines.put(None)
+                return
+            except KeyboardInterrupt:
+                lines.put("")
+    if interactive:
+        threading.Thread(target=reader, name="chipem-shell-input", daemon=True).start()
+    try:
+        while True:
+            try:
+                ex.pump(0.05)
+                if not interactive:
+                    if srv.killed or (srv.clients > 0 and srv.conn is None):
+                        break
+                    continue
+                try:
+                    line = lines.get_nowait()
+                except _queue.Empty:
+                    continue
+                if line is None or sh.onecmd(line):
+                    break
+                ready.set()
+            except KeyboardInterrupt:
+                print("^C", file=sh.stdout)
+                ready.set()
+    finally:
+        srv.close()
+
+
 def main(args) -> int:
     from .session import Session
     session = Session.from_args(args)
@@ -975,10 +1179,17 @@ def main(args) -> int:
         print_endpoints(session, sh.stdout)
         if getattr(args, "exec_cmds", None) is not None:
             sh.last_exit = 0
+            quit_ = False
             for line in str(args.exec_cmds).split("\n"):
                 if sh.onecmd(line):
+                    quit_ = True
                     break
+            if getattr(args, "gdb", None) is not None and not quit_:
+                _gdb_repl(sh, session, args, interactive=False)
             return sh.last_exit
+        if getattr(args, "gdb", None) is not None:
+            _gdb_repl(sh, session, args, interactive=True)
+            return 0
         try:
             import readline
             readline.set_completer_delims(" \t;")

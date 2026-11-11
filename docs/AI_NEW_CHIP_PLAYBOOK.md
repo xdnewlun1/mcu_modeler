@@ -33,7 +33,7 @@ and `CLAUDE.md` are updated.
 
 | input | why | where it came from for the existing chips |
 |---|---|---|
-| **Data sheet PDF** (required) | pin table, alternate-function table, package, memory map summary, max clock | `K22P100M120SF5.pdf` (section 5.1), `DS_stm32f405zg.pdf` (DS8626: Table 7 pins, Table 9 AF, Table 10 register boundaries), `tms320f28232.pdf` (SPRS439Q, Table 6-1, Tables 8-18..8-20) |
+| **Data sheet PDF** (required) | pin table, alternate-function table, package, memory map summary, max clock | `docs/datasheets/nxp/K22P100M120SF5.pdf` (section 5.1), `docs/datasheets/st/DS_stm32f405zg.pdf` (DS8626: Table 7 pins, Table 9 AF, Table 10 register boundaries), `docs/datasheets/ti/tms320f28232.pdf` (SPRS439Q, Table 6-1, Tables 8-18..8-20) |
 | **Exact part number and package** | the pin-number column to read, flash/RAM size, which peripherals exist | `MK22FN1M0VLL12` = LQFP100; `STM32F405ZG` = LQFP144 (the "Z" in ST names = 144 pins, "G" = 1 MB); `TMS320F28232` "PGF" = LQFP176 |
 | **SVD** (CMSIS, ARM parts only) | peripheral bases, register offsets, reset values, IRQ numbers | `cmsis-svd/cmsis-svd-data` on GitHub at a pinned commit (`data/Freescale/MK22F12.svd`, `data/STMicro/STM32F405.svd`). Also vendor CMSIS packs (Keil `*.pack` are zip files) or the vendor SDK. **TI C2000 has no SVD**: hand-write the regs YAML from the TRM |
 | **Reference manual / TRM** | register *behaviour*: reset clock, which status bits firmware polls, w1c/rc_w0 flags, the IRQ vector table, clock tree | K22 RM (`svd/dl-k22rm/K22P100M120SF5RM.pdf`), RM0090 for the STM32F4, SPRUFB0/SPRUFZ5/SPRU812 for the C2000 |
@@ -59,14 +59,14 @@ where transcription errors hide. Budget most of the review effort here.
 ### B.1 Find the tables
 
 ```sh
-.venv/bin/python -I .claude/skills/new-chip/pdf_find.py DS_stm32f405zg.pdf "pin and ball definitions" "Alternate function mapping"
+.venv/bin/python -I .claude/skills/new-chip/pdf_find.py docs/datasheets/st/DS_stm32f405zg.pdf "pin and ball definitions" "Alternate function mapping"
 #   49: Table 7. STM32F40xxx pin and ball definitions(1)          ... (continued) through page 61
 #   64: Table 9. Alternate function mapping                        ... through page 67
-pdftotext -layout -f 49 -l 61 DS_stm32f405zg.pdf $SCRATCH/pins.txt    # $SCRATCH = your scratchpad dir, not the repo
-pdftotext -layout -f 64 -l 67 DS_stm32f405zg.pdf $SCRATCH/af.txt
-pdftotext -layout -f 67 -l 70 K22P100M120SF5.pdf $SCRATCH/k22_pins.txt     # K22: 5.1 Signal Multiplexing and Pin Assignments
-pdftotext -layout -f 22 -l 31 tms320f28232.pdf $SCRATCH/c2k_pins.txt       # F28232: Table 6-1 Signal Descriptions
-pdftotext -layout -f 153 -l 155 tms320f28232.pdf $SCRATCH/c2k_mux.txt      # F28232: Tables 8-18..8-20 GPIO mux
+pdftotext -layout -f 49 -l 61 docs/datasheets/st/DS_stm32f405zg.pdf $SCRATCH/pins.txt    # $SCRATCH = your scratchpad dir, not the repo
+pdftotext -layout -f 64 -l 67 docs/datasheets/st/DS_stm32f405zg.pdf $SCRATCH/af.txt
+pdftotext -layout -f 67 -l 70 docs/datasheets/nxp/K22P100M120SF5.pdf $SCRATCH/k22_pins.txt     # K22: 5.1 Signal Multiplexing and Pin Assignments
+pdftotext -layout -f 22 -l 31 docs/datasheets/ti/tms320f28232.pdf $SCRATCH/c2k_pins.txt       # F28232: Table 6-1 Signal Descriptions
+pdftotext -layout -f 153 -l 155 docs/datasheets/ti/tms320f28232.pdf $SCRATCH/c2k_mux.txt      # F28232: Tables 8-18..8-20 GPIO mux
 ```
 
 Always use `-layout`, because columns are recovered by character position. Read the whole page range once by eye
@@ -258,6 +258,13 @@ core: {arch: armv7e-m, backend: unicorn, cpu: cortex-m4, fpu: true, clock_hz: 16
 - `num_irqs`: NVIC lines (raised automatically to cover `irqs:`).
 
 ## E. Deciding the models
+
+**Same vendor, new register generation** (the STM32F1 next to the STM32F4): make a new family directory for the
+blocks whose layout differs (`chipem/periph/stm32f1/`: GPIO/AFIO, RCC, FLASH, RTC, DMA, ADC, USB) and keep the
+same-IP blocks on the old family's models by parameter (`stm32.tim` with `bits: 16`, `stm32.usart`, `stm32.spi`,
+`stm32.i2c`, a thin subclass where register names or vector names differ, as `stm32f1.can`). The new clock model then
+has to offer the old family's RCC interface (gate table, `effective_apb_hz`, listeners) so the reused models find
+their clocks and gates. Vendor IRQ names that differ from the SVD go into `svd_irq_names` (`--check` prints RENAMED).
 
 **Reuse** when the vendor family *and* the register layout match. The scaffold has already done this per block.
 Re-check the TODO comments, then confirm `Chip(desc)` builds with no "not available" warning (the generated test does).

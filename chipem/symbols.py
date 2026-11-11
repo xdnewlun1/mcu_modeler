@@ -61,7 +61,9 @@ class Symbols:
 
     @classmethod
     def for_image(cls, image: Any) -> "Symbols":
-        thumb = getattr(image, "unit_bytes", 1) == 1
+        thumb = getattr(image, "thumb", None)               # set by Chip.load_firmware for non-ARM chips (MCS-51)
+        if thumb is None:
+            thumb = getattr(image, "unit_bytes", 1) == 1
         rh = getattr(image, "read_half", None) if image is not None and thumb else None
         return cls(image_symbols(image), rh, image, thumb=thumb)
 

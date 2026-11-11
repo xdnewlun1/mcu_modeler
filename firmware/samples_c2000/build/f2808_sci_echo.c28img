@@ -1,0 +1,38 @@
+{
+ "format": "c28img",
+ "unit_bits": 16,
+ "entry": 4096000,
+ "segments": [
+  {
+   "addr": 4096000,
+   "data_hex": "103b22761f76c001292868001118fdff21280a001140ff6c1c1a00081f76be01081aa0001f76be011a1a04001a761f76dd011028070011280300142b122b13281a00112823001546ff6c1792ff90615204687a520266e09c1447ff6c19961f76bf010e2804001f76dd01ee6f"
+  },
+  {
+   "addr": 4161526,
+   "data_hex": "7e000080"
+  }
+ ],
+ "symbols": {
+  "LED": 4,
+  "BRR": 26,
+  "GPAMUX2": 28552,
+  "GPBDIR": 28570,
+  "GPBTOGGLE": 28622,
+  "PLLSTS": 28689,
+  "PCLKCR0": 28700,
+  "PLLCR": 28705,
+  "WDCR": 28713,
+  "SCICCRB": 30544,
+  "SCICTL1B": 30545,
+  "SCIHBAUDB": 30546,
+  "SCILBAUDB": 30547,
+  "SCICTL2B": 30548,
+  "SCIRXSTB": 30549,
+  "SCIRXBUFB": 30551,
+  "SCITXBUFB": 30553,
+  "_c_int00": 4096000,
+  "pll": 4096010,
+  "loop": 4096035,
+  "send": 4096044
+ }
+}

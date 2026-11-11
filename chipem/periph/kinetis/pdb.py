@@ -120,6 +120,13 @@ class PDB(GatedBlock):
         if self.chip is not None:
             self._update_irq()
 
+    # ------------------------------------------------------------------ low-power modes (SMC freezer)
+    lp_frozen = False
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Stop/VLPS/LLS (Table 7-2: PDB static): the counter held while the bus clock was off."""
+        self.t0_ns += dns
+
     # ------------------------------------------------------------------ counter
     def _cancel(self) -> None:
         if self._ev is not None and self.chip is not None:
@@ -135,7 +142,8 @@ class PDB(GatedBlock):
     def cnt(self) -> int:
         if not self.running or self.chip is None:
             return self.frozen_cnt
-        el = int((now_ns(self.chip) - self.t0_ns) / self.tick_ns + 1e-6)
+        now = self.lp_t0_ns if self.lp_frozen else now_ns(self.chip)
+        el = int((now - self.t0_ns) / self.tick_ns + 1e-6)
         return max(0, min(el, self.mod))
 
     def _cnt_read(self, blk, reg):
@@ -287,7 +295,7 @@ class PDB(GatedBlock):
     def _input_trigger(self, sel: int, source: Any = None) -> None:
         """A hardware trigger input (TRGSEL `sel`) fired: restarts the counter when selected and PDBEN=1."""
         sc = self.get("SC")
-        if sc & PDBEN and (sc >> 8) & 0xF == sel:
+        if sc & PDBEN and (sc >> 8) & 0xF == sel and not self.lp_frozen:     # no bus clock in Stop: not seen
             self._start_cycle(now_ns(self.chip))
 
     # ------------------------------------------------------------------ ADC side

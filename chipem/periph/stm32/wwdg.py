@@ -77,10 +77,17 @@ class WWDG(GatedBlock):
         loc = self._gate_loc
         return loc is None or bool(self._rcc.mem[loc[0]] & loc[1])
 
+    lp_frozen: Any = False              # PWR freezer: PCLK1 off in Stop (RM0090 5.3.4) / gated Sleep
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """The counter held while PCLK1 was off: move its anchor by the time slept."""
+        self._t0 += dcycles
+
     def counter(self) -> int:
         if not self._running or self.chip is None:
             return self._c0
-        n = (self.chip.now_cycles() - self._t0) // self._tick
+        now = self.lp_c0 if self.lp_frozen else self.chip.now_cycles()
+        n = (now - self._t0) // self._tick
         c = self._c0 - n
         if self.get("CR") & WDGA:
             return max(c, 0x3F)

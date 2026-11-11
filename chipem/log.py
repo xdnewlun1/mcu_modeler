@@ -108,8 +108,13 @@ class EventLog:
         # (chip, pin) -> [recent edge times, dense edges stored in this burst, open _Wave | None]
         self._pins: dict[tuple, list] = {}
         self.pin_edges_dropped = 0          # edges kept out of the stored history (counted in `wave` events)
+        self.default_pin_burst = pin_burst
+        # kinds not recorded at all: neither stored nor passed to subscribers (chipem/perf.py drop_kinds / pin_log)
+        self.drop: frozenset[str] = frozenset()
 
-    def event(self, kind: str, t_ns: float, **fields: Any) -> LogEvent:
+    def event(self, kind: str, t_ns: float, **fields: Any) -> LogEvent | None:
+        if kind in self.drop:
+            return None
         self._seq += 1
         ev = LogEvent(kind, float(t_ns), fields, self._seq)
         if kind != "pin" or self.pin_burst is None or fields.get("field") != "level" or self._store_edge(ev):
@@ -226,6 +231,30 @@ def format_can(f: dict) -> str:
     return s
 
 
+def format_uart(f: dict) -> str:
+    """'UART0 rx 0x41 'A' FE PE NF', 'USART1 tx BREAK 13 bits', 'UART0 drop 0x41 'A' (overrun)' from a `uart` event
+    with a `byte` / `brk` field (chipem/periph/uartwire.py)."""
+    name = f.get("uart") or f.get("name") or ""
+    d = f.get("dir", "tx")
+    if f.get("idle") is not None and f.get("byte") is None:
+        return f"{name} {d} IDLE {f['idle']} bits"
+    if f.get("byte") is None or (f.get("brk") and d == "tx"):
+        return f"{name} {d} BREAK {f.get('brk')} bits" + (" (LIN break)" if f.get("lin") else "")
+    b = int(f["byte"])
+    c = chr(b) if 32 <= b < 127 else {10: "\\n", 13: "\\r"}.get(b, f"\\x{b:02x}")
+    s = f"{name} {d} 0x{b:02x} '{c}'"
+    if f.get("b8"):
+        s += " bit8=1"
+    errs = [k.upper() for k in ("fe", "pe", "nf") if f.get(k)]
+    if f.get("brk"):
+        errs.append(f"BREAK {f['brk']} bits")
+    if errs:
+        s += " " + " ".join(errs)
+    if d == "drop" and f.get("reason"):
+        s += f" ({f['reason']})"
+    return s
+
+
 def field_in_msg(key: str, value: Any, msg: str) -> bool:
     """True when an event's message already shows this field's value (`pin=PA9` after "PA9 -> USART1_TX", a
     `*_hz` field after a message giving the frequency): the event printers (format_event, chipem/web/evfmt.py) leave it
@@ -262,6 +291,12 @@ def format_event(ev: LogEvent) -> str:
         if isinstance(data, (bytes, bytearray)):
             data = data.decode("latin-1")
         s = " ".join(x for x in (head, str(name), str(f.pop("dir", "tx")), repr(data)) if x)
+    elif ev.kind == "uart" and ("byte" in f or "brk" in f or "idle" in f):
+        s = f"{head} {format_uart(f)}"
+        if f.get("dir") == "drop":
+            f.pop("reason", None)
+        for k in ("uart", "name", "dir", "byte", "b8", "fe", "pe", "nf", "brk", "lin", "idle", "dropped"):
+            f.pop(k, None)
     elif ev.kind == "can" and "id" in f:
         s = f"{head} {format_can(f)}"
         for k in ("link", "node", "dir", "id", "ext", "rtr", "dlc", "data", "msg"):

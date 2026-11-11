@@ -1,0 +1,12 @@
+# A timing checker written in Python (boards/parts/pwm_checker.py) on an STM32 PWM output.
+#   A (STM32F405ZG, HSI 16 MHz) runs tim_pwm: TIM3 channel 1 PWM on PA6, 1 kHz, 25 % duty.
+#   CHK1 measures every cycle and logs a `warn` when the duty leaves 20..30 % or the frequency 900..1100 Hz.
+#   Try `part CHK1 duty_min=40` in the shell (or the web UI control): the next cycle is a violation.
+# Run:   chipem run --board boards/parts/stm32_pwm_check.yaml --for 10ms
+# Build: firmware/samples_stm32/build.sh
+# Security: a script part runs Python with your privileges. Only load boards you trust.
+name: stm32_pwm_check
+chips:
+  - {id: A, chip: stm32f405zg, firmware: ../../firmware/samples_stm32/build/tim_pwm.elf}
+parts:
+  - {id: CHK1, type: script, file: pwm_checker.py, ports: {IN: A.PA6}}

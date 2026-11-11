@@ -128,9 +128,24 @@ def describe_event(e: dict) -> str:
     if kind == "uart":
         d = e.get("dir") or "tx"
         b = e.get("byte")
+        name = e.get('uart') or e.get('name') or ''
+        if b is None and e.get("brk") is not None:      # a break (chipem/periph/uartwire.py)
+            return f"{name} {d} BREAK {_js_str(e.get('brk'))} bits" + (" (LIN break)" if e.get("lin") else "")
+        if b is None and e.get("idle") is not None:     # C2000 idle-line block start (TXWAKE)
+            return f"{name} {d} IDLE {_js_str(e.get('idle'))} bits"
         if b is not None:
             b = int(b)
-            return f"{e.get('uart') or e.get('name') or ''} {d} 0x{b:02x} '{_byte_char(b)}'"
+            s = f"{name} {d} 0x{b:02x} '{_byte_char(b)}'"
+            if e.get("b8"):
+                s += " bit8=1"
+            errs = [k.upper() for k in ("fe", "pe", "nf") if e.get(k)]
+            if e.get("brk"):
+                errs.append(f"BREAK {_js_str(e.get('brk'))} bits")
+            if errs:
+                s += " " + " ".join(errs)
+            if d == "drop" and e.get("reason"):
+                s += f" ({e.get('reason')})"
+            return s
         data = e.get("data")
         if data is None:
             data = e.get("text")

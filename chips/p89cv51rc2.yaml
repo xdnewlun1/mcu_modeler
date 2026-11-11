@@ -1,0 +1,9 @@
+# NXP P89CV51RC2 (32 KB flash), PLCC44 (P89CV51RC2FA): the P89CV51RD2 description with its own memory size.
+# Source: P89CV51RB2/RC2/RD2 data sheet Rev. 03 Table 2 p.2 (flash size per type), Table 3 (pins).
+include: p89cv51rd2.yaml
+name: P89CV51RC2
+package: PLCC44
+memory:
+  - {name: FLASH, base: 0x00000, size: 0x8000, kind: flash, fill: 0xFF}   # CODE: 32 KB user flash
+  - {name: IRAM, base: 0x20000, size: 0x100, kind: ram}
+  - {name: XRAM, base: 0x40000, size: 0x300, kind: ram}

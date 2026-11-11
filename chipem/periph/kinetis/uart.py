@@ -53,12 +53,35 @@ Hardware flow control (§49.3.14 MODEM, §49.4.1.6/7, §49.4.2.7) on the UARTn_R
 * None of them: RTS_b stays deasserted (H). The level is driven with PinBoard.drive_signal, so nets and board parts
   see it. Board links still move whole bytes: a sender honours CTS only when its CTS_b pin is wired to the
   receiver's RTS_b (a net).
-Low-power modes (`clock_stop`, called by the SMC in STOP/VLPS/LLS/VLLS): the UART is static: a character arriving
-is lost (reason stop_mode) and only its start bit counts, as an RX active edge: S2.RXEDGIF (w1c) is set by every
-arriving character (start bit falling edge) and, with BDH.RXEDGIE, raises the status interrupt (wakes STOP/VLPS).
-A transmission in progress is held and resumes after wake-up.
-Not modelled: parity/noise/framing errors, IDLE, break/LIN (LBKDIF never sets), match address, IrDA, ISO-7816, 9-bit
-data (C3.T8/R8: board links carry bytes).
+Low-power modes (`clock_stop`, called by the SMC in STOP/VLPS/LLS/VLLS, and in WAIT/VLPW with C1.UARTSWAI): the
+UART is static: a character arriving is lost (reason stop_mode) and only its start bit counts, as an RX active edge:
+S2.RXEDGIF (w1c) is set by every arriving character (start bit falling edge) and, with BDH.RXEDGIE, raises the status
+interrupt (wakes STOP/VLPS). A transmission in progress and the idle-line count are held and resume after wake-up.
+
+Frames (chipem/periph/uartwire.py): every character goes out as a Frame with its real format: C1.M / PE / PT and
+C4.M10 (§49.4.4 Tables 49-244/245: 8-bit mode with PE = 7 data + parity, 9-bit mode (C3.T8 latched with the D
+write) with PE = 8 data + parity, M10 = 9 data + parity), BDH.SBNS stop bits, S2.MSBF bit order and C3.TXINV
+polarity. C2.SBK sends break characters (Table 49-237: 10/11/12 or, with S2.BRK13, 13/14 low bits, then a logic 1;
+repeated while SBK stays set; a queued break preempts the buffered data; TC = 0 meanwhile).
+The receiver decodes every arriving frame at its own settings (16 RT samples per bit, start verified at RT3/5/7,
+RT8/9/10 majority with the noise flag, resynchronisation on falling data edges, S2.MSBF / RXINV) and sets, with the
+dataword, S1.NF / FE / PF (none on overrun) and ED.NOISY / PARITYE per buffered dataword; D (8-bit mode) or C3.R8
+(9-bit mode) hold the received parity bit; C3.R8 is the ninth bit of the dataword at the head of the buffer.
+S1.FE inhibits further reception until cleared (reason framing_error). A break (all 0 including the stop bit) is a
+framing error with an all-0 dataword; with S2.LBKDE, 11 (M = 0) / 12 (M = 1) low bits set S2.LBKDIF (BDH.LBKDIE
+status interrupt) instead, RDRF/FE/NF/PF cannot set, datawords overwrite each other and OR sets when a character
+arrives while LBKDIF is still set. S1.IDLE: 10/11/12 consecutive 1s counted after the start bit (C1.ILT = 0; the
+character's trailing 1s count) or after the stop bit (ILT = 1), once per received frame, blocked while OR is set,
+C2.ILIE status interrupt; it is flagged when the next frame shows the line was idle long enough, or one character
+time after the idle time (the receiver only learns about a frame at its stop bit). OR, IDLE, NF, FE, PF clear by
+reading S1 (flag set) and then D. Error interrupt "UART<n>_ERR" adds (NF & C3.NEIE) | (FE & FEIE) | (PF & PEIE).
+Receiver wake-up (§49.4.2.10): C2.RWU with C1.WAKE = 0 ignores characters until an idle character (it clears RWU;
+IDLE only with S2.RWUID), WAKE = 1 until a frame with the address mark (the bit before the stop bit) = 1, which is
+received; ignored characters set no flags (reason mute). Match address (C4.MAEN1/MAEN2 with MA1/MA2): a marked
+address that matches is received with the data that follows; others and their data are discarded (reason
+address_mismatch).
+Not modelled: S2.RAF, C1.LOOPS/RSRC (loop and single-wire modes), IrDA (IR), ISO-7816, a receiver started in the
+middle of a character.
 
 Hot path: S1/TCFIFO/RCFIFO/SFIFO are stored values recomputed on every state change (`_refresh`), so polling them
 is a plain register read; S1 gets a read hook only while OR is set (the S1-then-D clear sequence).
@@ -69,16 +92,22 @@ from collections import deque
 from typing import Any
 
 from ..base import MMIOBlock
-from ..uartwire import UartRx
+from ..uartwire import SAMPLES_16, START_16, Frame, RxChar, RxFormat, UartRx
 from ..registry import register
 from .clockutil import bus_hz, core_hz, irq_number, regs_from_table
 from .dma import dma_request
 
-S1_TDRE, S1_TC, S1_RDRF, S1_IDLE, S1_OR = 0x80, 0x40, 0x20, 0x10, 0x08
-C2_TIE, C2_TCIE, C2_RIE, C2_TE, C2_RE = 0x80, 0x40, 0x20, 0x08, 0x04
+S1_TDRE, S1_TC, S1_RDRF, S1_IDLE, S1_OR, S1_NF, S1_FE, S1_PF = 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
+S1_RXERR = S1_OR | S1_NF | S1_FE | S1_PF
+S1_CLR = S1_IDLE | S1_RXERR                 # cleared by reading S1 (flag set) and then D (§49.3.5)
+C2_TIE, C2_TCIE, C2_RIE, C2_ILIE, C2_TE, C2_RE, C2_RWU, C2_SBK = 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
 C5_TDMAS, C5_RDMAS = 0x80, 0x20
-C1_M, C1_PE = 0x10, 0x02
-BDH_SBNS = 0x20
+C1_M, C1_WAKE, C1_ILT, C1_PE, C1_PT = 0x10, 0x08, 0x04, 0x02, 0x01
+BDH_LBKDIE, BDH_SBNS = 0x80, 0x20
+C3_R8, C3_T8, C3_TXINV, C3_NEIE, C3_FEIE, C3_PEIE = 0x80, 0x40, 0x10, 0x04, 0x02, 0x01
+C4_MAEN1, C4_MAEN2, C4_M10 = 0x80, 0x40, 0x20
+S2_MSBF, S2_RXINV, S2_RWUID, S2_BRK13, S2_LBKDE = 0x20, 0x10, 0x08, 0x04, 0x02
+ED_NOISY, ED_PARITYE = 0x80, 0x40
 CFIFO_TXFLUSH, CFIFO_RXFLUSH, CFIFO_RXOFE, CFIFO_TXOFE, CFIFO_RXUFE = 0x80, 0x40, 0x04, 0x02, 0x01
 PFIFO_TXFE, PFIFO_RXFE = 0x80, 0x08
 SFIFO_TXEMPT, SFIFO_RXEMPT, SFIFO_RXOF, SFIFO_TXOF, SFIFO_RXUF = 0x80, 0x40, 0x04, 0x02, 0x01
@@ -105,6 +134,7 @@ class UART(UartRx, MMIOBlock):
         self._rx_init()
         self._txq: deque[int] = deque()
         self._rxq: deque[int] = deque()
+        self._rxed: deque[int] = deque()       # ED flags (NOISY/PARITYE) of each buffered dataword
         self._shifting = False
         self._tx_ev = None
         self._rx_last = 0
@@ -124,7 +154,8 @@ class UART(UartRx, MMIOBlock):
               "C1": dict(on_write=self._ctl_write), "C2": dict(on_write=self._c2_write),
               "BDH": dict(on_write=self._c3_write), "BDL": dict(on_write=self._ctl_write),
               "C4": dict(on_write=self._ctl_write), "C5": dict(on_write=self._c5_write),
-              "C3": dict(on_write=self._c3_write),
+              "C3": dict(on_write=self._c3_write, ro_mask=C3_R8),
+              "ED": dict(ro_mask=0xFF),
               "S2": dict(w1c_mask=S2_LBKDIF | S2_RXEDGIF, ro_mask=0x01, on_write=self._c3_write),
               "MODEM": dict(ro_mask=0xF0, on_write=self._modem_write),
               "PFIFO": dict(ro_mask=0x77, on_write=self._pfifo_write),
@@ -141,10 +172,18 @@ class UART(UartRx, MMIOBlock):
         self._modem_off = self.regs["MODEM"].boff
         self._s2_off = self.regs["S2"].boff
         self._bdh_off = self.regs["BDH"].boff
-        self._o = {n: self.regs[n].boff for n in ("S1", "SFIFO", "TCFIFO", "RCFIFO", "TWFIFO", "RWFIFO", "D")}
+        self._o = {n: self.regs[n].boff for n in ("S1", "SFIFO", "TCFIFO", "RCFIFO", "TWFIFO", "RWFIFO", "D", "C3",
+                                                  "ED", "C2")}
         self.output = bytearray()
         self.rx_signal = f"UART{self.index}_RX"
-        self._or_seen = False
+        self._s1_seen = 0                      # S1 flags seen set by an S1 read (cleared by the next D read)
+        self._idle_ev = None
+        self._idle_at = 0.0                    # when the idle character completes (if no frame starts before)
+        self._idle_armed = False               # a frame arrived since IDLE was last set (§49.3.5 IDLE)
+        self._idle_left: float | None = None   # idle-count time left while the clock is stopped
+        self._brk_pending = False              # SBK: a break preempts the queued data (§49.4.1.4)
+        self._brk_active = False
+        self._ma_ok = False                    # match-address mode: the last marked address matched
         self._line = False
         self._err_line = False
         self._irq: int | None = None
@@ -195,14 +234,23 @@ class UART(UartRx, MMIOBlock):
         if rev is not None and self.chip is not None:
             self.chip.sched.cancel(rev)
         self._rts_ev = None
+        iev = getattr(self, "_idle_ev", None)
+        if iev is not None and self.chip is not None:
+            self.chip.sched.cancel(iev)
+        self._idle_ev = None
+        self._idle_armed = False
+        self._idle_left = None
+        self._brk_pending = self._brk_active = False
+        self._ma_ok = False
         self._txrts_on = False
         self._cts_wait = False
         self._lp_stopped = False
         self._shifting = False
         self._txq.clear()
         self._rxq.clear()
+        self._rxed.clear()
         self._rx_last = 0
-        self._or_seen = False
+        self._s1_seen = 0
         if getattr(self, "_line", False):
             self._set_line(False)
         if getattr(self, "_err_line", False):
@@ -233,11 +281,49 @@ class UART(UartRx, MMIOBlock):
         return self.module_hz() / (16.0 * (sbr + (self.get("C4") & 0x1F) / 32.0))
 
     def char_bits(self) -> int:
+        bits, par = self._layout()
+        return 1 + bits + (par != "N") + (2 if self.get("BDH") & BDH_SBNS else 1)
+
+    def _layout(self) -> tuple[int, str]:
+        """(data bits, parity) from C1.M/PE/PT and C4.M10 (§49.4.4 Tables 49-244/245): the parity bit is the bit
+        before the stop bit, so 8-bit mode with PE has 7 data bits, 9-bit mode with PE 8, and M10 9 + parity."""
         c1 = self.get("C1")
-        bits = 1 + (9 if c1 & C1_M else 8) + 1
-        if self.get("BDH") & BDH_SBNS:
-            bits += 1
-        return bits
+        pe = c1 & C1_PE
+        if c1 & C1_M:
+            bits = 9 if (not pe or self.get("C4") & C4_M10) else 8
+        else:
+            bits = 7 if pe else 8
+        return bits, (("O" if c1 & C1_PT else "E") if pe else "N")
+
+    def stop_bits(self) -> float:
+        return 2.0 if self.get("BDH") & BDH_SBNS else 1.0
+
+    def frame(self) -> str:
+        bits, par = self._layout()
+        return f"{bits}{par}{int(self.stop_bits())}"
+
+    def tx_frame_for(self, word: int) -> Frame:
+        bits, par = self._layout()
+        return Frame(word, bits, par, self.stop_bits(), self.baud(), msbf=bool(self.get("S2") & S2_MSBF),
+                     inv=bool(self.get("C3") & C3_TXINV))
+
+    def rx_format(self) -> RxFormat:
+        """16 RT samples per bit (§49.4.2.4): start verified at RT3/5/7, data and stop bits by RT8/9/10 majority (noise
+        flag when they differ), RT clock resynchronised on falling data edges; S2.MSBF / RXINV."""
+        bits, par = self._layout()
+        s2 = self.get("S2")
+        return RxFormat(self.baud(), bits, par, self.stop_bits(), msbf=bool(s2 & S2_MSBF), inv=bool(s2 & S2_RXINV),
+                        samples=SAMPLES_16, start=START_16, resync=True)
+
+    def break_bits(self) -> int:
+        """Transmitted break length (Table 49-237): BRK13 = 0: 10 (M = 0), 11 (M = 1), 12 (M = 1, M10 and PE);
+        BRK13 = 1: 13 (M = 0), 14 (M = 1)."""
+        c1 = self.get("C1")
+        if self.get("S2") & S2_BRK13:
+            return 14 if c1 & C1_M else 13
+        if not c1 & C1_M:
+            return 10
+        return 12 if self.get("C4") & C4_M10 and c1 & C1_PE else 11
 
     def char_ns(self) -> float:
         b = self.baud()
@@ -255,15 +341,22 @@ class UART(UartRx, MMIOBlock):
         mem, o = self.mem, self._o
         txn, rxn = len(self._txq), len(self._rxq)
         old = mem[o["S1"]]
-        s1 = old & S1_OR
+        s1 = old & S1_CLR
         if txn <= mem[o["TWFIFO"]] or (keep_flags and old & S1_TDRE):
             s1 |= S1_TDRE
         if not txn and not self._shifting:
             s1 |= S1_TC
         if rxn >= mem[o["RWFIFO"]] or (keep_flags and old & S1_RDRF):
-            if not s1 & S1_OR or old & S1_RDRF:        # OR blocks RDRF from asserting (§49.8.4)
-                s1 |= S1_RDRF
+            if old & S1_RDRF or not (s1 & S1_OR or mem[self._s2_off] & S2_LBKDE):
+                s1 |= S1_RDRF                          # OR / LBKDE block RDRF from asserting (§49.8.4, S2.LBKDE)
         mem[o["S1"]] = s1
+        if rxn:
+            head = self._rxq[0]
+            mem[o["ED"]] = self._rxed[0]
+            if (mem[o["C3"]] & C3_R8) != (C3_R8 if head & 0x100 else 0):
+                mem[o["C3"]] ^= C3_R8
+        else:
+            mem[o["ED"]] = 0
         sf = mem[o["SFIFO"]] & 0x07
         if not txn:
             sf |= SFIFO_TXEMPT
@@ -272,7 +365,7 @@ class UART(UartRx, MMIOBlock):
         mem[o["SFIFO"]] = sf
         mem[o["TCFIFO"]] = txn
         mem[o["RCFIFO"]] = rxn
-        self._s1_reg.on_read = self._s1_read if s1 & S1_OR else None
+        self._s1_reg.on_read = self._s1_read if s1 & S1_CLR else None
         if self._modem_on:
             if self.mem[self._modem_off] & MODEM_TXRTSE:
                 self._txrts_check()
@@ -288,11 +381,14 @@ class UART(UartRx, MMIOBlock):
 
     def _update_line(self) -> None:
         s1, c2, c5 = self.get("S1"), self.get("C2"), self.get("C5")
+        s2, bdh = self.get("S2"), self.get("BDH")
         self._set_line(bool((s1 & S1_TDRE and c2 & C2_TIE and not c5 & C5_TDMAS) or (s1 & S1_TC and c2 & C2_TCIE)
-                            or (s1 & S1_RDRF and c2 & C2_RIE and not c5 & C5_RDMAS)
-                            or (self.get("S2") & S2_RXEDGIF and self.get("BDH") & BDH_RXEDGIE)))
+                            or (s1 & S1_RDRF and c2 & C2_RIE and not c5 & C5_RDMAS) or (s1 & S1_IDLE and c2 & C2_ILIE)
+                            or (s2 & S2_RXEDGIF and bdh & BDH_RXEDGIE) or (s2 & S2_LBKDIF and bdh & BDH_LBKDIE)))
         sf, cf = self.get("SFIFO"), self.get("CFIFO")
-        err = bool((s1 & S1_OR and self.get("C3") & C3_ORIE)
+        c3 = self.get("C3")
+        err = bool((s1 & S1_OR and c3 & C3_ORIE) or (s1 & S1_NF and c3 & C3_NEIE) or (s1 & S1_FE and c3 & C3_FEIE)
+                   or (s1 & S1_PF and c3 & C3_PEIE)
                    or (sf & SFIFO_RXOF and cf & CFIFO_RXOFE) or (sf & SFIFO_TXOF and cf & CFIFO_TXOFE)
                    or (sf & SFIFO_RXUF and cf & CFIFO_RXUFE))
         if err != self._err_line:
@@ -334,27 +430,47 @@ class UART(UartRx, MMIOBlock):
 
     # ------------------------------------------------------------------ TX
     def _tx_start(self) -> None:
-        """Move buffered bytes into the idle shift register (instantly through all of them without a baud)."""
-        while self._txq and not self._shifting and self.get("C2") & C2_TE:
+        """Move buffered bytes into the idle shift register (instantly through all of them without a baud). A
+        queued break goes first (it preempts the buffered data, §49.4.1.4 note)."""
+        while (self._txq or self._brk_pending) and not self._shifting and self.get("C2") & C2_TE:
             if self._lp_stopped:
                 return
+            if self._brk_pending:
+                self._start_break()
+                continue
             if self._modem_on and self.get("MODEM") & MODEM_TXCTSE and not self._cts_asserted():
                 self._cts_wait = True                  # TXD idles until CTS_b is asserted (§49.4.1.6)
                 return
             self._cts_wait = False
             b = self._txq.popleft()
-            self.output.append(b)
-            self.emit("uart", uart=self.name, dir="tx", byte=b)
-            for cb in self.tx_listeners:
-                cb(self, b)
+            self._tx_emit(self.tx_frame_for(b))
             t = self.char_ns()
             if t > 0:
                 self._shifting = True
                 self._tx_ev = self.chip.sched.in_ns(t, self._tx_done)
 
+    def _start_break(self) -> None:
+        """C2.SBK: a break character of break_bits() logic 0s (no start/stop/parity bit), followed by at least one
+        logic 1 (modelled as one stop bit); while SBK stays set, breaks repeat (§49.4.1.4, C2.SBK)."""
+        self._brk_pending = False
+        self._brk_active = True
+        b = self.baud()
+        fr = Frame.brk_frame(self.break_bits(), 1.0, b, inv=bool(self.get("C3") & C3_TXINV))
+        self._tx_emit(fr)
+        t = fr.duration_ns()
+        if t > 0:
+            self._shifting = True
+            self._tx_ev = self.chip.sched.in_ns(t, self._tx_done)
+        else:
+            self._brk_active = False
+
     def _tx_done(self) -> None:
         self._tx_ev = None
         self._shifting = False
+        if self._brk_active:
+            self._brk_active = False
+            if self.get("C2") & C2_SBK and self.get("C2") & C2_TE:
+                self._brk_pending = True               # SBK still set: the next break character
         self._tx_start()
         self._refresh()
 
@@ -441,7 +557,16 @@ class UART(UartRx, MMIOBlock):
                 self._tx_ev = None
             else:
                 self._held_tx = None
+            if self._idle_ev is not None:
+                self._idle_left = max(self._idle_ev.t_ns - self.chip.sched.now_ns(), 0.0)
+                self.chip.sched.cancel(self._idle_ev)
+                self._idle_ev = None
+            if self._ln is not None:
+                self._ln.reset()
         else:
+            if self._idle_left is not None:
+                self._idle_ev = self.chip.sched.in_ns(self._idle_left, self._idle_fire)
+                self._idle_left = None
             held = getattr(self, "_held_tx", None)
             self._held_tx = None
             if held is not None:
@@ -463,7 +588,8 @@ class UART(UartRx, MMIOBlock):
                 self.emit("info", block=self.name, msg=f"{self.name}: transmit buffer full, byte 0x{new & 0xFF:02x} "
                           "lost (SFIFO.TXOF)")
         else:
-            self._txq.append(new & 0xFF)
+            # 9-bit formats: C3.T8 is the ninth bit, taken with the D write (§49.3.7, §49.3.8 note)
+            self._txq.append((new & 0xFF) | (0x100 if self.mem[self._o["C3"]] & C3_T8 else 0))
             if self.mem[self._modem_off] & MODEM_TXRTSE:
                 self._txrts_check()
             self._tx_start()
@@ -474,14 +600,22 @@ class UART(UartRx, MMIOBlock):
     def rx_pending(self) -> int:
         return self.wire_pending() + len(self._rxq)
 
-    def _rx_arrive(self, b: int, src: str) -> None:
+    def _rx_frame(self, fr: Frame, src: str, t_end: float | None = None) -> None:
         if src != "loop":
             self.mem[self._s2_off] |= S2_RXEDGIF      # the start bit is an active edge on RxD (§49.3.6)
         if self._lp_stopped:
-            self._rx_drop(b, "stop_mode")
+            self._rx_drop(fr.data if not fr.brk else 0, "stop_mode")
             self._update_line()
             return
-        UartRx._rx_arrive(self, b, src)
+        if self._idle_ev is not None:
+            # the idle check waits one character past the idle time so that a frame which started before it (and
+            # is delivered at its stop bit) can still cancel it: was the line idle long enough before this start?
+            self.chip.sched.cancel(self._idle_ev)
+            self._idle_ev = None
+            t_start = (self.chip.now_ns() if t_end is None else t_end) - fr.duration_ns()
+            if t_start >= self._idle_at - 1.0:
+                self._idle_fire()
+        UartRx._rx_frame(self, fr, src, t_end)
         if self.mem[self._bdh_off] & BDH_RXEDGIE:
             self._update_line()
 
@@ -493,38 +627,134 @@ class UART(UartRx, MMIOBlock):
             return "rx_disabled"
         return None
 
-    def _rx_accept(self, b: int) -> None:
+    def _idle_after(self, ch: RxChar) -> None:
+        """Schedule the idle-line detection after this character: 10/11/12 consecutive 1s (M, M10&PE), counted from
+        after the start bit (ILT = 0: the character's trailing 1s count) or after the stop bit (ILT = 1)."""
+        rx_bits, par = self._layout()
+        n = rx_bits + (par != "N")
+        need = n + 2
+        b = self.baud()
+        if b <= 0:
+            return
+        if not self.get("C1") & C1_ILT:
+            cells = ch.data | ((ch.pbit or 0) << rx_bits) if par != "N" else ch.data
+            trail = 1                                  # the stop bit
+            for i in range(n - 1, -1, -1):
+                if (cells >> i) & 1 and not ch.fe:
+                    trail += 1
+                else:
+                    break
+            need -= trail if not ch.fe else 0
+        now = self.chip.now_ns()
+        self._idle_at = now + max(need, 0) * 1e9 / b
+        self._idle_ev = self.chip.sched.at_ns(self._idle_at + self.char_ns(), self._idle_fire)
+
+    def _idle_fire(self) -> None:
+        """Idle line (S1.IDLE, §49.3.5): set once per received frame, blocked while OR is set; with RWU and WAKE = 0
+        the idle character wakes the receiver (clears RWU) and sets IDLE only with S2.RWUID (§49.4.2.10.1)."""
+        self._idle_ev = None
+        if not self._idle_armed or not self.get("C2") & C2_RE:
+            return
+        self._idle_armed = False
         mem, o = self.mem, self._o
-        if mem[o["S1"]] & S1_OR:                       # OR set: nothing is stored, even with room
-            self._rx_drop(b, "overrun")
+        c2 = mem[o["C2"]]
+        if c2 & C2_RWU and not self.get("C1") & C1_WAKE:
+            mem[o["C2"]] = c2 & ~C2_RWU
+            if not mem[self._s2_off] & S2_RWUID:
+                return
+        if not mem[o["S1"]] & S1_OR:
+            mem[o["S1"]] |= S1_IDLE
+            self._refresh()
+
+    def _rx_accept(self, ch: RxChar) -> None:
+        """A decoded character (§49.4.2.3-49.4.2.10): wake-up / match address, LIN break detection, error flags
+        (NF, FE, PF set with the dataword; none on overrun), buffer and overrun."""
+        mem, o = self.mem, self._o
+        c1, c2, s2 = self.get("C1"), mem[o["C2"]], mem[self._s2_off]
+        bits, par = self._layout()
+        word = ch.data
+        if par != "N" and ch.pbit is not None and bits < 9:
+            word |= ch.pbit << bits                    # D (8-bit) / R8 (9-bit) hold the received parity bit
+        mark = (ch.pbit if par != "N" else (ch.data >> (bits - 1)) & 1) or 0   # bit before the stop bit
+        self._idle_armed = True
+        self._idle_after(ch)
+        if s2 & S2_LBKDE:
+            # LIN break detection (S2.LBKDE): 11 (M = 0) / 12 (M = 1) low bits set LBKDIF; RDRF/FE/NF/PF cannot set;
+            # datawords overwrite each other; OR if LBKDIF is still set when the next character arrives
+            if ch.brk and ch.brk >= (12 if c1 & C1_M else 11) - 0.01:
+                mem[self._s2_off] |= S2_LBKDIF
+                self.emit("uart", uart=self.name, dir="rx", brk=round(ch.brk, 1), lin=1)
+                self._refresh()
+                return
+            if s2 & S2_LBKDIF:
+                self._rx_drop(word, "overrun")
+                mem[o["S1"]] |= S1_OR
+                self._refresh()
+                return
+            if self._rxq:
+                self._rxq[-1] = word
+                self._rxed[-1] = 0
+            else:
+                self._rxq.append(word)
+                self._rxed.append(0)
+            self._rx_event(RxChar(ch.data, ch.addr, ch.pbit), word)
+            self._refresh()
+            return
+        if c1 & C1_WAKE:
+            if c2 & C2_RWU:
+                if not mark:
+                    self._rx_drop(word, "mute")        # standby: no flags (§49.4.2.10.2)
+                    return
+                mem[o["C2"]] = c2 & ~C2_RWU            # an address mark wakes the receiver
+        elif c2 & C2_RWU:
+            self._rx_drop(word, "mute")                # idle-line wake-up pending
+            return
+        c4 = self.get("C4")
+        if c4 & (C4_MAEN1 | C4_MAEN2):
+            if mark:
+                a = word & 0xFF
+                self._ma_ok = bool((c4 & C4_MAEN1 and a == self.get("MA1")) or (c4 & C4_MAEN2 and a == self.get("MA2")))
+            if not self._ma_ok:
+                self._rx_drop(word, "address_mismatch")
+                return
+        s1 = mem[o["S1"]]
+        if s1 & S1_FE:
+            self._rx_drop(word, "framing_error")       # "FE inhibits further data reception until it is cleared"
+            return
+        if s1 & S1_OR:                                 # OR set: nothing is stored, even with room
+            self._rx_drop(word, "overrun")
             return
         if len(self._rxq) >= self.rx_depth():
-            self._rx_drop(b, "overrun")
+            self._rx_drop(word, "overrun")
             mem[o["S1"]] |= S1_OR
             mem[o["SFIFO"]] |= SFIFO_RXOF
             self._refresh()
             return
-        self._rxq.append(b)
-        mem[o["D"]] = self._rxq[0]
-        self.emit("uart", uart=self.name, dir="rx", byte=b)
+        self._rxq.append(word)
+        self._rxed.append((ED_NOISY if ch.nf else 0) | (ED_PARITYE if ch.pe else 0))
+        mem[o["D"]] = self._rxq[0] & 0xFF
+        mem[o["S1"]] |= (S1_NF if ch.nf else 0) | (S1_FE if ch.fe else 0) | (S1_PF if ch.pe else 0)
+        self._rx_event(ch, word)
         self._refresh()
 
     def _d_read(self, blk, reg):
         mem, o = self.mem, self._o
         if self._rxq:
             b = self._rx_last = self._rxq.popleft()
+            self._rxed.popleft()
         else:
             b = self._rx_last
             mem[o["SFIFO"]] |= SFIFO_RXUF                # §49.3.18: read from an empty buffer
-        if self._or_seen and mem[o["S1"]] & S1_OR:
-            mem[o["S1"]] &= ~S1_OR                     # S1 read with OR set, then D read
-        self._or_seen = False
-        mem[o["D"]] = self._rxq[0] if self._rxq else b
+        seen = self._s1_seen & mem[o["S1"]]
+        if seen:
+            mem[o["S1"]] &= ~seen                      # S1 read with the flag set, then D read
+        self._s1_seen = 0
+        mem[o["D"]] = (self._rxq[0] if self._rxq else b) & 0xFF
         self._refresh()
-        return b
+        return b & 0xFF
 
     def _s1_read(self, blk, reg):
-        self._or_seen = True                           # hook installed only while OR is set
+        self._s1_seen |= self.mem[self._o["S1"]] & S1_CLR     # hook installed only while one of them is set
         return None
 
     # ------------------------------------------------------------------ control
@@ -540,6 +770,8 @@ class UART(UartRx, MMIOBlock):
         return None
 
     def _c2_write(self, blk, reg, old, new):
+        if (new & ~old) & C2_SBK and new & C2_TE and not self._brk_active:
+            self._brk_pending = True                   # one break character per SBK set (more while it stays set)
         if (new & ~old) & C2_TE and not self._shifting:
             t = self.char_ns()                          # §49.4.1.3: TE 0->1 queues an idle preamble
             if t > 0:
@@ -561,6 +793,7 @@ class UART(UartRx, MMIOBlock):
     def _cfifo_write(self, blk, reg, old, new):
         if new & CFIFO_RXFLUSH:
             self._rxq.clear()
+            self._rxed.clear()
         if new & CFIFO_TXFLUSH:
             self._txq.clear()
         self._store(reg, new & ~(CFIFO_TXFLUSH | CFIFO_RXFLUSH))

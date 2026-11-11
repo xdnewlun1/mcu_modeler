@@ -596,8 +596,19 @@ class SPI(GatedBlock):
             self._apply_pins()
             self._sr_mod(clr_bits=BSY)
 
+    lp_frozen: Any = False              # PWR freezer: Stop / gated Sleep (no kernel clock, inputs not sampled)
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """The clock comes back after Stop / gated Sleep: a master frame in flight continues where it stopped (SCK
+        held its level), I2S bit and MCK clocks resume with their phase."""
+        self._t0 = getattr(self, "_t0", 0) + dcycles
+        if self.i2s is not None:
+            from ..lowpower import shift_event_args
+            self.i2s.t_next += dns
+            shift_event_args(self, dns, self.i2s._mck_tick)
+
     def _pin_changed(self, pin: Any) -> None:
-        if self.chip is None:
+        if self.chip is None or self.lp_frozen:
             return
         board = self.chip.pins
         cr1 = self._cr1()

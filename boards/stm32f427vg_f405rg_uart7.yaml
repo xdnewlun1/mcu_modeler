@@ -1,0 +1,27 @@
+# STM32F427VG (LQFP100, 180 MHz over-drive) answering an STM32F405RG over UART7 <-> USART2.
+#   A (STM32F405RG, LQFP64)  runs link_requester: PLL 168 MHz, USART2 on PA2 (TX) / PA3 (RX) at 230400 baud
+#                            (42 MHz / BRR 182 = 230769); every 2 ms (TIM2 IRQ) it sends "REQ <n>\r\n" and checks
+#                            the answer; PB0 toggles per correct ACK, PB1 goes high on a wrong one, PC13 high at the
+#                            first good ACK.
+#   B (STM32F427VG, LQFP100) runs f42x_link_responder: HSE 8 MHz -> PLL 180 MHz with PWR over-drive, UART7 on PE8
+#                            (TX, pin 39) / PE7 (RX, pin 38), AF8, 230400 baud (45 MHz / BRR 195 = 230769); answers
+#                            "ACK <n> <n*n>\r\n" and toggles PB0 per request.
+# The UART lines are ordinary nets; the board creates the byte link A.USART2 <-> B.UART7 once both pins are muxed.
+# Run:   chipem run --board boards/stm32f427vg_f405rg_uart7.yaml --for 20ms
+#        chipem serve --board boards/stm32f427vg_f405rg_uart7.yaml
+# Build: firmware/samples_stm32_variants/build.sh
+name: stm32f427vg_f405rg_uart7
+quantum: 10us
+chips:
+  - {id: A, chip: stm32f405rg, firmware: ../firmware/samples_stm32_variants/build/link_requester.elf}
+  - {id: B, chip: stm32f427vg, firmware: ../firmware/samples_stm32_variants/build/f42x_link_responder.elf}
+nets:
+  - {name: A_TX, pins: [A.PA2, B.PE7]}       # USART2_TX -> UART7_RX
+  - {name: B_TX, pins: [B.PE8, A.PA3]}       # UART7_TX -> USART2_RX
+  - {name: ACK_LED, pins: [A.PB0]}
+  - {name: REQ_LED, pins: [B.PB0]}
+  - {name: LINK_UP, pins: [A.PC13]}
+parts:
+  - {id: LED_A, type: led, color: green, ports: {in: ACK_LED}}
+  - {id: LED_B, type: led, color: yellow, ports: {in: REQ_LED}}
+  - {id: LED_UP, type: led, color: blue, ports: {in: LINK_UP}}

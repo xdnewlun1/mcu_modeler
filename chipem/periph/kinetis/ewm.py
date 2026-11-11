@@ -100,7 +100,8 @@ class EWM(GatedBlock):
     def counter(self) -> int:
         if not self.enabled() or self.chip is None:
             return 0
-        n = int((self.now_ns() - self._t0) * self.lpo_hz / 1e9 + 1e-6)
+        now = self.lp_t0_ns if self.lp_frozen else self.now_ns()
+        n = int((now - self._t0) * self.lpo_hz / 1e9 + 1e-6)
         return min(n, 255)
 
     def _restart(self) -> None:
@@ -161,7 +162,18 @@ class EWM(GatedBlock):
             self._line = on
             self.irq(self._irqn, on)
 
+    lp_frozen = False                         # set by the SMC freezer (Table 7-2: EWM static in Stop/VLPx/LLS)
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """The EWM counter (LPO, but gated with the bus clock: static in Stop, VLPW, VLPS, LLS) held while asleep."""
+        self._t0 += dns
+        if self._first_ns is not None:
+            self._first_ns += dns
+        self._on_input(None)                      # EWM_in asserted while the clock was off: seen now
+
     def _on_input(self, pin: Any) -> None:
+        if self.lp_frozen:
+            return                                # static: EWM_in is sampled again after the wake-up
         if self.enabled() and not self.asserted and self._input_asserted():
             self._assert("EWM_in asserted")
 

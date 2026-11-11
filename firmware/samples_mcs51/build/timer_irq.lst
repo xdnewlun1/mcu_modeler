@@ -1,0 +1,40 @@
+0000               ; timer_irq: Timer 0 interrupt every 10 ms (mode 1, reload DC00h = 65536 - 9216 at 11.0592 MHz / 12),
+0000               ; toggles P1.1 in the ISR and counts ticks in 30h:31h (big endian); Timer 0 is given the highest priority level 3
+0000               ; (IPH.PT0H + IP.PT0).  The main loop toggles P1.0 every 10 ticks.
+0000               TICKS_H DATA    30h
+0000               TICKS_L DATA    31h
+0000                       ORG     0000h
+0000  02 00 40             LJMP    main
+0003                       ORG     000Bh
+000B  02 00 6E             LJMP    t0_isr
+000E                       ORG     0040h
+0040  75 81 5F     main:   MOV     SP, #5Fh
+0043  75 30 00             MOV     TICKS_H, #0
+0046  75 31 00             MOV     TICKS_L, #0
+0049  75 89 01             MOV     TMOD, #01h
+004C  75 8C DC             MOV     TH0, #0DCh
+004F  75 8A 00             MOV     TL0, #00h
+0052  43 B7 02             ORL     IPH, #02h               ; PT0H
+0055  D2 B9                SETB    PT0
+0057  D2 A9                SETB    ET0
+0059  D2 AF                SETB    EA
+005B  D2 8C                SETB    TR0
+005D  7F 0A                MOV     R7, #10
+005F  E5 31        wait:   MOV     A, TICKS_L
+0061  B5 31 02     w2:     CJNE    A, TICKS_L, tick        ; spin until the ISR advances the count
+0064  80 FB                SJMP    w2
+0066  DF F7        tick:   DJNZ    R7, wait
+0068  7F 0A                MOV     R7, #10
+006A  B2 90                CPL     P1.0
+006C  80 F1                SJMP    wait
+006E  75 8C DC     t0_isr: MOV     TH0, #0DCh              ; reload first (mode 1 has no auto-reload)
+0071  75 8A 00             MOV     TL0, #00h
+0074  B2 91                CPL     P1.1
+0076  05 31                INC     TICKS_L
+0078  C0 E0                PUSH    ACC
+007A  E5 31                MOV     A, TICKS_L
+007C  70 02                JNZ     t0_done
+007E  05 30                INC     TICKS_H
+0080               t0_done:
+0080  D0 E0                POP     ACC
+0082  32                   RETI

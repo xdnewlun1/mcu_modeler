@@ -94,6 +94,7 @@ class ECAN(C2000Block):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         self.letter = str(params.get("instance") or name[-1]).upper()
+        self.clock_div = float(params.get("clock_div", 2))     # module clock = SYSCLKOUT / clock_div
         self.errors = CanErrorCounters()
         self._cce = True
         self._pda = False
@@ -247,8 +248,9 @@ class ECAN(C2000Block):
         return self._loop_bus if self.get("CANMC") & STM else self.can_bus
 
     def clock_hz(self) -> float:
-        """eCAN module clock = SYSCLKOUT / 2 (§13.7.1.2)."""
-        return float(self.chip.clock.hz) / 2.0 if self.chip is not None else 0.0
+        """eCAN module clock = SYSCLKOUT / `params.clock_div`: 2 on the F2833x/F2823x (§13.7.1.2), 1 on the 280x
+        (SPRUEU0 3.1.2: "SYSCLKOUT ... the same as the CPU clock frequency")."""
+        return float(self.chip.clock.hz) / self.clock_div if self.chip is not None else 0.0
 
     def _btc_valid(self) -> bool:
         btc = self.get("CANBTC")
@@ -272,7 +274,8 @@ class ECAN(C2000Block):
         return sc is None or sc.clock_enabled(self.gate)
 
     def _on_bus(self, bus: CanBus) -> bool:
-        if bus is not self._bus() or self._cce or self._pda or self.errors.busoff or not self._gate_on():
+        if bus is not self._bus() or self._cce or self._pda or self.errors.busoff or not self._gate_on() \
+                or self.clk_stopped:                  # STANDBY / HALT: no module clock (SPRU074 3.5.2)
             return False
         return self.chip.now_ns() >= self._sync_t
 
@@ -644,6 +647,21 @@ class ECAN(C2000Block):
         self._tsc_rebase()
         if self.chip is not None:
             self._bus().withdraw(self)
+
+    def clock_resumed(self, dt_cycles: int) -> None:
+        """STANDBY/HALT exit: the time stamp counter held while SYSCLKOUT was off; the module was off the bus and
+        resynchronises (11 recessive bits) before it takes part again (SPRU074 3.5.2: frames seen half-way would be
+        errors)."""
+        if self.chip is None:
+            return
+        v, t0, run, bit = self._tsc
+        self._tsc = (v, t0 + dt_cycles * 1e9 / self.chip.clock.hz, run, bit)
+        if self._cce or self._pda:
+            return
+        bit = self.can_bit_ns()
+        self._sync_t = self.now_ns() + BUS_IDLE_BITS * bit if bit > 0 else float("inf")
+        if bit > 0:
+            self._sched("sync", self._sync_t, self._tx_changed)
 
     def _leave_init(self) -> None:
         if self.chip is None:

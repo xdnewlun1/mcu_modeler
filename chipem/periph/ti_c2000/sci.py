@@ -11,7 +11,7 @@ it is appended to `output`, logged as a `uart` event and passed to `tx_listeners
 with SCICCR.LOOPBKENA.  With SCIFFTX.SCIFFENA the 16-deep TX FIFO feeds the shift register; TXFFST counts it and
 TXFFINT is set while TXFFST <= TXFFIL (cleared by TXFFINTCLR, re-set while the condition holds).
 RX (SPRUFZ5 SCI reference guide: SCICTL1.RXENA/SW RESET, SCIRXST.RXRDY/OE/RXERROR, SCIFFRX.RXFFOVF; PCLKCR0
-SCIxENCLK; data sheet tms320f28232.pdf sec. "Serial Communications Interface"): no input queue, like silicon. A
+SCIxENCLK; data sheet docs/datasheets/ti/tms320f28232.pdf sec. "Serial Communications Interface"): no input queue, like silicon. A
 character arrives at its stop bit (host input through `feed()` is paced at this SCI's character time, board links
 call `receive()` at the stop-bit time, SCICCR.LOOPBKENA loops TX back one character time later; see
 chipem/periph/uartwire.py) and is dropped (`uart` event dir 'drop', reason) when PCLKCR0 SCIxENCLK = 0 (clock_gated),
@@ -27,6 +27,19 @@ Reading SCIRXBUF clears RXRDY / pops the FIFO.  RXFFINT is set while RXFFST >= R
 Interrupt lines (level, latched on rising edges by the PIE): RX = RXBKINTENA & RXRDY (+ RXERRINTENA & RXERROR), or
 RXFFIENA & RXFFINT in FIFO mode → SCIRXINTx; TX = TXINTENA & TXRDY, or TXFFIENA & TXFFINT → SCITXINTx.
 SWRESET = 0 holds the SCI in reset: TXRDY = TXEMPTY = 1, RX flags clear, TXBUF writes are ignored.
+
+Frames (chipem/periph/uartwire.py; SPRU051 §1.2.4-1.2.7, §2.6): characters go out as Frames: 1-8 data bits, in
+address-bit mode (SCICCR.ADDR/IDLE MODE = 1) the address bit (WUT: SCICTL1.TXWAKE latched when TXSHF is loaded,
+TXWAKE then clears), parity over data + address bit, 1/2 stop bits. In idle-line mode TXWAKE replaces the next
+character by an 11-bit idle period (block-start signal; a `uart` event {dir: 'tx', idle: 11}). The receiver decodes
+each arriving frame at its own settings (8 SCICLK per bit, a start bit needs 4 low periods, 2-of-3 majority of
+periods 4/5/6, only the first stop bit checked, no noise flag): PE (parity, address bit included), FE (stop bit 0),
+OE, BRKDT (the line stays low >= 10 bits after a missing stop bit: RX interrupt with RX/BK INT ENA, also in SLEEP;
+afterwards characters are dropped (reason break_detected) until SW RESET, as the guide says), RXERROR = OR of them.
+These clear only by SW RESET (reading SCIRXBUF clears RXRDY and RXWAKE only). FIFO mode: each character keeps its
+FE/PE in SCIRXBUF bits 15/14 (SCIFFFE/SCIFFPE). SLEEP: only address frames (address bit = 1, or the first character
+after >= 10 idle bits in idle-line mode) set RXRDY / flags (RXWAKE = 1); others are dropped (reason sleep).
+The F2823x SCI cannot transmit a break (no send-break control; a break needs the pin as a GPIO).
 """
 from __future__ import annotations
 
@@ -34,17 +47,23 @@ from collections import deque
 from typing import Any
 
 from ..registry import register
-from ..uartwire import UartRx
+from ..uartwire import SAMPLES_8, Frame, RxChar, RxFormat, UartRx
 from ._util import C2000Block, build_regs, fmt_hz, irq_line, lspclk_hz
 
 # SCICTL1
-RXENA, TXENA, SWRESET, RXERRINTENA = 1 << 0, 1 << 1, 1 << 5, 1 << 6
+RXENA, TXENA, SLEEP, TXWAKE, SWRESET, RXERRINTENA = 1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 5, 1 << 6
 # SCICTL2
 TXINTENA, RXBKINTENA, TXEMPTY, TXRDY = 1 << 0, 1 << 1, 1 << 6, 1 << 7
 # SCIRXST
-OE, BRKDT, RXRDY, RXERROR = 1 << 3, 1 << 5, 1 << 6, 1 << 7
+RXWAKE, PE, OE, FE, BRKDT, RXRDY, RXERROR = 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7
+RX_ERRS = BRKDT | FE | OE | PE
 # SCICCR
-LOOPBKENA, PARITYENA, PARITY_EVEN, STOPBITS2 = 1 << 4, 1 << 5, 1 << 6, 1 << 7
+ADDRIDLE, LOOPBKENA, PARITYENA, PARITY_EVEN, STOPBITS2 = 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7
+# SCIRXBUF (FIFO mode): flags of the character at the top of the FIFO
+SCIFFFE, SCIFFPE = 1 << 15, 1 << 14
+START_C2000 = (0.5 / 8, 1.5 / 8, 2.5 / 8, 3.5 / 8)    # "four consecutive internal SCICLK periods of zero bits"
+IDLE_BLOCK_BITS = 10                                  # idle-line mode: >= 10 idle bits start a block (§1.2.5)
+TXWAKE_IDLE_BITS = 11                                 # idle-line mode TXWAKE: an idle period of 11 bits (§1.2.5.3)
 # SCIFFTX
 TXFFIENA, TXFFINTCLR, TXFFINT, TXFIFOXRESET, SCIFFENA, SCIRST = 1 << 5, 1 << 6, 1 << 7, 1 << 13, 1 << 14, 1 << 15
 # SCIFFRX
@@ -135,12 +154,31 @@ class SCI(UartRx, C2000Block):
 
     def char_bits(self) -> int:
         ccr = self.get("SCICCR")
-        return 1 + self.data_bits() + (1 if ccr & PARITYENA else 0) + (2 if ccr & STOPBITS2 else 1)
+        return (1 + self.data_bits() + (1 if ccr & ADDRIDLE else 0) + (1 if ccr & PARITYENA else 0)
+                + (2 if ccr & STOPBITS2 else 1))
+
+    def _parity(self) -> str:
+        ccr = self.get("SCICCR")
+        return ("E" if ccr & PARITY_EVEN else "O") if ccr & PARITYENA else "N"
 
     def frame(self) -> str:
         ccr = self.get("SCICCR")
-        par = ("E" if ccr & PARITY_EVEN else "O") if ccr & PARITYENA else "N"
-        return f"{self.data_bits()}{par}{2 if ccr & STOPBITS2 else 1}"
+        return f"{self.data_bits()}{self._parity()}{2 if ccr & STOPBITS2 else 1}" + ("+A" if ccr & ADDRIDLE else "")
+
+    def tx_frame_for(self, b: int, wut: int = 0) -> Frame:
+        """Frame (SPRU051 §1.2.7, Figure 1-7): start, 1-8 data bits LSB first, the address bit (address-bit mode:
+        WUT, i.e. TXWAKE latched with the character), parity over data + address bit, 1 or 2 stop bits."""
+        ccr = self.get("SCICCR")
+        return Frame(b, self.data_bits(), self._parity(), 2.0 if ccr & STOPBITS2 else 1.0, self.baud(),
+                     addr=wut if ccr & ADDRIDLE else None)
+
+    def rx_format(self) -> RxFormat:
+        """Receiver (SPRU051 §1.2.7): 8 SCICLK periods per bit, a start bit needs four consecutive 0 periods,
+        every other bit is the 2-of-3 majority of the 4th/5th/6th periods; only the first stop bit is checked; no
+        noise flag."""
+        ccr = self.get("SCICCR")
+        return RxFormat(self.baud(), self.data_bits(), self._parity(), 2.0 if ccr & STOPBITS2 else 1.0,
+                        addr=bool(ccr & ADDRIDLE), samples=SAMPLES_8, start=START_C2000, start_all=True)
 
     def char_ns(self) -> float:
         b = self.baud()
@@ -290,14 +328,25 @@ class SCI(UartRx, C2000Block):
         return b
 
     def _start_shift(self, b: int) -> None:
+        """SCITXBUF -> TXSHF; TXWAKE -> WUT and TXWAKE is cleared (§1.2.5.3). Idle-line mode with WUT = 1: the
+        character is suppressed and an idle period of 11 bits goes out instead (block-start signal)."""
         self._ctl2(clr_bits=TXEMPTY)
-        self.output.append(b)
-        self.emit("uart", uart=self.name, dir="tx", byte=b)
-        for cb in list(self.tx_listeners):
-            cb(self, b)
+        c1 = self.get("SCICTL1")
+        wut = 1 if c1 & TXWAKE else 0
+        if wut:
+            self.set("SCICTL1", c1 & ~TXWAKE)
+        ccr = self.get("SCICCR")
+        if wut and not ccr & ADDRIDLE:
+            bd = self.baud()
+            self.emit("uart", uart=self.name, dir="tx", idle=TXWAKE_IDLE_BITS)
+            t = TXWAKE_IDLE_BITS * 1e9 / bd if bd > 0 else 1.0
+            self._shift_ev = self.chip.sched.in_ns(t, self._shift_done)
+            return
+        fr = self.tx_frame_for(b, wut)
+        self._tx_emit(fr)
         t = self.char_ns()
-        if self.get("SCICCR") & LOOPBKENA:
-            self._loop_evs.append(self.chip.sched.in_ns(t if t > 0 else 1.0, self._loop_arrive, b))
+        if ccr & LOOPBKENA:
+            self._loop_evs.append(self.chip.sched.in_ns(t if t > 0 else 1.0, self._loop_arrive, fr))
         self._shift_ev = self.chip.sched.in_ns(t if t > 0 else 1.0, self._shift_done)
 
     def _shift_done(self) -> None:
@@ -319,10 +368,10 @@ class SCI(UartRx, C2000Block):
     def rx_pending(self) -> int:
         return self.wire_pending() + len(self.rx_fifo) + (1 if self.get("SCIRXST") & RXRDY else 0)
 
-    def _loop_arrive(self, b: int) -> None:
+    def _loop_arrive(self, fr: Frame) -> None:
         if self._loop_evs:
             self._loop_evs.pop(0)               # loopback characters arrive in order
-        self._rx_arrive(b, "loop")
+        self._rx_frame(fr, "loop")
 
     def _rx_block_reason(self) -> str | None:
         sc = self._sysctrl
@@ -339,43 +388,70 @@ class SCI(UartRx, C2000Block):
             return "rx_disabled"
         return None
 
-    def _rx_accept(self, b: int) -> None:
-        b &= (1 << self.data_bits()) - 1
+    def _rx_accept(self, ch: RxChar) -> None:
+        """A decoded character (SPRU051 §1.2.4-1.2.8, §2.6): break detect (BRKDT: the line stays low >= 10 bits after
+        a missing first stop bit; RX interrupt even in SLEEP; further characters are not received until SW RESET),
+        sleep / wake-up (address-bit mode: address bit = 1; idle-line mode: >= 10 idle bits before the character;
+        RXWAKE), FE (first stop bit 0), PE (address bit included), OE; FIFO mode keeps FE/PE per character
+        (SCIRXBUF.SCIFFFE/SCIFFPE). Error flags clear only by SW RESET."""
+        st = self.get("SCIRXST")
+        b = ch.data & ((1 << self.data_bits()) - 1)
+        if st & BRKDT:
+            self._rx_drop(b, "break_detected")      # "the SCI must be reset by toggling the SW RESET bit"
+            return
+        ccr = self.get("SCICCR")
+        n = self.data_bits() + (1 if ccr & ADDRIDLE else 0) + (1 if ccr & PARITYENA else 0)
+        brkdt = bool(ch.brk and ch.brk >= n + 2 + 10 - 0.01)
+        if ccr & ADDRIDLE:
+            wake = bool(ch.addr)
+        else:
+            wake = ch.idle >= IDLE_BLOCK_BITS - 0.01
+        if self.get("SCICTL1") & SLEEP and not wake:
+            if brkdt:
+                self.emit("uart", uart=self.name, dir="rx", brk=round(ch.brk, 1))
+                self.set("SCIRXST", st | BRKDT | RXERROR)
+                self._update_lines()
+            else:
+                self._rx_drop(b, "sleep")           # no RXRDY, no error flags in sleep mode (§1.2.4)
+            return
+        err = (FE if ch.fe else 0) | (PE if ch.pe else 0) | (BRKDT if brkdt else 0)
         if self.fifo_mode():
             if len(self.rx_fifo) >= FIFO_DEPTH:
                 self._rx_drop(b, "overrun")
                 self.set("SCIFFRX", self.get("SCIFFRX") | RXFFOVF)
                 return
-            self.emit("uart", uart=self.name, dir="rx", byte=b)
-            self.rx_fifo.append(b)
+            self._rx_event(ch, b)
+            self.rx_fifo.append(b | (SCIFFFE if ch.fe else 0) | (SCIFFPE if ch.pe else 0))
+            st = (st & ~RXWAKE) | (RXWAKE if wake else 0) | err
+            self.set("SCIRXST", st | (RXERROR if st & RX_ERRS else 0))
             self._sync_ff()
             return
-        st = self.get("SCIRXST")
         if st & RXRDY:                          # previous character overwritten and lost
             self._rx_drop(self._rx_byte, "overrun")
-            st |= OE | RXERROR
-        self.emit("uart", uart=self.name, dir="rx", byte=b)
+            st |= OE
+        self._rx_event(ch, b)
         self._rx_byte = b
         self.set("SCIRXBUF", b)
         self.set("SCIRXEMU", b)
-        self.set("SCIRXST", st | RXRDY)
+        st = (st & ~RXWAKE) | (RXWAKE if wake else 0) | err | RXRDY
+        self.set("SCIRXST", st | (RXERROR if st & RX_ERRS else 0))
         self._update_lines()
 
     def _rxbuf_read(self, blk, reg):
         if self.fifo_mode():
             if self.rx_fifo:
-                b = self.rx_fifo.popleft()
-                self._rx_byte = b
+                w = self.rx_fifo.popleft()
+                self._rx_byte = w & 0xFF
                 self._sync_ff()
-                return b
+                return w
             return self._rx_byte
         st = self.get("SCIRXST")
-        if st & RXRDY:
-            self.set("SCIRXST", st & ~(RXRDY | BRKDT))
+        if st & (RXRDY | RXWAKE):
+            self.set("SCIRXST", st & ~(RXRDY | RXWAKE))   # BRKDT and the error flags stay until SW RESET
             self._update_lines()
         return self._rx_byte
 
     def _rxemu_read(self, blk, reg):
         if self.fifo_mode() and self.rx_fifo:
-            return self.rx_fifo[0]
+            return self.rx_fifo[0] & 0xFF
         return self._rx_byte

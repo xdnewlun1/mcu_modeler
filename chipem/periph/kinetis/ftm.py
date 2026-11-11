@@ -379,7 +379,8 @@ class FTM(GatedBlock):
     def _pos_now(self) -> float:
         if not self.running or self._tick_ns <= 0:
             return float(self._p0)
-        return self._p0 + (self.chip.now_ns() - self._start_ns) / self._tick_ns
+        now = self.lp_t0_ns if self.lp_frozen else self.chip.now_ns()
+        return self._p0 + (now - self._start_ns) / self._tick_ns
 
     def _t(self, pos: float) -> float:
         return self._start_ns + (pos - self._p0) * self._tick_ns
@@ -443,6 +444,16 @@ class FTM(GatedBlock):
             if pos > after + EPS:
                 self._ev = self.chip.sched.at_ns(self._t(pos), self._boundary, kind, pos)
                 return
+
+    lp_frozen = False                                   # set by the SMC freezer while the FTM clocks are stopped
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Stop modes (38.1.3: "all FTM input clocks are stopped"): the SMC held this FTM's events for the time
+        slept; move the counter anchor too, so CNT continues from the value it had at the stop."""
+        self._start_ns += dns
+        for c in self.ch:
+            if c.last_t != -_INF:
+                c.last_t += dns
 
     def _clock_changed(self) -> None:
         if not self.running or self.chip is None:
@@ -768,6 +779,8 @@ class FTM(GatedBlock):
         if self._in_last.get(pid) == lvl:
             return
         self._in_last[pid] = lvl
+        if self.lp_frozen:
+            return                                      # Stop modes: FTM clocks stopped (38.1.3), the edge is lost
         r = self._route(pin.owner)
         if r is None:
             return

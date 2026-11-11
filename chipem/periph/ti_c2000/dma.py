@@ -440,6 +440,11 @@ class DMA(C2000Block):
         self.bursts += 1
         self._ev = self.chip.sched.at_cycles(b.end(), self._service)
 
+    def clock_resumed(self, dt_cycles: int) -> None:
+        """STANDBY/HALT exit: a burst in progress continues with its remaining words."""
+        if self._busy is not None:
+            self._busy.t0 += dt_cycles
+
     def _begin_burst(self, c: _Chan) -> int:
         """Transfer start (if none is active), ADCSYNC check, burst start; returns the number of items."""
         ctl = self._g(c, "CONTROL")

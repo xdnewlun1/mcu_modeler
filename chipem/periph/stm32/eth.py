@@ -664,6 +664,14 @@ class ETH(GatedBlock):
             new &= ~WFFRPR
         return new
 
+    lp_frozen: Any = False              # PWR freezer: HCLK off in Stop (the PMT magic-packet detector still runs)
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Clock back after Stop: transmit pacing and a received PAUSE continue where they were."""
+        self._next_tx_t += dns
+        if self._pause_until:
+            self._pause_until += dns
+
     def _ptp_write(self, blk, reg, old, new):
         if new & 1 and not old & 1:
             self._warn_once("ptp", f"{self.name}: PTP time stamping (PTPTSCR.TSE) is not modelled: registers are "
@@ -1113,6 +1121,9 @@ class ETH(GatedBlock):
                 return
         f = wire[:-4] if len(wire) >= 4 else wire
         pmt = self.get("MACPMTCSR")
+        if self.lp_frozen and not pmt & PD:
+            self.stats["lost"] += 1             # Stop: HCLK off, the RX FIFO/DMA cannot take the frame (only PMT runs)
+            return
         if pmt & PD:
             if pmt & MPE and self._magic(f):
                 self.set("MACPMTCSR", (pmt & ~PD) | MPR)

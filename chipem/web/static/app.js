@@ -102,6 +102,7 @@ async function api(path, body) {
   if (!r.ok) {
     const e = new Error((data && data.error) || `${r.status} ${r.statusText}`);
     e.status = r.status;
+    if (data && data.scripts) e.scripts = data.scripts;        // 409: script parts need the user's consent
     throw e;
   }
   return data;
@@ -509,6 +510,7 @@ async function boot() {
   selectChip(ui.sel, true);
 
   initLogic();
+  initDebug();
 
   const st = await api("/api/state");
   applyState(st);
@@ -609,6 +611,8 @@ function selectChip(cid, initial = false) {
     b.tabIndex = on ? 0 : -1;
   }
   ui.board.setSelected(cid);
+  ui.debug?.setChip?.(cid);
+  ui.regview?.setChip?.(cid);
   const c = ui.chipById.get(cid);
   $("pinsChip").textContent = ui.isBoard ? `chip ${cid} · ${c.name}` : "";
   $("btnStep").title = `Execute N instructions on ${ui.isBoard ? `chip ${cid} (the other chips do not move)` : "the chip"} (S)`;
@@ -719,6 +723,9 @@ function applyState(st) {
   }
   renderReadouts(st);
   renderStatus(st);
+  renderPerf(st);
+  ui.debug?.onState?.(st);
+  ui.regview?.onState?.(st);
   if (st.board && !ui.isBoard && !ui._reloading) {             // a part was added elsewhere: board layout
     ui._reloading = true;
     location.reload();
@@ -822,7 +829,7 @@ function renderReadouts(st) {
   const cs = chipState(st, ui.sel) || st;
   const t = st.board ? st.board.t_ns : (st.t_ns ?? st.time_ns);
   $("tTime").textContent = fmtTime(t);
-  $("tSpeed").textContent = updateSpeed(st);
+  renderSpeed(st);
   $("tInsn").textContent = cs.insns != null ? cs.insns.toLocaleString() : "—";
   $("tCycles").textContent = (cs.cycles ?? 0).toLocaleString();
   $("tClock").textContent = cs.hz ? fmtFreq(cs.hz) : "—";
@@ -864,7 +871,7 @@ function regRows() {
   const keys = [...REG_ORDER.filter((k) => k in cs), ...Object.keys(cs).filter((k) => !REG_ORDER.includes(k) && !skip.has(k))];
   const val = (k, v) => {
     if (v == null) return "—";
-    if (typeof v === "number" && /^(pc|sp|lr|msp|psp|xpsr|control|r\d+|xar\d|acc|p|xt|st\d|ier|ifr|dp)$/i.test(k)) return hex32(v);
+    if (typeof v === "number" && /^(pc|sp|lr|msp|psp|xpsr|control|r\d+|xar\d|acc|p|xt|st\d|ier|ifr|dp|a|b|psw|dptr|ie|ip|iph)$/i.test(k)) return hex32(v);
     if (typeof v === "object") return JSON.stringify(v);
     return typeof v === "number" ? v.toLocaleString() : String(v);
   };
@@ -1073,6 +1080,21 @@ function editAnalog(td, cid, p) {
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
   });
   inp.addEventListener("blur", () => finish(true));
+}
+
+// ---------------------------------------------------------------- debugger + register browser (debug.js, regview.js)
+async function initDebug() {
+  const opts = () => ({ api, toast, toastErr, chip: ui.sel, isBoard: ui.isBoard });
+  try {
+    const { DebugPane } = await import("./debug.js");
+    ui.debug = new DebugPane($("debugPane"), opts());
+  } catch (e) { $("debugPane").innerHTML = `<div class="empty">debugger: ${esc(e.message)}</div>`; }
+  try {
+    const { RegView } = await import("./regview.js");
+    ui.regview = new RegView($("regsPane"), opts());
+  } catch (e) { $("regsPane").innerHTML = `<div class="empty">registers: ${esc(e.message)}</div>`; }
+  if (ui.tab === "debug") ui.debug?.show(true);
+  if (ui.tab === "regs") ui.regview?.show(true);
 }
 
 // ---------------------------------------------------------------- logic strip (logic.js, optional)
@@ -1708,6 +1730,101 @@ function statRowsCsv() {
     .map((r) => [r.head, r.type, r.fields.map(([k, v]) => `${k}=${statVal(k, v)}`).join(" ")])];
 }
 
+// ---------------------------------------------------------------- emulation rate + performance (chipem/perf.py)
+const fmtX = (x) => (x == null ? "—" : `×${x >= 100 ? x.toFixed(0) : x >= 0.01 ? x.toPrecision(2) : x.toExponential(1)}`);
+const fmtNsShort = (ns) => (ns == null ? "" : ns >= 1e6 ? `${+(ns / 1e6).toPrecision(3)}ms` : ns >= 1e3 ? `${+(ns / 1e3).toPrecision(3)}us` : `${+ns.toPrecision(3)}ns`);
+
+// toolbar speed readout: achieved (server meter over the last second of running) vs requested; warn when behind
+function renderSpeed(st) {
+  const sp = st.speed;
+  const el = $("tSpeed");
+  if (!sp || !st.running) {
+    el.textContent = st.running ? updateSpeed(st) : (sp && sp.ratio != null ? fmtX(sp.ratio) : "—");
+    el.classList.remove("behind");
+    el.parentElement.title = "Speed: virtual time per wall-clock second while running";
+    return;
+  }
+  const req = sp.requested;
+  el.textContent = `${fmtX(sp.ratio)}${req != null ? `/${fmtX(req).slice(1)}` : ""}`;
+  el.classList.toggle("behind", !!sp.behind);
+  const chips = Object.entries(sp.chips || {}).map(([c, v]) => `${c} ${v.mips.toFixed(2)} MIPS${v.share != null && Object.keys(sp.chips).length > 1 ? ` (${Math.round(v.share * 100)} %)` : ""}`).join(", ");
+  el.parentElement.title = `achieved ${fmtX(sp.ratio)} of real time, requested ${req == null ? "max (unpaced)" : fmtX(req)}` +
+    (sp.behind ? " — the emulation cannot keep up with the requested rate" : "") + (chips ? `\n${chips}` : "") +
+    (sp.bottleneck ? `\nbottleneck: chip ${sp.bottleneck}` : "");
+}
+
+function setIfIdle(id, v) {
+  const e = $(id);
+  if (document.activeElement === e) return;
+  if (e.type === "checkbox") e.checked = !!v; else if (String(e.value) !== String(v)) e.value = v;
+}
+
+function renderPerf(st) {
+  const sp = st.speed;
+  if (!sp) return;
+  const req = sp.requested;
+  // toolbar rate control
+  if (document.activeElement !== $("rateIn")) $("rateIn").value = req == null ? "max" : String(req);
+  const opt = req == null ? "max" : String(req);
+  setIfIdle("rateSel", [...$("rateSel").options].some((o) => o.value === opt) ? opt : "custom");
+  // settings
+  const p = sp.settings || {};
+  setIfIdle("perfPreset", p.preset || "default");
+  setIfIdle("perfSlice", p.max_slice ?? "");
+  setIfIdle("perfQuantum", sp.quantum_ns != null ? fmtNsShort(sp.quantum_ns) : "");
+  setIfIdle("perfAuto", sp.auto_quantum);
+  setIfIdle("perfPoll", p.poll_skip_ns ? fmtNsShort(p.poll_skip_ns) : "0");
+  setIfIdle("perfPin", p.pin_log || "auto");
+  setIfIdle("perfDrop", (p.drop_kinds || []).join(","));
+  setIfIdle("perfUi", p.ui_interval_s != null ? `${Math.round(p.ui_interval_s * 1000)}ms` : "");
+  // summary line + per-chip table
+  const sum = `${p.preset || ""} · ${fmtX(sp.ratio)}${req != null ? ` of ${fmtX(req)}` : ""}${sp.behind ? " · cannot keep up" : ""}` +
+    (sp.quantum_ns != null ? ` · quantum ${fmtNsShort(sp.quantum_ns)}${sp.auto_quantum ? "+auto" : ""}` : "") +
+    (sp.bottleneck ? ` · bottleneck ${sp.bottleneck}` : "");
+  if ($("perfSum").textContent !== sum) $("perfSum").textContent = sum;
+  $("perfSum").classList.toggle("warn", !!sp.behind);
+  const rows = Object.entries(sp.chips || {});
+  const multi = rows.length > 1;
+  const html = rows.length ? `<tr><th>chip</th><th>MHz</th><th>MIPS</th><th>×real</th>${multi ? "<th>wall</th>" : ""}</tr>` +
+    rows.map(([c, v]) => `<tr${c === sp.bottleneck ? ' class="bott" title="bottleneck: this chip takes the largest share of the wall time"' : ""}><td>${esc(c)}</td><td>${v.mhz}</td><td>${v.mips.toFixed(2)}</td><td>${fmtX(v.ratio)}</td>` +
+      `${multi ? `<td>${v.share != null ? `${Math.round(v.share * 100)} %` : "—"}</td>` : ""}</tr>`).join("") : "";
+  if ($("perfLive")._h !== html) { $("perfLive").innerHTML = html; $("perfLive")._h = html; }
+}
+
+async function setRate(v) {
+  const t = String(v).trim().toLowerCase().replace(/^[x×]/, "");
+  try {
+    if (t === "max" || t === "inf" || t === "") await api("/api/realtime", { on: false });
+    else {
+      const x = parseFloat(t);
+      if (!(x > 0) || !Number.isFinite(x)) throw new Error(`bad rate ${v} (a factor such as 0.1, 1, 10, or max)`);
+      await api("/api/realtime", { on: true, speed: x });
+    }
+  } catch (e) { toastErr(`rate: ${e.message}`); }
+}
+
+async function setPerf(patch) {
+  try { await api("/api/perf", patch); } catch (e) { toastErr(`performance: ${e.message}`); }
+}
+
+function bindPerf() {
+  $("rateSel").addEventListener("change", () => { const v = $("rateSel").value; if (v !== "custom") setRate(v); });
+  $("rateIn").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); setRate($("rateIn").value); $("rateIn").blur(); } });
+  $("rateIn").addEventListener("change", () => setRate($("rateIn").value));
+  $("perfPreset").addEventListener("change", () => { if ($("perfPreset").value !== "custom") setPerf({ preset: $("perfPreset").value }); });
+  const onEnter = (id, fn) => {
+    $(id).addEventListener("change", () => fn($(id).value.trim()));
+    $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $(id).blur(); } });
+  };
+  onEnter("perfSlice", (v) => setPerf({ max_slice: parseInt(v, 10) }));
+  onEnter("perfQuantum", (v) => setPerf({ quantum: v === "" ? null : (/^[\d.]+$/.test(v) ? `${v}us` : v) }));
+  onEnter("perfPoll", (v) => setPerf({ poll_skip: v === "" || v === "0" ? 0 : (/^[\d.]+$/.test(v) ? `${v}us` : v) }));
+  onEnter("perfDrop", (v) => setPerf({ drop_kinds: v }));
+  onEnter("perfUi", (v) => setPerf({ ui_interval: /^[\d.]+$/.test(v) ? `${v}ms` : v }));
+  $("perfAuto").addEventListener("change", () => setPerf({ auto_quantum: $("perfAuto").checked }));
+  $("perfPin").addEventListener("change", () => setPerf({ pin_log: $("perfPin").value }));
+}
+
 async function setRealtime() {
   const sp = parseFloat($("rtSpeed").value);
   try {
@@ -1721,7 +1838,8 @@ function showTab(tab) {
   if (tab === true) tab = "disc"; else if (tab === false) tab = "pins";
   ui.tab = tab;
   ui.discOn = tab === "disc";
-  for (const [id, t, panel] of [["tabPins", "pins", "pinWrap"], ["tabDisc", "disc", "discPane"], ["tabLogic", "logic", "logicPane"]]) {
+  for (const [id, t, panel] of [["tabPins", "pins", "pinWrap"], ["tabDisc", "disc", "discPane"], ["tabLogic", "logic", "logicPane"],
+                                 ["tabDebug", "debug", "debugPane"], ["tabRegs", "regs", "regsPane"]]) {
     const on = t === tab;
     $(id).classList.toggle("on", on);
     $(id).setAttribute("aria-selected", String(on));
@@ -1732,6 +1850,8 @@ function showTab(tab) {
   $("discTools").hidden = tab !== "disc";
   if (tab === "disc") loadDiscovery();
   if (tab === "logic") ui.logic?.resize?.();
+  ui.debug?.show?.(tab === "debug");                 // debug.js / regview.js (initDebug)
+  ui.regview?.show?.(tab === "regs");
   prefs.tab = tab; savePrefs();
 }
 
@@ -1991,7 +2111,99 @@ function partControls(p) {
       `<label class="pp" title="duty cycle in % high">duty % <input type="text" data-param="duty" value="${esc(+((pa.duty ?? 0.5) * 100).toFixed(3))}" size="3" spellcheck="false"></label>`;
     case "pattern": return `<input type="text" class="pat" data-param="steps" value="${esc(fmtSteps(pa.steps))}" spellcheck="false" title="time:level steps, e.g. 0:L 1ms:H 3ms:L (Enter applies)">` +
       `<label class="toggle"><input type="checkbox" data-param="repeat" ${pa.repeat ? "checked" : ""}> repeat</label>`;
+    case "script": return scriptControls(p, st);
     default: return "";
+  }
+}
+
+// script parts (chipem/parts/script.py): PARAMS as fields, @action methods as buttons, reload / edit the source
+function scriptControls(p, st) {
+  const sc = p.script || {};
+  const vals = st.params || {};
+  const ctl = (sc.controls || []).map((c) => {
+    const v = vals[c.name] ?? c.default;
+    const tip = [c.doc, c.unit && `unit ${c.unit}`, c.min != null && `min ${c.min}`, c.max != null && `max ${c.max}`]
+      .filter(Boolean).join(" · ") || `${c.name} (Enter applies)`;
+    let inp;
+    if (typeof c.default === "boolean") inp = `<input type="checkbox" data-param="${esc(c.name)}" ${v ? "checked" : ""}>`;
+    else if (Array.isArray(c.choices)) inp = `<select data-param="${esc(c.name)}">${c.choices.map((o) => `<option${o === v ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    else inp = `<input type="text" data-param="${esc(c.name)}" value="${esc(v ?? "")}" spellcheck="false">`;
+    return `<label class="pp" title="${esc(tip)}">${esc(c.name)} ${inp}${c.unit ? `<span class="unit">${esc(c.unit)}</span>` : ""}</label>`;
+  }).join("");
+  const acts = (sc.actions || []).map((a) => `<button class="btn small ghost" data-set='${esc(JSON.stringify({ action: a }))}' title="run the script's @action ${esc(a)}">${esc(a)}</button>`).join("");
+  return ctl + acts +
+    `<button class="btn small ghost" data-script="reload" title="re-read ${esc(sc.file || "the inline code")}: state restarts with on_reset; ports cannot change without reloading the board">reload</button>` +
+    `<button class="btn small ghost" data-script="edit" title="edit the script source">edit</button>`;
+}
+
+async function scriptReload(id) {
+  const r = await act("/api/part/reload", { id });
+  if (!r) return;
+  scriptUpdated(id, r);
+  toast(`${id}: script reloaded`);
+}
+
+function scriptUpdated(id, r) {
+  const p = partById(id);
+  if (p && r.script) p.script = r.script;
+  if (r.state) ui.partState[id] = r.state;
+  renderPartsPanel();
+  ui.partsDirty = true;
+  schedule();
+}
+
+let scriptEdit = null;                      // part id being edited
+async function openScriptEditor(id) {
+  let src;
+  try { src = await api(`/api/part/script?id=${encodeURIComponent(id)}`); } catch (e) { toastErr(`script: ${e.message}`); return; }
+  scriptEdit = id;
+  $("sdTitle").textContent = `Script ${id}`;
+  $("sdFile").textContent = src.file || "inline code (saved in the board)";
+  $("sdFile").title = src.file || "";
+  $("sdCode").value = src.code || "";
+  $("sdErr").textContent = "";
+  $("scriptDlg").showModal();
+  $("sdCode").focus();
+}
+
+async function saveScript() {
+  if (!scriptEdit) return;
+  $("sdErr").textContent = "";
+  try {
+    const r = await api("/api/part/script", { id: scriptEdit, code: $("sdCode").value });
+    scriptUpdated(scriptEdit, r);
+    toast(`${scriptEdit}: saved and reloaded`);
+  } catch (e) { $("sdErr").textContent = e.message; }
+}
+
+function wireScriptEditor() {
+  const dlg = $("scriptDlg");
+  if (!dlg) return;
+  const close = () => { scriptEdit = null; if (dlg.open) dlg.close(); };
+  $("sdClose").addEventListener("click", close);
+  $("sdCancel").addEventListener("click", close);
+  $("sdSave").addEventListener("click", saveScript);
+  dlg.addEventListener("close", () => { scriptEdit = null; });
+  $("sdCode").addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveScript(); return; }
+    if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey) {     // indent / dedent with spaces
+      e.preventDefault();
+      const ta = e.target, a = ta.selectionStart, b = ta.selectionEnd, v = ta.value;
+      if (!e.shiftKey && a === b) { ta.setRangeText("    ", a, b, "end"); return; }
+      const ls = v.lastIndexOf("\n", a - 1) + 1;
+      const block = v.slice(ls, b);
+      const out = e.shiftKey ? block.replace(/^ {1,4}/gm, "") : block.replace(/^/gm, "    ");
+      ta.setRangeText(out, ls, b, "select");
+    }
+  });
+}
+
+// POST that may need the user's consent to run Python script parts (server answers 409 with the script list)
+async function apiScripts(path, body) {
+  try { return await api(path, body); } catch (e) {
+    if (e.status !== 409 || !/script parts/.test(e.message)) throw e;
+    if (!window.confirm(`${e.message.replace(/ \(send allow_scripts: true\)$/, "")}.\n\nA script part can do anything your user can do. Run it?`)) return null;
+    return api(path, { ...body, allow_scripts: true });
   }
 }
 
@@ -2064,6 +2276,16 @@ function renderPartStates() {
     }
     const pr = row.querySelector(".part-press");
     if (pr) pr.classList.toggle("on", !!st.pressed);
+    if (p.type === "script") {
+      row.classList.toggle("faulted", !!st.fault);
+      row.title = st.fault ? `faulted: ${st.fault} (reset or reload)` : "";
+      for (const inp of row.querySelectorAll(".part-ctl [data-param]")) {      // values the script changed itself
+        const v = (st.params || {})[inp.dataset.param];
+        if (v === undefined || document.activeElement === inp) continue;
+        if (inp.type === "checkbox") inp.checked = !!v;
+        else if (inp.value !== String(v ?? "")) inp.value = String(v ?? "");
+      }
+    }
   }
 }
 
@@ -2080,8 +2302,9 @@ async function partParamChanged(row, input) {
   const id = row.dataset.part;
   const key = input.dataset.param;
   let v = input.type === "checkbox" ? input.checked : input.value.trim();
+  const isScript = (partById(id) || {}).type === "script";     // script PARAMS: sent as typed, the part converts
   try {
-    if (key === "steps") v = parseSteps(v);
+    if (isScript) { /* as is */ } else if (key === "steps") v = parseSteps(v);
     else if (key === "duty") {                       // entered in %, the part takes a fraction
       const d = parseFloat(String(v).replace("%", ""));
       if (!Number.isFinite(d) || d < 0 || d > 100) throw new Error("duty: a percentage 0 … 100");
@@ -2094,6 +2317,7 @@ async function partParamChanged(row, input) {
 
 function wirePartDialog() {
   initBoardDialog({ api, toast, toastErr });
+  wireScriptEditor();
   $("btnAddPart").addEventListener("click", openPartDialog);
   $("btnAddPart0").addEventListener("click", openPartDialog);
   $("pdClose").addEventListener("click", closePartDialog);
@@ -2124,6 +2348,8 @@ function buildPartsPanel() {
     if (!row) return;
     const id = row.dataset.part;
     if (e.target.closest(".part-del")) { removePart(id); return; }
+    const sc = e.target.closest("[data-script]");
+    if (sc) { if (sc.dataset.script === "reload") scriptReload(id); else openScriptEditor(id); return; }
     const sb = e.target.closest("[data-set]");
     if (sb) { setPart(id, JSON.parse(sb.dataset.set)); return; }
   });
@@ -2161,6 +2387,7 @@ async function removePart(id) {
   const p = partById(id);
   const def = p && { id: p.id, type: p.type, params: { ...(p.params || {}) },
     ports: Object.fromEntries(Object.entries(p.ports || {}).filter(([, n]) => n)) };
+  if (def && p.type === "script") def.allow_scripts = true;     // it ran already: undo needs no new consent
   const r = await act("/api/part/remove", { id });
   if (!r) return;
   reloadWiring(r.wiring);
@@ -2273,7 +2500,8 @@ async function submitPart() {
   const body = { type, params, ports };
   const id = $("pdId").value.trim();
   if (id) body.id = id;
-  const r = await act("/api/part", body);
+  let r = null;
+  try { r = await apiScripts("/api/part", body); } catch (e) { toastErr(e.message); }
   if (r) {
     toast(`added ${r.part ? r.part.id : type}`);
     if (!ui.isBoard) { location.reload(); return; }          // the lone chip is now a one-chip board
@@ -2639,6 +2867,7 @@ function initDataTools() {
   $("linkMonWrap").addEventListener("toggle", () => { prefs.linkMon = $("linkMonWrap").open; savePrefs(); ui.uartDirty = true; schedule(); });
   $("rtOn").addEventListener("change", setRealtime);
   $("rtSpeed").addEventListener("change", setRealtime);
+  bindPerf();
   // status
   bindFilter($("statFilter"), applyStatFilter);
   $("statCopy").addEventListener("click", () => copyText(toTsv(statRowsCsv()), "row"));
@@ -2736,8 +2965,12 @@ function wireControls() {
   $("tabPins").addEventListener("click", () => showTab("pins"));
   $("tabDisc").addEventListener("click", () => showTab("disc"));
   $("tabLogic").addEventListener("click", () => showTab("logic"));
+  $("tabDebug").addEventListener("click", () => showTab("debug"));
+  $("tabRegs").addEventListener("click", () => showTab("regs"));
   tabKeys(document.querySelector("#panePins .tabs"), (b) => b.click());
-  if (prefs.tab && prefs.tab !== "pins") showTab(prefs.tab);
+  const urlTab = new URLSearchParams(location.search).get("tab");     // deep link: /?tab=debug | regs | logic | disc
+  if (urlTab && $(`tab${{ pins: "Pins", disc: "Disc", logic: "Logic", debug: "Debug", regs: "Regs" }[urlTab] || ""}`)) showTab(urlTab);
+  else if (prefs.tab && prefs.tab !== "pins") showTab(prefs.tab);
   $("discRefresh").addEventListener("click", loadDiscovery);
   $("discStatic").addEventListener("change", loadDiscovery);
   $("btnRun").addEventListener("click", () => act("/api/run", {}));
@@ -2843,6 +3076,7 @@ function wireControls() {
 // global shortcuts: case-insensitive, never while typing, never behind a modal dialog, Space presses a focused button
 function onKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^F\d+$/.test(e.key) && !document.body.classList.contains("modal-open") && ui.debug?.onKey?.(e)) return;   // debugger F-keys
   const t = e.target;
   const inField = t.closest && t.closest("input, select, textarea, [contenteditable]");
   const inDlg = t.closest && t.closest("#partDlg, #boardDlg, #restartPop");

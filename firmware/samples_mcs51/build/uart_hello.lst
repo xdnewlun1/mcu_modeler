@@ -1,0 +1,33 @@
+0000               ; uart_hello: "Hello" banner and echo on the UART at 9600 8N1, baud rate from Timer 1.
+0000               ; 11.0592 MHz, 12-clock, SMOD1 = 0: Timer 1 mode 2, TH1 = 256 - 11059200 / (12 * 32 * 9600) = 253 = FDh.
+0000               ; Every received byte is sent back; P1.0 toggles per byte.
+0000                       ORG     0000h
+0000  02 00 30             LJMP    main
+0003                       ORG     0030h
+0030  75 81 5F     main:   MOV     SP, #5Fh
+0033  75 89 20             MOV     TMOD, #20h              ; Timer 1 mode 2 (8-bit auto-reload)
+0036  75 8D FD             MOV     TH1, #0FDh
+0039  75 8B FD             MOV     TL1, #0FDh
+003C  75 98 50             MOV     SCON, #50h              ; mode 1, REN
+003F  D2 8E                SETB    TR1
+0041  90 00 68             MOV     DPTR, #banner
+0044  12 00 5D             LCALL   puts
+0047  30 98 FD     echo:   JNB     RI, $
+004A  E5 99                MOV     A, SBUF
+004C  C2 98                CLR     RI
+004E  B2 90                CPL     P1.0
+0050  12 00 55             LCALL   putc
+0053  80 F2                SJMP    echo
+0055  C2 99        putc:   CLR     TI
+0057  F5 99                MOV     SBUF, A
+0059  30 99 FD             JNB     TI, $
+005C  22                   RET
+005D  E4           puts:   CLR     A
+005E  93                   MOVC    A, @A+DPTR
+005F  60 06                JZ      puts_end
+0061  12 00 55             LCALL   putc
+0064  A3                   INC     DPTR
+0065  80 F6                SJMP    puts
+0067               puts_end:
+0067  22                   RET
+0068  48 65 6C 6C 6F 20 66 72 6F 6D 20 50 38 39 43 56 35 31 52 44 32 20 28 55 41 52 54 20 39 36 30 30 20 66 72 6F 6D 20 54 69 6D 65 72 20 31 29 0D 0A 00 banner: DB      "Hello from P89CV51RD2 (UART 9600 from Timer 1)", 13, 10, 0

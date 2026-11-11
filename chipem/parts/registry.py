@@ -29,6 +29,7 @@ def _load() -> None:
     from . import encoder, i2c_eeprom, i2c_register_device, i2s_codec, std  # noqa: F401  (standard types)
     from . import camera  # noqa: F401  (parallel camera, DVP hook)
     from . import serial  # noqa: F401  (serial cable chain: adapter, transceiver, connectors, cable)
+    from . import script  # noqa: F401  (scripted part: custom component written in Python)
 
 
 def get(type_name: str) -> type:

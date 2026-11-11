@@ -1,0 +1,10 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+B:0x00A0 CS
+C:0x0030 main
+C:0x0051 id_lp
+C:0x0071 rd_lp
+C:0x00A4 spi_xfer
+C:0x00B1 puthex
+C:0x00B9 nib
+C:0x00C4 nib_out
+C:0x00C4 putc

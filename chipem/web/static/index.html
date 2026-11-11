@@ -17,6 +17,7 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/layout.css">
+  <link rel="stylesheet" href="/static/debug.css">
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
@@ -49,6 +50,14 @@
       <div class="runfor joined">
         <input id="runFor" class="run-ctl" type="text" value="100ms" spellcheck="false" aria-label="Run duration" title="Duration, e.g. 500us, 10ms, 1.5s (Enter runs)">
         <button id="btnRunFor" class="btn run-ctl" title="Run for the given virtual time">Run for</button>
+      </div>
+      <div class="rate joined" title="Emulation rate: virtual seconds per wall-clock second (real-time pacing); max = as fast as possible. Type any factor (e.g. 0.002) and press Enter.">
+        <select id="rateSel" aria-label="Emulation rate preset">
+          <option value="max">max</option><option value="0.01">×0.01</option><option value="0.1">×0.1</option>
+          <option value="0.5">×0.5</option><option value="1">×1</option><option value="2">×2</option>
+          <option value="10">×10</option><option value="custom" hidden>custom</option>
+        </select>
+        <input id="rateIn" type="text" value="max" spellcheck="false" aria-label="Emulation rate (factor or max)">
       </div>
       <button id="btnBoard" class="btn" title="Board setup (B): add or remove MCUs, choose firmware, new / open / save a board">Board</button>
     </div>
@@ -96,6 +105,9 @@
       <tr class="board-row"><th>1–9</th><td>select chip</td></tr>
       <tr class="board-row"><th>Del</th><td>remove the selected net (undo in the toast)</td></tr>
       <tr><th>T</th><td>trace the selected pin in the Logic tab</td></tr>
+      <tr><th>F10 / F11</th><td>debugger: step over / step into (line; one instruction in the asm view)</td></tr>
+      <tr><th>Shift+F11</th><td>debugger: step out of the current function</td></tr>
+      <tr><th>F5 / Shift+F5</th><td>Debug tab: continue / pause · F4 run to cursor · F9 breakpoint at the cursor</td></tr>
       <tr><th>/</th><td>focus the filter of the pane under the pointer (over the board: find pin)</td></tr>
       <tr><th>Enter</th><td>find pin: next match · Shift+Enter: previous</td></tr>
       <tr><th>Tab, arrows</th><td>board: one stop per package, arrows move between pins, Enter opens the pin card</td></tr>
@@ -137,6 +149,10 @@
                     title="What the firmware did with each pin: configuring code, reads/writes, interrupts, floating inputs">Discovery</button>
             <button class="tab" id="tabLogic" role="tab" aria-selected="false" aria-controls="logicPane" tabindex="-1"
                     title="Logic analyser: traced pins over time (T on a selected pin, or 'trace' in the pin card)">Logic <span class="count" id="logicCount"></span></button>
+            <button class="tab" id="tabDebug" role="tab" aria-selected="false" aria-controls="debugPane" tabindex="-1"
+                    title="Debugger: source / disassembly, breakpoints, stepping (F10 over, F11 into, Shift+F11 out, F5 continue), registers, call stack, memory">Debug</button>
+            <button class="tab" id="tabRegs" role="tab" aria-selected="false" aria-controls="regsPane" tabindex="-1"
+                    title="Peripheral registers of the selected chip: bit fields, live values (no read side effects), write while paused">Registers</button>
           </div>
           <span class="pins-chip" id="pinsChip"></span>
           <div class="head-tools" id="discTools" hidden>
@@ -196,6 +212,8 @@
             <pre id="discText" class="term disc-text"></pre>
           </div>
           <div id="logicPane" class="logic-pane" role="tabpanel" aria-labelledby="tabLogic" hidden></div>
+          <div id="debugPane" class="debug-pane" role="tabpanel" aria-labelledby="tabDebug" hidden></div>
+          <div id="regsPane" class="debug-pane" role="tabpanel" aria-labelledby="tabRegs" hidden></div>
         </div>
       </section>
     </div>
@@ -281,6 +299,22 @@
           </div>
         </div>
         <div class="pane-body">
+          <details class="perf" id="perfWrap">
+            <summary title="Speed / fidelity settings (chipem/perf.py) and the speed the emulation achieves">performance <span class="perf-sum" id="perfSum"></span></summary>
+            <div class="perf-ctl">
+              <label title="accurate: max slice 500, every pin edge logged · default · fast: auto quantum, poll skip 100 µs, no mmio events, UI every 200 ms">preset
+                <select id="perfPreset"><option value="accurate">accurate</option><option value="default">default</option><option value="fast">fast</option><option value="custom" hidden>custom</option></select></label>
+              <label title="max instructions per core slice; slices end at the next event anyway. Longer: faster; pause/stop and clock.now_ns()-stamped things react up to one slice later">slice<input id="perfSlice" type="text" size="6" spellcheck="false"></label>
+              <label class="perf-board" title="board lockstep quantum = worst-case latency of a pin edge or link byte between chips (empty: the board file's value)">quantum<input id="perfQuantum" type="text" size="6" spellcheck="false"></label>
+              <label class="perf-board toggle" title="sleeping chips hold the others back only up to their next event (no fidelity cost)"><input type="checkbox" id="perfAuto">auto</label>
+              <label title="fast-forward polling loops (MMIO status reads with identical CPU state) up to the next event, at most this long at a time (0 = off). Values a model computes from time on each read are seen up to this late">poll skip<input id="perfPoll" type="text" size="6" spellcheck="false"></label>
+              <label title="pin edges in the event log: all · auto (PWM-like pins as wave summaries) · off (VCD and pin table still see every edge)">pin log
+                <select id="perfPin"><option>all</option><option>auto</option><option>off</option></select></label>
+              <label title="event kinds not recorded at all (comma list, e.g. mmio,i2s)">drop<input id="perfDrop" type="text" size="9" spellcheck="false"></label>
+              <label title="how often the UI state is refreshed">UI<input id="perfUi" type="text" size="5" spellcheck="false"></label>
+            </div>
+            <table class="perf-live" id="perfLive"></table>
+          </details>
           <div class="host-ctl" id="hostSerWrap">
             <label class="toggle" title="lock virtual time to the wall clock (needed for PC software on a host serial port; idle firmware costs no CPU)"><input type="checkbox" id="rtOn"> real time</label>
             <label class="toggle" title="speed factor: virtual seconds per wall second">speed<input id="rtSpeed" type="text" value="1" size="4" spellcheck="false" aria-label="real-time speed factor"></label>
@@ -366,6 +400,24 @@
       </div>
     </form>
   </div>
+
+  <dialog id="scriptDlg" class="dialog script-dlg" aria-labelledby="sdTitle" aria-modal="true">
+    <div class="dlg-head">
+      <h3 id="sdTitle">Script</h3>
+      <span id="sdFile" class="sd-file"></span>
+      <button type="button" id="sdClose" class="btn small ghost" title="Close (Esc)" aria-label="close">×</button>
+    </div>
+    <div class="sd-body">
+      <textarea id="sdCode" spellcheck="false" wrap="off" autocomplete="off" aria-label="script source"></textarea>
+      <p class="bd-note">Python, run with your user's privileges. Save writes the file and reloads the part: its state
+        restarts with on_reset; the ports cannot change without reloading the board. Ctrl+S saves, Tab indents.</p>
+      <div class="dlg-foot">
+        <span id="sdErr" class="sd-err" role="alert"></span>
+        <button type="button" id="sdCancel" class="btn small">Close</button>
+        <button type="button" id="sdSave" class="btn small primary">Save &amp; reload</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="boardDlg" class="dialog board-dlg" aria-labelledby="bdTitle" aria-modal="true">
     <div class="dlg-head">

@@ -255,10 +255,13 @@ class DAC(GatedBlock):
                 dma_request(self.chip, f"DAC{c.n}", True)
         self._transfer_in(c, 3 if hw else 1)     # the channel keeps converting (old data after an underrun)
 
+    lp_frozen: Any = False              # PWR freezer: Stop / gated Sleep (no APB1 clock: triggers are not seen)
+
     def _ext_trig(self, c: _Chan, t: int, level: bool) -> None:
         if level and not c.trig:
             c.trig = True
-            self._trigger(c, True)
+            if not self.lp_frozen:
+                self._trigger(c, True)
         elif not level:
             c.trig = False
 

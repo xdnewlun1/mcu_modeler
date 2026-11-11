@@ -1,0 +1,9 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0040 main
+C:0x005F wait
+C:0x0061 w2
+C:0x0066 tick
+C:0x006E t0_isr
+C:0x0080 t0_done
+D:0x0030 TICKS_H
+D:0x0031 TICKS_L

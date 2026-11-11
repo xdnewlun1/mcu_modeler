@@ -29,6 +29,9 @@ def _infos(b, needle="auto UART link"):
 
 def _send(b, cid, uart, byte):
     blk = b.chips[cid].peripherals[uart]
+    fr = blk.tx_frame_for(byte)                               # what the UART's transmitter puts on the line
+    for cb in list(blk.frame_listeners):
+        cb(blk, fr)
     for cb in list(blk.tx_listeners):
         cb(blk, byte)
 

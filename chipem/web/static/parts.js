@@ -127,6 +127,12 @@ export function stateText(part, st) {
       return `↑${st.rises ?? 0} ↓${st.falls ?? 0}`;
     }
     case "counter": return `${p.edge || "rise"} edges`;
+    case "script": {                      // chipem/parts/script.py: user state, or the fault that stopped it
+      if (st.fault) return `FAULT ${st.fault}`;
+      const outs = Object.entries(st).filter(([k, v]) => k !== "params" && (v === null || typeof v !== "object"))
+        .map(([k, v]) => `${k}=${v ?? "—"}`);
+      return outs.slice(0, 3).join(" ");
+    }
     default: {
       const outs = Object.entries(st).filter(([k, v]) => k !== "changes" && k !== "action" && (v === null || typeof v !== "object"))
         .map(([k, v]) => `${k}=${v ?? "—"}`);

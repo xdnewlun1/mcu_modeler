@@ -1,0 +1,11 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0030 main
+C:0x0040 warm
+C:0x0044 start
+C:0x004C feed
+C:0x005C forever
+C:0x0069 starve
+C:0x006B delay10ms
+C:0x006D d1
+C:0x006F d2
+D:0x007F RSTCNT

@@ -1,0 +1,14 @@
+# STM32F103T6 USB full-speed device (PA11 USBDM / PA12 USBDP; fixed external 1.5 k D+ pull-up as on the "blue pill")
+# plugged into an emulated PC (chipem/usbbus.py).  The bare-metal CDC-ACM firmware runs at 72 MHz (HSE 8 MHz x 9) with
+# USBCLK = PLL / 1.5 = 48 MHz.  The host waits the 100 ms attach debounce, resets the port, enumerates
+# (0483:5740 "CHIP_EM" "F103 bare-metal CDC"), binds its CDC-ACM driver (SET_LINE_CODING, SET_CONTROL_LINE_STATE
+# DTR|RTS) and polls bulk IN; the firmware answers DTR with "F103 CDC ready" and echoes what the host types, uppercased
+# ("hello" at 200 ms).  Run:
+#   chipem run --board boards/stm32f103_usb_cdc.yaml --for 300ms
+# A GPIO-switched pull-up instead: give the USB block `params: {pullup: PA8}` in a chip variant (or "!PA8" for an
+# active-low switch).
+name: stm32f103_usb_cdc
+chips:
+  - {id: A, chip: stm32f103t6, firmware: ../firmware/samples_stm32f1/build/usb_cdc.elf}
+links:
+  - {type: usb, name: USB1, device: A.USB, host: {debounce: 100ms, cdc_send: "hello\r\n", cdc_send_at: 200ms}}

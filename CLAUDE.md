@@ -18,12 +18,21 @@ Always use the venv; there is no system install.
 .venv/bin/chipem run s1_off000084_503080.bin --chip mk22fx512vll12 --for 2s --summary-only
 firmware/samples/build.sh                           # rebuild samples (clang + ld.lld; no GNU arm toolchain here)
 firmware/samples_stm32/build.sh; firmware/samples_c2000/build.sh   # STM32 (clang) / C28x (tools/c28x_asm.py)
-firmware/samples_stm32_variants/build.sh           # STM32F405/F407 package-variant samples (needs ld.lld)
+firmware/samples_stm32_variants/build.sh           # STM32F405/F407 package-variant samples + STM32F427/F437 f42x_*.c (needs ld.lld)
+.venv/bin/chipem run --board boards/stm32f427vg_f405rg_uart7.yaml --for 20ms  # F427VG (180 MHz, UART7) <-> F405RG
+.venv/bin/chipem run --board boards/stm32f437ai_sdram.yaml --for 20ms         # F437AI FMC SDRAM init + memory test
+firmware/samples_stm32_hal_f427/build.sh            # ST HAL built for STM32F427xx (over-drive, PLLSAI, UART7)
 .venv/bin/chipem run --board boards/stm32f405rg_f407ig_uart.yaml --for 20ms   # LQFP64 F405RG <-> LQFP176 F407IG
+firmware/samples_stm32f1/build.sh                   # STM32F103T6 (clang thumbv7m)
+.venv/bin/chipem run --board boards/stm32f103_stm32f405_can.yaml --for 35ms         # F103 bxCAN <-> F405 can_echo
 firmware/samples_c2000_c/build.sh                   # C28x C with TI cl2000 (found under toolchains/; EABI + COFF .out)
+.venv/bin/python tools/bench.py [--preset fast] [c2000]  # speed table (x real, MIPS per chip); not in the suite
 .venv/bin/chipem run --board boards/c2000_stm32_uart.yaml --for 20ms --pin-report
 .venv/bin/chipem run --board boards/k22_rs232_console.yaml   # PC software on the printed /dev/pts/N; real time, until Ctrl-C
 .venv/bin/chipem info firmware/samples_c2000/build/blinky.c28img --chip tms320f28232
+firmware/samples_mcs51/build.sh; .venv/bin/chipem run --board boards/p89cv51_stm32_uart.yaml --for 20ms   # 8051
+.venv/bin/chipem run firmware/samples_c2000/build/f2808_adc.c28img --chip tms320f2808 --for 14ms --adc ADCINA0=1234
+.venv/bin/python -I tools/gen_tms320f2808_regs.py [--check-ds ds.txt]   # regenerate the F2808 register table
 .venv/bin/python -I tools/svd2chip.py svd/dl-Sasv/MK22F12.svd --check chips/mk22fn1m0vll12.yaml
 ```
 
@@ -115,20 +124,27 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 | STM32 family | `chips/stm32f405*`, `chips/stm32f407*` (package variants, include `stm32f405zg.yaml`), `periph/stm32/*`, `firmware/samples_stm32/*`, `firmware/samples_stm32_variants/*`, `boards/stm32f405rg_f407ig_uart.yaml`, `firmware/samples_stm32_hal/*` (ST HAL; vendor code in `firmware/vendor/`), `boards/k22_stm32_uart.yaml`, `boards/c2000_stm32_chat_hal.yaml`, `boards/k22_stm32_can.yaml` and `boards/k22_c2000_stm32_can.yaml` (bxCAN `periph/stm32/can.py` on `chipem/canbus.py`); `test_stm32*` (variants: `test_stm32_variants`; bxCAN: `test_stm32_can`) |
 | PWM / timer outputs, input capture | `periph/stm32/tim.py` (output compare, PWM, input capture, PWM input, dead time / break, encoder; TIM1-14), `periph/kinetis/ftm.py` (FTM0-3 + `ftm_alias`: PWM, input / dual edge capture, faults, quadrature, external clock), `periph/ti_c2000/epwm.py`, `periph/ti_c2000/ecap.py` (eCAP1-4), `periph/signals.py` and the family `signals.py` tables, `PinBoard.drive_signal`/`release_signal`/`input_listeners` in `pins.py`, samples `firmware/samples/{ftm_pwm,ftm_capture}.c`, `firmware/samples_stm32/{tim_pwm,tim_capture}.c`, `firmware/samples_c2000/{epwm,ecap}.asm`, `firmware/samples_c2000_c/epwm.c`, boards `pwm_led.yaml`, `k22_ftm_capture.yaml`, `c2000_ecap_loopback.yaml`, `pwm_capture_3way.yaml`; `test_stm32_pwm`, `test_stm32_tim_capture`, `test_kinetis_ftm`, `test_kinetis_ftm_capture`, `test_c2000_epwm`, `test_c2000_hrpwm`, `test_c2000_ecap`, `test_integration_families` (3-way board) |
 | C2000 family | `chips/tms320f28232*` (register table hand-written), `periph/ti_c2000/*` (incl. `spi.py`, `mcbsp.py`, `xintf.py`), `arch/c28x/{arch,pie}.py`, `devices/sram.py` (board `sram` device, also usable by other external-bus models via `attach_memory()`), `firmware/samples_c2000/*` (incl. `spi_flash`, `mcbsp`, `xintf_sram`, `standby`), `boards/c2000_*.yaml` (incl. `c2000_spi_flash`, `c2000_mcbsp_flash`, `c2000_xintf_sram`); `test_c2000_*` (incl. `test_c2000_spi`, `test_c2000_mcbsp`, `test_c2000_xintf`, `test_c2000_lowpower`), `test_engine_units` |
+| TMS320F2808 (280x) | `chips/tms320f2808.yaml`, `chips/tms320f2808_regs.yaml` (generated: `tools/gen_tms320f2808_regs.py`, `--check-ds` against the data sheet), `chips/tms320f2808_bootrom.asm` (boot ROM stand-in, `boot.rom_words`), the 280x parameters of `periph/ti_c2000/{sysctrl,xint,misc,ecan}.py` (CLKINDIV layout and gates from the table, present XINTs, CSM `pwl_base`/`secure_ranges`, eCAN `clock_div`), `firmware/samples_c2000/f2808_*.asm`, `firmware/samples_c2000_c/f2808_*.c` + `f2808.{cmd,h}`, `boards/f2808_*.yaml`, `svd/c28x-docs/dl4-dl17` (280x guides); `test_c2000_f2808_{chip,models,samples}` |
+| STM32F1 family | `chips/stm32f103t6.yaml`, `chips/stm32f103_regs.yaml`, `periph/stm32f1/*` (RCC, GPIO/AFIO, EXTI, PWR, BKP, RTC, FLASH/option bytes/system memory/DBGMCU, DMA, ADC, USB/PMA, bxCAN subclass), `firmware/samples_stm32f1/*`, `boards/stm32f103_*.yaml`; `test_stm32f103t6_chip`, `test_stm32f1_*` |
 | C2000 C samples (TI compiler) | `firmware/samples_c2000_c/*` (C, `codestart.asm`, `f28232.cmd`, `build.sh`; incl. `mcbsp_spi.c`), `boards/c2000_stm32_chat_c.yaml`, `boards/c2000_mcbsp_flash.yaml`; `test_c2000_compiled` (skips if not built) |
 | C28x core / ISA | `core/c28x/*` (interpreter, assembler, disassembler), `arch/c28x/isa.yaml` (instruction table), `tools/c28x_asm.py`; `test_c28x_*`. Encodings are verified against TI's manuals and cl2000/dis2000 25.11.1: see `docs/C28X_CORE.md` before editing |
+| MCS-51 (8051) / P89CV51 | `core/mcs51/*` (interpreter, isa table, assembler/disassembler), `arch/mcs51/*` (IE/IP/IPH, CPU SFR block, debugger support), `periph/mcs51/*` (ports, timers 0/1/2, UART, SPI, PCA, WDT, IAP flash, sysctrl, xbus), `firmware_mcs51.py` (`chipem info`), `chips/p89cv51*.yaml` + `p89cv51_regs.yaml` (hand-written), `tools/mcs51_asm.py`, `firmware/samples_mcs51/*`, `boards/p89cv51_*.yaml`; `test_mcs51_*` (`tests/m51util.py`). See `docs/MCS51_CORE.md` |
 | pin report / symbols | `pinreport.py`, `symbols.py`; `test_pinreport` |
 | cross-family integration | `test_integration_families` (UART names, static pin roles, C2000 ↔ STM32 board) |
 | SD cards / external memory buses | `devices/sdcard.py` (SD card device, `--sd-card`, board `sd_card`), `periph/sdbus.py` (clock `wave` summary, line-mux check), `periph/stm32/sdio.py`, `periph/kinetis/sdhc.py`, `periph/stm32/fsmc.py` (NE1-4 windows through `Bus.map_window` / `Core.map_shared`/`unmap`), samples `firmware/samples_stm32/{sdio_card,fsmc_sram}.c`, `firmware/samples/sdhc_card.c`, `firmware/samples_stm32_hal/sd_hal.c`, boards `stm32_sdcard.yaml`, `k22_sdcard.yaml`, `stm32_fsmc_sram.yaml`; `test_stm32_sdio`, `test_kinetis_sdhc`, `test_stm32_fsmc` |
 | parts | `chipem/parts/*`, `tests/test_parts.py` (board parts: switches, LEDs, gates; wiring in `board.py`) |
+| script parts (custom parts in Python) | `chipem/parts/script.py` (`ScriptPart` user API, `ScriptHost` part type `script`: SPI/I2C/UART helpers, faults, hot reload), `chipem/cmd_new_part.py` (`chipem new-part`), `boards/parts/*` (examples), web: `/api/part/reload`, `/api/part/script`, `allow_scripts` consent + `_script_guard` in `web/server.py`, `scriptControls`/editor in `app.js`; docs/USER_GUIDE.md 6.4; `test_script_part`. Scripts run with the user's privileges: no sandbox |
 | Ethernet | `chipem/ethernet.py` (PHY, segment, host node, pcap, `EthLink`), `periph/stm32/eth.py` (`stm32.eth`, F407/F417), `firmware/samples_stm32/eth_ping.c`, `firmware/samples_stm32_hal_eth/*` (HAL ETH sample, own `build.sh`, STM32F407xx), `boards/stm32f407_eth_{ping,hal}.yaml`, `eth` links in `board.py`, `--eth-pcap`/`--eth-host`; `test_stm32_eth` |
+| STM32F427/F437 | `chips/stm32f427*.yaml` (base `stm32f427vg.yaml`), `chips/stm32f437*.yaml`, `chips/stm32f427_regs.yaml` (from `svd/dl-stm32f427/STM32F427.svd`), `periph/stm32/f42x.py` (`stm32.rcc_f42x` PLLSAI/DCKCFGR/TIMPRE, `stm32.pwr_f42x` over-drive, `stm32.flash_f42x` dual bank), `periph/stm32/fmc.py` + `devices/sdram.py` (FMC SDRAM controller, board `sdram` device, `Session.attach_sdram`), `periph/stm32/sai.py`, `periph/stm32/dma2d.py`, GCM/CCM in `periph/stm32/cryp.py` (`gcm: true`), I2C_FLTR in `i2c.py`, F42x DMA requests in `dma.py`, `firmware/samples_stm32_variants/f42x_*.c` + `f42x/` (startup, link.ld, `stm32f42x.h`), `firmware/samples_stm32_hal_f427/*`, `boards/stm32f427vg_f405rg_uart7.yaml`, `boards/stm32f437ai_sdram.yaml`, `boards/stm32f427vg_sai_codec.yaml`; `test_stm32f427_*`, `test_stm32f437_crypto` |
 | STM32 I2S | `periph/stm32/i2s.py`, the I2S parts of `periph/stm32/spi.py` (`stm32.i2s_ext`), `rcc.py` PLLI2S, `firmware/samples_stm32/i2s_tone.c`, `boards/stm32_i2s_codec.yaml`; `test_stm32_i2s` |
 | DCMI / camera | `periph/stm32/dcmi.py`, `parts/camera.py`, `firmware/samples_stm32/dcmi_capture.c`, `boards/stm32f407_dcmi_camera.yaml`; `test_stm32_dcmi` |
 | crypto (CRYP/HASH) | `chipem/crypto_algos.py`, `periph/stm32/{cryp,hash}.py`, `chips/stm32f415zg.yaml`, `chips/stm32f417zg.yaml`; `test_stm32_cryp_hash` |
 | host serial / real time / cable chains | `hostserial.py` (PTY, pyserial, TCP, memory ports; `UartBridge`), `realtime.py` (pacing), `parts/serial.py` (`usb_serial_adapter`, `rs232_transceiver`, connectors, `cable`, `SerialRouter`), `boards/k22_rs232_console.yaml`, `firmware/samples/uart_console.c`; `test_hostserial`, `test_serial_chain`, `test_web` (host serial) |
 | USB | `usbbus.py` (bus engine, `UsbHost` + CDC-ACM/HID/MSC drivers, `UsbLink`, `UsbCdcBridge`), `periph/stm32/otg.py` (`stm32.otg_fs` / `stm32.otg_hs`), `periph/kinetis/{usbfs,usbdcd}.py`, `firmware/samples_stm32/usb_cdc.c`, `firmware/samples_stm32_hal/usb_cdc_hal.c` (+ `usbd_conf.h`; ST USB Device Library vendored in `firmware/vendor/STM32CubeF4/Middlewares`), `firmware/samples/usb_cdc.c`, `boards/{stm32_usb_cdc,stm32_usb_cdc_hal,k22_usb_cdc}.yaml`; `test_usbbus`, `test_stm32_usb`, `test_kinetis_usb` |
 | run / session | `session.py`, `cmd_run.py`; `test_session`, `test_cmd_run` |
+| speed / fidelity | `perf.py` (PerfSettings, presets, SpeedMeter), `Board.run_for` auto quantum / `chip_wall`, C28x decode cache, MMIO dispatch cache and self-branch skip (`core/c28x/core.py`), poll skip (`PollWatch` in `core/base.py`, `_poll_read` in `unicorn_cm.py` and the C28x core, `Chip._skip_poll`), `/api/perf`, the toolbar rate control and Status-pane performance block, `tools/bench.py`; `test_perf` |
 | shell / web | `cmd_shell.py`, `cmd_serve.py`, `web/*`; `test_shell`, `test_web` |
+| debugger / GDB server | `debug.py` (breakpoints, watchpoints, stepping, listing, call stack, peek memory), `dwarf.py` (line info, CFI), `gdbserver.py` (RSP), `shell_debug.py` (shell commands), `web/debugapi.py` + `web/static/{debug,regview}.js`, `debug.css` (Debug / Registers tabs), core hooks in `core/unicorn_cm.py` / `core/c28x/core.py` (`set_breakpoints`, `set_watchpoints`), `MMIOBlock.peek_reg`/`peek_bytes`; `test_debug`, `test_debug_shell`, `test_gdbserver` |
 | samples | `firmware/samples/*` |
 | docs | `README.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/ADDING_A_CHIP.md`, `docs/LIMITATIONS.md`, `docs/C2000_ROADMAP.md` |
 
@@ -149,7 +165,10 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
   `stop_info = "wfe"`.
 - **Low-power modes** are family logic on top of a generic sleep: `chip.power_hooks` (`on_sleep`/`on_wake`),
   `chip.wake_gate`, `chip.wake()`, optional `clock_stop(stopped, mode)` on blocks (CONTRACTS.md "Low-power modes").
-  SLEEPONEXIT is handled in `Chip._run`.
+  SLEEPONEXIT is handled in `Chip._run`. Kinetis SMC and STM32 PWR share `chipem/periph/lowpower.Freezer`: blocks
+  without `clock_stop` get their events held (helper objects set `lp_owner = block`), `lp_frozen` = the mode while held
+  (ignore pin inputs then), and `time_shift(dns, dcycles)` on exit, where a model with an absolute start-time anchor
+  must move it. C2000 uses `cycle_anchors` / `clock_resumed(dt_cycles)` instead.
 - **VTOR must be preset for images linked above 0.** The Withings image (linked at 0x4000) never writes
   VTOR; its bootloader did. Session sets `vtor = image.start` for raw `.bin` images, and `Chip.reset()`
   falls back to the image start if `[VTOR]` is not a valid vector table. For ELF images VTOR defaults to 0
@@ -185,6 +204,13 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
   pin tables were generated from DS8626 Table 7/9 and checked against ST's open pin data (`chips/README.md`);
   `tests/test_stm32_variants.py` asserts every shared pin equals the LQFP144 file, so fix a pin in all files. BGA/WLCSP files use a row-major ball index as `num` plus a `ball:` key; the UFBGA176 files have 201
   balls (`pin_table_check.py --expect 201`).
+- **STM32F427/F437 are a different die (DEV_ID 0x419).** `chips/stm32f427vg.yaml` is their base file (own register
+  table `stm32f427_regs.yaml`, RCC/PWR/FLASH models `stm32.*_f42x` subclassing the F405 ones; `_util.find_model`
+  matches a subclass model by its base name, so `find_model(chip, "stm32.rcc")` finds `stm32.rcc_f42x`). CRYP/HASH
+  are gated `only: [STM32F437, STM32F439]`; LTDC is `omitted:` (F429/F439 only). STM32F427.svd lacks several F42x
+  registers/bits and has F405 reset values for the LPENR registers: `stm32.rcc_f42x` fixes them (with the SVD values
+  the F42x-only blocks would be frozen in Sleep mode). The LQFP100 has no FMC_SDCLK (PG8): SDRAM samples run on the
+  F437AI (UFBGA169). f42x samples use `firmware/samples_stm32_variants/f42x/startup.c` (91 vectors, RM0090 Table 63).
 - **Pin ids come from `gpio_name_format`** in the chip YAML: Kinetis `PT{port}{bit}` (default), STM32
   `P{port}{bit}`, C2000 `GPIO{num}`. Generic code (web `isGpioFunction`, pin report, firmware pin roles) must not
   assume the `PT` prefix.
@@ -199,8 +225,20 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 - **C28x images**: `.c28img` is JSON from `tools/c28x_asm.py` (segments as little-endian word streams, `entry`,
   `symbols`); TI `.out` is sniffed (ELF magic → ELF, COFF version 0x00C1/0x00C2 → COFF). There is no boot ROM:
   reset jumps to the image entry or 0x33FFF6 (`LB _c_int00`).
+- **TMS320F2808 (280x) shares the `ti_c2000` models**; the differences are data: the register table (generated by
+  `tools/gen_tms320f2808_regs.py`, never edit it) selects the sysctrl layout (PLLSTS.CLKINDIV, PCLKCR0/1 gates, no
+  PCLKCR3) and which XINTs exist; the chip YAML passes CSM `pwl_base`/`secure_ranges` and eCAN `clock_div: 1` (280x
+  eCAN clock = SYSCLKOUT). Reset runs a boot ROM stand-in (`chips/tms320f2808_bootrom.asm`, boot pins GPIO18/29/34)
+  only when the image has no entry point.
 - **The F28232 has no FPU** (`fpu: false`; F2833x parts have FPU32). The interpreter still implements FPU32 for
   F28335-class chips.
+- **MCS-51 address spaces are tagged ranges** (docs/MCS51_CORE.md): CODE 0x00000, XDATA 0x10000, IDATA 0x20000, SFR
+  0x30080-0x300FF, on-chip XRAM 0x40000.  SFR models are sparse MMIO blocks (base 0x30000, offset = SFR address,
+  `ranges` mapped by `Bus._map_sparse`).  The MCS-51 core counts OSCILLATOR periods (`cycle_counted`, 12 or 6 per
+  machine cycle) and `core.clock_hz` / `--clock` is the crystal.  Its models set flags only from scheduler events (the
+  core skips `JB/JNB bit,$` wait loops to the next event) and must schedule through `SfrBlock.at` so they act at the
+  due cycle (a slice may end one instruction after it).  8051 pins are `P1.0`: never split a pin name on "." to strip
+  a chip id unless the prefix IS a chip id.
 - **C28x ISA status.** Every base `isa.yaml` entry is `conf: ref`: verified word for word against TI's cl2000 25.11.1
   assembler and against `dis2000` over TI's RTS libraries; TI-compiled C (`firmware/samples_c2000_c`) runs. Not
   covered: FPU64, FINTDIV, VCU/TMU/CLA. See `docs/C28X_CORE.md` ("Verified against cl2000 25.11.1 output").
@@ -235,6 +273,12 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 - **UART bytes are dropped when the receiver is not listening** (RE/UE/RXENA clear, gate off, module reset, RX
   pin not muxed) or on overrun, like silicon (`uart` event `dir=drop reason=...`; `chipem/periph/uartwire.py`).
   `--uart-in` is paced at baud from t=0; use `--at TIME:UARTn=TEXT` for later injection (e.g. once a console is up).
+- **UART characters travel as frames** (`uartwire.Frame`: real baud, data/9th/address bit, parity bit, stop bits,
+  breaks). Transmit through `UartRx._tx_emit(frame)` (it feeds `frame_listeners` (links, router, host bridges) and the
+  byte-level `tx_listeners`); receive through `_rx_frame(frame, src, t_end)` -> `LineDecoder` -> the model's
+  `_rx_accept(RxChar)` (data + pe/fe/nf/brk/idle). A model describes its receiver with `rx_format()`. The fast path
+  (same frame length, baud within the sample points) does no per-bit work; keep it that way. Tests that inject
+  directly use `blk._rx_frame(fr, "host")` (no pin check) or `receive_frame(fr)` (pin must be muxed).
 - **Board parts propagate with zero delay** (`Board._propagate`, waves within one event); a net re-resolved more than
   16 times in one event is reported as a combinational loop (one `warn`) and left as is. Timed parts schedule on the
   first chip's scheduler; `Session.reset` restarts them, firmware resets do not.
@@ -247,7 +291,26 @@ without updating the contract. Do not edit `docs/PLAN.md` or `docs/CONTRACTS.md`
 - **Serial cable chains carry bytes by path resolution** (`parts/serial.py`): a part that should pass UART bytes
   implements `serial_paths`; chip-to-chip nets without parts stay with the board's auto UART links. On RS-232 nets
   H = positive voltage (space), so an idle RS-232 line reads L.
+- **Debugger hooks cost nothing only while none are set.** Breakpoints are one bounded `UC_HOOK_CODE` per address
+  (C28x: the decoded closure of that PC is wrapped), watchpoints ranged `UC_HOOK_MEM_READ/WRITE` hooks (C28x: their
+  pages take the slow access path). While any hook exists Unicorn retranslates with slower helpers (about 20-35 %);
+  deleting hooks schedules one more code-cache flush after the next run (`_wp_flush`), restoring full speed. A watch
+  stop lowers Unicorn's private `emu_count` (the word after the calibrated counter) so the run ends right after the
+  accessing instruction; without counter calibration the access would be repeated. A resume skips a breakpoint at the
+  start PC once (`core.bp_skip`, set by a breakpoint stop and by `Chip.step`).
+- **Reading registers for display must not have side effects.** Use `MMIOBlock.peek_reg`/`peek_bytes` (debugger,
+  register browser, gdb `m`): a register with an `on_read` hook shows its stored value with exact=False unless the
+  model lists it in `pure_reads`. Never call `bus.read` for display.
+- **Speed settings are opt-in fidelity trades** (`chipem/perf.py`, docs/USER_GUIDE.md "Making it faster"). The default preset keeps the old behaviour. The C28x interpreter's self-branch skip (`spin_pc`) is always on and exact. Poll skip (`--poll-skip`, preset fast) fast-forwards MMIO polling loops whose CPU registers repeat. A model that derives a status bit from the time on each read, instead of from a scheduled event, is then seen up to `poll_skip_ns` late. So new models should flip status flags in scheduler events. A loop that writes RAM without a register trace is not detected as impure (rare). On ARM the polling load runs once more after a skip, so status reads must not have side effects when they return the same value. Keep the cost zero when off: `core._poll is None` is the only check on the MMIO read path. Auto quantum lets sleeping or parked chips lag. Anything scheduled on such a chip from outside must go through its scheduler (it does: nets, links, parts), which ends the sender's run (`Chip.idle_watch` -> `Board._idle_poke` -> `yield_run`). Threads do not help (measured 0.99x for an ARM and a C28x chip run in parallel; this Python is not free-threaded), and `PYTHON_JIT=1` gives about +10 % on pure C28x loops and nothing on MMIO-heavy code.
 - **Not thread-safe.** Only the web `Worker` thread touches the Session/Chip. `Session.stop()` is the
   one call that is safe from another thread.
+- **STM32F1 is its own family (`stm32f1`)**: GPIO CRL/CRH + AFIO remap, single-PLL RCC, FPEC flash, counter RTC.
+  Same-IP blocks reuse `stm32.*` models by parameter (TIM2 `bits: 16`, TIM1 `irq: TIM1_UP`, IWDG `lsi_hz: 40000`;
+  bxCAN as the `stm32f1.can` subclass). `stm32f1.rcc` exposes the `stm32.rcc` interface plus its own `GATES`/`RST_REGS`
+  (F1 bit positions), which `stm32._util.rcc()`, `stm32.usart` and `stm32.tim` pick up. There is no AF number: the
+  F1 GPIO derives a pin's owner from the AFIO remap and the peripheral's configuration and re-evaluates on writes to
+  the peripherals' CR1/CR2/CR3/CCMRx/CCER/SMCR/BDTR (hooks wrapped by `stm32f1.afio`). The F1 IRQ names follow CMSIS
+  (`USB_LP_CAN1_RX0`, `ADC1_2`, `TIM1_UP`); the SVD names are in the chip YAML's `svd_irq_names`. RM0008 was not
+  available: the F1 models are not verified against it (docs/LIMITATIONS.md).
 - The arch layer uses 4 NVIC priority bits for ARMv7-M and 2 for ARMv6-M. These are not read from the
   SVD's `nvic_prio_bits`.

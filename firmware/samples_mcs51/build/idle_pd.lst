@@ -1,0 +1,45 @@
+0000               ; idle_pd: power-saving modes (data sheet sec. 6.12).
+0000               ; 1. Idle: Timer 0 interrupts every 10 ms wake the CPU from Idle (ORL PCON,#01h); the ISR toggles P1.1 and counts
+0000               ;    in 30h; after 5 wake-ups the main loop goes on.
+0000               ; 2. Power-down: INT0 is set level-sensitive (IT0 = 0) and enabled, Timer 0 stopped, PCON.PD set; the oscillator
+0000               ;    stops until INT0 (P3.2) is held low; the INT0 ISR clears EX0 (the pin is still low), toggles P1.2 and sets 31h.
+0000               ;    The main loop then sets 32h = A5h and toggles P1.0 forever.
+0000                       ORG     0000h
+0000  02 00 40             LJMP    main
+0003                       ORG     0003h
+0003  02 00 80             LJMP    int0_isr
+0006                       ORG     000Bh
+000B  02 00 75             LJMP    t0_isr
+000E                       ORG     0040h
+0040  75 81 5F     main:   MOV     SP, #5Fh
+0043  75 30 00             MOV     30h, #0
+0046  75 31 00             MOV     31h, #0
+0049  75 32 00             MOV     32h, #0
+004C  75 89 01             MOV     TMOD, #01h
+004F  75 8C DC             MOV     TH0, #0DCh
+0052  75 8A 00             MOV     TL0, #00h
+0055  D2 A9                SETB    ET0
+0057  D2 AF                SETB    EA
+0059  D2 8C                SETB    TR0
+005B               idle_lp:
+005B  43 87 01             ORL     PCON, #01h              ; Idle until the next Timer 0 interrupt
+005E  E5 30                MOV     A, 30h
+0060  B4 05 F8             CJNE    A, #5, idle_lp
+0063  C2 8C                CLR     TR0
+0065  C2 A9                CLR     ET0
+0067  C2 88                CLR     IT0                     ; INT0 level-sensitive (power-down wake-up source)
+0069  D2 A8                SETB    EX0
+006B  43 87 02             ORL     PCON, #02h              ; Power-down
+006E  75 32 A5             MOV     32h, #0A5h
+0071  B2 90        blink:  CPL     P1.0
+0073  80 FC                SJMP    blink
+0075  75 8C DC     t0_isr: MOV     TH0, #0DCh
+0078  75 8A 00             MOV     TL0, #00h
+007B  B2 91                CPL     P1.1
+007D  05 30                INC     30h
+007F  32                   RETI
+0080               int0_isr:
+0080  C2 A8                CLR     EX0
+0082  B2 92                CPL     P1.2
+0084  75 31 01             MOV     31h, #1
+0087  32                   RETI

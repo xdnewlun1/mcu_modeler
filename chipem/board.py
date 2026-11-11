@@ -4,6 +4,8 @@ Board description (`boards/<name>.yaml`, paths relative to the board file)::
 
     name: two_k22_uart
     quantum: 10us                      # optional lockstep quantum (CLI --quantum overrides)
+    auto_quantum: true                 # optional: sleeping chips do not hold the others back (chipem/perf.py)
+    performance: fast                  # optional speed/fidelity preset: accurate | default | fast; max_slice: N
     chips:
       - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/uart_link_sender.elf, clock_hz: 120e6}
       - {id: B, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/uart_link_echo.elf}
@@ -19,6 +21,7 @@ Board description (`boards/<name>.yaml`, paths relative to the board file)::
       - {type: spi_flash, chip: A, spi: SPI0, cs: PTC4}     # same options as --spi-flash
       - {type: sram, chip: A, bus: XINTF6, size: 256K, width: 16}   # parallel SRAM on an external bus (chipem/devices)
       - {type: sd_card, chip: A, host: SDIO, size: 64M, image: card.img}   # SD card; same options as --sd-card
+      - {type: sdram, chip: A, bus: FMC, bank: 2, size: 8M, width: 16}   # SDR SDRAM on an SDRAM controller (chipem/devices/sdram.py)
     parts:                             # board parts (chipem/parts): port -> net name, or CHIP.PIN (anonymous net)
       - {id: SW1, type: switch, level: H, ports: {out: BTN}}
       - {id: LED1, type: led, active: L, ports: {in: A.PTC5}}
@@ -47,7 +50,9 @@ Runtime (`Board`):
   peer's scheduler. Each byte arrives on its own; the receiver has no input queue: it takes the byte into its
   holding register/FIFO, or loses it (not listening, RX pin not muxed, overrun) exactly like silicon
   (chipem/periph/uartwire.py). A receiver whose chip has no pin offering its RX function gets nothing (no_pin).
-  A baud mismatch between the two ends (> 3 %) is reported once per link as a `warn`; bytes are still delivered.
+  Bytes travel as frames with their format (baud, data bits, parity bit, stop bits, breaks); the receiver decodes
+  them at its own settings by sample point (framing / parity / noise errors, garbage at a wrong baud, breaks for LIN
+  break / BRKDT detection). A baud (> 3 %) or frame-length mismatch is also reported once per link as a `warn`.
 * **CAN links** put the listed CAN controllers (`Chip.can_blocks()`: models with the `can_attach` hook) on one
   `chipem.canbus.CanBus` (`CanLink`): frames take their real bus time at the transmitter's bit rate, the lowest ID
   wins arbitration, a frame nobody acknowledges is an ACK error and is retried (see chipem/canbus.py). `host: true`
@@ -77,6 +82,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -128,7 +134,7 @@ class LinkSpec:
 
 @dataclass
 class DeviceSpec:
-    type: str                           # "spi_flash" | "sram" | "sd_card"
+    type: str                           # "spi_flash" | "sram" | "sd_card" | "sdram"
     chip: str
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -154,6 +160,9 @@ class BoardDesc:
     parts: list[PartSpec] = field(default_factory=list)
     host_serial: list[dict] = field(default_factory=list)   # [{uart, pty|port|tcp, ...}] (chipem/hostserial.py)
     realtime: Any = None                # None (auto: on with a host bridge) | bool | speed factor
+    # speed / fidelity (chipem/perf.py): {"preset": ..., "auto_quantum": bool, "max_slice": int} from the YAML keys
+    # `performance:`, `auto_quantum:`, `max_slice:` (CLI options override them)
+    perf: dict = field(default_factory=dict)
 
     def chip_ids(self) -> list[str]:
         return [c.id for c in self.chips]
@@ -356,8 +365,9 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
         if not isinstance(dv, dict):
             raise ValueError(f"board: device {i} must be a mapping")
         typ = str(dv.get("type", "")).lower()
-        if typ not in ("spi_flash", "sram", "sd_card"):
-            raise ValueError(f"board: device {i}: unsupported type {typ!r} (supported: spi_flash, sram, sd_card)")
+        if typ not in ("spi_flash", "sram", "sd_card", "sdram"):
+            raise ValueError(f"board: device {i}: unsupported type {typ!r} (supported: spi_flash, sram, sd_card, "
+                             "sdram)")
         cid, _ = split_qualified(f"{dv.get('chip', ids[0])}.x", ids)
         if cid is None:
             raise ValueError(f"board: device {i}: unknown chip {dv.get('chip')!r}")
@@ -387,6 +397,12 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
         if not isinstance(ports, dict):
             raise ValueError(f"board: part {pid or i}: `ports` must be a mapping port -> net or CHIP.PIN")
         params = {k: v for k, v in pd.items() if k not in ("id", "type", "ports", "state")}
+        pcls = registry.get(typ)
+        for k in getattr(pcls, "PATH_PARAMS", ()):     # file parameters (script parts): relative to the board file
+            if params.get(k):
+                params[k] = str(Path(_resolve_path(params[k], base)).resolve())
+        if getattr(pcls, "PATH_PARAMS", ()) and base is not None:
+            params["_board_dir"] = str(Path(base).resolve())
         parts.append(PartSpec(id=pid, type=typ, params=params,
                               ports={str(k): (str(v) if v is not None else None) for k, v in ports.items()}))
 
@@ -395,6 +411,16 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
         stim = [stim]
     q = data.get("quantum")
     quantum = parse_time(q) if q is not None else None
+    perf: dict[str, Any] = {}
+    if data.get("performance") is not None:
+        pname = str(data["performance"]).strip().lower()
+        if pname not in ("accurate", "default", "fast"):
+            raise ValueError(f"board: performance must be accurate, default or fast, not {data['performance']!r}")
+        perf["preset"] = pname
+    if data.get("auto_quantum") is not None:
+        perf["auto_quantum"] = bool(data["auto_quantum"])
+    if data.get("max_slice") is not None:
+        perf["max_slice"] = int(data["max_slice"])
     hs = data.get("host_serial") or []
     if isinstance(hs, dict):
         hs = [hs]
@@ -402,7 +428,7 @@ def parse_board(data: dict, *, base: Path | None = None, path: Path | None = Non
         raise ValueError("board: host_serial entries must be mappings with `uart` and one of pty/port/tcp")
     return BoardDesc(name=str(data.get("name") or (path.stem if path else "board")), path=path, chips=chips,
                      nets=nets, links=links, devices=devices, stimulus=[str(s) for s in stim], quantum_ns=quantum,
-                     parts=parts, host_serial=[dict(h) for h in hs], realtime=data.get("realtime"))
+                     parts=parts, host_serial=[dict(h) for h in hs], realtime=data.get("realtime"), perf=perf)
 
 
 def parse_part_spec(spec: str) -> PartSpec:
@@ -603,8 +629,10 @@ class Net:
 
 # ------------------------------------------------------------------------------------------------ links
 class UartLink:
-    """Byte-level UART connection between two UART models (tx_listeners / receive; receive() is called once per
-    byte at its stop-bit time and the receiver decides whether it is taken or dropped)."""
+    """UART connection between two UART models. Models with `frame_listeners` / `receive_frame` exchange frames
+    (chipem/periph/uartwire.py: the transmitter's baud, data bits, parity bit, stop bits, breaks; the receiver decodes
+    them at its own settings); others fall back to bytes (tx_listeners / receive). Delivery is at the frame's stop-bit
+    end and the receiver decides whether it is taken or dropped."""
 
     def __init__(self, board: "Board", a: tuple[str, str], b: tuple[str, str], *, bidir: bool = True):
         self.board = board
@@ -623,11 +651,12 @@ class UartLink:
         self.auto = False                   # created from a net (TX pin and RX pin on the same net)
         self.net: str | None = None         # that net's name
         self._last_rx: dict[int, float] = {}    # id(receiver block) -> arrival time of its last byte (ns)
-        self._hooks = [(self.blk_a, self._a_tx)]
-        self.blk_a.tx_listeners.append(self._a_tx)
-        if bidir:
-            self.blk_b.tx_listeners.append(self._b_tx)
-            self._hooks.append((self.blk_b, self._b_tx))
+        self._hooks = []
+        for blk, cb in ((self.blk_a, self._a_tx), (self.blk_b, self._b_tx))[:2 if bidir else 1]:
+            lst = getattr(blk, "frame_listeners", None)
+            lst = lst if lst is not None else blk.tx_listeners
+            lst.append(cb)
+            self._hooks.append((lst, cb))
 
     def describe(self) -> str:
         arrow = "<->" if self.bidir else "->"
@@ -643,36 +672,49 @@ class UartLink:
                 "a_to_b": self.bytes_ab, "b_to_a": self.bytes_ba}
 
     def close(self) -> None:
-        for blk, cb in self._hooks:
-            if cb in blk.tx_listeners:
-                blk.tx_listeners.remove(cb)
+        for lst, cb in self._hooks:
+            if cb in lst:
+                lst.remove(cb)
         self._hooks = []
 
-    def _a_tx(self, blk, byte: int) -> None:
-        self.bytes_ab += 1
-        self._send(self.chip_a, blk, self.chip_b, self.blk_b, byte)
+    def _a_tx(self, blk, x) -> None:
+        if isinstance(x, int) or not x.brk:
+            self.bytes_ab += 1
+        self._send(self.chip_a, blk, self.chip_b, self.blk_b, x)
 
-    def _b_tx(self, blk, byte: int) -> None:
-        self.bytes_ba += 1
-        self._send(self.chip_b, blk, self.chip_a, self.blk_a, byte)
+    def _b_tx(self, blk, x) -> None:
+        if isinstance(x, int) or not x.brk:
+            self.bytes_ba += 1
+        self._send(self.chip_b, blk, self.chip_a, self.blk_a, x)
 
-    def _send(self, src_chip, src, dst_chip, dst, byte: int) -> None:
+    def _send(self, src_chip, src, dst_chip, dst, x) -> None:
+        """`x`: a Frame (frame_listeners) or a byte (tx_listeners)."""
         self._check(src_chip, src, dst)
-        char = src.char_ns() if hasattr(src, "char_ns") else 0.0
+        fr = None if isinstance(x, int) else x
+        if fr is not None and fr.baud > 0:
+            char = fr.duration_ns()
+        else:
+            char = src.char_ns() if hasattr(src, "char_ns") else 0.0
         t = src_chip.now_ns() + char
         # a receiver ahead of the sender cannot get the byte at its stop bit any more; it gets it now, but never
         # sooner than one character after the previous byte (back-to-back bytes must not arrive together)
         last = self._last_rx.get(id(dst))
         if last is not None and t < last + char:
             t = last + char
-        data = bytes([byte])
+        rf = getattr(dst, "receive_frame", None) if fr is not None else None
+        if rf is not None:
+            fn, args = rf, (fr, t)
+        elif fr is not None and fr.brk:
+            return                          # a byte-level receiver cannot see a break
+        else:
+            fn, args = dst.receive, (bytes([(fr.data if fr is not None else x) & 0xFF]),)
         now = dst_chip.now_ns()
         if now >= t:
             self._last_rx[id(dst)] = now
-            dst.receive(data)
+            fn(*args)
         else:
             self._last_rx[id(dst)] = t
-            dst_chip.sched.at_ns(t, dst.receive, data)
+            dst_chip.sched.at_ns(t, fn, *args)
 
     def _check(self, src_chip, src, dst) -> None:
         if self.warned:
@@ -687,8 +729,8 @@ class UartLink:
         if abs(bs - bd) / max(bs, bd) > BAUD_TOLERANCE or fs != fd:
             self.warned = True
             what = f"baud mismatch {bs:.0f} vs {bd:.0f}" if fs == fd else f"frame mismatch {fs} vs {fd} bits"
-            self.board.warn(f"uart link {self.describe()}: {what} (bytes still delivered)",
-                            t_ns=src_chip.now_ns(), link=self.describe())
+            self.board.warn(f"uart link {self.describe()}: {what}; the receiver decodes at its own settings "
+                            f"(framing / parity errors, garbage)", t_ns=src_chip.now_ns(), link=self.describe())
 
 
 
@@ -738,6 +780,8 @@ class Board:
         self.name = name
         self.chips: dict[str, Any] = dict(chips)
         self.quantum_ns = float(quantum_ns) if quantum_ns else DEFAULT_QUANTUM_NS
+        self.auto_quantum = False                   # set_auto_quantum(): sleeping chips do not hold the others back
+        self.chip_wall: dict[str, float] = {}       # wall seconds spent in each chip's run_for (speed meter)
         self.log = log if log is not None else EventLog()
         self.nets: list[Net] = []
         self.links: list[UartLink] = []
@@ -1225,10 +1269,21 @@ class Board:
             out["devices"] = devs
         if self.parts:
             out["parts"] = [p.to_dict() for p in self.parts.values()]
+            for pd, p in zip(out["parts"], self.parts.values()):
+                for k in getattr(p, "PATH_PARAMS", ()):  # script files: relative to the exported YAML
+                    if pd.get(k):
+                        pd[k] = path(pd[k])
         if self.desc is not None and getattr(self.desc, "host_serial", None):
             out["host_serial"] = [dict(h) for h in self.desc.host_serial]
         if self.desc is not None and getattr(self.desc, "realtime", None) is not None:
             out["realtime"] = self.desc.realtime
+        bp = dict(getattr(self.desc, "perf", None) or {}) if self.desc is not None else {}
+        if "preset" in bp:
+            out["performance"] = bp["preset"]
+        if self.auto_quantum or "auto_quantum" in bp:
+            out["auto_quantum"] = bool(self.auto_quantum)
+        if "max_slice" in bp:
+            out["max_slice"] = int(bp["max_slice"])
         if self.desc is not None and self.desc.stimulus:
             out["stimulus"] = list(self.desc.stimulus)
         return out
@@ -1257,6 +1312,9 @@ class Board:
             lines.extend(f"#   net {ln.net}: {ln.describe()}" for ln in auto)
         if "realtime" in d:
             lines.append(f"realtime: {flow(d['realtime'])}")
+        for key in ("performance", "auto_quantum", "max_slice"):
+            if key in d:
+                lines.append(f"{key}: {flow(d[key])}")
         if "stimulus" in d:
             lines.append(f"stimulus: {flow(d['stimulus'])}")
         return "\n".join(lines) + "\n"
@@ -1289,21 +1347,27 @@ class Board:
 
     def run_for(self, ns: float) -> StopReason:
         chips = list(self.chips.items())
+        wall = self.chip_wall
+        clk = time.perf_counter
         if len(chips) == 1:
-            self._current = chips[0][1]
+            cid0, chip0 = chips[0]
+            self._current = chip0
+            w0 = clk()
             try:
-                return chips[0][1].run_for(ns)
+                return chip0.run_for(ns)
             finally:
                 self._current = None
+                wall[cid0] = wall.get(cid0, 0.0) + (clk() - w0)
         target = min(c.clock.now_ns() for _i, c in chips) + float(ns)
-        q = self.quantum_ns
         self._stop = False
         self.last_stop_chip = None
         eps = 1e-6
+        auto = self.auto_quantum
         while True:
             if self._stop:
                 self._stop = False
                 return StopReason.USER
+            q = self.quantum_ns                   # (may be changed between iterations: web/shell `quantum`)
             # chip furthest behind
             cid, chip, t = None, None, math.inf
             for i, c in chips:
@@ -1312,15 +1376,28 @@ class Board:
                     cid, chip, t = i, c, tc
             if t >= target - eps:
                 return StopReason.COUNT
-            others = min(c.clock.now_ns() for i, c in chips if i != cid)
-            limit = min(target, others + q)
+            if auto:
+                # auto quantum: a sleeping chip cannot act before its next event, so it holds the others back up to
+                # that event (exactly: its event-driven outputs are never late); an awake chip by its now + q.
+                # Something sent to a sleeping chip meanwhile ends the sender's run (_idle_poke) and re-plans.
+                limit, blocker = target, None
+                for i, c in chips:
+                    if i != cid:
+                        b = self._bound_ns(c, q)
+                        if b < limit:
+                            limit, blocker = b, c
+                others = limit
+            else:
+                others = min(c.clock.now_ns() for i, c in chips if i != cid)
+                limit = min(target, others + q)
             # board-clock events (pulse/pattern parts, part stimulus) are known in advance: no chip runs past the
             # next one, so every chip is at or behind it when it fires and receives the edge at its exact time
             if self._timed:
                 nxt = self.next_timed_ns()
                 if nxt is not None and t + eps < nxt <= limit:
                     limit = nxt
-                    if chip is self.clock_chip and others < nxt - eps:
+                    others_now = min(c.clock.now_ns() for i, c in chips if i != cid)
+                    if chip is self.clock_chip and others_now < nxt - eps:
                         # the event fires on this chip's scheduler: stop just short of it and let the others
                         # catch up first, so they see the drivers as they were before the edge
                         short = nxt - 2e9 / chip.clock.hz
@@ -1328,12 +1405,19 @@ class Board:
                             limit = short
             dt = limit - t
             if dt <= eps:
-                dt = min(q, target - t)
+                if auto and blocker is not None and blocker.sleeping and blocker.clock.now_ns() <= t + eps:
+                    # tie with a sleeper whose next event is due now: let it fire that event first
+                    chip, cid = blocker, next(i for i, c in chips if c is blocker)
+                    dt = 2e9 / chip.clock.hz
+                else:
+                    dt = min(q, target - t)
             self._current = chip
+            w0 = clk()
             try:
                 r = chip.run_for(dt)
             finally:
                 self._current = None
+                wall[cid] = wall.get(cid, 0.0) + (clk() - w0)
             if r is StopReason.COUNT:
                 continue
             if r is StopReason.USER:
@@ -1343,6 +1427,38 @@ class Board:
                 continue
             self.last_stop_chip = cid
             return r
+
+    @staticmethod
+    def _bound_ns(c: Any, q: float) -> float:
+        """Auto quantum: how far the other chips may run ahead of chip `c`. A chip that sleeps (WFI/IDLE, no wake-up
+        pending) or is parked (its last slice ended in a branch-to-itself or a skipped polling loop: its state repeats
+        until an event) does nothing before its next scheduled event: up to that event (a polling loop: at most
+        poll_skip_ns); an awake chip: its now + q."""
+        now = c.clock.now_ns()
+        parked = c.parked and not c.sleeping
+        if not (c.sleeping or parked) or c._wake_req:
+            return now + q
+        if c.arch.wakeup_pending() and (c.wake_gate is None or c.wake_gate() or parked):
+            return now + q
+        nd = c.sched.next_due()
+        b = math.inf if nd is None else max(now, c.clock.cycles_to_ns(nd))
+        if parked and c.poll_skip_ns > 0 and c.core.spin_pc is None:
+            b = min(b, now + c.poll_skip_ns)        # a skipped polling loop is re-read at least every poll_skip_ns
+        return b
+
+    def set_auto_quantum(self, on: bool) -> None:
+        """Auto quantum on/off (see run_for). While on, every chip reports events scheduled on it from outside
+        (Chip.idle_watch) so a sleeping chip that receives something re-plans the lockstep at once."""
+        self.auto_quantum = bool(on)
+        for c in self.chips.values():
+            c.idle_watch = self._idle_poke if self.auto_quantum else None
+
+    def _idle_poke(self, chip: Any) -> None:
+        """An event was scheduled on `chip` while another chip runs: if `chip` sleeps (it may lag far behind under
+        auto quantum), end the running chip's run_for so the next iteration limits it by `chip`'s new event."""
+        cur = self._current
+        if cur is not None and cur is not chip and (chip.sleeping or chip.parked):
+            cur.yield_run()
 
     def reset(self) -> None:
         for chip in self.chips.values():

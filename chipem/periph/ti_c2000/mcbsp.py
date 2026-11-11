@@ -148,6 +148,8 @@ def _rev8(v: int) -> int:
 
 @register("ti_c2000.mcbsp")
 class McBSP(C2000Block):
+    cycle_anchors = ("_t_srg",)         # internal sample-rate generator origin: held in STANDBY/HALT (LSPCLK off)
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         L = str(params.get("instance") or name[-1]).upper()

@@ -1,0 +1,12 @@
+# NXP P89CV51RD2 SPI master with a SPI NOR flash (W25Q32-style, JEDEC ID 0xEF4016, 4 MB, erased).
+#   A (P89CV51RD2, 11.0592 MHz) runs spi_flash: SPI master mode 0, SPICLK = fosc/16 (691.2 kHz) on P1.7, MOSI P1.5,
+#              MISO P1.6; chip select on P2.0 (GPIO).  RDID (9Fh) -> IRAM 30h-32h = EF 40 16, READ of 16 bytes at
+#              000000h -> 40h-4Fh (FFh: erased; give the device `file: image.bin` to preload it), then "ID EF4016" on
+#              the UART (9600 8N1).
+# Run:  chipem run --board boards/p89cv51_spi_flash.yaml --for 30ms
+name: p89cv51_spi_flash
+quantum: 10us
+chips:
+  - {id: A, chip: p89cv51rd2, firmware: ../firmware/samples_mcs51/build/spi_flash.hex}
+devices:
+  - {type: spi_flash, chip: A, spi: SPI, cs: P2.0, jedec: 0xEF4016}

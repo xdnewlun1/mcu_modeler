@@ -15,7 +15,11 @@ the compiler is not part of the repository).
 | `i2c_eeprom.c` | I2C-A master at 100 kHz (module clock 10 MHz) on GPIO32/33: writes "Hello over I2C" into a 24C32 EEPROM at 0x50 (FIFO mode, I2CCNT + STP), acknowledge-polls the write cycle, reads it back (dummy write, ARDY, repeated START) and prints `EEPROM: Hello over I2C` on SCI-A; board `boards/c2000_i2c_eeprom.yaml` |
 | `codestart.asm` | `codestart` section at 0x33FFF6: `LB wd_disable` → watchdog off → `LB _c_int00` (TI's CodeStartBranch scheme) |
 | `f28232.cmd` | linker command file: flash 0x330000–0x33FF7F, BEGIN 0x33FFF6, CSM areas, M0/M1, L0–L5 (the F28232 has 26K SARAM, so there is no L6/L7); `.stack` in M1, variables in L4, `.esysmem`/`.sysmem` in L5; COFF and EABI section names via `#if defined(__TI_EABI__)` |
-| `build.sh` | builds every `*.c` here (with `codestart.asm`) for both ABIs. Prints install instructions if `cl2000` is missing |
+| `build.sh` | builds every `*.c` here (with `codestart.asm`) for both ABIs; `f2808_*.c` are linked with `f2808.cmd` and built without `--float_support`. Prints install instructions if `cl2000` is missing |
+| `f2808.h`, `f2808.cmd` | TMS320F2808 register definitions (PLLSTS.CLKINDIV, 280x PCLKCR0 gates, ports A/B) and linker file (flash 0x3E8000-0x3F7F7F, BEGIN 0x3F7FF6, CSM areas, M0/M1, L0/L1, H0 for variables). `codestart.asm` is shared (its section is placed by the .cmd file) |
+| `f2808_blinky.c` | F2808: GPIO34 toggles every 1 ms (CPU timer 0, TIF polled) |
+| `f2808_adc.c` | F2808: ePWM1 SOCA every 500 us → ADC SEQ1 (ADCINA0/A1) → `interrupt void seq1_isr` (PIE 1.1); prints `ADC <n> <a0> <a1>` on SCI-A every 10 samples |
+| `f2808_can.c` | F2808: eCAN-B (GPIO8/GPIO10, 500 kbit/s from the 100 MHz eCAN clock) sends `100#00<n>4B32` every 10 ms and prints the `202#...` answers of the STM32 `can_echo` (`boards/f2808_stm32_can.yaml`); tests in `tests/test_c2000_f2808_samples.py` |
 
 ## Building
 

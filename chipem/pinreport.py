@@ -118,6 +118,9 @@ class PinReport:
         try:
             if getattr(core, "running", False) and type(core).__name__ == "C28xCore":
                 return _c28x_live_pc(core)
+            live = getattr(core, "live_pc", None)              # interpreters that keep the PC in a local (MCS-51)
+            if live is not None and getattr(core, "running", False):
+                return live()
             return core.pc
         except Exception:
             return None

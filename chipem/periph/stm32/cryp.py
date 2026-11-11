@@ -1,5 +1,6 @@
-"""STM32F415/F417 cryptographic processor (CRYP, RM0090 ch. 23): DES / TDES (ECB, CBC) and AES-128/192/256 (ECB,
-CBC, CTR) with AES key preparation, IN / OUT FIFOs, DMA and interrupts.
+"""STM32F415/F417 and STM32F437/F439 cryptographic processor (CRYP, RM0090 ch. 23): DES / TDES (ECB, CBC) and
+AES-128/192/256 (ECB, CBC, CTR) with AES key preparation, IN / OUT FIFOs, DMA and interrupts; on the F43x
+(`params.gcm`) also AES-GCM / GMAC and AES-CCM / CMAC with their four phases and the context swap registers.
 
 Reference: RM0090 Rev 22 ch. 23 (section numbers below), the register fields of the SVD (chips/stm32f405_regs.yaml)
 and ST's HAL (firmware/vendor/STM32CubeF4 stm32f4xx_hal_cryp.c, CMSIS stm32f417xx.h).  Ciphers: chipem/crypto_algos.py (pure Python, checked
@@ -15,7 +16,29 @@ against FIPS-197 / SP 800-38A / FIPS 46-3 vectors).
   ignored (23.3.5, 23.6.1 note).  The reserved bits read 0.  ALGOMODE[3] and GCM_CCMPH (GCM/CCM, 23.6.2) and the
   context swap registers CSGCMCCM0..7 / CSGCM0..7 (23.6.12) exist on STM32F42x/F43x only: on the F415/F417 they are
   reserved (the CR bits read 0 and are ignored with one `warn`; the CSGCM* registers read 0).  With `params.gcm`
-  (F43x) GCM/CCM are accepted but not modelled (one `warn`, nothing is processed).
+  (F43x) ALGOMODE = 1000 is GCM (also GMAC) and 1001 CCM (also CMAC); 1010..1111 are reserved (one `warn`, nothing
+  is processed).
+* GCM / CCM (23.3.2 "AES Galois/counter mode", "AES combined cipher machine"), phase = CR.GCM_CCMPH:
+  - init (00), started by CRYPEN: GCM computes the hash subkey H = E_K(0^128) and keeps J0 = the IV registers with
+    their 32-bit counter (IV1RR) minus 1 (HAL / RM0090 convention: software loads the initial counter block with
+    counter = 2 = inc32(J0) for a 96-bit IV); CCM encrypts the B0 block written to DIN (CBC-MAC start).  At the end
+    CRYPEN is cleared by hardware (23.3.2 step f/g).  No output.
+  - header (01): each 4-word block updates the GHASH (S = (S ^ A_i) . H) or the CBC-MAC (X = E_K(X ^ B_i)); no
+    output, so these blocks do not need OUT FIFO room.  Software formats B1 (CCM) and pads the header to 128 bits.
+  - payload (10): CTR encryption/decryption with the counter in the IV registers (IV1RR + 1 after each block, readable
+    for context saving); GCM hashes the ciphertext (DOUT when encrypting, DIN when decrypting), CCM MACs the plaintext.
+    A last block that software zero-pads is hashed padded: for GCM encryption / CCM decryption the tag is then wrong,
+    as on silicon (the HAL "Workaround 2" for partial blocks).
+  - final (11): GCM: DIN = len(A) || len(C) in bits (64 + 64) -> DOUT = E_K(J0) ^ GHASH; CCM: DIN = the counter block
+    A0 (CTR0) -> DOUT = E_K(A0) ^ X (the full 16-byte encrypted MAC; software truncates it to t bytes and compares
+    tags).  ALGODIR is ignored in this phase.
+  Block times: RM0090 Table 112 (STM32F43xxx) per phase, 128/192/256-bit key: GCM init 24/28/32, header 10,
+  payload 14/16/18, tag 14/16/18; CCM init 12/14/16, header 14/16/18, payload 25/29/33, tag 14/16/18 HCLK cycles.
+  The GCM init phase runs with an empty IN FIFO; CCM init waits for the 4 words of B0.
+  Context swap (23.3.7, 23.6.12): ST does not document the content of CSGCMCCM0..7R / CSGCM0..7R; CHIP_EM keeps
+  CSGCMCCM0..3 = the running GHASH S (GCM) or CBC-MAC X (CCM), CSGCMCCM4..7 = J0 (GCM), CSGCM0..3 = H (GCM),
+  CSGCM4..7 = 0.  Reading them snapshots the internal state, writing them restores it (after the key, IV and CR
+  are reprogrammed, as 23.3.7 "context restoration" says); save them with BUSY = 0.
 * Keys (23.3.2, 23.6.10): K0LR..K3RR (write-only, read 0); AES-128 uses K2..K3, AES-192 K1..K3, AES-256 K0..K3
   (KxLR = more significant word); DES uses K1, TDES K1|K2|K3 (EDE: E_K3(D_K2(E_K1(P)))).  IV0LR..IV1RR (AES 128-bit
   IV, DES the IV0 pair, 23.6.11) are updated by the hardware after every block (CBC: last ciphertext block; CTR: the
@@ -55,13 +78,20 @@ from ._util import GatedBlock, build_regs, dma_request, irq_number, make_absent,
 
 ALGODIR, CRYPEN, FFLUSH = 1 << 2, 1 << 15, 1 << 14
 ALGOMODE3, GCM_CCMPH = 1 << 19, 3 << 16
+GCM, CCM = 8, 9                               # ALGOMODE 1000 / 1001 (F43x)
+PH_INIT, PH_HEADER, PH_PAYLOAD, PH_FINAL = 0, 1, 2, 3
+# RM0090 Table 112 (STM32F43xxx): cycles per 128-bit block, key 128/192/256, phases init/header/payload/final
+GCM_CCM_CYCLES = {GCM: ((24, 28, 32), (10, 10, 10), (14, 16, 18), (14, 16, 18)),
+                  CCM: ((12, 14, 16), (14, 16, 18), (25, 29, 33), (14, 16, 18))}
 CR_BITS = 0xC3FC                              # CRYPEN, FFLUSH, KEYSIZE, DATATYPE, ALGOMODE[2:0], ALGODIR (23.6.1)
 CFG_BITS = 0x3FC                              # CR[9:2]: ignored while BUSY (23.3.5)
 IFEM, IFNF, OFNE, OFFU, BUSY = 1, 2, 4, 8, 16
 DIEN, DOEN = 1, 2
 INR, OUTR = 1, 2
 DEPTH = 8
-MODES = ("TDES-ECB", "TDES-CBC", "DES-ECB", "DES-CBC", "AES-ECB", "AES-CBC", "AES-CTR", "AES-KEY")
+MODES = ("TDES-ECB", "TDES-CBC", "DES-ECB", "DES-CBC", "AES-ECB", "AES-CBC", "AES-CTR", "AES-KEY", "AES-GCM",
+         "AES-CCM")
+PHASES = ("init", "header", "payload", "final")
 KEYREGS = [f"K{i}{s}R" for i in range(4) for s in "LR"]
 IVREGS = ["IV0LR", "IV0RR", "IV1LR", "IV1RR"]
 
@@ -107,9 +137,11 @@ class CRYP(GatedBlock):
             ov[k] = {"on_write": self._key_write, "on_read": lambda b, r: 0}
         for k in IVREGS:
             ov[k] = {"on_write": self._iv_write}
-        if not params.get("gcm", False):          # CSGCMCCM0..7R / CSGCM0..7R: STM32F42x/F43x only (23.6.12)
-            for i in range(8):
-                for k in (f"CSGCMCCM{i}R", f"CSGCM{i}R"):
+        for i in range(8):                        # CSGCMCCM0..7R / CSGCM0..7R: STM32F42x/F43x only (23.6.12)
+            for k in (f"CSGCMCCM{i}R", f"CSGCM{i}R"):
+                if params.get("gcm", False):
+                    ov[k] = {"on_read": self._cs_read, "on_write": self._cs_write}
+                else:
                     ov[k] = {**ro, "on_read": lambda b, r: 0}
         r = build_regs((name, "CRYP"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
@@ -129,6 +161,10 @@ class CRYP(GatedBlock):
         self._line = False
         self._dma = [False, False]
         self._key_prepared: tuple | None = None      # (key size, key words) after a key preparation
+        self._h = 0                                  # GCM hash subkey H (128-bit integer)
+        self._j0 = bytes(16)                         # GCM pre-counter block J0 (tag mask E_K(J0))
+        self._acc = 0                                # GCM GHASH accumulator S / CCM CBC-MAC X (128-bit integer)
+        self._inited = False                         # GCM/CCM init phase done (no restart on CRYPEN in phase 00)
 
     # ------------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
@@ -171,7 +207,12 @@ class CRYP(GatedBlock):
         return self.get("CR")
 
     def algomode(self) -> int:
-        return (self._cr() >> 3) & 7
+        """ALGOMODE[3:0]: 0..7, 8 GCM, 9 CCM (bit 3 = CR bit 19, F43x only)."""
+        cr = self._cr()
+        return ((cr >> 3) & 7) | (8 if cr & ALGOMODE3 else 0)
+
+    def phase(self) -> int:
+        return (self._cr() >> 16) & 3
 
     def _datatype(self) -> int:
         return (self._cr() >> 6) & 3
@@ -180,9 +221,9 @@ class CRYP(GatedBlock):
         return (16, 24, 32, 32)[(self._cr() >> 8) & 3]
 
     def _reserved_mode(self) -> bool:
-        cr = self._cr()
-        if cr & (ALGOMODE3 | GCM_CCMPH):
-            self._warn_once("gcm2", f"{self.name}: GCM/CCM modes are not modelled: nothing is processed")
+        if self.algomode() > CCM:
+            self._warn_once("gcm2", f"{self.name}: CR.ALGOMODE = {self.algomode():04b} is reserved (RM0090 23.6.2): "
+                            f"nothing is processed")
             return True
         return False
 
@@ -205,6 +246,8 @@ class CRYP(GatedBlock):
 
     def cycles(self) -> int:
         m = self.algomode()
+        if m in (GCM, CCM):
+            return GCM_CCM_CYCLES[m][self.phase()][{16: 0, 24: 1, 32: 2}[self._keysize()]]
         if m >= 4:
             return {16: 14, 24: 16, 32: 18}[self._keysize()]
         return 48 if m < 2 else 16
@@ -256,6 +299,9 @@ class CRYP(GatedBlock):
         if m == 7:
             self._start(self.cycles(), self._key_done)
             return
+        if m in (GCM, CCM):
+            self._kick_aead(m)
+            return
         bw = self.block_words()
         if len(self.infifo) < bw:
             return
@@ -269,6 +315,94 @@ class CRYP(GatedBlock):
         self.busy = True
         self._ev = self.chip.sched.at_cycles(self.chip.now_cycles() + cycles, cb, *args)
         self._update()
+
+    # ------------------------------------------------------------------ GCM / CCM (F43x)
+    def _kick_aead(self, m: int) -> None:
+        ph = self.phase()
+        if ph == PH_INIT and self._inited:                # RM0090 23.3.2 step g: CRYPEN set again before the header
+            return
+        if m == GCM and ph == PH_INIT:                    # hash subkey: no input data
+            key = self._aes_key()
+            self._h = int.from_bytes(ca.aes_encrypt(key, bytes(16)), "big")
+            iv = self._iv()
+            self._j0 = _bytes(iv[:3] + [(iv[3] - 1) & 0xFFFFFFFF])
+            self._acc = 0
+            self.trace.append(("AES-GCM", "init", "", f"{self._h:032x}"))
+            self._start(self.cycles(), self._init_done)
+            return
+        if len(self.infifo) < 4:
+            return
+        if ph in (PH_PAYLOAD, PH_FINAL) and len(self.outfifo) + 4 > DEPTH:
+            return
+        data = [self.infifo.popleft() for _ in range(4)]
+        blk = _bytes(data)
+        key = self._aes_key()
+        out = b""
+        if ph == PH_INIT:                                 # CCM: B0
+            self._acc = int.from_bytes(ca.aes_encrypt(key, blk), "big")
+            self.trace.append(("AES-CCM", "init", blk.hex(), ""))
+            self._start(self.cycles(), self._init_done)
+            return
+        if ph == PH_HEADER:
+            self._absorb(m, key, blk)
+        elif ph == PH_PAYLOAD:
+            iv = self._iv()
+            ks = ca.aes_encrypt(key, _bytes(iv))
+            out = bytes(a ^ b for a, b in zip(blk, ks))
+            self._set_iv(iv[:3] + [(iv[3] + 1) & 0xFFFFFFFF])
+            dec = bool(self._cr() & ALGODIR)
+            if m == GCM:
+                self._absorb(m, key, blk if dec else out)     # GHASH over the ciphertext
+            else:
+                self._absorb(m, key, out if dec else blk)     # CBC-MAC over the plaintext
+        else:                                             # final: tag
+            if m == GCM:
+                self._absorb(m, key, blk)                     # len(A) || len(C)
+                mask = ca.aes_encrypt(key, self._j0)
+            else:
+                mask = ca.aes_encrypt(key, blk)               # A0 = CTR0
+            out = bytes(a ^ b for a, b in zip(mask, self._acc.to_bytes(16, "big")))
+        self.trace.append((MODES[m], PHASES[ph], blk.hex(), out.hex()))
+        self._start(self.cycles(), self._block_done, _words(out))
+
+    def _absorb(self, m: int, key: bytes, blk: bytes) -> None:
+        v = int.from_bytes(blk, "big")
+        if m == GCM:
+            self._acc = ca.gf128_mul(self._acc ^ v, self._h)
+        else:
+            self._acc = int.from_bytes(ca.aes_encrypt(key, (self._acc ^ v).to_bytes(16, "big")), "big")
+
+    def _init_done(self) -> None:
+        """End of the GCM/CCM init phase: CRYPEN cleared by hardware (RM0090 23.3.2 init step f)."""
+        self._ev = None
+        self.busy = False
+        self.blocks += 1
+        self._inited = True
+        self.set("CR", self._cr() & ~CRYPEN)
+        self._update()
+
+    def _cs_words(self) -> list[int]:
+        """CSGCMCCM0..7 then CSGCM0..7 (CHIP_EM layout, see the module docstring)."""
+        acc = _words(self._acc.to_bytes(16, "big"))
+        return acc + _words(self._j0) + _words(self._h.to_bytes(16, "big")) + [0] * 4
+
+    def _cs_index(self, name: str) -> int:
+        i = int(name[-2])
+        return i if name.startswith("CSGCMCCM") else 8 + i
+
+    def _cs_read(self, blk, reg):
+        if self.busy:
+            self._warn_once("csbusy", f"{self.name}: context swap registers read while BUSY = 1 (RM0090 23.3.7: wait "
+                            f"for BUSY = 0 before saving the context)")
+        return self._cs_words()[self._cs_index(reg.name)]
+
+    def _cs_write(self, blk, reg, old, new):
+        ws = self._cs_words()
+        ws[self._cs_index(reg.name)] = new & 0xFFFFFFFF
+        self._acc = int.from_bytes(_bytes(ws[0:4]), "big")
+        self._j0 = _bytes(ws[4:8])
+        self._h = int.from_bytes(_bytes(ws[8:12]), "big")
+        return new
 
     def _key_done(self) -> None:
         self._ev = None
@@ -366,6 +500,8 @@ class CRYP(GatedBlock):
                 self.infifo.clear()
                 self.outfifo.clear()
             new &= ~FFLUSH
+        if (new ^ old) & (ALGOMODE3 | 0x38) or ((old >> 16) & 3 and not (new >> 16) & 3):
+            self._inited = False                          # new mode, or back to the init phase: a new message
         self._store(reg, new)
         self._update()
         if new & CRYPEN:
@@ -376,12 +512,15 @@ class CRYP(GatedBlock):
         if self.busy:            # ignored while BUSY (RM0090 23.6.10 note)
             self._warn_once("keybusy", f"{self.name}: key register written while BUSY = 1: ignored")
             return old
+        self._inited = False
         return None              # a rewritten key no longer matches _key_prepared (checked per block)
 
     def _iv_write(self, blk, reg, old, new):
         if self.busy:            # ignored while BUSY (RM0090 23.6.11 note)
             self._warn_once("ivbusy", f"{self.name}: IV register written while BUSY = 1: ignored")
             return old
+        if self.phase() == PH_INIT:                       # a new IV for the next init (context restore keeps it)
+            self._inited = False
         return None
 
     def _ctl_write(self, blk, reg, old, new):

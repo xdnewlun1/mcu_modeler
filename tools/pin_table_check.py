@@ -8,7 +8,8 @@ Errors (exit status 1):
   * pin count differs from --expect (default: the number in `package:`, e.g. LQFP144 -> 144; --expect 0 disables)
   * pin numbers are not unique, or not exactly 1..N
   * `kind` not one of gpio | analog | power | special
-  * a gpio pin without `port`/`bit`, a bad port letter or a bit outside 0..31; a non-gpio pin with port/bit
+  * a gpio pin without `port`/`bit`, a bad port letter (A-Z, or 0-9 for 80C51 ports) or a bit outside 0..31; a
+    non-gpio pin with port/bit
   * two gpio pins with the same port/bit (same GPIO name)
   * the GPIO name built from `gpio_name_format` (PT{port}{bit}, P{port}{bit}, GPIO{num}) is not one of the
     "/"-separated parts of the pin name (port/bit typo, or the wrong format for the family)
@@ -16,7 +17,7 @@ Errors (exit status 1):
   * two gpio/analog pins with the same name
 Warnings (exit status 1 only with --strict):
   * a function key that the family's mux model does not know (kinetis ALT0-7/EzPort, stm32 AF0-15/ADC/analog/
-    additional, ti_c2000 GPIO/MUX1-3/ANALOG)
+    additional, ti_c2000 GPIO/MUX1-3/ANALOG, stm32f1 AF/REMAP/ADC/analog/additional/debug, mcs51 GPIO/ALT1-3)
   * a power pin whose name does not look like a supply (V*, GND*, AVDD/AVSS ...), or a non-power pin that does
   * a pin whose name looks like a GPIO name but whose kind is not gpio
   * a gpio pin whose `default` matches none of its functions (and is not GPIO/DISABLED/empty)
@@ -44,6 +45,8 @@ FUNCTION_KEYS = {
     "kinetis": re.compile(r"ALT[0-7]|EzPort\Z"),
     "stm32": re.compile(r"AF([0-9]|1[0-5])|ADC|analog|additional\Z"),
     "ti_c2000": re.compile(r"GPIO|MUX[1-3]|ANALOG\Z"),
+    "stm32f1": re.compile(r"AF|REMAP|ADC|analog|additional|debug\Z"),
+    "mcs51": re.compile(r"GPIO|ALT[1-3]\Z"),
 }
 POWER_NAME = re.compile(r"(V[A-Z0-9_+\-]*|GND[A-Z0-9_]*|[AD]?VSS[A-Z0-9_]*|[AD]?VDD[A-Z0-9_]*)\Z", re.I)
 SUPPLY_LIKE = re.compile(r"(VDD|VSS|GND)[A-Z0-9_]*\Z", re.I)
@@ -84,9 +87,9 @@ def package_pin_count(package: str) -> int | None:
 def _gpio_like(desc: ChipDescription) -> re.Pattern:
     """Regex for GPIO names in this chip's format (PT{port}{bit} -> PT[A-Z]\\d+, GPIO{num} -> GPIO\\d+)."""
     fmt = desc.gpio_name_format
-    rx = re.escape(fmt).replace(r"\{port\}", "[A-Z]").replace(r"\{bit\}", r"\d+").replace(r"\{num\}", r"\d+")
+    rx = re.escape(fmt).replace(r"\{port\}", "[A-Z0-9]").replace(r"\{bit\}", r"\d+").replace(r"\{num\}", r"\d+")
     # re.escape leaves braces escaped as \{ ... \} on some versions and bare on others
-    rx = rx.replace("{port}", "[A-Z]").replace("{bit}", r"\d+").replace("{num}", r"\d+")
+    rx = rx.replace("{port}", "[A-Z0-9]").replace("{bit}", r"\d+").replace("{num}", r"\d+")
     return re.compile(rx + r"\Z")
 
 
@@ -130,8 +133,8 @@ def check_desc(desc: ChipDescription, expect: int | None = None, path: str = "")
             if p.port is None or p.bit is None:
                 r.errors.append(f"{tag}: gpio pin without port/bit")
             else:
-                if not re.fullmatch(r"[A-Z]", str(p.port)):
-                    r.errors.append(f"{tag}: port {p.port!r} is not a single capital letter")
+                if not re.fullmatch(r"[A-Z0-9]", str(p.port)):     # letters; digits for 80C51 ports P0-P3
+                    r.errors.append(f"{tag}: port {p.port!r} is not a single capital letter or digit")
                 if not 0 <= int(p.bit) <= 31:
                     r.errors.append(f"{tag}: bit {p.bit} outside 0..31")
                 ports[str(p.port)].append(int(p.bit))

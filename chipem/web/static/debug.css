@@ -1,0 +1,84 @@
+/* Debug and Registers tabs of the pins tray (debug.js, regview.js). Tokens only (style.css); dense, monospace,
+   fixed panes with their own scroll. */
+.debug-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+.dbg-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.dbg-bar .sep { width: 1px; height: 16px; background: var(--line); margin: 0 2px; }
+.dbg-bar select, .dbg-bar input[type=text], .dbg-h input[type=text], .dbg-h select {
+  height: 22px; font: 11.5px var(--mono); background: var(--panel); color: var(--fg); border: 1px solid var(--input-line);
+  border-radius: 3px; padding: 0 4px; }
+.dbg-goto { width: 190px; }
+.dbg-msg { flex: 1 1 auto; min-width: 0; color: var(--fg-2); font-family: var(--mono); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; padding-left: 6px; }
+.dbg-msg.hit { color: var(--lv-x); }
+.dbg-hint { color: var(--fg-3); font-size: 11px; font-weight: normal; margin-left: 6px; }
+.dbg-main { flex: 1 1 auto; min-height: 60px; display: flex; overflow: hidden; }
+.dbg-code { flex: 1 1 58%; min-width: 0; overflow: auto; font: 12px/17px var(--mono); outline: none; border-right: 1px solid var(--line); }
+.dbg-code:focus-visible { box-shadow: inset 0 0 0 1px var(--focus); }
+.dbg-code .r { display: flex; white-space: pre; cursor: default; }
+.dbg-code .r:hover { background: var(--raise); }
+.dbg-code .r.cur { background: var(--sel-row); }
+.dbg-code .r.pc { background: var(--accent-weak); }
+.dbg-code .g { flex: 0 0 26px; text-align: center; color: var(--danger); cursor: pointer; border-right: 1px solid var(--line); user-select: none; }
+.dbg-code .r.pc .g { color: var(--accent); }
+.dbg-code .r.bp.pc .g { color: var(--danger); }
+.dbg-code .g:hover { background: var(--err-bg); }
+.dbg-code .ad { flex: 0 0 auto; color: var(--fg-3); padding: 0 8px 0 4px; }
+.dbg-code .by { flex: 0 0 11ch; color: var(--fg-3); overflow: hidden; }
+.dbg-code .ln { flex: 0 0 auto; min-width: 5ch; color: var(--fg-3); text-align: right; padding: 0 8px 0 4px; }
+.dbg-code .r.src { color: var(--fg-2); }
+.dbg-code .r.src.nocode .g { cursor: default; }
+.dbg-code .r.src .tx { color: var(--term-fg); }
+.dbg-code .r.asm .tx { color: var(--fg); }
+.dbg-code .sym { color: var(--own); padding-left: 30px; }
+.dbg-code .note { color: var(--fg-3); padding: 1px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dbg-code .empty { color: var(--fg-3); padding: 4px 8px; }
+.dbg-side { flex: 0 0 42%; min-width: 220px; display: flex; flex-direction: column; overflow: hidden; }
+.dbg-sec { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+.dbg-regs-sec { flex: 3 1 0; }
+.dbg-stack-sec { flex: 1.3 1 0; }
+.dbg-bps-sec { flex: 1.7 1 0; }
+.dbg-h { display: flex; align-items: center; gap: 4px; padding: 1px 4px; border-bottom: 1px solid var(--line); background: var(--raise);
+  font-size: 11.5px; min-height: 22px; flex-wrap: wrap; }
+.dbg-h b { font-weight: 600; color: var(--fg-2); }
+.dbg-h .btn { margin-left: auto; }
+.dbg-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.dbg-side table { border-collapse: collapse; width: 100%; font: 11.5px/16px var(--mono); }
+.dbg-side td, .dbg-side th { padding: 0 6px; white-space: nowrap; border-bottom: 1px solid var(--line); text-align: left; }
+.dbg-regs th { color: var(--fg-2); font-weight: normal; width: 6ch; }
+.dbg-regs td.v { cursor: text; }
+.dbg-regs td.x { color: var(--fg-3); width: 100%; }
+.dbg-regs tr.chg td.v { color: var(--lv-x); font-weight: 600; }
+.dbg-regs td.v input, .rv-table td.v input { width: 12ch; font: inherit; background: var(--panel); color: var(--fg); border: 1px solid var(--accent); padding: 0 2px; }
+.dbg-stack tr { cursor: pointer; }
+.dbg-stack tr:hover td, .dbg-bps tr:hover td { background: var(--raise); }
+.dbg-stack td.n, .dbg-bps td.n { color: var(--fg-3); text-align: right; }
+.dbg-stack td.ad, .dbg-bps td.ad { color: var(--fg-3); }
+.dbg-bps td.ad { cursor: pointer; }
+.dbg-stack td.how { color: var(--lv-x); }
+.dbg-bps td.wh { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+.dbg-bps td.cd { cursor: pointer; color: var(--fg-2); }
+.dbg-bps .btn { margin: 0; }
+.dbg-add { display: flex; gap: 3px; flex: 1 1 auto; margin-left: 6px; }
+.dbg-add input { flex: 1 1 auto; min-width: 8ch; }
+.dbg-side .dim, .rv .dim { color: var(--fg-3); }
+.dbg-mem { flex: 0 0 auto; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.dbg-mem .dbg-h .btn { margin-left: 0; }
+.dbg-mem-addr { width: 150px; }
+.dbg-dump { height: 98px; margin: 0; overflow: auto; font: 11.5px/15px var(--mono); padding: 2px 6px; white-space: pre; }
+.nx { color: var(--fg-3); }
+.dbg-dump .chg { color: var(--lv-x); font-weight: 600; }
+/* registers browser */
+.rv-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.rv-filter { width: 280px; }
+.rv-table { border-collapse: collapse; width: 100%; font: 11.5px/17px var(--mono); }
+.rv-table td { padding: 0 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rv-table td.tg { width: 14px; color: var(--fg-3); cursor: pointer; padding: 0 2px; }
+.rv-table tr.rv-p { background: var(--raise); cursor: pointer; }
+.rv-table tr.rv-p td.nm b { color: var(--fg); }
+.rv-table tr.rv-r { cursor: pointer; }
+.rv-table tr.rv-r:hover td, .rv-table tr.rv-f:hover td { background: var(--sel-row); }
+.rv-table td.ad { color: var(--fg-3); }
+.rv-table td.v { cursor: text; }
+.rv-table tr.chg td.v { color: var(--lv-x); font-weight: 600; }
+.rv-table tr.rv-f td.nm { color: var(--fg-2); padding-left: 18px; }
+.rv-table .btn { height: 18px; padding: 0 4px; }

@@ -166,9 +166,10 @@ class C2000Block(MMIOBlock):
             now = chip.clock.cycles
             self._stop_cycle = now
             parked = []
+            from ..lowpower import event_owner
             for ev in sched._heap:
-                if ev.cancelled or getattr(ev.cb, "__self__", None) is not self:
-                    continue
+                if ev.cancelled or event_owner(ev) is not self:      # bound methods of the block or of its
+                    continue                                          # helpers (`lp_owner`: I2C master, ...)
                 parked.append((ev, ev.cycles - now, ev.t_ns is not None))
                 ev.cycles = _PARKED
                 ev.t_ns = None

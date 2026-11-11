@@ -41,6 +41,10 @@ Registers (SVD table): CR1, CR2, OAR1, OAR2, DR, SR1, SR2, CCR, TRISE.
 * DMA (§27.3.8): CR2.DMAEN asserts "I2Cx_TX" while TxE (transmitting) and "I2Cx_RX" while RxNE (RM0090 Table 43).
 Not modelled: 10-bit slave addressing (OAR1.ADDMODE = 1 never matches), SMBus (SMBUS, PEC, ALERT, ARP, timeouts),
 bus errors (BERR), the fixed analog spike filter (the programmable FLTR filters are F42x/F43x only, §27.3.5), OTYPER push-pull on I2C pins (always open-drain), the rise time.
+I2C_FLTR (§27.6.10, STM32F42xxx/43xxx register tables only): ANOFF / DNF[3:0] are stored and readable; a write that
+changes them while CR1.PE = 1 is ignored with one `warn` ("must be configured only when the I2C is disabled"). The
+filters themselves (spike suppression up to DNF x TPCLK1, the extra (DNF + 1) x TPCLK1 SDA hold time) are not modelled:
+the bus model has no glitches to filter.
 """
 from __future__ import annotations
 
@@ -79,7 +83,8 @@ class I2C(GatedBlock):
               "CR2": {"on_write": self._cr2_write},
               "SR1": {"ro_mask": 0x20FF, "on_read": self._sr1_read, "on_write": self._sr1_write},
               "SR2": {"ro_mask": 0xFFFF, "on_read": self._sr2_read},
-              "DR": {"on_read": self._dr_read, "on_write": self._dr_write}}
+              "DR": {"on_read": self._dr_read, "on_write": self._dr_write},
+              "FLTR": {"ro_mask": 0xFFE0, "on_write": self._fltr_write}}   # F42x/F43x register tables only
         r = build_regs((name, f"I2C{self.index}", "I2C1"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self.sda_sig, self.scl_sig = f"I2C{self.index}_SDA", f"I2C{self.index}_SCL"
@@ -90,6 +95,15 @@ class I2C(GatedBlock):
         self._warned_freq = False
         self.transfers: deque[tuple[str, int, bool]] = deque(maxlen=4096)   # ("w"/"r"/"sw"/"sr", byte|-1, acked)
         self._state_init()
+
+    def _fltr_write(self, blk, reg, old, new):
+        if (old ^ new) & 0x1F and self.get("CR1") & 1:
+            if not getattr(self, "_warned_fltr", False):
+                self._warned_fltr = True
+                self.emit("warn", block=self.name, msg=f"{self.name}_FLTR write ignored: ANOFF/DNF must be configured "
+                          "only while CR1.PE = 0 (RM0090 27.6.10)")
+            return old
+        return None
 
     def _state_init(self) -> None:
         self._sr1_seen = 0                  # SR1 value of the last SR1 read (clear sequences)
@@ -117,6 +131,7 @@ class I2C(GatedBlock):
         self._er_irq = irq_number(chip, f"I2C{self.index}_ER")
         self.port = I2CPort(chip, self.sda_sig, self.scl_sig, self, self.timing, self._arb_lost)
         self.port.target.enabled = False
+        self.port.master.lp_owner = self               # the PWR freezer holds the master's bit events with ours
 
     def reset(self) -> None:
         if self.port is not None:
@@ -518,9 +533,11 @@ class I2C(GatedBlock):
             self._tra = False
         self._slave_nack = False
 
+    lp_frozen: Any = False              # PWR freezer: no APB1 clock in Stop (the F4 I2C has no wake-up from Stop)
+
     def i2c_address(self, addr: int, read: bool) -> bool:
         cr1 = self.get("CR1")
-        if not cr1 & PE or self._msl or self.port.master.owns_bus or not cr1 & ACK:
+        if not cr1 & PE or self._msl or self.port.master.owns_bus or not cr1 & ACK or self.lp_frozen:
             return False
         oar1, oar2 = self.get("OAR1"), self.get("OAR2")
         gen = dual = False
@@ -550,7 +567,7 @@ class I2C(GatedBlock):
         return bool(sr1 & (ADDR | BTF))
 
     def i2c_rx_byte(self, byte: int) -> bool:
-        if not self.port.target.addressed or self._msl:
+        if not self.port.target.addressed or self._msl or self.lp_frozen:
             return False
         self.transfers.append(("sw", byte, True))
         if not self.get("SR1") & RXNE:

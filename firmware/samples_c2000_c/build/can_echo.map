@@ -1,7 +1,7 @@
 ******************************************************************************
              TMS320C2000 Linker Unix v25.11.1                  
 ******************************************************************************
->> Linked Mon Nov  9 18:24:33 2026
+>> Linked Tue Nov 10 17:36:14 2026
 
 OUTPUT FILE NAME:   <build/can_echo.out>
 ENTRY POINT SYMBOL: "code_start"  address: 0033fff6
@@ -93,7 +93,7 @@ MODULE SUMMARY
     +--+----------------------------+------+---------+---------+
        Total:                       307    57        2      
                                                             
-    ../../toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml_eabi.lib
+    /home/xnewlun/Documents/Programming/CHIP_EM/toolchains/ti-cgt-c2000/ti-cgt-c2000_25.11.1.LTS/lib/rts2800_ml_eabi.lib
        exit.c.obj                   41     0         6      
        copy_decompress_lzss.c.obj   46     0         0      
        autoinit.c.obj               43     0         0      

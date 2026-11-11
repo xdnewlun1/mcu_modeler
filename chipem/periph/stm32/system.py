@@ -19,13 +19,17 @@ stored); CSR.VOSRDY reads 1 (regulator always ready); CSR.BRR mirrors BRE; BRE i
 (5.4.2). CR.CWUF / CR.CSBF (write 1) clear CSR.WUF / CSR.SBF and read 0. PVD (5.2.3): CSR.PVDO = PVDE and VDD (params
 `vdd`, default 3.3 V; `set_vdd()`) below the PLS level (2.0 ... 2.9 V); PVDO drives EXTI line 16.
 Low-power modes (RM0090 5.3), entered when the core stops in WFI/WFE (the PWR is a `chip.power_hooks` entry):
-* Sleep (SCR.SLEEPDEEP = 0): the core stops, everything else runs; any enabled interrupt wakes it (generic).
+* Sleep (SCR.SLEEPDEEP = 0): the core stops, everything else runs; any enabled interrupt wakes it (generic).  A block
+  whose RCC_xxxLPENR bit is clear (its xxxENR bit set) has its clock gated during Sleep (5.3.2) and is frozen.
 * Stop (SLEEPDEEP = 1, CR.PDDS = 0; LPDS / FPDS only change the wake-up latency on silicon, Table 27, not
   modelled): if an EXTI pending bit or an RTC alarm / wakeup / tamper / time-stamp flag (RTC_ISR) is already set the
   entry is ignored and execution continues (5.3.4 Table 28). On entry the RCC's
   HSEON/PLLON/PLLI2SON (and their RDY bits) are cleared and SYSCLK is switched to HSI (SW = SWS = 0, prescalers kept),
-  as the RM says for the Stop exit: firmware must re-initialise its clocks after waking. Peripheral models with
-  `clock_stop()` (stm32.usart) freeze; others keep counting (approximation, see docs/LIMITATIONS.md). Only an EXTI
+  as the RM says for the Stop exit: firmware must re-initialise its clocks after waking. Every peripheral clock stops
+  ("all clocks in the 1.2 V domain"): models with `clock_stop()` (stm32.usart) are told, the others are held by the
+  shared freezer (chipem/periph/lowpower.py: pending events parked, `time_shift()` moves counter anchors on exit, so
+  TIM/WWDG/SPI/... continue from where they stopped); RTC, IWDG, EXTI, GPIO, SYSCFG, FLASH, RCC, PWR keep working,
+  and the USB OTG (EXTI 18/20) / Ethernet (EXTI 19) wake-up lines are driven from outside the clock domain. Only an EXTI
   line wakes the core (`chip.wake_gate`: PR & IMR != 0, i.e. EXTI0-15 pins, PVD, RTC alarm 17, RTC wakeup 22, ...);
   with WFE an EXTI event line (EMR) wakes it too. RTC and IWDG keep running (LSE/LSI).
 * Standby (SLEEPDEEP = 1, PDDS = 1): CSR.SBF is set, all peripherals except RTC/backup domain, IWDG, RCC (its CSR
@@ -272,7 +276,10 @@ CSR_WUF, CSR_SBF, CSR_PVDO, CSR_EWUP, CSR_BRE, CSR_BRR, CSR_VOSRDY = (1 << 0, 1 
                                                                      1 << 14)
 PVD_LEVELS = (2.0, 2.1, 2.3, 2.5, 2.6, 2.7, 2.8, 2.9)          # PWR_CR.PLS (RM0090 5.4.1)
 RTC_WAKE_FLAGS = 0x6F00         # RTC_ISR ALRAF ALRBF WUTF TSF TAMP1F TAMP2F (Stop entry ignored while one is set)
-_ALWAYS_ON = ("stm32.rtc", "stm32.iwdg", "stm32.rcc", "stm32.pwr", "stm32.dbgmcu")
+_ALWAYS_ON = ("stm32.rtc", "stm32.iwdg", "stm32.rcc", "stm32.pwr", "stm32.dbgmcu", "stm32.rcc_f42x", "stm32.pwr_f42x")
+# blocks that keep working in Stop (RM0090 5.3.4: "all clocks in the 1.2 V domain are stopped"; RTC / IWDG run from
+# LSE/LSI, EXTI edge detection is asynchronous, GPIO input levels feed it; the others are clock-less storage)
+_STOP_KEEP = _ALWAYS_ON + ("stm32.exti", "stm32.gpio", "stm32.syscfg", "stm32.flash")
 
 
 @register("stm32.pwr")
@@ -300,12 +307,15 @@ class PWR(GatedBlock):
         self.vdd = float(params.get("vdd", 3.3))          # supply voltage seen by the PVD
         self._pvdo = False
         self._standby_wake = False          # the next reset ends Standby (WKUP / RTC event): PWR_CSR is kept
+        self._frz: Any = None               # chipem.periph.lowpower.Freezer (Stop, and Sleep with LPENR bits clear)
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         hooks = getattr(chip, "power_hooks", None)
         if hooks is not None and self not in hooks:
             hooks.append(self)
+        from ..lowpower import Freezer
+        self._frz = Freezer(chip)
         from ._util import find_model
         self._exti = find_model(chip, "stm32.exti", "EXTI")
         self._rtc = find_model(chip, "stm32.rtc", "RTC")
@@ -323,6 +333,8 @@ class PWR(GatedBlock):
         if self._standby_wake:
             mask |= CSR_WUF | CSR_EWUP
         self._standby_wake = False
+        if self._frz is not None:
+            self._frz.drop()                    # a reset in Stop/Sleep: the held events belong to blocks that reset
         super().reset()
         if self._powered:
             self.set("CSR", (keep & mask) | CSR_VOSRDY)
@@ -445,6 +457,9 @@ class PWR(GatedBlock):
         if not getattr(arch, "sleep_deep", False):
             self.mode = "sleep"
             self.entries["sleep"] += 1
+            gated = self._sleep_gated(chip)
+            if gated:
+                self._frz.freeze(gated, "sleep")
             return
         if self.get("CR") & PWR_PDDS:
             self._enter_standby(chip)
@@ -457,12 +472,28 @@ class PWR(GatedBlock):
         if self.mode == "stop":
             if chip.wake_gate == self._stop_gate:
                 chip.wake_gate = None
-            for blk in list(chip.peripherals.values()):
-                fn = getattr(blk, "clock_stop", None)
-                if fn is not None:
-                    fn(False, "stop")
+        if self._frz is not None and self._frz.active:
+            self._frz.thaw()
+        if self.mode == "stop":
             self.emit("info", block=self.name, msg="exit Stop mode (SYSCLK = HSI)")
         self.mode = "run"
+
+    def _sleep_gated(self, chip: Any) -> list:
+        """Sleep mode (RM0090 5.3.2): blocks whose clock is enabled in RCC_xxxENR but not in RCC_xxxLPENR stop."""
+        r = rcc(chip)
+        if r is None:
+            return []
+        from .rcc import GATES
+        out = []
+        for blk in chip.peripherals.values():
+            g = GATES.get(getattr(blk, "gate", None) or "")
+            if g is None or getattr(blk, "model", None) in _STOP_KEEP:
+                continue
+            reg, bit = g
+            lp = reg.replace("ENR", "LPENR")
+            if lp in r.regs and (r.get(reg) >> bit) & 1 and not (r.get(lp) >> bit) & 1:
+                out.append(blk)
+        return out
 
     def _enter_stop(self, chip: Any) -> None:
         # RM0090 5.3.4 Table 28: all EXTI pending bits and the RTC alarm / wakeup / tamper / time-stamp flags must be
@@ -488,10 +519,9 @@ class PWR(GatedBlock):
             r.set("CR", (cr | HSION | HSIRDY) & ~(HSEON | HSERDY | PLLON | PLLRDY | PLLI2SON | PLLI2SRDY))
             r.set("CFGR", r.get("CFGR") & ~0xF)         # SW = SWS = HSI
             r.update()
-        for blk in list(chip.peripherals.values()):
-            fn = getattr(blk, "clock_stop", None)
-            if fn is not None:
-                fn(True, "stop")
+        # every block whose clock derives from the 1.2 V domain, the SCS too (SysTick runs on HCLK)
+        self._frz.freeze([b for b in chip.peripherals.values() if getattr(b, "model", None) not in _STOP_KEEP],
+                         "stop")
         chip.wake_gate = self._stop_gate
         self.emit("info", block=self.name, msg=f"enter Stop mode ({'WFE' if self._wfe else 'WFI'}, regulator "
                   f"{'low-power' if self.get('CR') & PWR_LPDS else 'main'}); HSE/PLL off, wake-up by EXTI")

@@ -1,0 +1,15 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0050 main
+C:0x0075 again
+C:0x00A5 putc
+C:0x00B3 puts
+C:0x00BD puts_end
+C:0x00BE serial_isr
+C:0x00D0 s_store
+C:0x00D9 s_put
+C:0x00DC s_skip
+C:0x00DE s_end
+C:0x00E3 ping
+D:0x002E N
+D:0x002F RXPTR
+D:0x0030 RXCNT

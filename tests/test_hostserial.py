@@ -101,7 +101,7 @@ def test_parse_helpers():
 
 
 @need_fw
-def test_memory_bridge_round_trip_and_framing_drop():
+def test_memory_bridge_round_trip_and_framing_errors():
     s = console()
     br = s.attach_host_serial("UART0", "memory")
     port: MemoryPort = br.port
@@ -115,10 +115,12 @@ def test_memory_bridge_round_trip_and_framing_drop():
         port.host_send(b"xyz")
         s.run_for(10e6)
         assert port.host_recv(0.2) == b""
-        assert br.dropped == 3
         w = [e.fields["msg"] for e in s.events(kinds={"warn"})]
         assert len(w) == 1 and "9600" in w[0] and "framing" in w[0]
-        assert [e.fields["reason"] for e in s.events(kinds={"uart"}) if e.fields.get("dir") == "drop"] == ["framing"] * 3
+        # a 9600 baud character seen by a 115200 baud receiver: its low bits are breaks (0x00 with FE), several
+        # per character, never the typed text
+        rx = [e.fields for e in s.events(kinds={"uart"}) if e.fields.get("dir") == "rx" and e.t_ns > 10.2e6]
+        assert len(rx) >= 3 and all(f["fe"] and f["byte"] == 0 and f["brk"] >= 12 for f in rx)
     finally:
         s.close()
 
@@ -195,7 +197,7 @@ def test_pty_round_trip_reconnect_and_link(tmp_path):
 
 @need_fw
 @need_pty
-def test_pty_baud_mismatch_warns_and_drops():
+def test_pty_baud_mismatch_warns_and_gives_framing_errors():
     s = console()
     br = s.attach_host_serial("UART0", "pty")
     try:
@@ -205,9 +207,9 @@ def test_pty_baud_mismatch_warns_and_drops():
                 assert wait(lambda: br.port.connected)
                 assert wait(lambda: br.port.line() is not None and br.port.line().baud == 9600)
                 os.write(fd, b"help\r")
-                assert wait(lambda: br.dropped >= 5)
+                assert wait(lambda: br.blk.rx_errors >= 5)
                 time.sleep(0.05)
-                assert read_until(fd, b"help", 0.2) == b""
+                assert b"help" not in read_until(fd, b"help", 0.2)
             finally:
                 os.close(fd)
         msgs = [e.fields["msg"] for e in s.events(kinds={"warn"})]
@@ -398,5 +400,51 @@ def test_realtime_falls_behind_with_one_warning():
         assert info["rebases"] >= 1 and info["max_lag_ms"] >= 20
         w = [e.fields["msg"] for e in s.events(kinds={"warn"}) if "real-time" in str(e.fields.get("msg"))]
         assert len(w) == 1 and "cannot keep up" in w[0]
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------------------------------------ frames / breaks
+def test_host_frame_decoding_helpers():
+    from chipem.hostserial import host_bytes_for, host_rx_format
+    from chipem.periph.uartwire import Frame
+    fr = Frame(0x41, 8, "N", 1.0, 115200)
+    assert host_bytes_for(fr, host_rx_format(LineSettings(115200), fr))[0][0] == 0x41
+    assert host_bytes_for(fr, None) == [(0x41, None)]                    # TCP / memory: no line settings
+    # PTY: only the baud is known; the frame layout is taken from the chip's frame
+    rx = host_rx_format(LineSettings(115200, framed=False), Frame(0x41, 7, "E", 1.0, 115200))
+    assert rx.bits == 7 and rx.parity == "E"
+    # a wrong host baud: a 57600 receiver sees the 5 low bit times of a 115200 0x00 as start + 4 zero bits
+    got = host_bytes_for(Frame(0x00, 8, "N", 1.0, 115200), host_rx_format(LineSettings(57600), fr))
+    assert [b for b, _ in got] == [0xF0]
+    # ... and a 115200 receiver reads 9600 baud low bits as breaks: 0x00 (or a break) on a raw tty
+    got = host_bytes_for(Frame(0x00, 8, "N", 1.0, 9600), host_rx_format(LineSettings(115200), fr))
+    assert got[0][0] == "break" and got[0][1].fe
+    got = host_bytes_for(Frame.brk_frame(13, 1.0, 115200), host_rx_format(LineSettings(115200), fr))
+    assert got[0][0] == "break"
+
+
+@need_fw
+def test_memory_bridge_breaks_both_ways_and_session_break_token():
+    from chipem.periph.uartwire import Frame
+    s = console()
+    br = s.attach_host_serial("UART0", "memory")
+    port: MemoryPort = br.port
+    u = s.chip.peripherals["UART0"]
+    try:
+        s.run_for(5e6)
+        assert port.host_recv(1.0) == BANNER
+        port.host_break()                                             # host -> chip: a break reaches the UART
+        s.run_for(1e6)
+        rx = [e.fields for e in s.events(kinds={"uart"}) if e.fields.get("dir") == "rx"]
+        assert rx and rx[-1]["byte"] == 0 and rx[-1]["fe"] and rx[-1]["brk"] >= 13
+        u._tx_emit(Frame.brk_frame(13, 1.0, u.baud()))                # chip -> host: what a raw tty reads
+        s.run_for(1e6)
+        assert port.breaks_out == 1 and port.host_recv(0.5).endswith(b"\x00")
+        n = len([e for e in s.events(kinds={"uart"}) if e.fields.get("brk")])
+        s.uart_input("<break:20>", "UART0")                           # --uart-in / --at / shell / web token
+        s.run_for(1e6)
+        brk = [e.fields for e in s.events(kinds={"uart"}) if e.fields.get("brk")]
+        assert len(brk) == n + 1 and brk[-1]["brk"] >= 20
     finally:
         s.close()

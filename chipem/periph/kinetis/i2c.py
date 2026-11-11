@@ -33,7 +33,12 @@ Registers (SVD table): A1, F, C1, S, D, C2, FLT, RA, SMB, A2, SLTH, SLTL.
   dummy read), as the module's handshake (§48.4.1.8).  The master's ACK of a transmitted byte shows in RXAK.
 * FLT: STARTF/STOPF (w1c) set on bus START/STOP; with SSIE they set IICIF.  FLT.FLT (glitch filter) is stored.
 * C2.HDRS, C2.SBRC, C2.AD[10:8]/ADEXT (10-bit slave addresses), SMB (SMBus timeouts, FACK, ALERTEN), SLTH/SLTL, A2
-  without SIICAEN, WUEN: stored only (see docs/LIMITATIONS.md).
+  without SIICAEN: stored only (see docs/LIMITATIONS.md).
+* Low-power modes (48.1.2, 48.4.6.4, Table 7-2): WAIT keeps running.  In STOP/VLPS the module clock is off (the SMC
+  freezer holds a master transfer's bit events and resumes them) but with C1.WUEN = 1 the slave address match stays
+  active: a matching address (or general call) is acknowledged, sets IAAS/IICIF and the I2C interrupt wakes the core,
+  while SCL is stretched until software accesses D.  Without WUEN (and always in LLS/VLLS) an address is not
+  acknowledged while the clock is off.
 Pins: PORT PCR.ODE must be set for open-drain operation (§3.9.4 note); without it a released line drives H (the PORT
 model reports push-pull) and a slave's ACK conflicts with it on a net.
 """
@@ -116,6 +121,7 @@ class I2C(GatedBlock):
         super().attach(chip)
         self._irqn = irq_number(chip, f"I2C{self.index}", self.name)
         self.port = I2CPort(chip, self.sda_sig, self.scl_sig, self, self.timing, self._arb_lost)
+        self.port.master.lp_owner = self               # the SMC freezer holds the master's bit events with ours
         for b in chip.peripherals.values():
             if getattr(b, "model", None) == "kinetis.dmamux":
                 b.register_source(self.dma_source, lambda: self._dma)
@@ -357,10 +363,14 @@ class I2C(GatedBlock):
             if flt & SSIE:
                 self._s(IICIF)
 
+    lp_frozen: Any = False                               # SMC freezer: the low-power mode while the clock is off
+
     def i2c_address(self, addr: int, read: bool) -> bool:
         c1 = self.get("C1")
         if not c1 & IICEN or c1 & MST or self.port.master.owns_bus:
             return False
+        if self.lp_frozen and not (c1 & WUEN and self.lp_frozen in ("STOP", "VLPS")):
+            return False                                 # clock off, no wake-up: the address is not acknowledged
         c2 = self.get("C2")
         a1 = (self.get("A1") >> 1) & 0x7F
         ra = (self.get("RA") >> 1) & 0x7F
@@ -399,7 +409,7 @@ class I2C(GatedBlock):
         return not self._svc
 
     def i2c_rx_byte(self, byte: int) -> bool:
-        if not self.port.target.addressed:
+        if not self.port.target.addressed or (self.lp_frozen and self._svc):
             return False
         ack = not self.get("C1") & TXAK
         self.transfers.append(("sw", byte, ack))

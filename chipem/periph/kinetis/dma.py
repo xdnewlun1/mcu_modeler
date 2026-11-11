@@ -188,6 +188,7 @@ class DMA(GatedBlock):
         self._err_line = False
         self._busy = False
         self._queue: list[int] = []
+        self._lp_pending: set[int] = set()     # hardware requests that arrived while the clocks were stopped
         self.transfers = 0               # minor loops executed (statistics)
 
     def attach(self, chip: Any) -> None:
@@ -208,6 +209,7 @@ class DMA(GatedBlock):
         self._lines = 0
         self._err_line = False
         self._queue.clear()
+        self._lp_pending = set()
         self._busy = False
         super().reset()
 
@@ -315,10 +317,23 @@ class DMA(GatedBlock):
         return wr
 
     # ------------------------------------------------------------------ requests
+    lp_frozen: Any = False              # SMC freezer: Stop/VLPS/LLS (Table 7-2: DMA static)
+
     def hw_request(self, ch: int) -> None:
         """Hardware request on channel ch (from the DMAMUX)."""
         if ch < self.nch and self._bit("ERQ", ch):
+            if self.lp_frozen:              # no system clock: the request line stays asserted, served at the wake-up
+                self._lp_pending.add(ch)
+                return
             self._enqueue(ch)
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Clocks back after a stop mode: serve the requests that arrived meanwhile (still asserted ones too)."""
+        pend, self._lp_pending = self._lp_pending, set()
+        for ch in sorted(pend):
+            if self._bit("ERQ", ch):
+                self._enqueue(ch)
+        self._kick_all()
 
     def _kick_all(self) -> None:
         if self.mux is None:

@@ -283,7 +283,7 @@ def test_usart_break_lin_detection_and_parity(desc):
     _af7(chip, 10)
     wr(chip, USART1 + 0x10, 1 << 14 | 1 << 6)                       # LINEN, LBDIE
     wr(chip, USART1 + 0x0C, rd(chip, USART1 + 0x0C) | 1)            # SBK
-    assert [e.get("brk") for e in chip.log if e.kind == "uart" and e.get("dir") == "tx"] == [1]
+    assert [e.get("brk") for e in chip.log if e.kind == "uart" and e.get("dir") == "tx"] == [13]
     assert rd(chip, USART1 + 0x0C) & 1
     bit = 139 / 16e6 * 1e9
     chip.run_for(12.5 * bit)
@@ -342,3 +342,124 @@ def test_usart_smartcard_irda_warn_once(desc):
     wr(chip, USART1 + 0x14, 1 << 5 | 1 << 1)
     w = [e.fields["msg"] for e in chip.log if e.kind == "warn" and "not modelled" in e.fields.get("msg", "")]
     assert len(w) == 2 and "smartcard" in w[0]
+
+
+# ================================================================================================ clocks stopped in Stop
+TIM6, WWDG_BASE = 0x40001000, 0x40002C00
+
+
+def test_stop_holds_tim_counter_and_continues(desc):
+    # RM0090 5.3.4: all 1.2 V domain clocks stop; the timer continues from its value instead of jumping
+    chip = _chip(desc, LOOP)
+    _rtc_wakeup(chip, 0.5)
+    wr(chip, EXTI, 1 << 22)
+    wr(chip, EXTI + 8, 1 << 22)
+    wr(chip, ISER0, 1 << RTC_WKUP_IRQ)
+    wr(chip, TIM6 + 0x28, 15)                                       # PSC: 1 MHz at 16 MHz
+    wr(chip, TIM6 + 0x2C, 0xFFFF)
+    wr(chip, TIM6 + 0x14, 1)                                        # UG: load the PSC
+    wr(chip, TIM6, 1)                                               # CEN
+    wr(chip, SCR, SLEEPDEEP)
+    tim = chip.peripherals["TIM6"]
+    chip.run_for(1e6)
+    pwr = chip.peripherals["PWR"]
+    assert pwr.mode == "stop" and tim.lp_frozen == "stop"
+    c0 = rd(chip, TIM6 + 0x24)
+    chip.run_for(100e6)
+    assert pwr.mode == "stop" and rd(chip, TIM6 + 0x24) == c0          # held (read through the debugger)
+    while _r4(chip) == 0 and chip.now_ns() < 2e9:
+        chip.run_for(50e6)
+    t_wake = [e.t_ns for e in _infos(chip, "exit Stop mode")][0]
+    wr(chip, TIM6, 0)                                                # stop it to compare
+    c1 = rd(chip, TIM6 + 0x24)
+    awake_us = (chip.now_ns() - t_wake) / 1e3
+    assert not tim.lp_frozen
+    assert 0 <= (c1 - c0) & 0xFFFF <= awake_us + 2                   # only the time awake was counted (1 MHz)
+
+
+def test_stop_holds_wwdg_counter(desc):
+    chip = _chip(desc, LOOP)
+    _rtc_wakeup(chip, 0.5)
+    wr(chip, EXTI, 1 << 22)
+    wr(chip, EXTI + 8, 1 << 22)
+    wr(chip, ISER0, 1 << RTC_WKUP_IRQ)
+    wr(chip, RCC + APB1ENR, rd(chip, RCC + APB1ENR) | 1 << 11)      # WWDG clock
+    wr(chip, WWDG_BASE + 4, 3 << 7 | 0x7F)                          # CFR: WDGTB = /8, window 0x7F
+    wr(chip, WWDG_BASE, 0x7F)                                        # T = 0x7F, WDGA = 0: just counting
+    wr(chip, SCR, SLEEPDEEP)
+    w = chip.peripherals["WWDG"]
+    chip.run_for(1e5)
+    v0 = w.counter()
+    chip.run_for(300e6)                                               # 300 ms asleep: would wrap many times
+    assert chip.peripherals["PWR"].mode == "stop" and w.counter() == v0
+    while _r4(chip) == 0 and chip.now_ns() < 2e9:
+        chip.run_for(50e6)
+    assert _r4(chip) >= 1
+    assert (v0 - w.counter()) & 0x7F < 8                              # a few ticks while awake, no 300 ms jump
+
+
+def test_sleep_gates_blocks_with_lpenr_clear(desc):
+    # RM0090 5.3.2: RCC_APBxLPENR = 0 stops that peripheral's clock in Sleep mode; the others keep running
+    chip = _chip(desc, LOOP)
+    wr(chip, TIM6 + 0x28, 15)
+    wr(chip, TIM6 + 0x2C, 0xFFFF)
+    wr(chip, TIM6, 1)
+    wr(chip, 0x40000000 + 0x28, 15)                                 # TIM2 too (keeps its LPENR bit)
+    wr(chip, 0x40000000 + 0x2C, 0xFFFFFFFF)
+    wr(chip, RCC + APB1ENR, rd(chip, RCC + APB1ENR) | 1)
+    wr(chip, 0x40000000, 1)
+    wr(chip, RCC + 0x60, rd(chip, RCC + 0x60) & ~(1 << 4))         # APB1LPENR.TIM6LPEN = 0
+    chip.run_for(1e5)
+    pwr = chip.peripherals["PWR"]
+    assert pwr.mode == "sleep"
+    a6, a2 = rd(chip, TIM6 + 0x24), rd(chip, 0x40000024)
+    chip.run_for(1e6)
+    assert rd(chip, TIM6 + 0x24) == a6 and rd(chip, 0x40000024) != a2
+    chip.peripherals["TIM2"]  # noqa: B018
+    wr(chip, ISER0, 1 << EXTI0_IRQ)                                  # wake it: software EXTI0 interrupt
+    wr(chip, EXTI, 1)
+    wr(chip, EXTI + 0x10, 1)                                         # SWIER0
+    chip.run_for(1e5)
+    assert _r4(chip) >= 1 and rd(chip, TIM6 + 0x24) != a6           # running again after the wake-up
+
+
+def test_stop_defers_dma_request(desc):
+    chip = _chip(desc, LOOP)
+    _rtc_wakeup(chip, 0.2)
+    wr(chip, EXTI, 1 << 22)
+    wr(chip, EXTI + 8, 1 << 22)
+    wr(chip, ISER0, 1 << RTC_WKUP_IRQ)
+    wr(chip, SCR, SLEEPDEEP)
+    chip.run_for(1e5)
+    dma = chip.peripherals["DMA2"]
+    assert dma.lp_frozen == "stop"
+    kicked = []
+    orig = dma._service
+    dma._service = lambda: (kicked.append(chip.peripherals["PWR"].mode), orig())[1]
+    dma.request("USART1_RX", True)
+    assert dma._ev is None                                            # no HCLK: nothing scheduled
+    while _r4(chip) == 0 and chip.now_ns() < 2e9:
+        chip.run_for(50e6)
+    assert _r4(chip) >= 1 and kicked and kicked[0] == "run"           # served once the clock is back
+
+
+def test_stop_holds_systick(desc):
+    chip = _chip(desc, LOOP)
+    _rtc_wakeup(chip, 0.25)
+    wr(chip, EXTI, 1 << 22)
+    wr(chip, EXTI + 8, 1 << 22)
+    wr(chip, ISER0, 1 << RTC_WKUP_IRQ)
+    wr(chip, 0xE000E014, 0xFFFFFF)                                  # SYST_RVR
+    wr(chip, 0xE000E018, 0)
+    wr(chip, 0xE000E010, 5)                                         # ENABLE, CLKSOURCE = HCLK
+    wr(chip, SCR, SLEEPDEEP)
+    chip.run_for(1e5)
+    v0 = rd(chip, 0xE000E018)
+    scs = chip.arch_blocks[0]
+    chip.run_for(100e6)
+    assert chip.peripherals["PWR"].mode == "stop" and scs.lp_frozen == "stop"         # HCLK off: SysTick held
+    while _r4(chip) == 0 and chip.now_ns() < 2e9:
+        chip.run_for(1e6)
+    t_wake = [e.t_ns for e in _infos(chip, "exit Stop mode")][0]
+    awake = (chip.now_ns() - t_wake) * 16e6 / 1e9
+    assert _r4(chip) >= 1 and (v0 - rd(chip, 0xE000E018)) % (1 << 24) <= awake + 1000   # no jump by 250 ms

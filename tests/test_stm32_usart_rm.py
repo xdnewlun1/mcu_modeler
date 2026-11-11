@@ -156,3 +156,80 @@ def test_over8_forced_to_zero_in_lin_mode(desc):
     assert u.baud() == pytest.approx(16e6 / (8 * (8 + 3 / 8)))         # BRR 139 = 0x8B: OVER8 ignores bit 3
     wr(chip, USART1 + CR2, LINEN)
     assert u.baud() == pytest.approx(16e6 / 139)                        # OVER8 forced to 0 (30.6.4)
+
+
+# ---------------------------------------------------------------- frames: parity / noise / framing / breaks (30.3.3)
+from chipem.periph.uartwire import Frame  # noqa: E402
+
+PE_, NF_, PCE, PS, PEIE = 1, 4, 1 << 10, 1 << 9, 1 << 8
+ONEBIT = 1 << 11
+
+
+def _sr_dr(chip):
+    sr = rd(chip, USART1 + SR)
+    return sr, rd(chip, USART1 + DR)
+
+
+def test_parity_error_with_data_and_parity_bit_in_msb(desc):
+    chip, u = _usart(desc, cr1=UE | TE | RE | PCE | PEIE)          # 7 data bits + even parity
+    assert u.frame() == "7E1"
+    u._rx_frame(Frame(0x41, 7, "O", baud=u.baud()), "host")         # odd parity bit on the wire
+    sr = rd(chip, USART1 + SR)
+    assert sr & (PE_ | RXNE) == PE_ | RXNE and (16 + 37) in chip.arch.asserted     # PEIE
+    assert rd(chip, USART1 + DR) == 0x41 | 0x80                     # received parity bit in the MSB
+    assert not rd(chip, USART1 + SR) & PE_                          # SR then DR read clears PE
+    u._rx_frame(Frame(0x41, 7, "E", baud=u.baud()), "host")
+    sr, dr = _sr_dr(chip)
+    assert sr & PE_ == 0 and dr == 0x41
+    ev = [e for e in chip.log if e.kind == "uart" and e.get("dir") == "rx"]
+    assert ev[0].get("pe") == 1 and not ev[1].get("pe")
+
+
+def test_noise_framing_and_tolerance_by_sample_points(desc):
+    chip, u = _usart(desc)
+    b = u.baud()
+    u._rx_frame(Frame(0x55, baud=b * 1.03), "host")                 # 3 %: every sample inside its bit
+    sr, dr = _sr_dr(chip)
+    assert sr & (NF_ | FE) == 0 and dr == 0x55
+    u._rx_frame(Frame(0x00, baud=b * 1.08), "host")                 # 8 % fast: bit 7 is sampled in the stop
+    chip.run_for(2 * u.char_ns())                                   # bit, the stop bit on the idle line
+    sr, dr = _sr_dr(chip)
+    assert dr == 0x80 and not sr & FE
+    u._rx_frame(Frame(0x00, baud=b / 1.08), "host")                 # 8 % slow: the stop sample hits data bit 7
+    chip.run_for(2 * u.char_ns())
+    sr, dr = _sr_dr(chip)
+    assert sr & FE and dr == 0x00
+    # a sample triple straddling a bit edge: noise flag (3 samples disagree), majority value kept
+    u._rx_frame(Frame(0x0F, baud=b / 1.06), "host")
+    chip.run_for(2 * u.char_ns())
+    sr, dr = _sr_dr(chip)
+    assert sr & NF_
+    wr(chip, USART1 + CR3, ONEBIT)                                  # one sample per bit: no noise detection
+    u._rx_frame(Frame(0x0F, baud=b / 1.06), "host")
+    chip.run_for(2 * u.char_ns())
+    sr, dr = _sr_dr(chip)
+    assert not sr & NF_
+
+
+def test_nine_bit_word_and_wrong_word_length(desc):
+    chip, u = _usart(desc, cr1=UE | TE | RE | M)
+    u._rx_frame(Frame(0x1A5, 9, baud=u.baud()), "host")
+    sr, dr = _sr_dr(chip)
+    assert dr == 0x1A5 and not sr & FE
+    wr(chip, USART1 + CR1, UE | TE | RE)                              # 8-bit receiver, 9-bit frame: bit 8 is
+    u._rx_frame(Frame(0x0A5, 9, baud=u.baud()), "host")              # sampled as the stop bit: 0 -> FE
+    chip.run_for(2 * u.char_ns())
+    sr, dr = _sr_dr(chip)
+    assert sr & FE and dr == 0xA5
+
+
+def test_kinetis_break_reaches_stm32_lin_detection(desc):
+    """A K22 UART break (S2.BRK13 = 1: 13 low bits) on a link to a USART in LIN mode: FE + 0x00 and LBD."""
+    chip, u = _usart(desc)
+    wr(chip, USART1 + CR2, LINEN)
+    u.receive_frame(Frame.brk_frame(13, 1.0, u.baud()))             # the pin is muxed: a link delivery
+    chip.run_for(u.char_ns())
+    sr, dr = _sr_dr(chip)
+    assert sr & (LBD | FE | RXNE) == LBD | FE | RXNE and dr == 0
+    ev = [e for e in chip.log if e.kind == "uart" and e.get("dir") == "rx"][-1]
+    assert ev.get("brk") >= 13 and ev.get("fe") == 1

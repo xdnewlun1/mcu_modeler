@@ -1,0 +1,30 @@
+# P89CV51RD2 command console behind a MAX232-style RS-232 transceiver, a DB9 connector and a USB-serial adapter on
+# the PC: the classic 8051 service port.
+#
+#   P89CV51 UART (P3.1 TXD / P3.0 RXD, 5 V) -- U1 rs232_transceiver (inverting, +/-V) -- PC usb_serial_adapter
+#   (DB9) -- host PTY: open the printed /dev/pts/N in a terminal program at 9600 8N1
+#
+#   .venv/bin/chipem run --board boards/p89cv51_rs232_console.yaml          # runs until Ctrl-C, real time
+#   picocom -b 9600 /dev/pts/N
+#
+# The firmware (uart_console) answers 'l' (toggle LED1 on P1.0, active low), 'v' (version), 'h' (help).
+name: p89cv51_rs232_console
+quantum: 10us
+chips:
+  - {id: A, chip: p89cv51rd2, firmware: ../firmware/samples_mcs51/build/uart_console.hex}
+parts:
+  - {id: GND, type: gnd, ports: {out: GND}}
+  - id: U1
+    type: rs232_transceiver
+    drivers: 1
+    receivers: 1
+    ports: {t1in: A.P3.1, t1out: RS_TXD, r1in: RS_RXD, r1out: A.P3.0, gnd: GND}
+  - id: LED1
+    type: led
+    active: L
+    ports: {in: A.P1.0}
+  - id: PC
+    type: usb_serial_adapter
+    port: pty                 # pty:/tmp/ttyP89 adds a stable symlink; tcp:5555 for a raw TCP port; serial:COM7
+    baud: 9600
+    ports: {rxd: RS_TXD, txd: RS_RXD, gnd: GND}

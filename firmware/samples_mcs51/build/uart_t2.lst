@@ -1,0 +1,75 @@
+0000               ; uart_t2: interrupt-driven UART at 9600 8N1 with Timer 2 as the baud-rate generator.
+0000               ; 11.0592 MHz, 12-clock: baud = fosc / (32 * (65536 - RCAP2)) -> RCAP2 = 65536 - 36 = FFDCh.
+0000               ; The serial ISR (vector 0023h) stores received bytes in a 16-byte ring at 40h; the main loop echoes them
+0000               ; uppercased.  T2CON = 34h: RCLK, TCLK, TR2.
+0000               RXHEAD  DATA    30h
+0000               RXTAIL  DATA    31h
+0000               RXCOUNT DATA    32h
+0000               RING    EQU     40h
+0000                       ORG     0000h
+0000  02 00 50             LJMP    main
+0003                       ORG     0023h
+0023  02 00 B2             LJMP    serial_isr
+0026                       ORG     0050h
+0050  75 81 6F     main:   MOV     SP, #6Fh
+0053  75 30 00             MOV     RXHEAD, #0
+0056  75 31 00             MOV     RXTAIL, #0
+0059  75 32 00             MOV     RXCOUNT, #0
+005C  75 CB FF             MOV     RCAP2H, #0FFh
+005F  75 CA DC             MOV     RCAP2L, #0DCh
+0062  75 CD FF             MOV     TH2, #0FFh
+0065  75 CC DC             MOV     TL2, #0DCh
+0068  75 C8 34             MOV     T2CON, #34h             ; RCLK = TCLK = 1, TR2 = 1
+006B  75 98 50             MOV     SCON, #50h              ; mode 1, REN
+006E  D2 AC                SETB    ES
+0070  D2 AF                SETB    EA
+0072  90 00 D1             MOV     DPTR, #banner
+0075  12 00 A7             LCALL   puts
+0078  E5 30        loop:   MOV     A, RXHEAD
+007A  B5 31 02             CJNE    A, RXTAIL, have
+007D  80 F9                SJMP    loop
+007F  24 40        have:   ADD     A, #RING
+0081  F8                   MOV     R0, A
+0082  E6                   MOV     A, @R0
+0083  05 30                INC     RXHEAD
+0085  53 30 0F             ANL     RXHEAD, #0Fh
+0088  B4 61 00             CJNE    A, #'a', $+3
+008B  40 07                JC      send                    ; < 'a'
+008D  B4 7B 00             CJNE    A, #'z'+1, $+3
+0090  50 02                JNC     send                    ; > 'z'
+0092  24 E0                ADD     A, #'A'-'a'
+0094  12 00 99     send:   LCALL   putc
+0097  80 DF                SJMP    loop
+0099  C2 AC        putc:   CLR     ES                      ; TI is polled: keep the ISR from seeing it
+009B  C2 99                CLR     TI
+009D  F5 99                MOV     SBUF, A
+009F  30 99 FD             JNB     TI, $
+00A2  C2 99                CLR     TI
+00A4  D2 AC                SETB    ES
+00A6  22                   RET
+00A7  E4           puts:   CLR     A
+00A8  93                   MOVC    A, @A+DPTR
+00A9  60 06                JZ      puts_end
+00AB  12 00 99             LCALL   putc
+00AE  A3                   INC     DPTR
+00AF  80 F6                SJMP    puts
+00B1               puts_end:
+00B1  22                   RET
+00B2               serial_isr:
+00B2  C0 E0                PUSH    ACC
+00B4  C0 D0                PUSH    PSW
+00B6  75 D0 08             MOV     PSW, #08h               ; register bank 1
+00B9  30 98 10             JNB     RI, isr_end
+00BC  C2 98                CLR     RI
+00BE  E5 31                MOV     A, RXTAIL
+00C0  24 40                ADD     A, #RING
+00C2  F8                   MOV     R0, A
+00C3  A6 99                MOV     @R0, SBUF
+00C5  05 31                INC     RXTAIL
+00C7  53 31 0F             ANL     RXTAIL, #0Fh
+00CA  05 32                INC     RXCOUNT
+00CC               isr_end:
+00CC  D0 D0                POP     PSW
+00CE  D0 E0                POP     ACC
+00D0  32                   RETI
+00D1  50 38 39 43 56 35 31 20 54 32 20 39 36 30 30 20 65 63 68 6F 0D 0A 00 banner: DB      "P89CV51 T2 9600 echo", 13, 10, 0

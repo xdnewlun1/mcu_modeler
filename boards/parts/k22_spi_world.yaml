@@ -1,0 +1,18 @@
+# A K22 DSPI master talking to an SPI slave written in Python (boards/parts/spi_world.py).
+#   A (MK22FN1M0VLL12) runs spi_master: SPI0 master, mode 0, 117 kHz, PCS0 on PTC4 held low for the 5-byte
+#   transaction; every 2 ms it sends "hello" and prints "M <n> WORLD" (what the slave shifted back) on UART0.
+#   U1 is a `script` part: the Python class answers "WORLD" (change it live: `part U1 reply=EARTH`).
+# Run:   chipem run --board boards/parts/k22_spi_world.yaml --for 7ms
+#        chipem serve --board boards/parts/k22_spi_world.yaml      (Parts panel: U1 state, Reload, Edit)
+# Build: firmware/samples/build.sh
+# Security: a script part runs Python with your privileges. Only load boards you trust.
+name: k22_spi_world
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../../firmware/samples/build/spi_master.elf, clock_hz: 120000000}
+nets:
+  - {name: SCK, pins: [A.PTC5], pull: down}
+  - {name: MOSI, pins: [A.PTC6]}
+  - {name: MISO, pins: [A.PTC7], pull: up}
+  - {name: NSS, pins: [A.PTC4], pull: up}
+parts:
+  - {id: U1, type: script, file: spi_world.py, ports: {CS: NSS, SCK: SCK, MOSI: MOSI, MISO: MISO}}

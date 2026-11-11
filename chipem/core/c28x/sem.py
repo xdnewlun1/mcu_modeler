@@ -1435,8 +1435,10 @@ def sem_tbit(c, o, pc, npc):
                 c.tc = (rd(ea()) >> b) & 1
                 return npc
         else:
+            get = loc_get(c, o["loc"], False)      # one closure for address + read (fast paths for DP/stack/XARn)
+
             def h():
-                c.tc = (rd(ea()) >> bit) & 1
+                c.tc = (get() >> bit) & 1
                 return npc
         return h
     m = 1 << bit
@@ -1993,9 +1995,14 @@ def sem_lcr(c, o, pc, npc):
     ind = o.get("ind")
     n = o.get("n", 0)
     t = o.get("addr", 0)
+    wr16 = c.wr16
 
-    def h():
-        push2x16(c, c.rpc)
+    def h():                                    # push2x16(c, RPC) inlined (hot: every C call)
+        sp = c.sp
+        v = c.rpc
+        wr16(sp, v & M16)
+        wr16((sp + 1) & M16, (v >> 16) & M16)
+        c.sp = (sp + 2) & M16
         c.rpc = npc
         return (xar[n] & M22) if ind else t
     return h
@@ -2022,9 +2029,16 @@ def sem_lret(c, o, pc, npc):
 
 
 def sem_lretr(c, o, pc, npc):
-    def h():
+    rd16 = c.rd16
+
+    def h():                                    # pop2x16 inlined (hot: every C return)
         t = c.rpc
-        c.rpc = pop2x16(c) & M22
+        sp = (c.sp - 1) & M16
+        hi = rd16(sp)
+        sp = (sp - 1) & M16
+        lo = rd16(sp)
+        c.sp = sp
+        c.rpc = ((hi << 16) | lo) & M22
         return t
     return h
 

@@ -1,0 +1,348 @@
+# P89CV51RB2/RC2/RD2 SFR table, HAND-WRITTEN (NXP publishes no SVD for its 80C51 parts).
+# Same schema as tools/svd2chip.py output (chips/README.md) so chipem.regtable.regs_for() reads it unchanged.
+# Generated once by a transcription script from the data sheet P89CV51RB2_RC2_RD2 Rev. 03 (25 August 2009,
+# docs/datasheets/nxp/P89CV51RB2_RC2_RD2.pdf): Table 4 'Special function registers' (pp. 10-12) for every address
+# and bit name, the per-register tables (cited per register) for reset values.  Table 4 lists no reset values; where
+# no per-register table gives one, the 80C51 family value is used and marked (SP 07H, ports FFH, others 00H).
+# MCS-51 convention (docs/CONTRACTS.md 'MCS-51 address spaces'): every block's base is the SFR space tag 0x30000,
+# size 0x100, and a register's offset IS its SFR address (0x80-0xFF); blocks are sparse (only their registers are
+# mapped).  Bit-addressable SFRs (address a multiple of 8) have bit addresses = address + bit number.
+device: P89CV51RD2
+svd_version: "hand-written"
+address_unit_bits: 8
+cpu: {name: 80C51, fpu: false}
+interrupts:                 # interrupt number n -> vector 8n+3 (data sheet Table 41 p.53)
+  0: INT0
+  1: TIMER0
+  2: INT1
+  3: TIMER1
+  4: SERIAL
+  6: PCA
+  7: TIMER2
+peripherals:
+  CPU:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "CPU registers kept in the core (arch-owned block)"
+    group: CPU
+    registers:
+      - {name: SP, offset: 0x81, width: 1, reset: 0x07, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12; reset 07H: 80C51 family (not listed in this data sheet)"}
+      - {name: DPL, offset: 0x82, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11"}
+      - {name: DPH, offset: 0x83, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11"}
+      - {name: AUXR1, offset: 0xA2, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 8/9 p.16 (reset 00H)", fields: [
+          {name: ENBOOT, lsb: 5, width: 1},
+          {name: GF2, lsb: 3, width: 1},
+          {name: ZERO2, lsb: 2, width: 1, access: read-only},
+          {name: DPS, lsb: 0, width: 1},
+        ]}
+      - {name: PSW, offset: 0xD0, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11", fields: [
+          {name: CY, lsb: 7, width: 1},
+          {name: AC, lsb: 6, width: 1},
+          {name: F0, lsb: 5, width: 1},
+          {name: RS1, lsb: 4, width: 1},
+          {name: RS0, lsb: 3, width: 1},
+          {name: OV, lsb: 2, width: 1},
+          {name: F1, lsb: 1, width: 1},
+          {name: P, lsb: 0, width: 1, access: read-only},
+        ]}
+      - {name: ACC, offset: 0xE0, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: B, offset: 0xF0, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+  INTC:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Interrupt enable / priority (arch-owned block)"
+    group: INTC
+    registers:
+      - {name: IE, offset: 0xA8, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11, Table 42/43 p.54 (reset 00H)", fields: [
+          {name: EA, lsb: 7, width: 1},
+          {name: EC, lsb: 6, width: 1},
+          {name: ET2, lsb: 5, width: 1},
+          {name: ES, lsb: 4, width: 1},
+          {name: ET1, lsb: 3, width: 1},
+          {name: EX1, lsb: 2, width: 1},
+          {name: ET0, lsb: 1, width: 1},
+          {name: EX0, lsb: 0, width: 1},
+        ]}
+      - {name: IPH, offset: 0xB7, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11, Table 46/47 p.55 (reset 00H)", fields: [
+          {name: PPCH, lsb: 6, width: 1},
+          {name: PT2H, lsb: 5, width: 1},
+          {name: PSH, lsb: 4, width: 1},
+          {name: PT1H, lsb: 3, width: 1},
+          {name: PX1H, lsb: 2, width: 1},
+          {name: PT0H, lsb: 1, width: 1},
+          {name: PX0H, lsb: 0, width: 1},
+        ]}
+      - {name: IP, offset: 0xB8, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11, Table 44/45 p.55 (reset 00H)", fields: [
+          {name: PPC, lsb: 6, width: 1},
+          {name: PT2, lsb: 5, width: 1},
+          {name: PS, lsb: 4, width: 1},
+          {name: PT1, lsb: 3, width: 1},
+          {name: PX1, lsb: 2, width: 1},
+          {name: PT0, lsb: 1, width: 1},
+          {name: PX0, lsb: 0, width: 1},
+        ]}
+  PORTS:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Ports 0-3 (quasi-bidirectional; P0 open drain)"
+    group: PORTS
+    registers:
+      - {name: P0, offset: 0x80, width: 1, reset: 0xFF, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11; reset FFH: 80C51 family", fields: [
+          {name: AD7, lsb: 7, width: 1},
+          {name: AD6, lsb: 6, width: 1},
+          {name: AD5, lsb: 5, width: 1},
+          {name: AD4, lsb: 4, width: 1},
+          {name: AD3, lsb: 3, width: 1},
+          {name: AD2, lsb: 2, width: 1},
+          {name: AD1, lsb: 1, width: 1},
+          {name: AD0, lsb: 0, width: 1},
+        ]}
+      - {name: P1, offset: 0x90, width: 1, reset: 0xFF, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11", fields: [
+          {name: CEX4, lsb: 7, width: 1},
+          {name: CEX3, lsb: 6, width: 1},
+          {name: CEX2, lsb: 5, width: 1},
+          {name: CEX1, lsb: 4, width: 1},
+          {name: CEX0, lsb: 3, width: 1},
+          {name: ECI, lsb: 2, width: 1},
+          {name: T2EX, lsb: 1, width: 1},
+          {name: T2, lsb: 0, width: 1},
+        ]}
+      - {name: P2, offset: 0xA0, width: 1, reset: 0xFF, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11", fields: [
+          {name: A15, lsb: 7, width: 1},
+          {name: A14, lsb: 6, width: 1},
+          {name: A13, lsb: 5, width: 1},
+          {name: A12, lsb: 4, width: 1},
+          {name: A11, lsb: 3, width: 1},
+          {name: A10, lsb: 2, width: 1},
+          {name: A9, lsb: 1, width: 1},
+          {name: A8, lsb: 0, width: 1},
+        ]}
+      - {name: P3, offset: 0xB0, width: 1, reset: 0xFF, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11", fields: [
+          {name: RD, lsb: 7, width: 1},
+          {name: WR, lsb: 6, width: 1},
+          {name: T1, lsb: 5, width: 1},
+          {name: T0, lsb: 4, width: 1},
+          {name: INT1, lsb: 3, width: 1},
+          {name: INT0, lsb: 2, width: 1},
+          {name: TXD, lsb: 1, width: 1},
+          {name: RXD, lsb: 0, width: 1},
+        ]}
+  SYSCTRL:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Power control, auxiliary function and clock control"
+    group: SYSCTRL
+    registers:
+      - {name: PCON, offset: 0x87, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11; POF set by power-on reset (sec. 6.2.3 p.16)", fields: [
+          {name: SMOD1, lsb: 7, width: 1},
+          {name: SMOD0, lsb: 6, width: 1},
+          {name: POF, lsb: 4, width: 1},
+          {name: GF1, lsb: 3, width: 1},
+          {name: GF0, lsb: 2, width: 1},
+          {name: PD, lsb: 1, width: 1},
+          {name: IDL, lsb: 0, width: 1},
+        ]}
+      - {name: AUXR, offset: 0x8E, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 5/6 p.13-14 (reset 00H)", fields: [
+          {name: EXTRAM, lsb: 1, width: 1},
+          {name: AO, lsb: 0, width: 1},
+        ]}
+      - {name: CKCON, offset: 0x8F, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 50/51 p.58 (reset 00H)", fields: [
+          {name: SPIX2, lsb: 7, width: 1},
+          {name: WDX2, lsb: 6, width: 1},
+          {name: PCAX2, lsb: 5, width: 1},
+          {name: SIX2, lsb: 4, width: 1},
+          {name: T2X2, lsb: 3, width: 1},
+          {name: T1X2, lsb: 2, width: 1},
+          {name: T0X2, lsb: 1, width: 1},
+          {name: X2, lsb: 0, width: 1},
+        ]}
+  TIMER01:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Timer/counters 0 and 1, external interrupts 0/1 (TCON)"
+    group: TIMER01
+    registers:
+      - {name: TCON, offset: 0x88, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12, Table 16/17 p.27-28 (reset 00H)", fields: [
+          {name: TF1, lsb: 7, width: 1},
+          {name: TR1, lsb: 6, width: 1},
+          {name: TF0, lsb: 5, width: 1},
+          {name: TR0, lsb: 4, width: 1},
+          {name: IE1, lsb: 3, width: 1},
+          {name: IT1, lsb: 2, width: 1},
+          {name: IE0, lsb: 1, width: 1},
+          {name: IT0, lsb: 0, width: 1},
+        ]}
+      - {name: TMOD, offset: 0x89, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12, Table 13/14 p.27 (reset 00H)", fields: [
+          {name: T1GATE, lsb: 7, width: 1},
+          {name: T1C_T, lsb: 6, width: 1},
+          {name: T1M1, lsb: 5, width: 1},
+          {name: T1M0, lsb: 4, width: 1},
+          {name: T0GATE, lsb: 3, width: 1},
+          {name: T0C_T, lsb: 2, width: 1},
+          {name: T0M1, lsb: 1, width: 1},
+          {name: T0M0, lsb: 0, width: 1},
+        ]}
+      - {name: TL0, offset: 0x8A, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+      - {name: TL1, offset: 0x8B, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+      - {name: TH0, offset: 0x8C, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+      - {name: TH1, offset: 0x8D, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+  TIMER2:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Timer/counter 2"
+    group: TIMER2
+    registers:
+      - {name: T2CON, offset: 0xC8, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12, Table 19/20 p.30-31 (reset 00H)", fields: [
+          {name: TF2, lsb: 7, width: 1},
+          {name: EXF2, lsb: 6, width: 1},
+          {name: RCLK, lsb: 5, width: 1},
+          {name: TCLK, lsb: 4, width: 1},
+          {name: EXEN2, lsb: 3, width: 1},
+          {name: TR2, lsb: 2, width: 1},
+          {name: C_T2, lsb: 1, width: 1},
+          {name: CP_RL2, lsb: 0, width: 1},
+        ]}
+      - {name: T2MOD, offset: 0xC9, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12, Table 21/22 p.31 (reset XX00 0000B)", fields: [
+          {name: T2OE, lsb: 1, width: 1},
+          {name: DCEN, lsb: 0, width: 1},
+        ]}
+      - {name: RCAP2L, offset: 0xCA, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11"}
+      - {name: RCAP2H, offset: 0xCB, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11"}
+      - {name: TL2, offset: 0xCC, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+      - {name: TH2, offset: 0xCD, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+  UART:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Enhanced UART (framing error, automatic address recognition)"
+    group: UART
+    registers:
+      - {name: SCON, offset: 0x98, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11, Table 24/25 p.37 (reset 00H)", fields: [
+          {name: SM0_FE, lsb: 7, width: 1},
+          {name: SM1, lsb: 6, width: 1},
+          {name: SM2, lsb: 5, width: 1},
+          {name: REN, lsb: 4, width: 1},
+          {name: TB8, lsb: 3, width: 1},
+          {name: RB8, lsb: 2, width: 1},
+          {name: TI, lsb: 1, width: 1},
+          {name: RI, lsb: 0, width: 1},
+        ]}
+      - {name: SBUF, offset: 0x99, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11"}
+      - {name: SADDR, offset: 0xA9, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11; reset 0 (sec. 6.6.9 p.40)"}
+      - {name: SADEN, offset: 0xB9, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.11; reset 0 (sec. 6.6.9 p.40)"}
+  SPI:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Serial peripheral interface"
+    group: SPI
+    registers:
+      - {name: SPDAT, offset: 0x86, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12"}
+      - {name: SPSR, offset: 0xAA, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12, Table 30/31 p.43 (reset 00H)", fields: [
+          {name: SPIF, lsb: 7, width: 1},
+          {name: WCOL, lsb: 6, width: 1},
+        ]}
+      - {name: SPCR, offset: 0xD5, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.12, Table 27/28 p.42 (reset 00H)", fields: [
+          {name: SPIE, lsb: 7, width: 1},
+          {name: SPEN, lsb: 6, width: 1},
+          {name: DORD, lsb: 5, width: 1},
+          {name: MSTR, lsb: 4, width: 1},
+          {name: CPOL, lsb: 3, width: 1},
+          {name: CPHA, lsb: 2, width: 1},
+          {name: SPR1, lsb: 1, width: 1},
+          {name: SPR0, lsb: 0, width: 1},
+        ]}
+  PCA:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Programmable counter array, 5 modules (module 4 = watchdog)"
+    group: PCA
+    registers:
+      - {name: CCON, offset: 0xD8, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 35/36 p.47 (reset 00H)", fields: [
+          {name: CF, lsb: 7, width: 1},
+          {name: CR, lsb: 6, width: 1},
+          {name: CCF4, lsb: 4, width: 1},
+          {name: CCF3, lsb: 3, width: 1},
+          {name: CCF2, lsb: 2, width: 1},
+          {name: CCF1, lsb: 1, width: 1},
+          {name: CCF0, lsb: 0, width: 1},
+        ]}
+      - {name: CMOD, offset: 0xD9, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 32/33 p.46 (reset 00H)", fields: [
+          {name: CIDL, lsb: 7, width: 1},
+          {name: WDTE, lsb: 6, width: 1},
+          {name: CPS1, lsb: 2, width: 1},
+          {name: CPS0, lsb: 1, width: 1},
+          {name: ECF, lsb: 0, width: 1},
+        ]}
+      - {name: CCAPM0, offset: 0xDA, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 37/38 p.47 (reset 00H)", fields: [
+          {name: ECOM0, lsb: 6, width: 1},
+          {name: CAPP0, lsb: 5, width: 1},
+          {name: CAPN0, lsb: 4, width: 1},
+          {name: MAT0, lsb: 3, width: 1},
+          {name: TOG0, lsb: 2, width: 1},
+          {name: PWM0, lsb: 1, width: 1},
+          {name: ECCF0, lsb: 0, width: 1},
+        ]}
+      - {name: CCAPM1, offset: 0xDB, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 37/38 p.47 (reset 00H)", fields: [
+          {name: ECOM1, lsb: 6, width: 1},
+          {name: CAPP1, lsb: 5, width: 1},
+          {name: CAPN1, lsb: 4, width: 1},
+          {name: MAT1, lsb: 3, width: 1},
+          {name: TOG1, lsb: 2, width: 1},
+          {name: PWM1, lsb: 1, width: 1},
+          {name: ECCF1, lsb: 0, width: 1},
+        ]}
+      - {name: CCAPM2, offset: 0xDC, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 37/38 p.47 (reset 00H)", fields: [
+          {name: ECOM2, lsb: 6, width: 1},
+          {name: CAPP2, lsb: 5, width: 1},
+          {name: CAPN2, lsb: 4, width: 1},
+          {name: MAT2, lsb: 3, width: 1},
+          {name: TOG2, lsb: 2, width: 1},
+          {name: PWM2, lsb: 1, width: 1},
+          {name: ECCF2, lsb: 0, width: 1},
+        ]}
+      - {name: CCAPM3, offset: 0xDD, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 37/38 p.47 (reset 00H)", fields: [
+          {name: ECOM3, lsb: 6, width: 1},
+          {name: CAPP3, lsb: 5, width: 1},
+          {name: CAPN3, lsb: 4, width: 1},
+          {name: MAT3, lsb: 3, width: 1},
+          {name: TOG3, lsb: 2, width: 1},
+          {name: PWM3, lsb: 1, width: 1},
+          {name: ECCF3, lsb: 0, width: 1},
+        ]}
+      - {name: CCAPM4, offset: 0xDE, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10, Table 37/38 p.47 (reset 00H)", fields: [
+          {name: ECOM4, lsb: 6, width: 1},
+          {name: CAPP4, lsb: 5, width: 1},
+          {name: CAPN4, lsb: 4, width: 1},
+          {name: MAT4, lsb: 3, width: 1},
+          {name: TOG4, lsb: 2, width: 1},
+          {name: PWM4, lsb: 1, width: 1},
+          {name: ECCF4, lsb: 0, width: 1},
+        ]}
+      - {name: CL, offset: 0xE9, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP0L, offset: 0xEA, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP1L, offset: 0xEB, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP2L, offset: 0xEC, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP3L, offset: 0xED, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP4L, offset: 0xEE, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CH, offset: 0xF9, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP0H, offset: 0xFA, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP1H, offset: 0xFB, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP2H, offset: 0xFC, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP3H, offset: 0xFD, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+      - {name: CCAP4H, offset: 0xFE, width: 1, reset: 0x00, reset_mask: 0xFF, access: read-write, description: "Table 4 p.10"}
+  WDT:
+    base: 0x30000
+    size: 0x100
+    derived_from: null
+    description: "Watchdog timer (14-bit, enabled by writing 1EH, E1H to WDTRST)"
+    group: WDT
+    registers:
+      - {name: WDTRST, offset: 0xA6, width: 1, reset: 0x00, reset_mask: 0xFF, access: write-only, description: "Table 4 p.12, sec. 6.8 p.43-44 (write-only)"}

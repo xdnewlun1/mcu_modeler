@@ -645,7 +645,7 @@ class ADC(GatedBlock):
             return
         self._trig_lvl = level
         exten = self.get("CR2") >> 28 & 3
-        if exten & (1 if level else 2):
+        if exten & (1 if level else 2) and not self.lp_frozen:     # Stop: no ADC clock, the trigger is missed
             self._start_regular(t, external=True)
 
     def _ext_jtrig(self, t: int, level: bool) -> None:
@@ -653,8 +653,10 @@ class ADC(GatedBlock):
             return
         self._jtrig_lvl = level
         jexten = self.get("CR2") >> 20 & 3
-        if jexten & (1 if level else 2):
+        if jexten & (1 if level else 2) and not self.lp_frozen:
             self._start_injected(t, external=True)
+
+    lp_frozen: Any = False              # PWR freezer: Stop / gated Sleep (a conversion in progress is held)
 
     # ------------------------------------------------------------ register hooks
     def _sr_write(self, blk, reg, old, new):

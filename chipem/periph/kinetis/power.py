@@ -10,7 +10,9 @@
   Clocks (Table 7-2): in STOP/VLPS the core, system and bus clocks stop: every block's scheduler events are held back
   ("frozen") except those of the LPTMR, RTC, CMP, DAC, VREF, LLWU, power/clock blocks, PORT/GPIO, the WDOG (with
   STCTRLH.STOPEN) and an ADC on its asynchronous clock (CFG1.ADICLK=3). Blocks with `clock_stop(stopped, mode)` (PIT,
-  WDOG, UART) are told instead and keep their counters right. In LLS/VLLS only the LPTMR, RTC, CMP, DAC, LLWU and
+  WDOG, UART, DSPI, SAI, FlexCAN) are told instead and keep their counters right; the held ones get `time_shift()`
+  on exit (FTM, PDB, CMT, EWM, USB, USBDCD, DMA: counter anchors move by the time slept; chipem/periph/lowpower.py).
+  Wake-capable while held: I2C address match with C1.WUEN (STOP/VLPS), FlexCAN self wake, SAI with STOPE. In LLS/VLLS only the LPTMR, RTC, CMP, DAC, LLWU and
   the power/clock blocks run; the NVIC is off (`chip.wake_gate`), only the LLWU wakes the chip. WAIT/VLPW stop only
   the core (the WDOG too unless STCTRLH.WAITEN). Frozen events resume with their remaining time.
   MCG on exit (25.4.1 notes): PEE -> PBE after VLPS/LLS (C5.PLLSTEN0 cleared) and after STOP with PLLSTEN0=0.
@@ -32,11 +34,11 @@
 """
 from __future__ import annotations
 
-import heapq
 import re
 from typing import Any
 
 from ..base import MMIOBlock
+from ..lowpower import Freezer
 from ..registry import register
 from ._util import build_regs, find_model, irq_number
 
@@ -66,66 +68,7 @@ def reset_kind(chip: Any) -> str:
     return "por"
 
 
-class _Freezer:
-    """Holds back the scheduler events of blocks whose clock is stopped and resumes them with their remaining time."""
-
-    def __init__(self, chip: Any):
-        self.chip = chip
-        self.held: list = []
-        self.told: list = []
-        self.t0_ns = 0.0
-        self.c0 = 0
-        self.mode = ""
-
-    def freeze(self, blocks: list, mode: str) -> None:
-        chip = self.chip
-        sched = chip.sched
-        self.mode = mode
-        self.t0_ns = sched.now_ns()
-        self.c0 = sched.now_cycles()
-        told = [b for b in blocks if hasattr(b, "clock_stop")]
-        for b in told:
-            b.clock_stop(True, mode)
-        self.told = told
-        rest = {id(b) for b in blocks if not hasattr(b, "clock_stop")}
-        keep, held = [], []
-        for ev in sched._heap:
-            owner = getattr(ev.cb, "__self__", None)
-            if not ev.cancelled and owner is not None and id(owner) in rest:
-                held.append(ev)
-            else:
-                keep.append(ev)
-        if held:
-            heapq.heapify(keep)
-            sched._heap[:] = keep
-        self.held = held
-
-    def thaw(self) -> None:
-        chip = self.chip
-        sched, clock = chip.sched, chip.clock
-        dns = sched.now_ns() - self.t0_ns
-        dc = sched.now_cycles() - self.c0
-        for ev in self.held:
-            if ev.cancelled:
-                continue
-            if ev.t_ns is not None:
-                ev.t_ns += dns
-                ev.cycles = clock.abs_ns_to_cycles(ev.t_ns)
-            else:
-                ev.cycles += dc
-            heapq.heappush(sched._heap, ev)
-            owner = getattr(ev.cb, "__self__", None)
-            if getattr(owner, "_st_ev", None) is ev:          # armv7m SysTick keeps its own copy of the wrap time
-                owner._st_next = ev.cycles
-        self.held = []
-        for b in self.told:
-            b.clock_stop(False, self.mode)
-        self.told = []
-
-    def drop(self) -> None:
-        """Reset while frozen: the held events belong to blocks that reset anyway."""
-        self.held = []
-        self.told = []
+_Freezer = Freezer          # shared with the STM32 PWR (chipem/periph/lowpower.py)
 
 
 @register("kinetis.smc")
@@ -317,6 +260,10 @@ class SMC(MMIOBlock):
                 if m == "kinetis.wdog" and not (b.get("STCTRLH") & 0x80):        # WAITEN
                     out.append(b)
                 elif m == "kinetis.ewm" and mode == "VLPW":
+                    out.append(b)
+                elif m == "kinetis.dspi":                                         # Doze (MCR.DOZE), 3.9.3.8
+                    out.append(b)
+                elif m == "kinetis.uart" and "C1" in b.regs and b.get("C1") & 0x40:  # C1.UARTSWAI, 49.1.2.2
                     out.append(b)
                 continue
             if mode in ("STOP", "VLPS"):

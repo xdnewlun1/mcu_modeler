@@ -71,6 +71,10 @@ GATES: dict[str, tuple[str, int]] = {
     "ADC1": ("APB2ENR", 8), "ADC2": ("APB2ENR", 9), "ADC3": ("APB2ENR", 10), "SDIO": ("APB2ENR", 11),
     "SPI1": ("APB2ENR", 12), "SYSCFG": ("APB2ENR", 14), "TIM9": ("APB2ENR", 16), "TIM10": ("APB2ENR", 17),
     "TIM11": ("APB2ENR", 18),
+    # STM32F42xxx/43xxx only (RM0090 6.3.10-6.3.14); on the F405/F407 these bits are reserved (read-only in its SVD)
+    "GPIOJ": ("AHB1ENR", 9), "GPIOK": ("AHB1ENR", 10), "DMA2D": ("AHB1ENR", 23), "FMC": ("AHB3ENR", 0),
+    "UART7": ("APB1ENR", 30), "UART8": ("APB1ENR", 31), "SPI4": ("APB2ENR", 13), "SPI5": ("APB2ENR", 20),
+    "SPI6": ("APB2ENR", 21), "SAI1": ("APB2ENR", 22), "LTDC": ("APB2ENR", 26),
 }
 _RST_REG = {"AHB1ENR": "AHB1RSTR", "AHB2ENR": "AHB2RSTR", "AHB3ENR": "AHB3RSTR", "APB1ENR": "APB1RSTR",
             "APB2ENR": "APB2RSTR"}
@@ -340,6 +344,11 @@ class RCC(MMIOBlock):
                         self.emit("info", block=self.name, msg=f"{gname} reset through RCC_{reg.name}")
         return None
 
+    def clock_limits(self) -> tuple[float, float, float, str]:
+        """(HCLK, PCLK1, PCLK2 maxima, reason suffix) for the `warn` in update(): STM32F405/407 168/42/84 MHz
+        (stm32.rcc_f42x overrides it with the voltage-scale / over-drive dependent limits)."""
+        return 168e6, 42e6, 84e6, ""
+
     # ------------------------------------------------------------ update
     def update(self) -> None:
         cfgr = self.get("CFGR")
@@ -375,11 +384,13 @@ class RCC(MMIOBlock):
         if chip is not None and getattr(chip, "clock_override", None):
             self.frozen = True
         if chip is not None:
-            if self.core_hz > 168e6 * 1.001:
-                self.emit("warn", block=self.name, msg=f"RCC: HCLK {fmt_hz(self.core_hz)} exceeds the 168 MHz maximum")
-            if self.apb1_hz > 42e6 * 1.001 or self.apb2_hz > 84e6 * 1.001:
+            hmax, a1max, a2max, why = self.clock_limits()
+            if self.core_hz > hmax * 1.001:
+                self.emit("warn", block=self.name, msg=f"RCC: HCLK {fmt_hz(self.core_hz)} exceeds the "
+                          f"{hmax / 1e6:g} MHz maximum{why}")
+            if self.apb1_hz > a1max * 1.001 or self.apb2_hz > a2max * 1.001:
                 self.emit("warn", block=self.name, msg=f"RCC: APB clock above maximum (APB1 {fmt_hz(self.apb1_hz)} "
-                          f"> 42 MHz or APB2 {fmt_hz(self.apb2_hz)} > 84 MHz)")
+                          f"> {a1max / 1e6:g} MHz or APB2 {fmt_hz(self.apb2_hz)} > {a2max / 1e6:g} MHz){why}")
             msg = (f"core clock {self.core_hz / 1e6:.3f} MHz (SYSCLK {self.source} {self.sysclk_hz / 1e6:.3f} MHz), "
                    f"APB1 {self.apb1_hz / 1e6:.3f} MHz, APB2 {self.apb2_hz / 1e6:.3f} MHz")
             if self.frozen:

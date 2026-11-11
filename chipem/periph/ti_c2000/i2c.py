@@ -114,6 +114,7 @@ class I2C(C2000Block):
             self.int2 = irq_line(chip, f"I2CINT2{self.letter}", "8.2")
         self.port = I2CPort(chip, self.sda_sig, self.scl_sig, self, self.timing, self._arb_lost)
         self.port.target.enabled = False
+        self.port.master.lp_owner = self               # parked with the block in STANDBY/HALT (C2000Block.clock_stop)
 
     def reset(self) -> None:
         self._cancel_dlb()
@@ -538,8 +539,8 @@ class I2C(C2000Block):
 
     def i2c_address(self, addr: int, read: bool) -> bool:
         mdr = self.get("I2CMDR")
-        if not mdr & IRS or mdr & MST or self.port.master.owns_bus or mdr & (XA | FDF):
-            return False
+        if not mdr & IRS or mdr & MST or self.port.master.owns_bus or mdr & (XA | FDF) or self.clk_stopped:
+            return False                                 # STANDBY/HALT: no SYSCLKOUT, the address is not seen
         oar = self.get("I2COAR") & 0x7F
         if addr == oar:
             self._str(AAS | (SDIR if read else 0), AD0)
@@ -550,7 +551,7 @@ class I2C(C2000Block):
         return True
 
     def i2c_rx_byte(self, byte: int) -> bool:
-        if not self.port.target.addressed:
+        if not self.port.target.addressed or self.clk_stopped:
             return False
         mdr = self.get("I2CMDR")
         ack = True

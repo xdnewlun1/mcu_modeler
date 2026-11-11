@@ -1,0 +1,59 @@
+0000               ; uart_console: a tiny command console on the UART at 9600 8N1 (Timer 1), for boards/p89cv51_rs232_console.yaml
+0000               ; (MAX232-style transceiver, DB9, PC terminal).  Commands (one letter + Enter): 'l' toggles the LED (P1.0, active
+0000               ; low), 'v' prints the version, 'h' or '?' help.  Characters are echoed; prompt "> ".
+0000                       ORG     0000h
+0000  02 00 30             LJMP    main
+0003                       ORG     0030h
+0030  75 81 6F     main:   MOV     SP, #6Fh
+0033  75 89 20             MOV     TMOD, #20h
+0036  75 8D FD             MOV     TH1, #0FDh
+0039  75 8B FD             MOV     TL1, #0FDh
+003C  75 98 50             MOV     SCON, #50h
+003F  D2 8E                SETB    TR1
+0041  90 00 9F             MOV     DPTR, #s_hello
+0044  12 00 94             LCALL   puts
+0047  90 00 C1     prompt: MOV     DPTR, #s_prompt
+004A  12 00 94             LCALL   puts
+004D  7F 00                MOV     R7, #0                  ; command letter
+004F  30 98 FD     getc:   JNB     RI, $
+0052  E5 99                MOV     A, SBUF
+0054  C2 98                CLR     RI
+0056  B4 0D 26             CJNE    A, #13, not_cr
+0059  12 00 85             LCALL   crlf
+005C  EF                   MOV     A, R7
+005D  B4 6C 0A             CJNE    A, #'l', c2
+0060  B2 90                CPL     P1.0
+0062  90 00 C4             MOV     DPTR, #s_led
+0065  12 00 94             LCALL   puts
+0068  80 DD                SJMP    prompt
+006A  B4 76 08     c2:     CJNE    A, #'v', c3
+006D  90 00 D2             MOV     DPTR, #s_ver
+0070  12 00 94             LCALL   puts
+0073  80 D2                SJMP    prompt
+0075  60 D0        c3:     JZ      prompt
+0077  90 00 EC             MOV     DPTR, #s_help
+007A  12 00 94             LCALL   puts
+007D  80 C8                SJMP    prompt
+007F  12 00 8C     not_cr: LCALL   putc                    ; echo
+0082  FF                   MOV     R7, A
+0083  80 CA                SJMP    getc
+0085  74 0D        crlf:   MOV     A, #13
+0087  12 00 8C             LCALL   putc
+008A  74 0A                MOV     A, #10
+008C  C2 99        putc:   CLR     TI
+008E  F5 99                MOV     SBUF, A
+0090  30 99 FD             JNB     TI, $
+0093  22                   RET
+0094  E4           puts:   CLR     A
+0095  93                   MOVC    A, @A+DPTR
+0096  60 06                JZ      puts_end
+0098  12 00 8C             LCALL   putc
+009B  A3                   INC     DPTR
+009C  80 F6                SJMP    puts
+009E               puts_end:
+009E  22                   RET
+009F  0D 0A 50 38 39 43 56 35 31 52 44 32 20 63 6F 6E 73 6F 6C 65 20 28 39 36 30 30 20 38 4E 31 29 0D 0A 00 s_hello: DB     13, 10, "P89CV51RD2 console (9600 8N1)", 13, 10, 0
+00C1  3E 20 00     s_prompt: DB    "> ", 0
+00C4  4C 45 44 20 74 6F 67 67 6C 65 64 0D 0A 00 s_led:  DB      "LED toggled", 13, 10, 0
+00D2  63 68 69 70 65 6D 20 6D 63 73 35 31 20 73 61 6D 70 6C 65 20 31 2E 30 0D 0A 00 s_ver:  DB      "chipem mcs51 sample 1.0", 13, 10, 0
+00EC  63 6F 6D 6D 61 6E 64 73 3A 20 6C 20 28 4C 45 44 29 2C 20 76 20 28 76 65 72 73 69 6F 6E 29 2C 20 68 20 28 68 65 6C 70 29 0D 0A 00 s_help: DB      "commands: l (LED), v (version), h (help)", 13, 10, 0

@@ -205,3 +205,23 @@ mark { background: var(--mark); color: inherit; border-radius: 1px; }
   .topbar .title { flex: 1 0 100%; }
   .topbar .chip-meta { display: inline; }
 }
+
+/* ---------- emulation rate (toolbar) and performance block (status pane; chipem/perf.py) ---------- */
+.rate { margin-left: 4px; }
+.rate select { height: 26px; font: 12px var(--mono); }
+.rate input { width: 6ch; text-align: right; }
+.readouts .ro b.behind { color: var(--lv-x); }
+.perf { flex: 0 0 auto; border-bottom: 1px solid var(--line); font-size: 11.5px; }
+.perf > summary { padding: 2px 8px; cursor: pointer; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-sum { font: 11px var(--mono); font-variant-numeric: tabular-nums; margin-left: 6px; }
+.perf-sum.warn { color: var(--lv-x); }
+.perf-ctl { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 2px 8px; }
+.perf-ctl label { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.perf-ctl input[type=text] { height: 20px; font: 11.5px var(--mono); text-align: right; }
+.perf-ctl select { height: 20px; font: 11.5px var(--mono); }
+.perf-live { margin: 2px 8px 4px; border-collapse: collapse; font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+.perf-live th, .perf-live td { padding: 0 8px 0 0; text-align: right; white-space: nowrap; }
+.perf-live th { color: var(--fg-3); font-weight: 400; font-family: var(--sans); }
+.perf-live td:first-child, .perf-live th:first-child { text-align: left; }
+.perf-live tr.bott td { color: var(--lv-x); }
+body:not(.board-mode) .perf-board { display: none; }

@@ -43,6 +43,9 @@ def _zero(blk, reg):
     return 0
 
 
+_zero.pure_read = True        # write-only register reads 0: the debugger may peek it (periph.base.peek_reg)
+
+
 @register("ti_c2000.gpio")
 class GPIO(C2000Block):
     eallow_regs = (["GPACTRL", "GPAQSEL1", "GPAQSEL2", "GPAMUX1", "GPAMUX2", "GPADIR", "GPAPUD",

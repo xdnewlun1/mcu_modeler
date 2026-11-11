@@ -8,6 +8,8 @@ tests/test_stm32_cryp_hash.py.
 
 AES (FIPS-197):  aes_expand(key) -> round-key words; aes_encrypt(key, block), aes_decrypt(key, block);
                  aes_last_words(key) -> the last Nk schedule words; aes_decrypt_from_last(last, block, nk)
+GCM / CCM:       gf128_mul, ghash(h, data); gcm_encrypt / gcm_decrypt (SP 800-38D) and ccm_blocks / ccm_encrypt
+                 (SP 800-38C) -- references for the F43x CRYP modes (tests/test_stm32f437_crypto.py)
 DES (FIPS 46-3): des_encrypt(key8, block8), des_decrypt(key8, block8); tdes_encrypt / tdes_decrypt (EDE, K1|K2|K3)
 Hashes:          MD5 / SHA-1 / SHA-224 / SHA-256: `HASHES[name]` -> HashAlg(iv, compress(state, block64) -> state,
                  digest_words, length_little); `digest(name, data)`, `pad(name, bitlen)` helpers.
@@ -198,6 +200,101 @@ def aes_decrypt(key: bytes, block: bytes) -> bytes:
 def aes_decrypt_from_last(last: list[int], block: bytes) -> bytes:
     """Decrypt with a schedule given by its last Nk words (the CRYP's prepared decryption key)."""
     return aes_decrypt_w(aes_expand_from_last(last), block)
+
+
+# ================================================================================================ GCM / CCM
+_GF_R = 0xE1 << 120
+
+
+def gf128_mul(x: int, y: int) -> int:
+    """Multiplication in GF(2^128) with the GCM bit order (SP 800-38D 6.3; bit 0 = most significant bit)."""
+    z, v = 0, y
+    for i in range(127, -1, -1):
+        if (x >> i) & 1:
+            z ^= v
+        v = (v >> 1) ^ _GF_R if v & 1 else v >> 1
+    return z
+
+
+def ghash(h: bytes, data: bytes) -> int:
+    """GHASH_H over `data` (zero-padded to whole 16-byte blocks); returns the 128-bit accumulator."""
+    hi, s = int.from_bytes(h, "big"), 0
+    data = data + bytes(-len(data) % 16)
+    for i in range(0, len(data), 16):
+        s = gf128_mul(s ^ int.from_bytes(data[i:i + 16], "big"), hi)
+    return s
+
+
+def _inc32(cb: bytes) -> bytes:
+    return cb[:12] + ((int.from_bytes(cb[12:], "big") + 1) & M32).to_bytes(4, "big")
+
+
+def _ctr(key: bytes, cb: bytes, data: bytes) -> bytes:
+    out = bytearray()
+    w = aes_expand(key)
+    for i in range(0, len(data), 16):
+        ks = aes_encrypt_w(w, cb)
+        out += bytes(a ^ b for a, b in zip(data[i:i + 16], ks))
+        cb = _inc32(cb)
+    return bytes(out)
+
+
+def gcm_encrypt(key: bytes, iv: bytes, pt: bytes, aad: bytes = b"") -> tuple[bytes, bytes]:
+    """AES-GCM (SP 800-38D): (ciphertext, 16-byte tag).  96-bit IVs use J0 = IV || 0^31 || 1."""
+    h = aes_encrypt(key, bytes(16))
+    j0 = iv + b"\0\0\0\1" if len(iv) == 12 else \
+        (ghash(h, iv + bytes(-len(iv) % 16) + (8 * len(iv)).to_bytes(16, "big"))).to_bytes(16, "big")
+    ct = _ctr(key, _inc32(j0), pt)
+    lens = (8 * len(aad)).to_bytes(8, "big") + (8 * len(ct)).to_bytes(8, "big")
+    s = ghash(h, aad + bytes(-len(aad) % 16) + ct + bytes(-len(ct) % 16) + lens)
+    tag = bytes(a ^ b for a, b in zip(aes_encrypt(key, j0), s.to_bytes(16, "big")))
+    return ct, tag
+
+
+def gcm_decrypt(key: bytes, iv: bytes, ct: bytes, aad: bytes = b"") -> tuple[bytes, bytes]:
+    """AES-GCM decryption: (plaintext, expected tag); the caller compares the tag."""
+    h = aes_encrypt(key, bytes(16))
+    j0 = iv + b"\0\0\0\1" if len(iv) == 12 else \
+        (ghash(h, iv + bytes(-len(iv) % 16) + (8 * len(iv)).to_bytes(16, "big"))).to_bytes(16, "big")
+    pt = _ctr(key, _inc32(j0), ct)
+    lens = (8 * len(aad)).to_bytes(8, "big") + (8 * len(ct)).to_bytes(8, "big")
+    s = ghash(h, aad + bytes(-len(aad) % 16) + ct + bytes(-len(ct) % 16) + lens)
+    return pt, bytes(a ^ b for a, b in zip(aes_encrypt(key, j0), s.to_bytes(16, "big")))
+
+
+def ccm_blocks(nonce: bytes, aad: bytes, plen: int, tlen: int) -> tuple[bytes, bytes, bytes]:
+    """SP 800-38C A.2 formatting: (B0, the formatted associated data padded to 16 bytes, counter block CTR0)."""
+    q = 15 - len(nonce)
+    flags = (0x40 if aad else 0) | (((tlen - 2) // 2) << 3) | (q - 1)
+    b0 = bytes([flags]) + nonce + plen.to_bytes(q, "big")
+    if not aad:
+        a = b""
+    elif len(aad) < 0xFF00:
+        a = len(aad).to_bytes(2, "big") + aad
+    elif len(aad) < 1 << 32:
+        a = b"\xff\xfe" + len(aad).to_bytes(4, "big") + aad
+    else:
+        a = b"\xff\xff" + len(aad).to_bytes(8, "big") + aad
+    a += bytes(-len(a) % 16)
+    ctr0 = bytes([q - 1]) + nonce + bytes(q)
+    return b0, a, ctr0
+
+
+def ccm_encrypt(key: bytes, nonce: bytes, pt: bytes, aad: bytes = b"", tlen: int = 16) -> tuple[bytes, bytes]:
+    """AES-CCM (SP 800-38C): (ciphertext, tag of `tlen` bytes)."""
+    b0, a, ctr0 = ccm_blocks(nonce, aad, len(pt), tlen)
+    w = aes_expand(key)
+    x = aes_encrypt_w(w, b0)
+    mac_in = a + pt + bytes(-len(pt) % 16)
+    for i in range(0, len(mac_in), 16):
+        x = aes_encrypt_w(w, bytes(p ^ k for p, k in zip(x, mac_in[i:i + 16])))
+    q = 15 - len(nonce)
+    ct = b""
+    for i in range(0, len(pt), 16):
+        ctr = ctr0[:16 - q] + (i // 16 + 1).to_bytes(q, "big")
+        ct += bytes(p ^ k for p, k in zip(pt[i:i + 16], aes_encrypt_w(w, ctr)))
+    tag = bytes(p ^ k for p, k in zip(x, aes_encrypt_w(w, ctr0)))[:tlen]
+    return ct, tag
 
 
 # ================================================================================================ DES

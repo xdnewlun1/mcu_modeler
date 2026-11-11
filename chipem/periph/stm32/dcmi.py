@@ -322,10 +322,18 @@ class DCMI(GatedBlock):
                             f"to a pin: those data bits read 0")
         return carried, forced
 
+    lp_frozen: Any = False              # PWR freezer: Stop / gated Sleep
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Clock back after Stop: camera lines that were due while the clock was off are lost, not replayed late."""
+        from ..lowpower import own_events
+        for ev in own_events(self, self.dvp_line):
+            self.chip.sched.cancel(ev)
+
     def dvp_line(self, src: Any, t0_ns: float, period_ns: float, samples, ports: dict) -> None:
         """One camera line: `samples[k]` is clocked in at t0 + (k + 1/2) x period (camera clock domain)."""
-        if self.absent or self.chip is None or not self._enabled():
-            return
+        if self.absent or self.chip is None or not self._enabled() or self.lp_frozen:
+            return                          # Stop: no HCLK, the camera's line is lost
         if self.chip.now_ns() < t0_ns:
             ev = self.chip.sched.at_ns(t0_ns, self.dvp_line, src, t0_ns, period_ns, samples, ports)
             self._evs.append(ev)

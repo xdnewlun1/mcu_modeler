@@ -1,0 +1,129 @@
+     VMA      LMA     Size Align Out     In      Symbol
+ 8000000        0        0     1 _estack = ORIGIN(RAM) + LENGTH(RAM)
+ 8000000  8000000       ec     4 .isr_vector
+ 8000000  8000000       ec     4         /tmp/startup-c3a472.o:(.isr_vector)
+ 8000000  8000000       ec     1                 vectors
+ 80000ec  80000ec      428     4 .text
+ 80000ec  80000ec        2     4         /tmp/startup-c3a472.o:(.text.Default_Handler)
+ 80000ec  80000ec        0     1                 $t
+ 80000ed  80000ed        2     1                 Default_Handler
+ 80000ed  80000ed        2     1                 NMI_Handler
+ 80000ed  80000ed        2     1                 HardFault_Handler
+ 80000ed  80000ed        2     1                 MemManage_Handler
+ 80000ed  80000ed        2     1                 BusFault_Handler
+ 80000ed  80000ed        2     1                 UsageFault_Handler
+ 80000ed  80000ed        2     1                 SVC_Handler
+ 80000ed  80000ed        2     1                 DebugMon_Handler
+ 80000ed  80000ed        2     1                 PendSV_Handler
+ 80000ed  80000ed        2     1                 WWDG_IRQHandler
+ 80000ed  80000ed        2     1                 PVD_IRQHandler
+ 80000ed  80000ed        2     1                 TAMPER_IRQHandler
+ 80000ed  80000ed        2     1                 RTC_IRQHandler
+ 80000ed  80000ed        2     1                 FLASH_IRQHandler
+ 80000ed  80000ed        2     1                 RCC_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI0_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI1_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI2_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI3_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI4_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel1_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel2_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel3_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel4_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel5_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel6_IRQHandler
+ 80000ed  80000ed        2     1                 DMA1_Channel7_IRQHandler
+ 80000ed  80000ed        2     1                 ADC1_2_IRQHandler
+ 80000ed  80000ed        2     1                 USB_HP_CAN1_TX_IRQHandler
+ 80000ed  80000ed        2     1                 CAN1_RX1_IRQHandler
+ 80000ed  80000ed        2     1                 CAN1_SCE_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI9_5_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_BRK_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_UP_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_TRG_COM_IRQHandler
+ 80000ed  80000ed        2     1                 TIM1_CC_IRQHandler
+ 80000ed  80000ed        2     1                 TIM2_IRQHandler
+ 80000ed  80000ed        2     1                 TIM3_IRQHandler
+ 80000ed  80000ed        2     1                 I2C1_EV_IRQHandler
+ 80000ed  80000ed        2     1                 I2C1_ER_IRQHandler
+ 80000ed  80000ed        2     1                 SPI1_IRQHandler
+ 80000ed  80000ed        2     1                 USART1_IRQHandler
+ 80000ed  80000ed        2     1                 USART2_IRQHandler
+ 80000ed  80000ed        2     1                 EXTI15_10_IRQHandler
+ 80000ed  80000ed        2     1                 RTC_Alarm_IRQHandler
+ 80000ed  80000ed        2     1                 USBWakeUp_IRQHandler
+ 80000f0  80000f0       5c     4         /tmp/startup-c3a472.o:(.text.Reset_Handler)
+ 80000f0  80000f0        0     1                 $t
+ 80000f1  80000f1       5c     1                 Reset_Handler
+ 800014c  800014c       6a     4         /tmp/can_node-c4eb35.o:(.text.USB_LP_CAN1_RX0_IRQHandler)
+ 800014c  800014c        0     1                 $t
+ 800014d  800014d       6a     1                 USB_LP_CAN1_RX0_IRQHandler
+ 80001b8  80001b8       10     4         /tmp/can_node-c4eb35.o:(.text.SysTick_Handler)
+ 80001b8  80001b8        0     1                 $t
+ 80001b9  80001b9       10     1                 SysTick_Handler
+ 80001c8  80001c8      32e     4         /tmp/can_node-c4eb35.o:(.text.main)
+ 80001c8  80001c8        0     1                 $t
+ 80001c9  80001c9      32e     1                 main
+ 80004f6  80004f6       1d     1         <internal>:(.rodata.str1.1)
+ 8000513  8000513        1     1         . = ALIGN(4)
+ 8000514  8000514       10     4 .ARM.exidx
+ 8000514  8000514       10     4         <internal>:(.ARM.exidx)
+20000000 20000000        0     1 .data
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sdata = .
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _edata = .
+20000000 20000000        0     1 _sidata = LOADADDR(.data)
+20000000 20000000       14     4 .bss
+20000000 20000000        0     1         . = ALIGN(4)
+20000000 20000000        0     1         _sbss = .
+20000000 20000000        4     4         /tmp/can_node-c4eb35.o:(.bss.bad)
+20000000 20000000        4     1                 bad
+20000004 20000004        4     4         /tmp/can_node-c4eb35.o:(.bss.last_data)
+20000004 20000004        4     1                 last_data
+20000008 20000008        4     4         /tmp/can_node-c4eb35.o:(.bss.echoes)
+20000008 20000008        4     1                 echoes
+2000000c 2000000c        4     4         /tmp/can_node-c4eb35.o:(.bss.ticks)
+2000000c 2000000c        4     1                 ticks
+20000010 20000010        4     4         /tmp/can_node-c4eb35.o:(.bss.sent)
+20000010 20000010        4     1                 sent
+20000014 20000014        0     1         . = ALIGN(4)
+20000014 20000014        0     1         _ebss = .
+       0        0      163     1 .debug_loclists
+       0        0       32     1         /tmp/startup-c3a472.o:(.debug_loclists)
+      32       32      131     1         /tmp/can_node-c4eb35.o:(.debug_loclists)
+       0        0      243     1 .debug_abbrev
+       0        0       c0     1         /tmp/startup-c3a472.o:(.debug_abbrev)
+      c0       c0      183     1         /tmp/can_node-c4eb35.o:(.debug_abbrev)
+       0        0      33c     1 .debug_info
+       0        0       8b     1         /tmp/startup-c3a472.o:(.debug_info)
+      8b       8b      2b1     1         /tmp/can_node-c4eb35.o:(.debug_info)
+       0        0       b6     1 .debug_rnglists
+       0        0       17     1         /tmp/startup-c3a472.o:(.debug_rnglists)
+      17       17       9f     1         /tmp/can_node-c4eb35.o:(.debug_rnglists)
+       0        0       c8     1 .debug_str_offsets
+       0        0       34     1         /tmp/startup-c3a472.o:(.debug_str_offsets)
+      34       34       94     1         /tmp/can_node-c4eb35.o:(.debug_str_offsets)
+       0        0      1ac     1 .debug_str
+       0        0      1ac     1         <internal>:(.debug_str)
+       0        0       74     1 .debug_addr
+       0        0       14     1         /tmp/startup-c3a472.o:(.debug_addr)
+      14       14       60     1         /tmp/can_node-c4eb35.o:(.debug_addr)
+       0        0       40     1 .comment
+       0        0       40     1         <internal>:(.comment)
+       0        0       41     1 .ARM.attributes
+       0        0       41     1         /tmp/startup-c3a472.o:(.ARM.attributes)
+       0        0       88     4 .debug_frame
+       0        0       34     4         /tmp/startup-c3a472.o:(.debug_frame)
+      34       34       54     4         /tmp/can_node-c4eb35.o:(.debug_frame)
+       0        0      447     1 .debug_line
+       0        0       c6     1         /tmp/startup-c3a472.o:(.debug_line)
+      c6       c6      381     1         /tmp/can_node-c4eb35.o:(.debug_line)
+       0        0       9c     1 .debug_line_str
+       0        0       9c     1         <internal>:(.debug_line_str)
+       0        0      460     4 .symtab
+       0        0      460     4         <internal>:(.symtab)
+       0        0       e9     1 .shstrtab
+       0        0       e9     1         <internal>:(.shstrtab)
+       0        0      41b     1 .strtab
+       0        0      41b     1         <internal>:(.strtab)

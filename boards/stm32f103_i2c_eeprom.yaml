@@ -1,0 +1,12 @@
+# STM32F103T6 I2C1 master (PB6 SCL / PB7 SDA, open-drain) writing and reading a 24C02 EEPROM at 0x50.
+# Run:   chipem run --board boards/stm32f103_i2c_eeprom.yaml --for 20ms
+# Build: firmware/samples_stm32f1/build.sh
+name: stm32f103_i2c_eeprom
+quantum: 1us
+chips:
+  - {id: A, chip: stm32f103t6, firmware: ../firmware/samples_stm32f1/build/i2c_eeprom.elf}
+nets:
+  - {name: SCL, pins: [A.PB6], open_drain: true}
+  - {name: SDA, pins: [A.PB7], open_drain: true}
+parts:
+  - {id: EE1, type: i2c_eeprom, address: 0x50, size: 256, ports: {sda: SDA, scl: SCL}}

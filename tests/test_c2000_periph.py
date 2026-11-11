@@ -593,3 +593,114 @@ def test_csm_flash_spi_storage(chip):
     assert rd(chip, 0x7042) & 0x40 and rd(chip, 0x7047) & 0xFF == 0x55
     assert rd(chip, 0x6800) == 0x0083                      # ePWM1 TBCTL reset value (storage)
     assert rd(chip, 0x7400) == 0                           # unmapped PF2 word → auto stub
+
+
+# ------------------------------------------------------------------ SCI frames: errors, break, multiprocessor modes
+from chipem.periph.uartwire import Frame  # noqa: E402
+
+SCIRXST, SCIRXBUF = 0x7055, 0x7057
+
+
+def _char_cycles(c, sci, n=1.0):
+    return int(n * sci.char_ns() * 1e-9 * c.clock.hz) + 5
+
+
+def test_sci_parity_and_framing_errors_until_sw_reset(chip):
+    sci = chip.peripherals["SCIA"]
+    sci_setup(chip)
+    wr(chip, 0x7050, 0x0067)                  # 8 data bits, parity enabled, even
+    assert sci.frame() == "8E1"
+    sci.receive_frame(Frame(0x41, 8, "O", baud=sci.baud()))
+    st = rd(chip, SCIRXST)
+    assert st & 0xC4 == 0xC4                  # RXERROR | RXRDY | PE
+    assert rd(chip, SCIRXBUF) == 0x41         # the data is received anyway
+    assert rd(chip, SCIRXST) & 0x84 == 0x84 and not rd(chip, SCIRXST) & 0x40   # PE stays, RXRDY clears
+    wr(chip, 0x7051, 0x0003)                  # SW RESET clears the error flags
+    wr(chip, 0x7051, 0x0023)
+    assert rd(chip, SCIRXST) == 0
+    sci.receive_frame(Frame(0x00, 8, "E", baud=sci.baud() / 2))   # half the baud: stop bit sampled low
+    chip.run_cycles(_char_cycles(chip, sci, 2))
+    assert rd(chip, SCIRXST) & 0x90 == 0x90   # RXERROR | FE
+
+
+def test_sci_break_detect_blocks_reception_until_sw_reset(chip):
+    sci = chip.peripherals["SCIA"]
+    sci_setup(chip)
+    wr(chip, 0x0CF2, 0x1)                     # PIEIER9: SCIRXINTA
+    wr(chip, 0x7054, 0x0002)                  # RXBKINTENA
+    sci.receive_frame(Frame.brk_frame(15, baud=sci.baud()))       # 15 low bits: FE, but no BRKDT (< 10 + 10)
+    chip.run_cycles(_char_cycles(chip, sci, 2))
+    st = rd(chip, SCIRXST)
+    assert st & 0x10 and not st & 0x20
+    rd(chip, SCIRXBUF)
+    sci.receive_frame(Frame.brk_frame(30, baud=sci.baud()))       # >= 10 bits low after the missing stop bit
+    chip.run_cycles(_char_cycles(chip, sci, 2))
+    assert rd(chip, SCIRXST) & 0xA0 == 0xA0 and pie_flags(chip, 9) & 1   # BRKDT, RXERROR, RX interrupt
+    rd(chip, SCIRXBUF)
+    assert rd(chip, SCIRXST) & 0x20           # BRKDT is not cleared by reading the buffer
+    sci.feed(b"x")
+    chip.run_cycles(_char_cycles(chip, sci, 1.5))
+    assert _drops(chip)[-1] == (ord("x"), "break_detected")
+    wr(chip, 0x7051, 0x0003)
+    wr(chip, 0x7051, 0x0023)
+    sci.feed(b"y")
+    chip.run_cycles(_char_cycles(chip, sci, 1.5))
+    assert rd(chip, SCIRXST) & 0x40 and rd(chip, SCIRXBUF) == ord("y")
+
+
+def test_sci_address_bit_mode_txwake_sleep_rxwake(chip):
+    sci = chip.peripherals["SCIA"]
+    sci_setup(chip)
+    wr(chip, 0x7050, 0x000F)                  # ADDR/IDLE MODE = 1 (address-bit mode), 8 data bits
+    assert sci.frame() == "8N1+A" and sci.char_bits() == 11
+    got = []
+    sci.frame_listeners.append(lambda blk, fr: got.append(fr))
+    wr(chip, 0x7051, 0x002B)                  # TXWAKE: the next character is an address
+    wr(chip, 0x7059, 0x12)
+    assert got[-1].addr == 1 and not rd(chip, 0x7051) & 0x08        # WUT took TXWAKE, which clears
+    chip.run_cycles(_char_cycles(chip, sci, 1.2))
+    wr(chip, 0x7059, 0x34)
+    assert got[-1].addr == 0
+    wr(chip, 0x7051, 0x0027)                  # SLEEP: only address frames are received
+    sci.receive_frame(Frame(0x55, 8, addr=0, baud=sci.baud()))
+    assert not rd(chip, SCIRXST) & 0x40 and _drops(chip)[-1] == (0x55, "sleep")
+    chip.run_cycles(_char_cycles(chip, sci))
+    sci.receive_frame(Frame(0x12, 8, addr=1, baud=sci.baud()))
+    assert rd(chip, SCIRXST) & 0x42 == 0x42   # RXRDY | RXWAKE (address bit)
+    assert rd(chip, SCIRXBUF) == 0x12 and not rd(chip, SCIRXST) & 0x42
+
+
+def test_sci_idle_line_mode_block_start(chip):
+    sci = chip.peripherals["SCIA"]
+    sci_setup(chip)
+    evs = []
+    sci.frame_listeners.append(lambda blk, fr: evs.append(fr))
+    wr(chip, 0x7051, 0x002B)                  # idle-line mode (ADDR/IDLE = 0), TXWAKE
+    wr(chip, 0x7059, 0x00)                    # don't-care character: replaced by an 11-bit idle period
+    assert not evs and any(e.get("idle") == 11 for e in chip.log if e.kind == "uart")
+    wr(chip, 0x7059, 0x42)                    # the address goes out after the idle period
+    assert not evs
+    chip.run_cycles(int(11 / sci.baud() * chip.clock.hz) + 5)
+    assert evs and evs[-1].data == 0x42
+    # receiver in SLEEP: a character after >= 10 idle bits is an address (RXWAKE), back-to-back ones are not
+    wr(chip, 0x7051, 0x0027)
+    fr = Frame(0x21, 8, baud=sci.baud())
+    chip.run_cycles(_char_cycles(chip, sci, 3))
+    sci.receive_frame(fr)
+    assert rd(chip, SCIRXST) & 0x42 == 0x42
+    rd(chip, SCIRXBUF)
+    chip.run_cycles(int(fr.duration_ns() * 1e-9 * chip.clock.hz))
+    sci.receive_frame(Frame(0x22, 8, baud=sci.baud()))            # started right after the previous one
+    assert not rd(chip, SCIRXST) & 0x40 and _drops(chip)[-1] == (0x22, "sleep")
+
+
+def test_sci_fifo_error_flags_per_character(chip):
+    sci = chip.peripherals["SCIA"]
+    sci_setup(chip, fifo=True)
+    wr(chip, 0x7050, 0x0067)                  # 8E1
+    sci.receive_frame(Frame(0x31, 8, "E", baud=sci.baud()))
+    chip.run_cycles(_char_cycles(chip, sci))
+    sci.receive_frame(Frame(0x32, 8, "O", baud=sci.baud()))
+    chip.run_cycles(_char_cycles(chip, sci))
+    assert rd(chip, SCIRXBUF) == 0x31
+    assert rd(chip, SCIRXBUF) == 0x32 | 0x4000                 # SCIFFPE with the character on top of the FIFO

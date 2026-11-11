@@ -135,19 +135,19 @@ Notes on the modelled peripherals:
 | WDOG | The unlock window lasts at least 4096 core cycles (silicon: 256 bus clocks). Reset events of RM 24.6: time-out, a wrong unlock / refresh value, a refresh before the window; with IRQRSTEN they set INTFLG, raise WDOG_EWM and reset 256 bus clocks later. Not checked: the 20-bus-clock gap inside an unlock / refresh sequence and "no configuration within WCT after unlocking". Writes to locked registers are ignored with one `warn`. Test mode is not modelled. The counter holds in STOP/VLPS without STOPEN, WAIT/VLPW without WAITEN and in LLS. |
 | PIT | The K22 PIT has no lifetime timer (no LTMR64H/L in its memory map). Channels hold in STOP/VLPS/LLS (bus clock off). Each channel timeout is a trigger for PDB0 (TRGSEL 4–7) and the ADC alternate trigger; DMAMUX periodic triggering is not modelled. |
 | LPTMR | MCGIRCLK is fixed at 32.768 kHz and OSCERCLK at 8 MHz. Pulse-counter mode counts edges of CMP0's output or the pins muxed to LPTMR0_ALT1/ALT2 (TPP polarity); the glitch filter (PBYP=0) passes a level held for 2^PRESCALE prescaler clocks, without the sampling phase; PRESCALE=0 with the filter is unsupported on silicon and taken unfiltered (one `warn`). Keeps running in every low-power mode (also VLLS0, where silicon has no LPO/OSC). |
-| UART | The TX pin does not toggle: it shows its idle level (output, H) and RX is an input (level from the pull or the net, else `X`). RX behaves like silicon: no input queue; a byte arriving with C2.RE clear, the SIM gate off or no pin muxed to UARTn_RX is dropped, and one arriving while RDRF/OR is set is lost with S1.OR (OR & C3.ORIE drives UARTn_ERR). No parity, framing or noise errors, no break, LIN, IrDA, ISO-7816 or 9-bit data (board links carry bytes). Hardware flow control is modelled on the UARTn_RTS_b / UARTn_CTS_b pins (MODEM TXCTSE, RXRTSE, TXRTSE/TXRTSPOL; see `kinetis/uart.py`): the TXRTSE one-bit lead before the start bit is not inserted, and an unmuxed CTS_b reads asserted. In STOP/VLPS/LLS the UART is static: an arriving character is lost (`drop` reason `stop_mode`) but sets S2.RXEDGIF (BDH.RXEDGIE interrupt wakes STOP/VLPS). TX/RX buffers follow RM ch. 49: UART0/1 have 8-entry FIFOs (`fifo_depth: 8` in the chip YAML; PFIFO reports the size), UART2–4 one entry; the effective depth is 1 until PFIFO.TXFE/RXFE is set. TDRE/RDRF follow the TWFIFO/RWFIFO watermarks, a byte arriving with the buffer full is lost with OR and SFIFO.RXOF, a write to a full transmit buffer sets TXOF, reading D from an empty buffer sets RXUF (silicon's resulting FIFO-pointer misalignment is not modelled), CFIFO flushes and the RXUFE/TXOFE/RXOFE error interrupts work. The transmitter is double buffered (buffer + shift register) and setting C2.TE shifts out a one-character idle preamble first. DMA requests (C5.RDMAS/TDMAS) are supported. Baud pacing is modelled, so TDRE/TC/RDRF timing follows the configured baud rate; UART0/1 run from the core clock, UART2–5 from the bus clock. |
+| UART | The TX pin does not toggle: it shows its idle level (output, H) and RX is an input (level from the pull or the net, else `X`); characters travel as frames (see "UART frames and line conditions" below). RX behaves like silicon: no input queue; a byte arriving with C2.RE clear, the SIM gate off or no pin muxed to UARTn_RX is dropped, and one arriving while RDRF/OR is set is lost with S1.OR (OR & C3.ORIE drives UARTn_ERR). Frame format (§49.4.4): C1.M/PE/PT, C4.M10, C3.T8/R8, BDH.SBNS, S2.MSBF, C3.TXINV / S2.RXINV are carried and decoded; S1.NF/FE/PF and ED.NOISY/PARITYE are set by the receiver's RT8/9/10 sampling (with the NEIE/FEIE/PEIE error interrupt); FE inhibits reception until cleared (§49.3.5). C2.SBK sends 10-14-bit breaks (S2.BRK13, Table 49-237); a received break is FE + 0x00, or with S2.LBKDE an 11/12-bit LIN break sets S2.LBKDIF (BDH.LBKDIE). S1.IDLE (C1.ILT, C2.ILIE) is flagged up to one character late (the receiver learns of a frame at its stop bit). Wake-up: C2.RWU with idle-line (WAKE = 0, S2.RWUID) or address-mark (WAKE = 1) wake-up, match address (C4.MAEN1/2, MA1/MA2). Not modelled: S2.RAF, LOOPS/RSRC loop and single-wire modes, IrDA, ISO-7816. Hardware flow control is modelled on the UARTn_RTS_b / UARTn_CTS_b pins (MODEM TXCTSE, RXRTSE, TXRTSE/TXRTSPOL; see `kinetis/uart.py`): the TXRTSE one-bit lead before the start bit is not inserted, and an unmuxed CTS_b reads asserted. In STOP/VLPS/LLS (and WAIT/VLPW with C1.UARTSWAI) the UART is static: an arriving character is lost (`drop` reason `stop_mode`) but sets S2.RXEDGIF (BDH.RXEDGIE interrupt wakes STOP/VLPS); a character being sent and the idle count are held. TX/RX buffers follow RM ch. 49: UART0/1 have 8-entry FIFOs (`fifo_depth: 8` in the chip YAML; PFIFO reports the size), UART2–4 one entry; the effective depth is 1 until PFIFO.TXFE/RXFE is set. TDRE/RDRF follow the TWFIFO/RWFIFO watermarks, a byte arriving with the buffer full is lost with OR and SFIFO.RXOF, a write to a full transmit buffer sets TXOF, reading D from an empty buffer sets RXUF (silicon's resulting FIFO-pointer misalignment is not modelled), CFIFO flushes and the RXUFE/TXOFE/RXOFE error interrupts work. The transmitter is double buffered (buffer + shift register) and setting C2.TE shifts out a one-character idle preamble first. DMA requests (C5.RDMAS/TDMAS) are supported. Baud pacing is modelled, so TDRE/TC/RDRF timing follows the configured baud rate; UART0/1 run from the core clock, UART2–5 from the bus clock. |
 | ADC | Hardware triggers (SC2.ADTRG) come from the PDB pre-triggers (SIM_SOPT7 ADCnALTTRGEN=0) or from the alternate source in ADCnTRGSEL (ALTTRGEN=1; ADCnPRETRGSEL picks SC1A/SC1B): PDB0_EXTRG pin rising edge, CMP0–2 output rising edge, FTM0–3 trigger, PIT channel 0–3 timeout, RTC alarm / seconds, LPTMR0 compare (all sources of Table 3-51; the SIM logs one `info` only for reserved TRGSEL 15 or a source missing from the chip). A trigger during a conversion restarts it. With ADTRG=1 an SC1n write just selects the channel. Calibration completes instantly. Conversion time is fixed (`params.conv_ns`, default 4 µs), times 4–32 with hardware averaging (SC3.AVGE; the average of noise-free samples is the sample). The compare function (ACFE/ACFGT/ACREN, CV1/CV2) suppresses COCO and the result as on silicon. Conversions on the bus clock stop in STOP/VLPS/LLS; ADACK (ADICLK=3) conversions continue in STOP/VLPS. Values come from `--adc`/`set_channel`, not from pin levels; unset channels read 0. ADC0_SE23 (DAC0 output) and ADC1_SE18 (VREF_OUT) convert the source's voltage with VREFH = 3.3 V (`params.vrefh`) or, with SC2.REFSEL=01, VALT = VREF_OUT. The temperature sensor, bandgap (AD27) and VREFH/VREFL channels are not wired. |
 | PDB | The counter starts on the software trigger (TRGSEL=15) or any Table 3-51 input: PDB0_EXTRG pin, CMP0–2 output, PIT channel 0–3, FTM0–3 trigger, RTC alarm / seconds, LPTMR0 (a source missing from the chip is logged once and never fires). Pre-triggers drive ADC0/ADC1 SC1A/SC1B (pre-triggers 2–7 ignored); back-to-back chaining follows ADC completion (ch0 pre-trigger 0 chains from ADC1 SC1B). LDMOD=1/2/3 load buffered values at the next wrap or trigger (no distinction). Sequence errors flag when the target COCO is still set, but the conversion still starts. DAC interval trigger 0 drives DAC0's hardware trigger (TOE: every DACINT0+1 PDB clocks from each counter start, up to MOD; EXT: on ADC0 SC1A completion); interval trigger 1 (DAC1, absent) and pulse-out (POEN/POnDLY, the CMP sample/window signal) are storage only. One-shot mode leaves CNT at 0. |
 | DMA/DMAMUX | Transfers complete instantly (zero bus time); no channel arbitration, priorities or bandwidth control. DMAMUX periodic triggering (PIT TRIG) is not modelled (logged once; the channel behaves as untriggered). Only peripherals that call `dma_request` (e.g. UART, ADC, DSPI) can request DMA. |
 | DSPI (SPI0–2) | Bit by bit on the pins (SCK/SOUT/PCSx driven, SIN sampled) at the CTAR baud rate with tCSC/tASC/tDT, CPOL/CPHA, LSBFE, PCSIS and continuous selection (CONT); slave mode clocked from the SCK/PCS0 pins (MSB first, CTAR0). Not modelled: continuous SCK (CONT_SCKE), the modified transfer format (MTFE: classic timing), the PCS strobe (PCSSE) — one `warn` each; DBR duty cycles are exact only for BR = 2 (50/50 otherwise); a slave with an empty TX FIFO sets TFUF and shifts zeros (what silicon sends is not specified); pin delays. Without a muxed SCK pin a frame is one event (same duration). A responder (`--spi-flash`, `responder(tx, pcs, bits)`) answers instead of the SIN pin; SIN not muxed reads `params.miso` (all ones). |
 | SDHC | `kinetis.sdhc` with the SD card device. Data moves in watermark-sized chunks (RDWML/WRWML words per event, timed at 32 / bus width SDCLK per word); the buffer never over/underruns because SDCLK is gated (PRSSTAT.SDOFF), as on silicon. Internal DMA moves data in zero bus time; no SDMA boundary (the K22 SDHC has none); ADMA1 is not modelled (DMAE + one `warn`) although HTCAPBLT advertises ADMA; the K22 DMAMUX has no SDHC slot, so VENDOR.EXTDMAEN does nothing. EMODE little endian puts the first bus byte in bits 7:0 (the RM figure is ambiguous; the NXP SDK relies on this). SDSTB is always 1 (no clock settling), stop at block gap / continue / read wait, SDIO card interrupts, suspend/resume, MMC boot and the 8-bit bus are not modelled (one `warn`). PRSSTAT.CINS follows the attached card (or PROCTL.CDSS/CDTL); there is no card-detect pin or debounce. DCLK is not toggled per edge: `pin` wave events summarise it (`chipem/periph/sdbus.py`); CMD/DAT pins keep their idle roles. |
 | I2S0 (SAI) | `kinetis.sai`: bit clock / frame sync / data on the pins (master and slave, RX synchronous to TX), FIFOs, masks, FEF/SEF/WSF, IRQs, DMA. Not modelled: BCS (bit clock swap), BCI, Stop/Debug modes, MCLK duty cycle and fractional-divider jitter (average frequency exact), pad delays. An MCLK above `params.mclk_edges_max_hz` (1 MHz) is not toggled on its pin (one `info` gives the frequency). An external frame sync is read at the drive edge (FSE=0: the frame starts at that bit). Without pins on a side the bits of a word are one event. The bit clock and MCLK frequencies are taken when the clock starts (a later bus/PLL change does not retime a running SAI). |
-| CMT | `kinetis.cmt`: carrier and modulator timing, time/baseband/FSK/EXSPC, IROL/CMTPOL/IROPEN, EOCF/IRQ/DMA. The undefined reset values of the data registers read 0; Stop modes and SIM_SOPT2[PTD7PAD] are not modelled. |
+| CMT | `kinetis.cmt`: carrier and modulator timing, time/baseband/FSK/EXSPC, IROL/CMTPOL/IROPEN, EOCF/IRQ/DMA. The undefined reset values of the data registers read 0; Stop modes freeze the modulator with IRO held (41.4.2.1); SIM_SOPT2[PTD7PAD] is not modelled. |
 | FlexBus | `kinetis.flexbus` + `kinetis.flexbus_space` (0x60000000–0xDFFFFFFF): chip-select decode (incl. the global FB_CS0 out of reset), write protect, port size, external memories (`devices: [{type: sram, bus: FB}]`). Transaction level: no bus timing (ASET/WS/hold cost no time), no FB_TA, no FB_AD/FB_CS/FB_OE pin waveforms or pin-mux checks, BLS/BEM ignored, no instruction fetch from FlexBus memory (the core cannot execute MMIO). |
 | MCM | `kinetis.mcm`: the ISCR FPU flags mirror FPSCR and raise the MCM IRQ, re-checked every `params.fpu_poll_ns` (10 µs) while an enable is set (IRQ latency up to that). ETB counter: no trace packets, never expires. |
 | RTC | Driven by virtual time. Keeps state across chip resets (VBAT domain) but not across a new Session. TCR compensation stored only. |
 | FTFE | Commands complete synchronously (CCIF never reads 0, no erase/program time). Program-only-clears-bits is honoured. Security, backdoor key and protection registers are loaded from the flash configuration field, but protection is not enforced on writes. |
-| SMC/PMC/LLWU | Power modes follow RM ch. 7/14/16 (`kinetis/power.py`): WAIT, STOP, VLPR (status only: no frequency limit enforced, a warning when the MCG is not in BLPI/BLPE), VLPW, VLPS, LLS, VLLS3-0; PMPROT write-once and STOPM/RUNM blocking, STOPA on an aborted entry, LPWUI exits, PMSTAT. In stop modes the scheduler events of clock-stopped blocks are held back and resumed with their remaining time (Table 7-2); blocks with their own `clock_stop` (PIT, WDOG, UART) keep counters exact, others (FTM, PDB, DSPI, I2C, SAI, CMT, DMA, SysTick) resume where their next event was, so a counter read just after wake-up may be off by the time slept. Not modelled: the stop-acknowledge handshake (SACKERR), stop-mode wake-ups of I2C address match / CAN / SDHC, ADC conversions on the bus clock that are in progress at entry, pin isolation in VLLS (pins return to their reset state at the wake-up reset instead of holding until ACKISO), the LPO-off and POR-option differences of VLLS0, the LLWU 5-LPO-cycle filter delay (FILT flags are immediate). VLLS SRAM loss reads 0. LLWU F3 bit 7 (RTC seconds, which has no flag of its own) clears on the first F3 read. LVD/LVW are storage only. |
+| SMC/PMC/LLWU | Power modes follow RM ch. 7/14/16 (`kinetis/power.py`): WAIT, STOP, VLPR (status only: no frequency limit enforced, a warning when the MCG is not in BLPI/BLPE), VLPW, VLPS, LLS, VLLS3-0; PMPROT write-once and STOPM/RUNM blocking, STOPA on an aborted entry, LPWUI exits, PMSTAT. In stop modes the clocks follow Table 7-2 through the shared freezer (`chipem/periph/lowpower.py`): held blocks' events resume with their remaining time and `time_shift()` moves time-derived counters (FTM, PDB, CMT, EWM, USB, USBDCD), so counters continue where they stopped; DMA requests are served at wake. DSPI finishes its frame and stops (47.4.8.1; WAIT with MCR.DOZE too); SAI keeps running with xCSR.STOPE and an external or OSCERCLK-derived clock, otherwise stops after its frame (51.1.3.2); I2C address match wakes from STOP/VLPS with C1.WUEN (48.4.6.4); FlexCAN acknowledges (LPMACK), holds TIMER and self-wakes (SLFWAK → WAKINT, at the end of the first frame seen; 46.4.10.3); UART WAIT with UARTSWAI stops. Pin edges reaching a stopped block are lost. Not modelled: the stop-acknowledge handshake (SACKERR), SDHC card-interrupt wake, FlexCAN wake filter, pin isolation in VLLS (pins return to their reset state at the wake-up reset instead of holding until ACKISO), the LPO-off and POR-option differences of VLLS0, the LLWU 5-LPO-cycle filter delay (FILT flags are immediate). VLLS SRAM loss reads 0. LLWU F3 bit 7 (RTC seconds, which has no flag of its own) clears on the first F3 read. LVD/LVW are storage only. |
 | RCM | SRS0/SRS1 from the `reset` reason: POR, PIN (RESET_b falling edge, RPFC filter not modelled), WDOG, LOC/LOL (MCG monitors), WAKEUP (VLLS, 0x41 with the pin), SW (SYSRESETREQ), LOCKUP (a core lockup resets the K22, `lockup_reset: true` in its YAML). LVD resets, JTAG, EzPort, MDM-AP and SACKERR never occur. |
 | VBAT | Plain RAM that survives chip reset. |
 | CRC | Results are immediate (silicon: 2 clocks per byte). Data writes are transposed per TOT within the bytes the access covers and fed MSB first; seed writes (WAS=1) are not transposed (32.3.2.1 puts a 16-bit seed in DATA[LU:LL] whatever TOT is). GPOLY[31:16] ignores writes while TCRC=0, as 32.2.2 says: drivers that write GPOLY before setting TCRC=1 get a 16-bit polynomial. In 16-bit mode DATA[31:16] keeps its reset/32-bit-mode value (RM: indeterminate). |
@@ -184,12 +184,15 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
   Stop mode are dropped; IDLE is set one character after the last reception and only SR + DR reads clear it.
   CR3.DMAT/DMAR DMA requests are generated (TXE/RXNE). Hardware flow control (USART1/2/3/6, 30.3.14): CTSE holds a
   character in TDR while the USARTn_CTS pin is H/X (an unmuxed CTS counts as asserted, one `info`; SR.CTS + CTSIE on
-  CTS edges; breaks ignore CTS), RTSE drives USARTn_RTS L while RXNE = 0 and H while it is set. Parity: the parity bit
-  replaces the MSB on transmit and is computed into DR's MSB on receive; PE, FE (except for a break) and NF are never
-  set because links carry no line errors. 9-bit words lose bit 8 on links and host input (byte-wide). CR1.SBK sends a
-  timed break of 10 (M = 0) / 11 (M = 1) / 13 (LINEN) low bits plus the stop bits (SBK clears in its stop bit; logged
-  `uart` event `brk: 1`), but board links do not carry it; `receive_break(bits)` (tests, future links) gives FE + RXNE
-  0x00 and SR.LBD with CR2.LINEN when the break is >= 10 (LBDL = 0) / 11 (LBDL = 1) bits. OVER8 counts as 0 with
+  CTS edges; breaks ignore CTS), RTSE drives USARTn_RTS L while RXNE = 0 and H while it is set. Frames carry their format (see
+  "UART frames and line conditions"): the parity bit is the MSB of the M-bit word on transmit; the receiver decodes
+  at its own settings (samples 8/9/10 of 16 or 4/5/6 of 8, CR3.ONEBIT) and sets PE (with the received parity bit in
+  DR's MSB), FE and NF with RXNE; 9-bit words keep bit 8 end to end (host input in the UART's own format has bit 8 =
+  0). CR1.SBK sends a timed break of 10 (M = 0) / 11 (M = 1) / 13 (LINEN) low bits plus the stop bits (SBK clears in
+  its stop bit; `uart` event `brk: bits`), carried by links; a received break is FE + RXNE 0x00 and SR.LBD with
+  CR2.LINEN when it is >= 10 (LBDL = 0) / 11 (LBDL = 1) bits (also in mute mode). The RM0090 Table 144 tolerance
+  (3.75 % for M = 0) is tighter than the model's geometric sample-point limit (about ±4.5 %) because it includes the
+  1/16-bit start-edge detection uncertainty, which is not modelled. OVER8 counts as 0 with
   LINEN/SCEN/IREN. Half duplex (HDSEL) receives on the TX pin and echoes its own characters. Mute mode (RWU, 30.3.6)
   wakes on an idle frame detected after a received character (WAKE = 0; RWU is cleared when the next character
   arrives rather than at the idle detection) or on an address mark matching CR2.ADD (WAKE = 1; RWU writes are ignored
@@ -200,9 +203,12 @@ MK22FN1M0AVLL12/MK22FX512AVLL12; our YAMLs model the non-A parts from data sheet
   tell the difference), so the firmware must restore its clocks; the entry is skipped while an EXTI pending bit or an
   RTC alarm/wakeup/tamper/time-stamp flag is set (RM0090 5.3.4 Table 28).
   In Stop only EXTI lines (pins, RTC alarm 17 / wakeup 22, ...) end the sleep; IWDG, RTC and LSE/LSI keep running;
-  USARTs freeze (`clock_stop`), but the other peripheral models (TIM, SPI, I2C, ADC, DMA, SysTick, ...) keep counting
-  in Stop: their interrupts do not wake the core (only EXTI does), are taken after the wake-up, and a free-running
-  timer has advanced. LPDS/FPDS and the regulator / HSI start-up latency cost no time. Standby resets every peripheral
+  every peripheral clock stops (RM0090 5.3.4): the USART is told (`clock_stop`), the others are frozen by the
+  shared freezer (`chipem/periph/lowpower.py`), so TIM/WWDG/SysTick counters, SPI/I2S frames, ADC conversions and
+  SDIO/CRYP/HASH operations continue where they stopped; DMA requests are served at wake; I2C, bxCAN, SPI-slave and
+  timer inputs are not seen; Ethernet frames are lost unless PMT power-down (magic packet → EXTI 19); USB tokens time
+  out (resume → EXTI 18/20). In Sleep, blocks with RCC_xxxLPENR = 0 are frozen the same way (5.3.2). Register reads
+  of SysTick CVR during Stop (debugger) show a running value until wake. LPDS/FPDS and the regulator / HSI start-up latency cost no time. Standby resets every peripheral
   except RTC, IWDG, RCC and PWR, releases all pins (PA0 pulled down with EWUP), clears SRAM/CCM RAM to 0 (silicon:
   undefined) and the backup SRAM unless CSR.BRE = 1, and ends with a chip reset ("standby_wakeup") on a WKUP rising
   edge, an RTC alarm or wakeup event (with its interrupt enable in RTC_CR), NRST or IWDG; tamper/time-stamp events are
@@ -460,6 +466,109 @@ die, same peripheral list and models). In addition:
 - **UFBGA176+25 pin count**: the files list all 201 balls (176 + 25 thermal VSS balls F6..K10), so
   `tools/pin_table_check.py` needs `--expect 201` (its default takes the count from the package name).
 
+## STM32F427xx / STM32F437xx
+
+Everything in the STM32F405ZG section applies to the blocks the two dies share (same models). F42x/F43x specifics
+(RM0090 Rev 22, DS9405/DS9484 Rev 14):
+
+- **Packages**: LQFP100, LQFP144, LQFP176, UFBGA176+25 (F427) and UFBGA169, LQFP144, LQFP176 (F437 "I" parts) have
+  chip files; LQFP208, TFBGA216 and WLCSP143 do not. The peripheral map is the die's: on the LQFP100 the FMC SDRAM
+  pins are not bonded (no PG8 = FMC_SDCLK), so `stm32.fmc` refuses SDRAM commands there ("package has no ... pin").
+  The flash-size register, unique ID, system memory, OTP and option-byte areas are not mapped.
+- **Register table quirks**: STM32F427.svd lacks RCC_PLLSAICFGR / RCC_DCKCFGR, several F42x enable bits, the F42x
+  LPENR reset values, FLASH_OPTCR DB1M/SPRMOD/BFB2 and has FMC BWTR3/4 at the wrong offsets; the models add or fix
+  them (`chips/README.md`). The IRQ table follows RM0090 Table 63 (87 SAI1 and 90 DMA2D are missing from the SVD).
+- **Clock tree** (`stm32.rcc_f42x`, RM0090 ch. 6): PLLSAI/PLLI2S lock at once like the other PLLs (no lock time);
+  PLLSAIR / PLLSAIDIVR (LCD clock) are stored but drive nothing (no LTDC). Exceeding the HCLK/APB limits of DS9405
+  Table 17 for the current scale and over-drive state logs a `warn`; the chip keeps running at that clock.
+- **Over-drive** (`stm32.pwr_f42x`, RM0090 5.1.4 / 5.5): ODSWEN → ODSWRDY takes Tod_swen of DS9405 Table 23 (45 us
+  with HSI, 100..45 us for a 4..26 MHz HSE crystal, 40 us with HSE bypass), ODSWEN = 0 takes Tod_swdis. ODEN → ODRDY
+  takes 20 us: neither RM0090 nor DS9405 gives this time (an assumption, `params.od_ready_us`). The system clock stall
+  during the switch is not modelled (the CPU keeps running). Under-drive only sets UDRDY on Stop entry; the lower
+  leakage and the longer wake-up time are not modelled. VOS changes the frequency limits only, not timing.
+- **Dual-bank flash** (`stm32.flash_f42x`, RM0090 3.5 / 3.9): erase and option programming complete at once (BSY never
+  reads 1, like the F405 model); read-while-write, write protection (nWRP), PCROP (SPRMOD), read protection (RDP) and
+  BFB2 dual-bank boot are stored but not enforced. Option bytes survive system resets but not a new Chip/Session.
+  RM0090 Table 9 prints bank-2 sector 14 of a dual-bank 1 MB part at 0x0808 0000; the model uses 0x0808 8000.
+- **FMC SDRAM** (`stm32.fmc`, RM0090 37.7): register-level controller with the init sequence enforced by the
+  `sdram` device (clock enable, then >= 100 us, PALL, >= 2 auto-refresh, load mode register checked against SDCR.CAS
+  and burst length 1), BUSY/MODES, the refresh timer with RE (raised only when COUNT < TRP + TRC, because accesses
+  take no time), and 64 ms data retention (`refresh_ms`; decayed cells read 0). Access timing (CAS latency, TRCD,
+  RBURST read FIFO, RPIPE), pin waveforms, the mobile-SDRAM extended mode register (37.7.3 step 9) and
+  SYSCFG_MEMRM.SWP_FMC are not modelled. A write to a write-protected bank faults on the fast (mapped) path but is
+  only dropped with a `warn` on the slow (geometry-mismatch) path. RM0090 Rev 22 Table 297 (and the SVD) put BWTR3/4
+  at 0x104/0x10C; the model follows the register description (37.5.6: 0x114/0x11C).
+- **DMA2D** (`stm32.dma2d`, RM0090 ch. 11): transfer time per line = max(PL pixel cycles in conversion/blending
+  modes, 32-bit AHB beats x (1 + AMTCR.DT)) HCLK cycles; AHB contention, wait states and FIFO bursts are not
+  modelled (11.3.9). Output conversion truncates 8-bit channels and blending with both alphas 0 gives 0 (11.3.6/11.3.7
+  leave these open). LWR is taken as a 0-based line number. All configuration registers are write-protected while a
+  transfer or CLUT load runs (silicon may allow some). The SVD's CSS/AI/RBS fields (F7 DMA2D) are reserved here.
+- **SAI1** (`stm32.sai`, RM0090 ch. 29): AC'97 (CNRDY never set) and mu-law/A-law companding (29.11, 29.12.3) are
+  not modelled (one `warn`; treated as the free protocol / data not companded); no GCR / external synchronisation;
+  the PCLK >= 2 x SCK rule (29.5 note) only warns. TRIS releases SD for whole inactive slots and the frame padding
+  only, not inside an active slot (29.12.4). Masters add two lead-in bit clocks before frame 0 (first-frame timing is
+  not specified in 29.4; same choice as `stm32.i2s`). In word mode (no SAI pins muxed) a slot is processed per event,
+  so FIFO pops can land up to one bit late. RM0090 contradictions followed in favour of the register description:
+  CR1.MODE bit 1 = slave, bit 0 = receiver (29.4 says the opposite); FBOFF is 5 bits (29.8 says [5:0]); SR resets to
+  0x00000008 (FREQ, 29.17.6; the SVD says 0). On the LQFP100 block B has only SAI1_SD_B (PE3), so it can only run
+  synchronous to block A.
+- **CRYP GCM/CCM** (`stm32.cryp` with `gcm: true`, RM0090 23.3): the context-swap register contents (CSGCMCCMxR,
+  CSGCMxR, 23.6.12) are not documented by ST; CHIP_EM uses its own layout, so a context saved on silicon cannot be
+  restored here. GCM J0 is the initial counter block minus 1 (the HAL convention, counter = 2); the GHASH
+  pre-processing of a non-96-bit IV is left to software. Output data appears after the RM0090 Table 112 block time,
+  but the internal state updates when a block starts. A zero-padded partial last block is hashed padded, which
+  makes the GCM encryption tag and the CCM decryption tag wrong exactly as on silicon (ST HAL "workaround 2").
+- **HASH SHA-224/256** (`stm32.hash` with `sha2: true`): 50 HCLK cycles per block (RM0090 25.3.1); the extra
+  last-block factor is not modelled.
+- **I2C_FLTR** (RM0090 27.6.10): stored and protected while PE = 1; the analog/digital filters themselves (spike
+  suppression, the extra (DNF + 1) x TPCLK1 SDA hold time) are not modelled.
+
+## STM32F103T6 (family `stm32f1`)
+
+**Not verified against RM0008.** The F1 reference manual (RM0008) could not be downloaded (ST's server refused the
+automated request), so every `stm32f1.*` model was written from the data sheet DS15060 Rev 7, the register layout of
+ST's STM32F103xx.svd and ST's documented F1 behaviour (as used by the SPL/HAL drivers). Each model docstring says so.
+Check them against RM0008 when it is available: `stm32f1.rcc`, `stm32f1.gpio`/`stm32f1.afio` (remap table),
+`stm32f1.exti`, `stm32f1.pwr`, `stm32f1.bkp`, `stm32f1.rtc`, `stm32f1.flash`/`optbytes`/`sysmem`/`dbgmcu`,
+`stm32f1.dma`, `stm32f1.adc`, `stm32f1.usb`/`stm32f1.pma`, `stm32f1.can` (the F4 bxCAN itself is verified against
+RM0090). The reused F4 models (TIM, USART, SPI, I2C, IWDG, WWDG, CRC) are verified against RM0090 only; F1-specific
+differences of those IPs that the SVD does not express (reserved bits become read-only from the F1 SVD) are not
+modelled.
+
+- **Pins**: only the VFQFPN36 package; LQFP48/LQFP64/TFBGA64 and the 16 KB x4 parts are not described. CAN_REMAP = 11
+  (CAN on PD0/PD1, RM0008) is in the remap table but the data sheet's pin table does not list CAN on PD0/PD1, so no
+  pin carries it. EVENTOUT (AFIO_EVCR) is stored, not driven. PC13-PC15 / TAMPER-RTC are not bonded on the T6.
+- **Pin owner selection**: the F1 has no AF number; the GPIO model gives an alternate-function output pin to the
+  routed output whose peripheral is enabled (clock + enable bits), the first in Table 5 order on a tie, and an input
+  pin to a routed input in use (USART RX with its clock on, CTS with CTSE, timer channels in capture mode, CAN_RX,
+  SPI per `signal_state`). Silicon ORs the outputs / feeds every input; the data sheet asks for one peripheral at a
+  time (note 4). Re-evaluation happens on GPIO/AFIO writes, clock gate writes and writes to the peripherals'
+  CR1/CR2/CR3/CCMRx/CCER/SMCR/BDTR (wrapped hooks).
+- **RCC**: oscillators and PLL are ready immediately (no HSE start-up or PLL lock time); CSS never detects an HSE
+  failure; MCO is not driven. **FLASH_ACR** too-few wait states only warn.
+- **FLASH**: the core has no write hook on memory, so CPU writes to the flash are checked after the fact at the next
+  FLASH register access (PGERR / WRPRTERR restore the old half-word; writes without PG are undone with a warning);
+  word or byte programming writes are not refused with a bus error; the CPU is not stalled during BSY. Erase time 30
+  ms (DS15060 Table 28: 20-40 ms), half-word 52.5 us. Read protection (RDP) only shows in OBR. The system memory
+  (bootloader) reads 0xFF; BOOT0/BOOT1 are not sampled (always boot from flash).
+- **RTC**: BKP_RTCCR calibration and the RTC output on TAMPER are not applied; the RTOFF busy time is 3 RTCCLK.
+- **PWR**: Stop entry ignored with a pending EXTI or ALRF; LPDS has no effect (the wake-up latency of DS15060
+  Table 26 is not modelled); DBGMCU_CR DBG_STOP/DBG_STANDBY are storage. Option bytes nRST_STOP/nRST_STDBY reset the chip
+  on entry.
+- **DBGMCU**: IDCODE is readable (as with a debugger attached; ST's errata for low/medium density say user code
+  reads 0 without one — not modelled; not verified).
+- **DMA/ADC** (agent notes): second-ADON-write start only with EXTTRIG = 0; EOC also set at the end of an injected
+  group; DMA GIF is a stored flag; RSTCAL takes 2 ADCCLK; calibration code 0; APB byte-lane replication of
+  byte/half-word DMA writes, the EXTI11/EXTI15 ADC triggers, slow interleaved dual mode (approximated), sensor
+  start-up/minimum sample time and the equal-sampling-time rule of simultaneous modes are not modelled; DMA still
+  transfers with its clock gated (warning only).
+- **USB**: STAT_TX/STAT_RX both NAK after a SETUP; a buffer overrun is answered with STALL; isochronous endpoints are
+  handled as bulk (one warning); ERR and PMAOVR never occur; the missed SOFs before suspend are reported at once
+  (ESOF, LSOF = 3); PMA accesses are not checked against the USB/CAN clock; a fixed D+ pull-up attaches only once the
+  transceiver is on and FRES = 0. Using USB and bxCAN together only warns (the shared SRAM is not corrupted).
+- **Static analysis**: `chipem info` predicts no pin roles for the F1 (`chipem/firmware.py` decodes Kinetis PCR,
+  STM32F4 MODER/AFR and C2000 GPxMUX only); the run-time pin report works.
+
 ## TMS320F28232 (C2000)
 
 - **ISA checked against TI's tools**: every `isa.yaml` entry assembles to the same words as TI's cl2000 25.11.1
@@ -593,8 +702,9 @@ die, same peripheral list and models). In addition:
   DMA DEBUGCTRL.FREE) is stored and has no effect, silently.
 - **Low-power modes** (`ti_c2000.sysctrl`, SPRUI07 1.3.3): IDLE (LPMCR0.LPM = 00; any enabled interrupt wakes),
   STANDBY (01) and HALT (1x) are entered by the IDLE instruction. STANDBY/HALT stop SYSCLKOUT to every peripheral:
-  their scheduler events are parked and their time-derived counters (CPU timers, ePWM, eCAP, eQEP, XINT counters, SPI)
-  frozen, pin inputs are ignored (edges in between are lost) and SCI bytes are dropped (`reason=clock_stopped`). The
+  their scheduler events are parked and their time-derived counters (CPU timers, ePWM, eCAP, eQEP, XINT counters, SPI,
+  McBSP sample-rate generator, ADC sessions, DMA bursts, eCAN time stamps; helper events such as the I2C master's or the
+  SCI line decoder's are parked with their block) frozen, pin inputs are ignored (edges in between are lost) and SCI bytes are dropped (`reason=clock_stopped`). The
   watchdog keeps counting in STANDBY (and stops in HALT, with the oscillator). Wake-up: a GPIOLPMSEL port A pin held
   low for QUALSTDBY + 2 OSCCLK (STANDBY; a shorter pulse restarts the qualification), the watchdog interrupt with
   LPMCR0.WDINTE + SCSR.WDENINT (STANDBY), a selected pin low through the oscillator start-up
@@ -633,18 +743,46 @@ die, same peripheral list and models). In addition:
 - **Clock gates only warn** (PCLKCR); silicon ignores accesses to an unclocked peripheral.
 - SCI: overrun is modelled (OE/RXERROR without FIFO: the unread character is overwritten; RXFFOVF with the FIFO:
   the 17th character is not stored, our reading of the guide's ambiguous wording); bytes arriving in SW RESET, with
-  RXENA clear, the PCLKCR0 gate off or GPIO not muxed to SCIRXDx are dropped. No framing/parity errors, break
-  detection, FFTXDLY or autobaud. No boot ROM (reset jumps to the image entry or 0x33FFF6; its CSM dummy read and
+  RXENA clear, the PCLKCR0 gate off or GPIO not muxed to SCIRXDx are dropped. Frames carry their format (SPRU051:
+  1-8 data bits, address bit in address-bit mode from TXWAKE, parity over data + address bit, 1/2 stop bits; TXWAKE
+  in idle-line mode sends an 11-bit idle period); the receiver sets PE/FE/BRKDT/RXERROR (until SW RESET; FIFO mode
+  SCIFFFE/SCIFFPE per character), RXWAKE, and in SLEEP takes only address frames. After BRKDT further characters are
+  dropped until SW RESET, as the guide states. The SCI cannot send a break (no control bit). No FFTXDLY or
+  autobaud. No boot ROM (reset jumps to the image entry or 0x33FFF6; its CSM dummy read and
   DIVSEL = /2 are emulated), flash writable by the CPU.
 - The interpreter runs about 2–5 M instructions/s, 1/20 to 1/50 of real time at 100 MHz.
 
 More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
 
+## TMS320F2808 (C2000 280x)
+
+Everything listed for the F28232 above applies (same core, same `ti_c2000` models), plus:
+
+- **Boot ROM stand-in, not TI's code**: `chips/tms320f2808_bootrom.asm` sits at TI's addresses (InitBoot 0x3FFB50,
+  vectors 0x3FFFC0, ITRAPIsr) and only implements the CSM dummy read, the GPIO18/29/34 boot-mode selection and the three
+  direct jumps (flash 0x3F7FF6, M0 0x000000, OTP 0x3D7800). The SCI-A, SPI-A, I2C, eCAN-A and parallel loaders are not
+  implemented: the ROM turns the watchdog off and waits in a loop. The boot ROM math tables, version/checksum words and
+  the rest of the 4K ROM read as erased (0xFFFF). Images with an entry point skip the ROM, as before.
+- **CPU vector table in ROM**: with PIECTRL.ENPIE = 0 an interrupt or trap fetches the ROM vectors, which (as on silicon,
+  SPRU722C Table 1) point to M0 locations 0x000042-0x00007E, and ILLEGAL to ITRAPIsr (watchdog on, loop until reset)
+  instead of the `bad_vector` fault event the F28232 reports.
+- **Peripheral input default with two pins on one function** (SPRU712H Table 4-8: the peripheral then sees a fixed 0 or
+  1) is not modelled: the inputs follow whichever pin changes.
+- **ePWM5/6** keep plain-storage TBPHSHR/CMPAHR/HRCNFG locations (no HRPWM on the F2808; the data sheet marks them
+  N/A / F2809-only).
+- **ADC**: same model as the F28232 (sequencers, 2.5 + (ACQ_PS + 1) + 4 ADCCLK first result); the F2808's 12.5 MHz
+  ADCCLK limit and the 5 ms bandgap/reference settling (td(BGR)) are not enforced. ADCOFFTRIM is stored only.
+- **eCAN clock**: SYSCLKOUT (SPRUEU0 3.1.2), set by the `clock_div: 1` parameter; the rest of the eCAN model follows
+  the F2833x guide (same IP).
+- **Flash/OTP wait states, the flash pipeline and the Flash API** are not modelled (flash is CPU-writable), as on the
+  F28232. The GGM/ZGM BGA packages are not described.
+
 ## Pins
 
 - Levels are digital (H/L/X). There are no pin voltages: ADC inputs come from `--adc` / `set_channel` (on the STM32
   a channel without a value converts its pin's digital level, H = VREF+, L/X = 0 V).
-- UARTs do not toggle pin levels with their traffic; I2C does (pin-level bus,
+- UARTs do not toggle pin levels with their traffic (characters travel as frames over links; generating the bit
+  edges for the Logic tab / VCD would cost a pin event per bit on every byte, so it is not done); I2C does (pin-level bus,
   `chipem/periph/i2cwire.py`), the STM32 SPI and Kinetis DSPI do (bit by
   bit, `stm32.spi`, `kinetis.dspi`), and so do the Kinetis SAI (BCLK/FS/TXD) and CMT (IRO carrier). Timer/PWM channels (STM32 TIM,
   Kinetis FTM, C2000 ePWM, eCAP in APWM mode) do: they drive their signal edge by edge through
@@ -675,7 +813,7 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   (the bus picks one). Bus-off recovery waits 128 x 11 bit times regardless of bus traffic.
 - **Pins.** CAN pins are not driven bit by bit: a `can` link joins the controllers; the TX pin shows its recessive
   idle level. A chip description without a pin offering CANx_RX/CANRXx skips the pin check.
-- **FlexCAN:** no supervisor-mode access checks (SUPV), low-power stop / doze / self wake-up (WAKINT), BUSY code
+- **FlexCAN:** no supervisor-mode access checks (SUPV), doze mode, the wake-up filter (WAKSRC), BUSY code
   bit, SMP/RJW effects, TASD, WRMFRZ; freeze and disable are acknowledged at once.
 - **eCAN:** no emulation suspend (SUSP/SMA), TCOF (TSC MSB overflow), SA1 after leaving init only cleared by the
   first bus contact, no corruption on 16-bit accesses to the 32-bit-only registers.
@@ -695,7 +833,29 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   `reason`; the run summary counts them). Host input is paced at the receiving UART's current baud (115200 8N1
   while it has none). `--uart-in` starts at t=0, so bytes sent before the firmware has enabled its receiver are
   lost; use `--at` to type later. A chip with no pin offering a UART's RX function receives host input without a
-  pin check but nothing over board links.
+  pin check but nothing over board links. Host input is sent in the receiving UART's own format (a matching
+  terminal); `<break>` / `<break:N>` in the text sends a break (default two character times, at least 13 bits).
+
+## UART frames and line conditions
+
+- Every UART character (Kinetis UART, STM32 USART, C2000 SCI) travels as a frame with its transmitter's real baud
+  (from the divider), data bits (incl. a 9th bit / C2000 address bit), parity bit as transmitted, stop bits, bit
+  order and polarity, or as a break of N low bits (`chipem/periph/uartwire.py`). Board links, auto links, the serial
+  router (cable chains), host bridges and host input all carry frames; the byte-level `tx_listeners` still fire.
+- The receiver decodes at its own settings by sample point: three samples per bit at its family's positions (RT8/9/10
+  of 16, 4/5/6 of 8), majority vote, noise flag when they disagree, start-bit verification, only the first stop bit
+  checked, Kinetis resynchronisation on falling data edges. Sample times are counted from the start edge at the
+  receiver's own bit time, so a baud mismatch moves late samples into the neighbouring bits (geometric tolerance about
+  ±4.5 % for 10-bit frames, ±4 % for 11-bit ones). Within that tolerance and with the same frame length, the
+  character is taken directly from the frame (no per-bit work, no extra events); otherwise the line waveform is
+  decoded, with several received characters per transmitted one when the transmitter is slower, and back-to-back
+  frames decoded as one continuous line.
+- Approximations: the start edge is detected exactly (silicon: up to 1/16 bit late, part of the RM tolerance
+  figures); no glitches or slow edges (noise is only what sampling a wrong baud yields); characters decoded from the
+  line waveform (mismatched settings, breaks) are delivered when the transmitted frame that completes them has ended,
+  keeping their spacing, i.e. up to one transmitted character late; a receiver whose chip runs ahead of the sender
+  on a board sees the line only to the board quantum; a frame overlapping another on the same RX (two transmitters)
+  is delayed to the end of the first. A receiver enabled in the middle of a character takes the whole character.
 - A net is a perfect wire: there is no propagation delay or drive strength. A peripheral
   output contributes its idle (or, for a PWM channel, its live) level as a strong driver; a peripheral input or a
   released open-drain pin contributes only its pull resistor; an open-drain pin pulled low (I2C) is a strong L.
@@ -796,15 +956,22 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
 
 ## Host serial bridge and serial cable parts
 
-- **Framing mismatch is drop + warn, not garbage.** A host at another baud rate / frame length than the UART would
-  make the receiver decode wrong characters with framing/noise flags; chipem drops the byte (`reason=framing`) and
-  logs one `warn` per direction instead. Likewise an inverted line (TTL on an RS-232 port) is modelled as "no valid
-  characters" (`polarity`), not as the break/garbage stream a real receiver would produce.
+- **Framing mismatch is decoded**, both ways: host bytes are frames in the host's format and the UART decodes them
+  at its own settings (framing / parity / noise errors, garbage), chip frames are decoded with the host's settings
+  and the host gets what a Linux tty in raw mode reads (0x00 for a framing error or a break, parity unchecked); one
+  `warn` per direction names both settings. An inverted line on a cable chain (TTL on an RS-232 port) is still
+  modelled as "no valid characters" (`polarity`), not as the break/garbage stream a real receiver would produce.
+- **Breaks**: a chip break reaches a pyserial port as `send_break()`, a PTY / TCP / memory port as a 0x00 byte. The
+  PC cannot send a break through a PTY (tcsendbreak on a pty slave is not visible on the master), pyserial (no
+  receive-side break API) or raw TCP; `MemoryPort.host_break()`, the adapter's `break` value and the `<break>` token
+  of `--uart-in` / `--at` / shell `uart` / web console can. Parity and framing errors detected by the PC's own UART
+  are not visible to chipem.
 - **PTY line settings.** Linux keeps the speed of a PTY but drops CSIZE and PARENB, so only the baud the PC program
   set is checked (frame: the adapter's `format`, default 8N1). A PTY has no modem lines: DTR/RTS read asserted while
   a program has it open, CTS/DSR/DCD/RI towards the host are recorded but not visible to it. macOS PTYs are expected
   to work the same way but were not tested. No PTYs on Windows: use com0com (`--uart-port`) or `--uart-tcp`.
-- **TCP is raw** (no RFC 2217: no baud or modem-line negotiation; telnet negotiation bytes would reach the UART). A
+- **TCP is raw** (no RFC 2217, not implemented because a full option negotiation is not cheap: no baud, break or
+  modem-line negotiation; telnet negotiation bytes would reach the UART). A
   `--uart-port` URL like `rfc2217://host:port` goes through pyserial's own client.
 - **pyserial ports** use null-modem wiring for the modem lines (host RTS → our CTS, host DTR → our DSR); RI towards
   the host cannot be driven. The line settings checked are the ones given on the command line (the other end of a
@@ -822,6 +989,31 @@ More detail in [C2000_ROADMAP.md](C2000_ROADMAP.md).
   transceiver are not modelled; its `shdn_n`/`en_n` follow the MAX3222 (floating = active). RS-485 and TTL-5 V
   adapters are not modelled (`levels: ttl` is 3.3 V).
 - **Cable presets**: only DE-9 straight / null-modem; DB9-RJ50 pinouts are vendor specific, give `map:`.
+
+## Debugger (chipem/debug.py, chipem/gdbserver.py)
+
+- Watchpoints see CPU accesses only: DMA transfers, exception stacking / unstacking done by the arch model and
+  debugger reads/writes do not trigger them. On the C28x a peripheral model that accesses memory through the core's
+  accessors (not the bus) would be reported with the CPU's PC.
+- A watchpoint stops after the whole instruction: an `ldm`/`stm`/`push`/`pop` touching several words reports the first
+  watched access; an access in an instruction that also returns from an exception (`pop {pc}` with EXC_RETURN) is
+  reported as the exception return, not as a watch stop. A C28x `RPT`-repeated instruction stops after the last
+  repetition.
+- If Unicorn's instruction-counter calibration fails, a watchpoint stops inside the instruction and the access is
+  performed again on resume (an MMIO side effect twice).
+- While any breakpoint or watchpoint exists Unicorn runs translated code with extra helper calls (about 20 % slower
+  with a breakpoint, 35 % with a breakpoint and a RAM watchpoint, blinky); with none set the speed is unchanged.
+- On a board, a stop leaves the other chips ahead by up to one board quantum (reported as the skew); they are not
+  rolled back.
+- Peeked MMIO values: a register whose model computes or side-effects on read (`on_read` hook not listed in the
+  model's `pure_reads`) shows its last stored value, which can be stale (marked `~` / dim); the explicit "read"
+  performs a real read with side effects.
+- Source-level stepping uses internal breakpoints on the function's line starts and the return address: indirect
+  calls are not entered by `s` (step into), only direct ones with line info; `finish` in `main`, `Reset_Handler` or
+  `_c_int00` is refused. Without DWARF CFI the call stack is a stack scan (`scan` frames are guesses). No local
+  variables or types in the shell / web (gdb shows them from the ELF itself).
+- C28x over GDB: no gdb architecture exists; generic RSP clients only (custom target.xml, word addresses).
+- One GDB client at a time; `--gdb` serves one chip of a board (the debugger's `continue` still runs the board).
 
 ## Tooling
 
@@ -891,3 +1083,23 @@ What it does not do yet:
   identical in the PWM review run.
 - The 0x0–0x3FFF bootloader is not in the file. That region is erased flash (0xFF), so anything that calls
   into the bootloader would fault.
+
+## MCS-51 / P89CV51 (chipem/core/mcs51, chipem/periph/mcs51)
+
+- No NXP boot code: the IAP entry FFF0h is emulated natively; starting at the ISP bootloader (status bit / PSEN low
+  with boot vector FCh) halts at FC00h with a `warn`.  IAP ID bytes are placeholders (not in the data sheet); IAP
+  durations are 0 unless `params.page_erase_ms` / `iap_us_per_byte` are set.
+- Interrupt vectors follow data sheet Table 41 (Timer 2 003Bh, PCA 0033h), which disagrees with Fig. 25 and the
+  P89C51RD2 (Timer 2 002Bh); change `mcs51.interrupts` in the chip YAML if your silicon differs.
+- Peripheral events can be processed up to one instruction late (the instruction in progress completes); the models
+  count with the event's due cycle, so counters, captures and pin-edge timestamps are exact.
+- UART mode 0 receive is not modelled; a write to SBUF while data bits are shifting is queued (one `warn`); the
+  divide-by-16 transmit phase is not modelled.
+- External bus: MOVX to XDATA reaches a board `sram` device, but P0/P2/ALE/RD/WR are not toggled per access; ALE is
+  not toggled at fosc/6; external program memory (EA = 0) is not supported (unmapped code reads FFh); security bits
+  are reported, only write protect is enforced (IAP).
+- Power-down wake is immediate (no 1024-clock oscillator restart).  Timer counter inputs and T2EX have no
+  two-machine-cycle sampling delay.  The PCA's "fosc/6" source is fosc/12 in 12-clock mode (Table 34 prints fosc/6
+  twice).  Watchdog: the RST pin pulse is logged, not driven.  No DIP40 package (not in the data sheet).
+- Watchpoints: writes to RAM are found by comparison after each instruction; IDATA reads are not watched.
+- No C samples: SDCC is not installed (`.ihx`/`.map`/`.cdb`/`.noi` symbols are loaded when present).

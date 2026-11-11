@@ -3,7 +3,9 @@
  * RX: RXNE interrupt -> 64-byte ring. TX: polled on TXE. Lines end in "\n"; '\r' is ignored. */
 #ifndef LINEIO_H
 #define LINEIO_H
+#ifndef STM32F42X_H                                 /* f42x_*.c include f42x/stm32f42x.h first */
 #include "variants.h"
+#endif
 
 #define RING      64u
 #define LINE_MAX  32u

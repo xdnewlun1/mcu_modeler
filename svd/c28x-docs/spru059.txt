@@ -1,0 +1,1790 @@
+TMS320x281x Serial Peripheral Interface
+
+Reference Guide
+
+
+
+
+                   Literature Number: SPRU059E
+                 June 2002 – Revised February 2009
+2   SPRU059E – June 2002 – Revised February 2009
+                 Submit Documentation Feedback
+                                                                                                                         Contents
+
+       Preface ............................................................................................................................... 7
+       1       Serial Peripheral Interface (SPI) ................................................................................... 9
+       1.1     Enhanced SPI Module Overview ......................................................................................... 10
+               1.1.1    SPI Block Diagram ................................................................................................ 12
+               1.1.2    SPI Module Signal Summary .................................................................................... 13
+       1.2     Overview of SPI Module Registers ...................................................................................... 13
+       1.3     SPI Operation ............................................................................................................... 14
+               1.3.1    Introduction to Operation ......................................................................................... 14
+               1.3.2    SPI Module Slave and Master Operation Modes ............................................................. 15
+       1.4     SPI Interrupts ............................................................................................................... 16
+               1.4.1    SPI Interrupt Control Bits ......................................................................................... 16
+               1.4.2    Data Format ........................................................................................................ 17
+               1.4.3    Baud Rate and Clocking Schemes ............................................................................. 18
+               1.4.4    Initialization Upon Reset.......................................................................................... 20
+               1.4.5    Data Transfer Example ........................................................................................... 20
+       1.5     SPI FIFO Description ...................................................................................................... 21
+               1.5.1    SPI Interrupts ...................................................................................................... 22
+
+       2       SPI Registers and Waveforms .................................................................................... 25
+       2.1     SPI Control Registers ...................................................................................................... 26
+               2.1.1    SPI Configuration Control Register (SPICCR) ................................................................ 26
+               2.1.2    SPI Operation Control Register (SPICTL) ..................................................................... 27
+               2.1.3    SPI Status Register (SPIST) ..................................................................................... 28
+               2.1.4    SPI Baud Rate Register (SPIBRR) ............................................................................. 29
+               2.1.5    SPI Emulation Buffer Register (SPIRXEMU) .................................................................. 29
+               2.1.6    SPI Serial Receive Buffer Register (SPIRXBUF) ............................................................. 30
+               2.1.7    SPI Serial Transmit Buffer Register (SPITXBUF) ............................................................. 30
+               2.1.8    SPI Serial Data Register (SPIDAT) ............................................................................. 31
+               2.1.9    SPI FIFO Transmit, Receive, and Control Registers ......................................................... 32
+               2.1.10 SPI Priority Control Register (SPIPRI) ........................................................................ 35
+       2.2     SPI Example Waveforms .................................................................................................. 36
+
+       A       Revision History ....................................................................................................... 39
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                                                  Contents        3
+Submit Documentation Feedback
+                                                                                                                                 www.ti.com
+
+                                                            List of Figures
+    1-1     SPI CPU Interface .......................................................................................................... 10
+    1-2     Serial Peripheral Interface Module Block Diagram .................................................................... 12
+    1-3     SPI Master/Slave Connection ............................................................................................ 15
+    1-4     SPICLK Signal Options .................................................................................................... 19
+    1-5     SPI: SPICLK-CLKOUT Characteristic When (BRR + 1) is Odd, BRR > 3, and CLOCK POLARITY = 1 ....... 19
+    1-6     Five Bits per Character .................................................................................................... 21
+    1-7     SPI FIFO Interrupt Flags and Enable Logic Generation .............................................................. 22
+    2-1     SPI Configuration Control Register (SPICCR) — Address 7040h ................................................... 26
+    2-2     SPI Operation Control Register (SPICTL) — Address 7041h ........................................................ 27
+    2-3     SPI Status Register (SPIST) — Address 7042h ....................................................................... 28
+    2-4     SPI Baud Rate Register (SPIBRR) — Address 7044h ................................................................ 29
+    2-5     SPI Emulation Buffer Register (SPIRXEMU) — Address 7046h..................................................... 30
+    2-6     SPI Serial Receive Buffer Register (SPIRXBUF) — Address 7047h ................................................ 30
+    2-7     SPI Serial Transmit Buffer Register (SPITXBUF) — Address 7048h ............................................... 31
+    2-8     SPI Serial Data Register (SPIDAT) — Address 7049h ............................................................... 31
+    2-9     SPI FIFO Transmit (SPIFFTX) Register – Address 704Ah ........................................................... 32
+    2-10    SPI FIFO Receive (SPIFFRX) Register – Address 704Bh ........................................................... 33
+    2-11    SPI FIFO Control (SPIFFCT) Register – Address 704Ch ............................................................ 34
+    2-12    SPI Priority Control Register (SPIPRI) — Address 704Fh ............................................................ 35
+    2-13    CLOCK POLARITY = 0, CLOCK PHASE = 0 (All data transitions are during the rising edge, non-delayed
+            clock. Inactive level is low.) ............................................................................................... 36
+    2-14    CLOCK POLARITY = 0, CLOCK PHASE = 1 (All data transitions are during the rising edge, but delayed
+            by half clock cycle. Inactive level is low.) ............................................................................... 36
+    2-15    CLOCK POLARITY = 1, CLOCK PHASE = 0 (All data transitions are during the falling edge. Inactive
+            level is high.) ................................................................................................................ 37
+    2-16    CLOCK POLARITY = 1, CLOCK PHASE = 1 (All data transitions are during the falling edge, but delayed
+            by half clock cycle. Inactive level is high.) .............................................................................. 37
+    2-17    SPISTE Behavior in Master Mode (Master lowers SPISTE during the entire 16 bits of transmission.) ........ 38
+    2-18    SPISTE Behavior in Slave Mode (Slave’s SPISTE is lowered during the entire 16 bits of transmission.) ..... 38
+
+
+
+
+4   List of Figures                                                                        SPRU059E – June 2002 – Revised February 2009
+                                                                                                        Submit Documentation Feedback
+www.ti.com
+
+                                                               List of Tables
+       1-1     SPI Module Signal Summary ............................................................................................. 13
+       1-2     SPI Registers ............................................................................................................... 13
+       1-3     SPI Clocking Scheme Selection Guide .................................................................................. 19
+       1-4     SPI Interrupt Flag Modes .................................................................................................. 22
+       2-1     SPI Configuration Control Register (SPICCR) Field Descriptions ................................................... 26
+       2-2     Character Length Control Bit Values .................................................................................... 27
+       2-3     SPI Operation Control Register (SPICTL) Field Descriptions ........................................................ 27
+       2-4     SPI Status Register (SPIST) Field Descriptions ....................................................................... 28
+       2-5     Field Descriptions .......................................................................................................... 29
+       2-6     SPI Emulation Buffer Register (SPIRXEMU) Field Descriptions ..................................................... 30
+       2-7     SPI Serial Receive Buffer Register (SPIRXBUF) Field Descriptions ................................................ 30
+       2-8     SPI Serial Transmit Buffer Register (SPITXBUF) Field Descriptions ............................................... 31
+       2-9     SPI Serial Data Register (SPIDAT) Field Descriptions ................................................................ 31
+       2-10    SPI FIFO Transmit (SPIFFTX) Register Field Descriptions .......................................................... 32
+       2-11    SPI FIFO Receive (SPIFFRX) Register Field Descriptions ........................................................... 33
+       2-12    SPI FIFO Control (SPIFFCT) Register Field Descriptions ............................................................ 34
+       2-13    SPI Priority Control Register (SPIPRI) Field Descriptions ............................................................ 35
+       A-1     Changes in Revision E .................................................................................................... 39
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                                            List of Tables       5
+Submit Documentation Feedback
+6   List of Tables   SPRU059E – June 2002 – Revised February 2009
+                                  Submit Documentation Feedback
+                                                                                                         Preface
+                                                                       SPRU059E – June 2002 – Revised February 2009
+
+
+
+
+       This guide describes how the serial peripheral interface works.
+
+About This Manual
+       The SPI module described in this reference guide is a Type 0 SPI. See the TMS320x28xx, 28xxx DSP
+       Peripheral Reference Guide (SPRU566) for a list of all devices with an SPI module of the same type, to
+       determine the differences between types, and for a list of device-specific differences within a type.
+Related Documentation From Texas Instruments
+
+       The following books describe the TMS320x281x and related support tools that are available on the TI
+       website.
+       CPU User's Guides—
+       SPRU430— TMS320C28x DSP CPU and Instruction Set Reference Guide describes the central
+            processing unit (CPU) and the assembly language instructions of the TMS320C28x fixed-point
+            digital signal processors (DSPs). It also describes emulation features available on these DSPs.
+       SPRU078— TMS320x281x System Control and Interrupts Reference Guide describes the various
+           interrupts and system control features of the 281x digital signal processors (DSPs).
+       Peripheral Guides—
+       SPRU566— TMS320x28xx, 28xxx DSP Peripheral Reference Guide describes the peripheral reference
+             guides of the 28x digital signal processors (DSPs).
+       SPRU060— TMS320x281x Analog-to-Digital Converter (ADC) Reference Guide describes the ADC
+           module, which is a 12-bit pipelined ADC. The analog circuits of this converter, referred to as the
+           core in this document, include the front-end analog multiplexers (MUXs), sample-and-hold (S/H)
+           circuits, the conversion core, voltage regulators, and other analog supporting circuits. Digital
+           circuits, referred to as the wrapper in this document, include programmable conversion sequencer,
+           result registers, interface to analog circuits, interface to device peripheral bus, and interface to other
+           on-chip modules.
+       SPRU065— TMS320x281x Event Manager (EV) Reference Guide describes the EV modules that provide
+           a broad range of functions and features that are particularly useful in motion control and motor
+           control applications. The EV modules include general-purpose (GP) timers, full-compare/pulse
+           width modulator (PWM) units, capture units, and quadrature-encoder pulse (QEP) circuits.
+       SPRU074— TMS320x28xx, 28xxx Enhanced Controller Area Network (eCAN) Reference Guide describes
+           the eCAN that uses established protocol to communicate serially with other controllers in electrically
+           noisy environments.
+       SPRU051— TMS320x28xx, 28xxx Serial Communication Interface (SCI) Reference Guide describes the
+           SCI, which is a two-wire asynchronous serial port, commonly known as a UART. The SCI modules
+           support digital communications between the CPU and other asynchronous peripherals that use the
+           standard non-return-to-zero (NRZ) format.
+       SPRU059— TMS320x28xx, 28xxx Serial Peripheral Interface (SPI) Reference Guide describes the SPI -
+           a high-speed synchronous serial input/output (I/O) port - that allows a serial bit stream of
+           programmed length (one to sixteen bits) to be shifted into and out of the device at a programmed
+           bit-transfer rate.
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                                        7
+Submit Documentation Feedback
+Trademarks                                                                                             www.ti.com
+
+      SPRU061— TMS320x281x Multi-channel Buffered Serial Ports (McBSPs) Reference Guide describes the
+          McBSP available on the C28x devices. The McBSPs allow direct interface between a DSP and
+          other devices in a system.
+      SPRU067— TMS320x281x External Interface (XINTF) Reference Guide describes the external interface
+          (XINTF) of the 281x digital signal processors (DSPs).
+      SPRU095— TMS320x281x Boot ROM Reference Guide describes the purpose and features of the
+          bootloader (factory-programmed boot-loading software). It also describes other contents of the
+          device on-chip boot ROM and identifies where all of the information is located within that memory.
+      Tools Guides—
+      SPRU513— TMS320C28x Assembly Language Tools User's Guide describes the assembly language
+            tools (assembler and other tools used to develop assembly language code), assembler directives,
+            macros, common object file format, and symbolic debugging directives for the TMS320C28x device.
+      SPRU514— TMS320C28x Optimizing C Compiler User's Guide describes the TMS320C28x™ C/C++
+          compiler. This compiler accepts ANSI standard C/C++ source code and produces TMS320 DSP
+          assembly language source code for the TMS320C28x device.
+      SPRU608— The TMS320C28x Instruction Set Simulator Technical Overview describes the simulator,
+          available within the Code Composer Studio for TMS320C2000 IDE, that simulates the instruction
+          set of the C28x™ core.
+      SPRU625— TMS320C28x DSP/BIOS Application Programming Interface (API) Reference Guide
+          describes development using DSP/BIOS.
+
+Trademarks
+      Code Composer Studio and C28x are trademarks of Texas Instruments.
+
+
+
+
+8                                                                      SPRU059E – June 2002 – Revised February 2009
+                                                                                    Submit Documentation Feedback
+                                                                                                                                Chapter 1
+                                                                                        SPRU059E – June 2002 – Revised February 2009
+
+
+                                                                  Serial Peripheral Interface (SPI)
+
+
+       The serial peripheral interface (SPI) is a high-speed synchronous serial input/ output (I/O) port that allows
+       a serial bit stream of programmed length (one to sixteen bits) to be shifted into and out of the device at a
+       programmed bit-transfer rate. The SPI is normally used for communications between the DSP controller
+       and external peripherals or another controller. Typical applications include external I/O or peripheral
+       expansion via devices such as shift registers, display drivers, and analog-to-digital converters (ADCs).
+       Multidevice communications are supported by the master/slave operation of the SPI. On the C28x™, the
+       port supports a 16-level, receive and transmit FIFO for reducing CPU servicing overhead.
+       This reference guide is applicable for the SPI found on both the TMS320x281x families of processors.
+       This includes all Flash-based, ROM-based and RAM-based devices within these families.
+
+           Note:    The 28x SPI features several enhancements compared to the 240xA SPI. See section 1.5 for
+                    a description of these features.
+
+
+
+
+                   Topic   ..................................................................................................   Page
+
+
+                     1.1      Enhanced SPI Module Overview ................................................. 10
+                     1.2      Overview of SPI Module Registers .............................................. 13
+                     1.3      SPI Operation ........................................................................... 14
+                     1.4      SPI Interrupts ........................................................................... 16
+                     1.5      SPI FIFO Description ................................................................. 21
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                            Serial Peripheral Interface (SPI)   9
+Submit Documentation Feedback
+Enhanced SPI Module Overview                                                                                                www.ti.com
+
+
+
+1.1   Enhanced SPI Module Overview
+      Figure 1-1 shows the SPI CPU interfaces.
+
+                                             Figure 1-1. SPI CPU Interface
+
+                                          System                               SYSCLKOUT
+                                                          Low speed
+                                          control          prescaler                             CPU
+                                           block
+
+                                               SPIAENCLK         LSPCLK
+
+
+                                                                                   SYSRS
+
+
+                           SPISIMO
+
+
+
+                                                                                                           Peripheral Bus
+                           SPISOMI
+
+
+                                                                   Registers
+                                                    SPI
+                GPIO        SPICLK
+                MUX
+                            SPISTE
+
+
+
+
+                                                                                  SPIINT/RXINT
+                                                                                                          PIE
+                                                                                      TXINT              block
+
+
+      The SPI module features include:
+      • SPISOMI: SPI slave-output/master-input pin
+      • SPISIMO: SPI slave-input/master-output pin
+      • SPISTE: SPI slave transmit-enable pin
+      • SPICLK: SPI serial-clock pin
+
+           Note:    All four pins can be used as GPIO, if the SPI module is not used.
+
+      •   Two operational modes: master and slave
+      •   Baud rate: 125 different programmable rates. The maximum baud rate that can be employed is limited
+          by the maximum speed of the I/O buffers used on the SPI pins. See the device-specific data sheet for
+          more details.
+      •   Data word length: one to sixteen data bits
+      •   Four clocking schemes (controlled by clock polarity and clock phase bits) include:
+          – Falling edge without phase delay: SPICLK active-high. SPI transmits data on the falling edge of the
+             SPICLK signal and receives data on the rising edge of the SPICLK signal.
+          – Falling edge with phase delay: SPICLK active-high. SPI transmits data one half-cycle ahead of the
+             falling edge of the SPICLK signal and receives data on the falling edge of the SPICLK signal.
+          – Rising edge without phase delay: SPICLK inactive-low. SPI transmits data on the rising edge of the
+             SPICLK signal and receives data on the falling edge of the SPICLK signal.
+          – Rising edge with phase delay: SPICLK inactive-low. SPI transmits data one half-cycle ahead of the
+             falling edge of the SPICLK signal and receives data on the rising edge of the SPICLK signal.
+      •   Simultaneous receive and transmit operation (transmit function can be disabled in software)
+      •   Transmitter and receiver operations are accomplished through either interrupt- driven or polled
+          algorithms.
+
+
+10    Serial Peripheral Interface (SPI)                                              SPRU059E – June 2002 – Revised February 2009
+                                                                                                  Submit Documentation Feedback
+www.ti.com                                                                                     Enhanced SPI Module Overview
+       •     12 SPI module control registers: Located in control register frame beginning at address 7040h.
+
+             Note:   All registers in this module are 16-bit registers that are connected to Peripheral Frame 2.
+                     When a register is accessed, the register data is in the lower byte (7–0), and the upper byte
+                     (15–8) is read as zeros. Writing to the upper byte has no effect.
+
+       Enhanced Feature:
+       • 16-level transmit/receive FIFO
+       • Delayed transmit control
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                               Serial Peripheral Interface (SPI)   11
+Submit Documentation Feedback
+Enhanced SPI Module Overview                                                                                                                                              www.ti.com
+
+1.1.1 SPI Block Diagram
+         Figure 1-2 is a block diagram of the SPI in slave mode, showing the basic control blocks available on the
+         28x SPI module.
+
+                                          Figure 1-2. Serial Peripheral Interface Module Block Diagram
+
+                       SPIFFENA
+                                                                                            Receiver            Overrun
+                      SPIFFTX.14                                                           Overrun Flag         INT ENA
+
+                RX FIFO registers                                                           SPISTS.7
+                                                                                                            SPICTL.4
+                      SPIRXBUF
+                      RX FIFO _0
+                      RX FIFO _1
+                                                                                                                                          SPINT / SPIRXINT
+                      −−−−−
+                      RX FIFO _15
+                                                              RX FIFO Interrupt
+                                                                                                             RX Interrupt
+                                                                                                               Logic
+                             16
+
+                   SPIRXBUF                                                                 SPIFFOVF FLAG
+                  Buffer Register
+                                                                                           SPIFFRX.15                                     To CPU
+                                  TX FIFO registers
+                                      SPITXBUF
+                                      TX FIFO _15                                                            TX Interrupt
+                                      −−−−−                            TX FIFO Interrupt                       Logic
+                                      TX FIFO _1
+                                      TX FIFO _0                                                                                             SPITX / SPITXINT
+                                              16                                                                 SPI INT
+                                                                                           SPI INT FLAG           ENA
+                                     SPITXBUF                                               SPISTS.6
+                 16                Buffer Register
+                                                                                                            SPICTL.0
+
+                                              16
+
+                                                                                  M                                  M
+
+                        SPIDAT                                                                                       S
+                      Data Register                                               S          SW1                                                                SPISIMO
+
+                                                                                  M                                  M
+                      SPIDAT.15 − 0
+                                                                                                                     S
+                                                                                  S          SW2                                                                SPISOMI
+                             Talk
+                            SPICTL.1
+                                                                                                                                                                SPISTE†
+                                                                                                                                                                *
+
+
+
+
+                                  State Control
+                                                                                                                              Master/Slave
+                SPI Char           SPICCR.3 − 0                                                                                SPICTL.2
+                                                                                  S
+                                  3       2       1       0                                               SW3
+                                                                                                                    Clock                    Clock
+                                  SPI Bit Rate                                    M                S               Polarity                  Phase
+              LSPCLK               SPIBRR.6 − 0                                                                   SPICCR.6                SPICTL.3              SPICLK
+                                                                                                   M
+                        6     5       4       3       2       1    0
+
+
+
+     A      SPISTE of a slave device is driven low by the master.
+
+
+
+
+12       Serial Peripheral Interface (SPI)                                                                                         SPRU059E – June 2002 – Revised February 2009
+                                                                                                                                                Submit Documentation Feedback
+www.ti.com                                                                                      Overview of SPI Module Registers
+1.1.2 SPI Module Signal Summary
+
+                                           Table 1-1. SPI Module Signal Summary
+        Signal Name                       Description
+        External Signals
+        SPICLK                            SPI clock
+        SPISIMO                           SPI slave in, master out
+        SPISOMI                           SPI slave out, master in
+        SPISTE                            SPI slave transmit enable
+        Control
+        SPI Clock Rate                    LSPCLK
+        Interrupt signals
+        SPIRXINT                          Transmit interrupt/ Receive Interrupt in non FIFO mode (referred to as SPI INT)
+                                          Receive in interrupt in FIFO mode
+        SPITXINT                          Transmit interrupt – FIFO
+
+
+
+
+1.2    Overview of SPI Module Registers
+       The SPI port operation is configured and controlled by the registers listed in Table 1-2.
+
+                                                      Table 1-2. SPI Registers
+                    Name                       Address Range          Size (x16)                      Description
+                   SPICCR                       0x0000-7040                1               SPI Configuration Control Register
+                    SPICTL                      0x0000-7041                1                 SPI Operation Control Register
+                    SPIST                       0x0000-7042                1                       SPI Status Register
+                    SPIBRR                      0x0000-7044                1                    SPI Baud Rate Register
+                   SPIEMU                       0x0000-7046                1                 SPI Emulation Buffer Register
+                   SPIRXBUF                     0x0000-7047                1                 SPI Serial Input Buffer Register
+                   SPITXBUF                     0x0000-7048                1                SPI Serial Output Buffer Register
+                    SPIDAT                      0x0000-7049                1                    SPI Serial Data Register
+                   SPIFFTX                      0x0000-704A                1                  SPI FIFO Transmit Register
+                   SPIFFRX                      0x0000-704B                1                   SPI FIFO Receive Register
+                   SPIFFCT                      0x0000-704C                1                   SPI FIFO Control Register
+                    SPIPRI                      0x0000-704F                1                  SPI Priority Control Register
+
+
+       This SPI has 16-bit transmit and receive capability, with double-buffered transmit and double-buffered
+       receive. All data registers are 16-bits wide.
+       The SPI is no longer limited to a maximum transmission rate of LSPCLK/8 in slave mode. The maximum
+       transmission rate in both slave mode and master mode is now LSPCLK/4.
+       Writes of transmit data to the serial data register, SPIDAT (and the new transmit buffer, SPITXBUF), must
+       be left-justified within a 16-bit register.
+       The control and data bits for general-purpose bit I/O multiplexing have been removed from this peripheral,
+       along with the associated registers, SPIPC1 (704Dh) and SPIPC2 (704Eh). These bits are now in the
+       General-Purpose I/O registers.
+       Twelve registers inside the SPI module control the SPI operations:
+       • SPICCR (SPI configuration control register). Contains control bits used for SPI configuration
+         – SPI module software reset
+         – SPICLK polarity selection
+         – Four SPI character-length control bits
+
+SPRU059E – June 2002 – Revised February 2009                                                   Serial Peripheral Interface (SPI)   13
+Submit Documentation Feedback
+SPI Operation                                                                                               www.ti.com
+
+      •   SPICTL (SPI operation control register). Contains control bits for data transmission
+          – Two SPI interrupt enable bits
+          – SPICLK phase selection
+          – Operational mode (master/slave)
+          – Data transmission enable
+      •   SPISTS (SPI status register). Contains two receive buffer status bits and one transmit buffer status bit
+          – RECEIVER OVERRUN
+          – SPI INT FLAG
+          – TX BUF FULL FLAG
+      •   SPIBRR (SPI baud rate register). Contains seven bits that determine the bit transfer rate
+      •   SPIRXEMU (SPI receive emulation buffer register). Contains the received data. This register is used
+          for emulation purposes only. The SPIRXBUF should be used for normal operation
+      •   SPIRXBUF (SPI receive buffer — the serial receive buffer register). Contains the received data
+      •   SPITXBUF (SPI transmit buffer — the serial transmit buffer register). Contains the next character to be
+          transmitted
+      •   SPIDAT (SPI data register). Contains data to be transmitted by the SPI, acting as the transmit/receive
+          shift register. Data written to SPIDAT is shifted out on subsequent SPICLK cycles. For every bit shifted
+          out of the SPI, a bit from the receive bit stream is shifted into the other end of the shift register
+      •   SPIPRI (SPI priority register). Contains bits that specify interrupt priority and determine SPI operation
+          on the XDS™ emulator during program suspensions.
+
+
+1.3   SPI Operation
+      This section describes the operation of the SPI. Included are explanations of the operation modes,
+      interrupts, data format, clock sources, and initialization. Typical timing diagrams for data transfers are
+      given.
+
+1.3.1 Introduction to Operation
+      Figure 1-3 shows typical connections of the SPI for communications between two controllers: a master
+      and a slave.
+      The master initiates data transfer by sending the SPICLK signal. For both the slave and the master, data
+      is shifted out of the shift registers on one edge of the SPICLK and latched into the shift register on the
+      opposite SPICLK clock edge. If the CLOCK PHASE bit (SPICTL.3) is high, data is transmitted and
+      received a half-cycle before the SPICLK transition (see Section 1.3.2). As a result, both controllers send
+      and receive data simultaneously. The application software determines whether the data is meaningful or
+      dummy data. There are three possible methods for data transmission:
+      • Master sends data; slave sends dummy data.
+      • Master sends data; slave sends data.
+      • Master sends dummy data; slave sends data.
+      The master can initiate data transfer at any time because it controls the SPICLK signal. The software,
+      however, determines how the master detects when the slave is ready to broadcast data.
+
+
+
+
+14    Serial Peripheral Interface (SPI)                                     SPRU059E – June 2002 – Revised February 2009
+                                                                                         Submit Documentation Feedback
+www.ti.com                                                                                                                 SPI Operation
+
+                                          Figure 1-3. SPI Master/Slave Connection
+                        SPI master (master/slave = 1)                             SPI slave (master/slave = 0)
+                                                              Slave in/
+                              SPIRXBUF.15−0          SPISIMO master out     SPISIMO     SPIRXBUF.15−0
+                              Serial input buffer                                      Serial input buffer
+                                SPIRXBUF                                                 SPIRXBUF
+
+                                                                  SPI
+                                                      SPISTE                SPISTE
+                                                                 strobe
+                                           SPIDAT.15−0                         SPIDAT.15−0
+                                Shift register     SPISOMI       Slave out/ SPISOMI     Shift register
+                            MSB                LSB                                  MSB                LSB
+                                 (SPIDAT)                        master in               (SPIDAT)
+
+
+                                                                 Serial
+                                                      SPICLK                SPICLK
+                                                                 clock
+                              SPITXBUF.15−0                                             SPITXBUF.15−0
+                            Serial transmit buffer                                    Serial transmit buffer
+                                 SPITXBUF                                                  SPITXBUF
+
+                                Processor 1                                                Processor 2
+
+
+
+1.3.2 SPI Module Slave and Master Operation Modes
+       The SPI can operate in master or slave mode. The MASTER/SLAVE bit (SPICTL.2) selects the operating
+       mode and the source of the SPICLK signal.
+
+1.3.2.1   Master Mode
+       In the master mode (MASTER/SLAVE = 1), the SPI provides the serial clock on the SPICLK pin for the
+       entire serial communications network. Data is output on the SPISIMO pin and latched from the SPISOMI
+       pin.
+       The SPIBRR register determines both the transmit and receive bit transfer rate for the network. SPIBRR
+       can select 126 different data transfer rates.
+       Data written to SPIDAT or SPITXBUF initiates data transmission on the SPISIMO pin, MSB (most
+       significant bit) first. Simultaneously, received data is shifted through the SPISOMI pin into the LSB (least
+       significant bit) of SPIDAT. When the selected number of bits has been transmitted, the received data is
+       transferred to the SPIRXBUF (buffered receiver) for the CPU to read. Data is stored right-justified in
+       SPIRXBUF.
+       When the specified number of data bits has been shifted through SPIDAT, the following events occur:
+       • SPIDAT contents are transferred to SPIRXBUF.
+       • SPI INT FLAG bit (SPISTS.6) is set to 1.
+       • If there is valid data in the transmit buffer SPITXBUF, as indicated by the TXBUF FULL bit in SPISTS,
+         this data is transferred to SPIDAT and is transmitted; otherwise, SPICLK stops after all bits have been
+         shifted out of SPIDAT.
+       • If the SPI INT ENA bit (SPICTL.0) is set to 1, an interrupt is asserted.
+       In a typical application, the SPISTE pin serves as a chip-enable pin for a slave SPI device. This pin is
+       driven low by the master before transmitting data to the slave and is taken high after the transmission is
+       complete.
+
+1.3.2.2   Slave Mode
+       In the slave mode (MASTER/SLAVE = 0), data shifts out on the SPISOMI pin and in on the SPISIMO pin.
+       The SPICLK pin is used as the input for the serial shift clock, which is supplied from the external network
+       master. The transfer rate is defined by this clock. The SPICLK input frequency should be no greater than
+       the LSPCLK frequency divided by 4.
+
+SPRU059E – June 2002 – Revised February 2009                                                      Serial Peripheral Interface (SPI)   15
+Submit Documentation Feedback
+SPI Interrupts                                                                                                www.ti.com
+
+       Data written to SPIDAT or SPITXBUF is transmitted to the network when appropriate edges of the
+       SPICLK signal are received from the network master. Data written to the SPITXBUF register will be
+       transferred to the SPIDAT register when all bits of the character to be transmitted have been shifted out of
+       SPIDAT. If no character is currently being transmitted when SPITXBUF is written to, the data will be
+       transferred immediately to SPIDAT. To receive data, the SPI waits for the network master to send the
+       SPICLK signal and then shifts the data on the SPISIMO pin into SPIDAT. If data is to be transmitted by
+       the slave simultaneously, and SPITXBUF has not been previously loaded, the data must be written to
+       SPITXBUF or SPIDAT before the beginning of the SPICLK signal.
+       When the TALK bit (SPICTL.1) is cleared, data transmission is disabled, and the output line (SPISOMI) is
+       put into the high-impedance state. If this occurs while a transmission is active, the current character is
+       completely transmitted even though SPISOMI is forced into the high-impedance state. This ensures that
+       the SPI is still able to receive incoming data correctly. This TALK bit allows many slave devices to be tied
+       together on the network, but only one slave at a time is allowed to drive the SPISOMI line.
+       The SPISTE pin operates as the slave-select pin. An active-low signal on the SPISTE pin allows the slave
+       SPI to transfer data to the serial data line; an inactive- high signal causes the slave SPI serial shift register
+       to stop and its serial output pin to be put into the high-impedance state. This allows many slave devices to
+       be tied together on the network, although only one slave device is selected at a time.
+
+
+1.4    SPI Interrupts
+       This section includes information on the control bits that initialize interrupts, data format, clocking,
+       initialization, and data transfer.
+
+1.4.1 SPI Interrupt Control Bits
+       Five control bits are used to initialize the SPI interrupts:
+       • SPI INT ENA bit (SPICTL.0)
+       • SPI INT FLAG bit (SPISTS.6)
+       • OVERRUN INT ENA bit (SPICTL.4)
+       • RECEIVER OVERRUN FLAG bit (SPISTS.7)
+
+1.4.1.1   SPI INT ENA Bit (SPICTL.0)
+       When the SPI interrupt-enable bit is set and an interrupt condition occurs, the corresponding interrupt is
+       asserted.
+                   0     Disable SPI interrupts
+                   1     Enable SPI interrupts
+
+
+
+1.4.1.2   SPI INT FLAG Bit (SPISTS.6)
+       This status flag indicates that a character has been placed in the SPI receiver buffer and is ready to be
+       read.
+       When a complete character has been shifted into or out of SPIDAT, the SPI INT FLAG bit (SPISTS.6) is
+       set, and an interrupt is generated if enabled by the SPI INT ENA bit (SPICTL.0). The interrupt flag remains
+       set until it is cleared by one of the following events:
+       • The interrupt is acknowledged (this is different from the C240).
+       • The CPU reads the SPIRXBUF (reading the SPIRXEMU does not clear the SPI INT FLAG bit).
+       • The device enters IDLE2 or HALT mode with an IDLE instruction.
+       • Software clears the SPI SW RESET bit (SPICCR.7).
+       • A system reset occurs.
+
+
+
+
+16     Serial Peripheral Interface (SPI)                                      SPRU059E – June 2002 – Revised February 2009
+                                                                                           Submit Documentation Feedback
+www.ti.com                                                                                                                     SPI Interrupts
+       When the SPI INT FLAG bit is set, a character has been placed into the SPIRXBUF and is ready to be
+       read. If the CPU does not read the character by the time the next complete character has been received,
+       the new character is written into SPIRXBUF, and the RECEIVER OVERRUN Flag bit (SPISTS.7) is set.
+
+1.4.1.3      OVERRUN INT ENA Bit (SPICTL.4)
+       Setting the overrun interrupt enable bit allows the assertion of an interrupt whenever the RECEIVER
+       OVERRUN Flag bit (SPISTS.7) is set by hardware. Interrupts generated by SPISTS.7 and by the SPI INT
+       FLAG bit (SPISTS.6) share the same interrupt vector.
+                      0     Disable RECEIVER OVERRUN Flag bit interrupts
+                      1     Enable RECEIVER OVERRUN Flag bit interrupts
+
+
+
+1.4.1.4      RECEIVER OVERRUN FLAG Bit (SPISTS.7)
+       The RECEIVER OVERRUN Flag bit is set whenever a new character is received and loaded into the
+       SPIRXBUF before the previously received character has been read from the SPIRXBUF. The RECEIVER
+       OVERRUN Flag bit must be cleared by software.
+
+
+1.4.2 Data Format
+       Four bits (SPICCR.3–0) specify the number of bits (1 to 16) in the data character. This information directs
+       the state control logic to count the number of bits received or transmitted to determine when a complete
+       character has been processed. The following statements apply to characters with fewer than 16 bits:
+       • Data must be left-justified when written to SPIDAT and SPITXBUF.
+       • Data read back from SPIRXBUF is right-justified.
+       • SPIRXBUF contains the most recently received character, right-justified, plus any bits that remain from
+          previous transmission(s) that have been shifted to the left (shown in Example 1-1).
+
+       Example 1-1. Transmission of Bit From SPIRXBUF
+
+       Conditions:
+       1. Transmission character length = 1 bit (specified in bits SPICCR.3–0)
+       2. The current value of SPIDAT = 737Bh
+                                                          SPIDAT (before transmission)
+                            0     1     1     1     0     0     1     1     0     1     1     1      1      0     1      1
+                                                           SPIDAT (after transmission)
+             (TXed) 0 ←     1     1     1     0     0     1     1     0     1     1     1     1      0      1     1    x (1)    ← (RXed)
+                                                          SPIRXBUF (after transmission)
+                            1     1     1     0     0     1     1     0     1     1     1     1      0      1     1    x (1)
+
+
+       (1)
+              x = 1 if SPISOMI data is high; x = 0 if SPISOMI data is low; master mode is assumed.
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                         Serial Peripheral Interface (SPI)     17
+Submit Documentation Feedback
+SPI Interrupts                                                                                           www.ti.com
+
+1.4.3 Baud Rate and Clocking Schemes
+       The SPI module supports 125 different baud rates and four different clock schemes. Depending on
+       whether the SPI clock is in slave or master mode, the SPICLK pin can receive an external SPI clock signal
+       or provide the SPI clock signal, respectively.
+       • In the slave mode, the SPI clock is received on the SPICLK pin from the external source, and can be
+           no greater than the LSPCLK frequency divided by 4.
+       • In the master mode, the SPI clock is generated by the SPI and is output on the SPICLK pin, and can
+           be no greater than the LSPCLK frequency divided by 4.
+       Example 1-2 shows how to determine the SPI baud rates.
+       Example 1-2. Baud Rate Determination
+
+          For SPIBRR = 3 to 127:
+          SPI Baud Rate =    LSPCLK
+                          (SPIBRR + 1)                                                                        (1-1)
+          For SPIBRR = 0, 1, or 2:
+          SPI Baud Rate = LSPCLK
+                               4                                                                              (1-2)
+          where:
+          LSPCLK = Low-speed peripheral clock frequency of the device
+          SPIBRR = Contents of the SPIBRR in the master SPI device
+          To determine what value to load into SPIBRR, you must know the device system clock (LSPCLK)
+          frequency (which is device-specific) and the baud rate at which you will be operating.
+          Example 1–2 shows how to determine the maximum baud rate at which a 240xA can communicate.
+          Assume that LSPCLK = 40 MHz.
+
+
+
+       Example 1-3. Maximum Baud-Rate Calculation
+
+          Maximum SPI Baud Rate = LSPCLK
+                                     4
+                                  40 × 10 6
+                                =
+                                     4
+                                = 10 × 10 6 bps                                                               (1-3)
+
+
+
+1.4.3.1    SPI Clocking Schemes
+       The CLOCK POLARITY bit (SPICCR.6) and the CLOCK PHASE bit (SPICTL.3) control four different
+       clocking schemes on the SPICLK pin. The CLOCK POLARITY bit selects the active edge, either rising or
+       falling, of the clock. The CLOCK PHASE bit selects a half-cycle delay of the clock. The four different
+       clocking schemes are as follows:
+       • Falling Edge Without Delay. The SPI transmits data on the falling edge of the SPICLK and receives
+            data on the rising edge of the SPICLK.
+       • Falling Edge With Delay. The SPI transmits data one half-cycle ahead of the falling edge of the
+            SPICLK signal and receives data on the falling edge of the SPICLK signal.
+       • Rising Edge Without Delay. The SPI transmits data on the rising edge of the SPICLK signal and
+            receives data on the falling edge of the SPICLK signal.
+       • Rising Edge With Delay. The SPI transmits data one half-cycle ahead of the rising edge of the SPICLK
+            signal and receives data on the rising edge of the SPICLK signal.
+
+
+18     Serial Peripheral Interface (SPI)                                 SPRU059E – June 2002 – Revised February 2009
+                                                                                      Submit Documentation Feedback
+www.ti.com                                                                                                              SPI Interrupts
+       The selection procedure for the SPI clocking scheme is shown in Table 1-3. Examples of these four
+       clocking schemes relative to transmitted and received data are shown in Figure 1-4.
+
+                                             Table 1-3. SPI Clocking Scheme Selection Guide
+                      SPICLK Scheme                               CLOCK POLARITY                      CLOCK PHASE
+                                                                     (SPICCR.6)                         (SPICTL.3)
+                  Rising edge without delay                             0                                     0
+                   Rising edge with delay                               0                                     1
+                 Falling edge without delay                             1                                     0
+                   Falling edge with delay                              1                                     1
+
+
+
+                                                Figure 1-4. SPICLK Signal Options
+         SPICLK cycle                   1          2          3          4          5   6            7            8
+              number
+               SPICLK
+          (Rising edge
+         without delay)
+
+               SPICLK
+          (Rising edge
+            with delay)
+
+                SPICLK
+          (Falling edge
+         without delay)
+                SPICLK
+          (Falling edge
+            with delay)
+
+              SPISIMO/      See note   MSB                                                                        LSB
+              SPISOMI
+
+                  SPISTE
+             (Into slave)
+
+
+          Receive latch
+                 points
+
+
+         Note:     Previous data bit
+
+       For the SPI, SPICLK symmetry is retained only when the result of (SPIBRR+1) is an even value. When
+       (SPIBRR + 1) is an odd value and SPIBRR is greater than 3, SPICLK becomes asymmetrical. The low
+       pulse of SPICLK is one CLKOUT longer than the high pulse when the CLOCK POLARITY bit is clear (0).
+       When the CLOCK POLARITY bit is set to 1, the high pulse of the SPICLK is one CLKOUT longer than the
+       low pulse, as shown in Figure 1-5.
+
+Figure 1-5. SPI: SPICLK-CLKOUT Characteristic When (BRR + 1) is Odd, BRR > 3, and CLOCK POLARITY
+                                                =1
+                                                   2 cycles              3 cycles       2 cycles
+                    CLKOUT
+
+
+                     SPICLK
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                Serial Peripheral Interface (SPI)      19
+Submit Documentation Feedback
+SPI Interrupts                                                                                                  www.ti.com
+
+1.4.4 Initialization Upon Reset
+       A system reset forces the SPI peripheral module into the following default configuration:
+       • Unit is configured as a slave module (MASTER/SLAVE = 0)
+       • Transmit capability is disabled (TALK = 0)
+       • Data is latched at the input on the falling edge of the SPICLK signal
+       • Character length is assumed to be one bit
+       • SPI interrupts are disabled
+       • Data in SPIDAT is reset to 0000h
+       • SPI module pin functions are selected as general-purpose inputs (this is done in I/O MUX control
+          register B [MCRB])
+       To change this SPI configuration:
+          Step 1. Clear the SPI SW RESET bit (SPICCR.7) to 0 to force the SPI to the reset state.
+          Step 2. Initialize the SPI configuration, format, baud rate, and pin functions as desired.
+          Step 3. Set the SPI SW RESET bit to 1 to release the SPI from the reset state.
+          Step 4. Write to SPIDAT or SPITXBUF (this initiates the communication process in the master).
+          Step 5. Read SPIRXBUF after the data transmission has completed (SPISTS.6 = 1) to determine
+                   what data was received.
+       To prevent unwanted and unforeseen events from occurring during or as a result of initialization changes,
+       clear the SPI SW RESET bit (SPICCR.7) before making initialization changes, and then set this bit after
+       initialization is complete.
+
+            Note:    Do not change SPI configuration when communication is in progress.
+
+
+
+1.4.5 Data Transfer Example
+       The timing diagram shown in Figure 1-6 illustrates an SPI data transfer between two devices using a
+       character length of five bits with the SPICLK being symmetrical.
+       The timing diagram with SPICLK unsymmetrical (Figure 1-5) shares similar characterizations with
+       Figure 1-6 except that the data transfer is one CLKOUT cycle longer per bit during the low pulse (CLOCK
+       POLARITY = 0) or during the high pulse (CLOCK POLARITY = 1) of the SPICLK.
+       Figure 1-6 is applicable for 8-bit SPI only and is not for 24x devices that are capable of working with 16-bit
+       data. The figure is shown for illustrative purposes only.
+
+
+
+
+20     Serial Peripheral Interface (SPI)                                        SPRU059E – June 2002 – Revised February 2009
+                                                                                             Submit Documentation Feedback
+www.ti.com                                                                                                            SPI FIFO Description
+
+                                                    Figure 1-6. Five Bits per Character
+                        Master SPI
+                           Int flag
+                          Slave SPI
+                             Int flag
+                                        A B C                           D E F G           H                      I     J    K
+                          SPISOMI
+                         from slave
+                                                7     6      5      4   3             7       6   5       4      3
+                          SPISIMO
+                       from master
+
+             SPICLK signal options:
+                                                7     6      5      4   3             7       6   5       4      3
+            CLOCK POLARITY = 0
+              CLOCK PHASE = 0
+
+
+            CLOCK POLARITY = 0
+              CLOCK PHASE = 1
+
+            CLOCK POLARITY = 1
+              CLOCK PHASE = 0
+
+            CLOCK POLARITY = 1
+              CLOCK PHASE = 1
+
+
+
+
+                           SPISTE
+
+      A     Slave writes 0D0h to SPIDAT and waits for the master to shift out the data.
+      B     Master sets the slave SPISTE signal low (active).
+      C     Master writes 058h to SPIDAT, which starts the transmission procedure.
+      D     First byte is finished and sets the interrupt flags.
+      E     Slave reads 0Bh from its SPIRXBUF (right-justified).
+      F     Slave writes 04Ch to SPIDAT and waits for the master to shift out the data.
+      G     Master writes 06Ch to SPIDAT, which starts the transmission procedure.
+      H     Master reads 01Ah from the SPIRXBUF (right–justified).
+      I     Second byte is finished and sets the interrupt flags.
+      J     Master reads 89h and the slave reads 8Dh from their respective SPIRXBUF. After the user’s software masks off the
+            unused bits, the master receives 09h and the slave receives 0Dh.
+      K     Master clears the slave SPISTE signal high (inactive).
+
+
+
+1.5       SPI FIFO Description
+          The following steps explain the FIFO features and help with programming the SPI FIFOs:
+          1. Reset. At reset the SPI powers up in standard SPI mode, the FIFO function is disabled. The FIFO
+             registers SPIFFTX, SPIFFRX and SPIFFCT remain inactive.
+          2. Standard SPI. The standard 240x SPI mode will work with SPIINT/SPIRXINT as the interrupt source.
+          3. Mode change. FIFO mode is enabled by setting the SPIFFEN bit to 1 in the SPIFFTX register. SPIRST
+             can reset the FIFO mode at any stage of its operation.
+          4. Active registers. All the SPI registers and SPI FIFO registers SPIFFTX, SPIFFRX, and SPIFFCT will be
+             active.
+          5. Interrupts. FIFO mode has two interrupts one for transmit FIFO, SPITXINT and one for receive FIFO,
+             SPIINT/SPIRXINT. SPIINT/SPIRXINT is the common interrupt for SPI FIFO receive, receive error and
+             receive FIFO overflow conditions. The single SPIINT for both transmit and receive sections of the
+             standard SPI will be disabled and this interrupt will service as SPI receive FIFO interrupt.
+
+
+SPRU059E – June 2002 – Revised February 2009                                                          Serial Peripheral Interface (SPI)   21
+Submit Documentation Feedback
+SPI FIFO Description                                                                                                      www.ti.com
+       6. Buffers. Transmit and receive buffers are supplemented with two 16x16 FIFOs. The one-word transmit
+          buffer (TXBUF) of the standard SPI functions as a transition buffer between the transmit FIFO and shift
+          register. The one-word transmit buffer will be loaded from transmit FIFO only after the last bit of the
+          shift register is shifted out.
+       7. Delayed transfer. The rate at which transmit words in the FIFO are transferred to transmit shift register
+          is programmable. The SPIFFCT register bits (7–0) FFTXDLY7–FFTXDLY0 define the delay between
+          the word transfer. The delay is defined in number SPI serial clock cycles. The 8-bit register could
+          define a minimum delay of 0 serial clock cycles and a maximum of 255 serial clock cycles. With zero
+          delay, the SPI module can transmit data in continuous mode with the FIFO words shifting out back to
+          back. With the 255 clock delay, the SPI module can transmit data in a maximum delayed mode with
+          the FIFO words shifting out with a delay of 255 SPI clocks between each words. The programmable
+          delay facilitates glueless interface to various slow SPI peripherals, such as EEPROMs, ADC, DAC etc.
+       8. FIFO status bits. Both transmit and receive FIFOs have status bits TXFFST or RXFFST (bits 12– 0)
+          that define the number of words available in the FIFOs at any time. The transmit FIFO reset bit
+          TXFIFO and receive reset bit RXFIFO will reset the FIFO pointers to zero when these bits are set to 1.
+          The FIFOs will resume operation from start once these bits are cleared to zero.
+       9. Programmable interrupt levels. Both transmit and receive FIFO can generate CPU interrupts. The
+          interrupt trigger is generated whenever the transmit FIFO status bits TXFFST (bits 12–8) match (less
+          than or equal to) the interrupt trigger level bits TXFFIL (bits 4–0 ). This provides a programmable
+          interrupt trigger for transmit and receive sections of the SPI. The default value for these trigger level
+          bits will be 0x11111 for receive FIFO and 0x00000 for transmit FIFO respectively.
+
+1.5.1 SPI Interrupts
+
+                          Figure 1-7. SPI FIFO Interrupt Flags and Enable Logic Generation
+                              16 x 16-bit FIFO
+                                RX FIFO 15
+                                       .               RXFFOVF flag
+                                       .
+                                       .                    RXFFIL         RXFFIENA
+                                 RX FIFO 0                                                         1
+                                                                                     SPIFFENA                   SPIRXINT
+                                                                            OVRNINTENA             0
+                                  RX BUF
+             SPI SOMI                                  RX_OVRN flag
+                                  SPIDAT
+             SPI SIMO                                      SPIINT flag
+                                   TX BUF
+                                                                            SPIINTENA
+
+
+                                 TX FIFO 0                                                     SPIFFENA
+                                                                            TXFFIENA
+                                       .                                                            0
+                                       .                    TXFFIL                                              SPITXINT
+                                       .                                                           1
+
+                                TX FIFO 15
+
+
+                                                 Table 1-4. SPI Interrupt Flag Modes
+                              SPI Interrupt        Interrupt             Interrupt                FIFO Enable    Interrupt (1)
+        FIFO Options          Source               Flags                 Enables                   SPIFFENA      line
+        SPI without FIFO
+                              Receive overrun      RXOVRN                OVRNINTENA                    0         SPIRXINT
+                              Data receive         SPIINT                SPIINTENA                     0         SPIRXINT
+
+
+
+       (1)
+             In non FIFO mode, SPIRXINT is the same as the SPIINT interrupt in 240x devices.
+
+22     Serial Peripheral Interface (SPI)                                                SPRU059E – June 2002 – Revised February 2009
+                                                                                                     Submit Documentation Feedback
+www.ti.com                                                                                       SPI FIFO Description
+
+
+                                       Table 1-4. SPI Interrupt Flag Modes (continued)
+                            SPI Interrupt      Interrupt       Interrupt          FIFO Enable       Interrupt (1)
+                            Transmit empty     SPIINT          SPIINTENA                 0          SPIRXINT
+        SPI FIFO mode
+                            FIFO receive       RXFFIL          RXFFIENA                  1          SPIRXINT
+                            Transmit empty     TXFFIL          TXFFIENA                  1          SPITXINT
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                     Serial Peripheral Interface (SPI)   23
+Submit Documentation Feedback
+24   Serial Peripheral Interface (SPI)   SPRU059E – June 2002 – Revised February 2009
+                                                      Submit Documentation Feedback
+                                                                                                                                Chapter 2
+                                                                                        SPRU059E – June 2002 – Revised February 2009
+
+
+                                                                      SPI Registers and Waveforms
+
+
+       This section contains the registers, bit descriptions, and waveforms.
+
+
+                  Topic    ..................................................................................................   Page
+
+
+                     2.1      SPI Control Registers ................................................................ 26
+                     2.2      SPI Example Waveforms ............................................................ 36
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                             SPI Registers and Waveforms   25
+Submit Documentation Feedback
+SPI Control Registers                                                                                                                    www.ti.com
+
+
+
+2.1         SPI Control Registers
+            The SPI is controlled and accessed through registers in the control register file.
+
+2.1.1 SPI Configuration Control Register (SPICCR)
+            SPICCR controls the setup of the SPI for operation.
+
+                              Figure 2-1. SPI Configuration Control Register (SPICCR) — Address 7040h
+            7                 6                5                  4                 3                  2                 1                  0
+ SPI SW Reset               CLOCK           Reserved          SPILBK           SPI CHAR3         SPI CHAR2          SPI CHAR1         SPI CHAR0
+                           POLARITY
+          R/W-0             R/W-0             R-0                R-0              R/W-0             R/W-0              R/W-0             R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                              Table 2-1. SPI Configuration Control Register (SPICCR) Field Descriptions
+     Bit        Field               Value    Description
+      7         SPI SW RESET                 SPI software reset. When changing configuration, you should clear this bit before the changes and
+                                             set this bit before resuming operation.
+                                      0      Initializes the SPI operating flags to the reset condition. Specifically, the RECEIVER OVERRUN
+                                             Flag bit (SPISTS.7), the SPI INT FLAG bit (SPISTS.6), and the TXBUF FULL Flag bit (SPISTS.5)
+                                             are cleared. The SPI configuration remains unchanged. If the module is operating as a master, the
+                                             SPICLK signal output returns to its inactive level.
+                                      1      SPI is ready to transmit or receive the next character. When the SPI SW RESET bit is a 0, a
+                                             character written to the transmitter will not be shifted out when this bit is set. A new character must
+                                             be written to the serial data register.
+      6         CLOCK                        Shift Clock Polarity. This bit controls the polarity of the SPICLK signal. CLOCK POLARITY and
+                POLARITY                     CLOCK PHASE (SPICTL.3) control four clocking schemes on the SPICLK pin. See Section 1.4.3.
+                                      0      Data is output on rising edge and input on falling edge. When no SPI data is sent, SPICLK is at low
+                                             level. The data input and output edges depend on the value of the CLOCK PHASE bit (SPICTL.3)
+                                             as follows:
+                                             • CLOCK PHASE = 0: Data is output on the rising edge of the SPICLK signal; input data is latched
+                                               on the falling edge of the SPICLK signal.
+                                             • CLOCK PHASE = 1: Data is output one half-cycle before the first rising edge of the SPICLK
+                                               signal and on subsequent falling edges of the SPICLK signal; input data is latched on the rising
+                                               edge of the SPICLK signal.
+                                      1      Data is output on falling edge and input on rising edge. When no SPI data is sent, SPICLK is at
+                                             high level. The data input and output edges depend on the value of the CLOCK PHASE bit
+                                             (SPICTL.3) as follows:
+                                             • CLOCK PHASE = 0: Data is output on the falling edge of the SPICLK signal; input data is
+                                               latched on the rising edge of the SPICLK signal.
+                                             • CLOCK PHASE = 1: Data is output one half-cycle before the first falling edge of the SPICLK
+                                               signal and on subsequent rising edges of the SPICLK signal; input data is latched on the falling
+                                               edge of the SPICLK signal.
+      5         Reserved                     Reads return zero; writes have no effect.
+      4         SPILBK                       SPI loopback. Loop back mode allows module validation during device testing. This mode is valid
+                                             only in master mode of the SPI.
+                                      0      SPI loop back mode disabled – default value after reset
+                                      1      SPI loop back mode enabled, SIMO/SOMI lines are connected internally. Used for module self
+                                             tests.
+     3-0        SPI CHAR3 –                  Character Length Control Bits 3-0. These four bits determine the number of bits to be shifted in or
+                SPI CHAR0                    out as a single character during one shift sequence. Table 2-2 lists the character length selected by
+                                             the bit values.
+
+
+
+
+26          SPI Registers and Waveforms                                                           SPRU059E – June 2002 – Revised February 2009
+                                                                                                               Submit Documentation Feedback
+www.ti.com                                                                                                                 SPI Control Registers
+
+                                            Table 2-2. Character Length Control Bit Values
+                          SPI CHAR3               SPI CHAR2           SPI CHAR1            SPI CHAR0          Character Length
+                                0                     0                    0                     0                    1
+                                0                     0                    0                     1                    2
+                                0                     0                    1                     0                    3
+                                0                     0                    1                     1                    4
+                                0                     1                    0                     0                    5
+                                0                     1                    0                     1                    6
+                                0                     1                    1                     0                    7
+                                0                     1                    1                     1                    8
+                                1                     0                    0                     0                    9
+                                1                     0                    0                     1                    10
+                                1                     0                    1                     0                    11
+                                1                     0                    1                     1                    12
+                                1                     1                    0                     0                    13
+                                1                     1                    0                     1                    14
+                                1                     1                    1                     0                    15
+                                1                     1                    1                     1                    16
+
+
+
+2.1.2 SPI Operation Control Register (SPICTL)
+         SPICTL controls data transmission, the SPI’s ability to generate interrupts, the SPICLK phase, and the
+         operational mode (slave or master).
+
+                               Figure 2-2. SPI Operation Control Register (SPICTL) — Address 7041h
+         7                 6                  5                 4                  3                 2                 1                 0
+                        Reserved                          OVERRUN INT          CLOCK            MASTER/             TALK           SPI INT ENA
+                                                             ENA               PHASE             SLAVE
+                          R-0                                 R/W-0             R/W-0             R/W-0             R/W-0             R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                               Table 2-3. SPI Operation Control Register (SPICTL) Field Descriptions
+   Bit       Field                  Value   Description
+   7-5       Reserved                       Reads return zero; writes have no effect.
+   4         Overrun INT ENA                Overrun Interrupt Enable. Setting this bit causes an interrupt to be generated when the RECEIVER
+                                            OVERRUN Flag bit (SPISTS.7) is set by hardware. Interrupts generated by the RECEIVER
+                                            OVERRUN Flag bit and the SPI INT FLAG bit (SPISTS.6) share the same interrupt vector.
+                                     0      Disable RECEIVER OVERRUN Flag bit (SPISTS.7) interrupts
+                                     1      Enable RECEIVER OVERRUN Flag bit (SPISTS.7) interrupts
+   3         CLOCK PHASE                    SPI Clock Phase Select. This bit controls the phase of the SPICLK signal.
+                                            CLOCK PHASE and CLOCK POLARITY (SPICCR.6) make four different clocking schemes
+                                            possible (see Figure 1-4). When operating with CLOCK PHASE high, the SPI (master or slave)
+                                            makes the first bit of data available after SPIDAT is written and before the first edge of the SPICLK
+                                            signal, regardless of which SPI mode is being used.
+                                     0      Normal SPI clocking scheme, depending on the CLOCK POLARITY bit (SPICCR.6)
+                                     1      SPICLK signal delayed by one half-cycle; polarity determined by the CLOCK POLARITY bit
+   2         MASTER /                       SPI Network Mode Control. This bit determines whether the SPI is a network master or slave.
+             SLAVE                          During reset initialization, the SPI is automatically configured as a network slave.
+                                     0      SPI configured as a slave.
+                                     1      SPI configured as a master.
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                               SPI Registers and Waveforms          27
+Submit Documentation Feedback
+SPI Control Registers                                                                                                                       www.ti.com
+
+                     Table 2-3. SPI Operation Control Register (SPICTL) Field Descriptions (continued)
+      Bit       Field                   Value   Description
+       1        TALK                            Master/Slave Transmit Enable. The TALK bit can disable data transmission (master or slave) by
+                                                placing the serial data output in the high-impedance state. If this bit is disabled during a
+                                                transmission, the transmit shift register continues to operate until the previous character is shifted
+                                                out. When the TALK bit is disabled, the SPI is still able to receive characters and update the status
+                                                flags. TALK is cleared (disabled) by a system reset.
+                                         0      Disables transmission:
+                                                • Slave mode operation: If not previously configured as a general-purpose I/O pin, the SPISOMI
+                                                  pin will be put in the high-impedance state.
+                                                • Master mode operation: If not previously configured as a general-purpose I/O pin, the SPISIMO
+                                                  pin will be put in the high-impedance state.
+                                         1      Enables transmission For the 4-pin option, ensure to enable the receiver’s SPISTE input pin.
+       0        SPI INT ENA                     SPI Interrupt Enable. This bit controls the SPI’s ability to generate a transmit/receive interrupt. The
+                                                SPI INT FLAG bit (SPISTS.6) is unaffected by this bit.
+                                         0      Disables interrupt
+                                         1      Enables interrupt
+
+
+
+2.1.3 SPI Status Register (SPIST)
+
+                                             Figure 2-3. SPI Status Register (SPIST) — Address 7042h
+            7                 6                   5                  4                                                                         0
+      RECEIVER            SPI INT            TX BUF FULL                                              Reserved
+      OVERRUN            FLAG (1) (2)          FLAG (2)
+      FLAG (1) (2)
+           R/C-0           R/C-0                R/C-0                                                    R-0
+
+ LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+(1)
+        The RECEIVER OVERRUN FLAG bit and the SPI INT FLAG bit share the same interrupt vector.
+(2)
+        Writing a 0 to bits 5, 6, and 7 has no effect.
+
+                                             Table 2-4. SPI Status Register (SPIST) Field Descriptions
+      Bit       Field                   Value   Description
+       7        RECEIVER                        SPI Receiver Overrun Flag. This bit is a read/clear-only flag. The SPI hardware sets this bit when a
+                OVERRUN FLAG                    receive or transmit operation completes before the previous character has been read from the
+                                                buffer. The bit indicates that the last received character has been overwritten and therefore lost
+                                                (when the SPIRXBUF was overwritten by the SPI module before the previous character was read
+                                                by the user application). The SPI requests one interrupt sequence each time this bit is set if the
+                                                OVERRUN INT ENA bit (SPICTL.4) is set high. The bit is cleared in one of three ways:
+                                                • Writing a 1 to this bit
+                                                • Writing a 0 to SPI SW RESET (SPICCR.7)
+                                                • Resetting the system
+                                                If the OVERRUN INT ENA bit (SPICTL.4) is set, the SPI requests only one interrupt upon the first
+                                                occurrence of setting the RECEIVER OVERRUN Flag bit. Subsequent overruns will not request
+                                                additional interrupts if this flag bit is already set. This means that in order to allow new overrun
+                                                interrupt requests the user must clear this flag bit by writing a 1 to SPISTS.7 each time an overrun
+                                                condition occurs. In other words, if the RECEIVER OVERRUN Flag bit is left set (not cleared) by
+                                                the interrupt service routine, another overrun interrupt will not be immediately re-entered when the
+                                                interrupt service routine is exited.
+                                         0      Writing a 0 has no effect
+                                         1      Clears this bit. The RECEIVER OVERRUN Flag bit should be cleared during the interrupt service
+                                                routine because the RECEIVER OVERRUN Flag bit and SPI INT FLAG bit (SPISTS.6) share the
+                                                same interrupt vector. This will alleviate any possible doubt as to the source of the interrupt when
+                                                the next byte is received.
+
+
+
+
+28           SPI Registers and Waveforms                                                              SPRU059E – June 2002 – Revised February 2009
+                                                                                                                   Submit Documentation Feedback
+www.ti.com                                                                                                                    SPI Control Registers
+
+                           Table 2-4. SPI Status Register (SPIST) Field Descriptions (continued)
+   Bit         Field               Value       Description
+   6           SPI INT FLAG                    SPI Interrupt Flag. SPI INT FLAG is a read-only flag. The SPI hardware sets this bit to indicate that
+                                               it has completed sending or receiving the last bit and is ready to be serviced. The received
+                                               character is placed in the receiver buffer at the same time this bit is set. This flag causes an
+                                               interrupt to be requested if the SPI INT ENA bit (SPICTL.0) is set.
+                                        0      Writing a 0 has no effect
+                                        1      This bit is cleared in one of three ways:
+                                               • Reading SPIRXBUF
+                                               • Writing a 0 to SPI SW RESET (SPICCR.7)
+                                               • Resetting the system
+   5           TX BUF FULL                     SPI Transmit Buffer Full Flag. This read-only bit gets set to 1 when a character is written to the SPI
+               FLAG                            Transmit buffer SPITXBUF. It is cleared when the character is automatically loaded into SPIDAT
+                                               when the shifting out of a previous character is complete.
+                                        0      Writing a 0 has no effect
+                                        1      This bit is cleared at reset.
+   4-0         Reserved             10         Reads return zero; writes have no effect.
+
+
+
+2.1.4 SPI Baud Rate Register (SPIBRR)
+          SPIBRR contains the bits used for baud-rate selection.
+
+                                    Figure 2-4. SPI Baud Rate Register (SPIBRR) — Address 7044h
+         7                    6                   5                  4                3                 2                 1                 0
+    Reserved           SPI BIT RATE 6       SPI BIT RATE 5    SPI BIT RATE 4    SPI BIT RATE 3   SPI BIT RATE 2     SPI BIT RATE 1    SPI BIT RATE 0
+         R-0               RW-0                 RW-0              RW-0              RW-0              RW-0              RW-0              RW-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                                               Table 2-5. Field Descriptions
+   Bit         Field               Value       Description
+   7           Reserved                        Reads return zero; writes have no effect.
+   6-0         SPI BIT RATE 6–                 SPI Bit Rate (Baud) Control. These bits determine the bit transfer rate if the SPI is the network
+               SPI BIT RATE 0                  master. There are 125 data-transfer rates (each a function of the CPU clock, LSPCLK) that can be
+                                               selected. One data bit is shifted per SPICLK cycle. (SPICLK is the baud rate clock output on the
+                                               SPICLK pin.)
+                                               If the SPI is a network slave, the module receives a clock on the SPICLK pin from the network
+                                               master; therefore, these bits have no effect on the SPICLK signal. The frequency of the input clock
+                                               from the master should not exceed the slave SPI’s SPICLK signal divided by 4.
+                                               In master mode, the SPI clock is generated by the SPI and is output on the SPICLK pin. The SPI
+                                               baud rates are determined by the following formula:
+                                               For SPIBRR = 3 to 127:
+                                               SPI Baud Rate =     LSPCLK
+                                                                 (SPIBRR + 1)
+
+                                               For SPIBRR = 0, 1, or 2:
+                                               SPI Baud Rate = LSPCLK
+                                                                  4
+                                               where: LSPCLK = Function of CPU clock frequency X low-speed peripheral clock of the device
+                                               SPIBRR = Contents of the SPIBRR in the master SPI device
+
+
+
+2.1.5 SPI Emulation Buffer Register (SPIRXEMU)
+          SPIRXEMU contains the received data. Reading SPIRXEMU does not clear the SPI INT FLAG bit
+          (SPISTS.6). This is not a real register but a dummy address from which the contents of SPIRXBUF can be
+          read by the emulator without clearing the SPI INT FLAG.
+
+
+SPRU059E – June 2002 – Revised February 2009                                                                  SPI Registers and Waveforms           29
+Submit Documentation Feedback
+SPI Control Registers                                                                                                                   www.ti.com
+
+                            Figure 2-5. SPI Emulation Buffer Register (SPIRXEMU) — Address 7046h
+           15               14               13                 12                11                 10                  9                 8
+      ERXB15             ERXB14            ERXB13           ERXB12             ERXB11             ERXB10             ERXB9              ERXB8
+           R-0             R-0              R-0                R-0                R-0               R-0                R-0                R-0
+
+
+           7                6                5                  4                  3                  2                  1                 0
+      ERXB7               ERXB6            ERXB5             ERXB4              ERXB3             ERXB2              ERXB1              ERXB0
+           R-0             R-0              R-0                R-0                R-0               R-0                R-0                R-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                Table 2-6. SPI Emulation Buffer Register (SPIRXEMU) Field Descriptions
+     Bit         Field             Value   Description
+     15          ERXB15– ERXB0             Emulation Buffer Received Data. SPIRXEMU functions almost identically to SPIRXBUF, except that
+                                           reading SPIRXEMU does not clear the SPI INT FLAG bit (SPISTS.6). Once the SPIDAT has
+                                           received the complete character, the character is transferred to SPIRXEMU and SPIRXBUF, where
+                                           it can be read. At the same time, SPI INT FLAG is set.
+                                           This mirror register was created to support emulation. Reading SPIRXBUF clears the SPI INT
+                                           FLAG bit (SPISTS.6). In the normal operation of the emulator, the control registers are read to
+                                           continually update the contents of these registers on the display screen. SPIRXEMU was created
+                                           so that the emulator can read this register and properly update the contents on the display screen.
+                                           Reading SPIRXEMU does not clear the SPI INT FLAG bit, but reading SPIRXBUF clears this flag.
+                                           In other words, SPIRXEMU enables the emulator to emulate the true operation of the SPI more
+                                           accurately.
+                                           It is recommended that you view SPIRXEMU in the normal emulator run mode.
+
+
+
+2.1.6 SPI Serial Receive Buffer Register (SPIRXBUF)
+            SPIRXBUF contains the received data. Reading SPIRXBUF clears the SPI INT FLAG bit (SPISTS.6).
+
+                           Figure 2-6. SPI Serial Receive Buffer Register (SPIRXBUF) — Address 7047h
+           15               14               13                 12                11                 10                  9                 8
+      RXB15               RXB14            RXB13             RXB12              RXB11              RXB10              RXB9               RXB8
+           R-0             R-0              R-0                R-0                R-0               R-0                R-0                R-0
+
+
+           7                6                5                  4                  3                  2                  1                 0
+       RXB7               RXB6             RXB5               RXB4               RXB3              RXB2               RXB1               RXB0
+           R-0             R-0              R-0                R-0                R-0               R-0                R-0                R-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                           Table 2-7. SPI Serial Receive Buffer Register (SPIRXBUF) Field Descriptions
+     Bit         Field             Value   Description
+     15          RXB15 – RXB0              Received Data. Once SPIDAT has received the complete character, the character is transferred to
+                                           SPIRXBUF, where it can be read. At the same time, the SPI INT FLAG bit (SPISTS.6) is set. Since
+                                           data is shifted into the SPI’s most significant bit first, it is stored right-justified in this register.
+
+
+
+2.1.7 SPI Serial Transmit Buffer Register (SPITXBUF)
+            SPITXBUF stores the next character to be transmitted. Writing to this register sets the TX BUF FULL Flag
+            bit (SPISTS.5). When transmission of the current character is complete, the contents of this register are
+            automatically loaded in SPIDAT and the TX BUF FULL Flag is cleared. If no transmission is currently
+            active, data written to this register falls through into the SPIDAT register and the TX BUF FULL Flag is not
+            set.
+
+
+30          SPI Registers and Waveforms                                                          SPRU059E – June 2002 – Revised February 2009
+                                                                                                              Submit Documentation Feedback
+www.ti.com                                                                                                               SPI Control Registers
+          In master mode, if no transmission is currently active, writing to this register initiates a transmission in the
+          same manner that writing to SPIDAT does.
+
+                        Figure 2-7. SPI Serial Transmit Buffer Register (SPITXBUF) — Address 7048h
+         15               14               13                12                11                10                 9                 8
+    TXB15               TXB14            TXB13             TXB12             TXB11             TXB10              TXB9              TXB8
+         R-0              R-0             R-0               R-0                R-0               R-0               R-0               R-0
+
+
+         7                6                5                  4                 3                 2                 1                 0
+     TXB7                TXB6             TXB5             TXB4              TXB3               TXB2              TXB1              TXB0
+         R-0              R-0             R-0               R-0                R-0               R-0               R-0               R-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                         Table 2-8. SPI Serial Transmit Buffer Register (SPITXBUF) Field Descriptions
+   Bit         Field             Value   Description
+   15          TXB15 – TXB0              Transmit Data Buffer. This is where the next character to be transmitted is stored. When the
+                                         transmission of the current character has completed, if the TX BUF FULL Flag bit is set, the
+                                         contents of this register is automatically transferred to SPIDAT, and the TX BUF FULL Flag is
+                                         cleared.
+                                         Writes to SPITXBUF must be left-justified.
+
+
+
+2.1.8 SPI Serial Data Register (SPIDAT)
+          SPIDAT is the transmit/receive shift register. Data written to SPIDAT is shifted out (MSB) on subsequent
+          SPICLK cycles. For every bit (MSB) shifted out of the SPI, a bit is shifted into the LSB end of the shift
+          register.
+
+                                 Figure 2-8. SPI Serial Data Register (SPIDAT) — Address 7049h
+         15               14               13                12                11                10                 9                 8
+    SDAT15              SDAT14           SDAT13           SDAT12            SDAT11            SDAT10             SDAT9             SDAT8
+         R-0              R-0             R-0               R-0                R-0               R-0               R-0               R-0
+
+
+         7                6                5                  4                 3                 2                 1                 0
+    SDAT7               SDAT6            SDAT5            SDAT4              SDAT3             SDAT2             SDAT1             SDAT0
+         R-0              R-0             R-0               R-0                R-0               R-0               R-0               R-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                 Table 2-9. SPI Serial Data Register (SPIDAT) Field Descriptions
+   Bit         Field             Value   Description
+   15          SDAT15 – SDAT0            Serial data. Writing to the SPIDAT performs two functions:
+                                         • It provides data to be output on the serial output pin if the TALK bit (SPICTL.1) is set.
+                                         • When the SPI is operating as a master, a data transfer is initiated. When initiating a transfer, see
+                                           the CLOCK POLARITY bit (SPICCR.6) described in Section 2.1.1 and the CLOCK PHASE bit
+                                           (SPICTL.3) described in Section 2.1.2, for the requirements.
+                                         In master mode, writing dummy data to SPIDAT initiates a receiver sequence. Since the data is not
+                                         hardware-justified for characters shorter than sixteen bits, transmit data must be written in
+                                         left-justified form, and received data read in right-justified form.
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                            SPI Registers and Waveforms           31
+Submit Documentation Feedback
+SPI Control Registers                                                                                                                   www.ti.com
+
+2.1.9 SPI FIFO Transmit, Receive, and Control Registers
+
+                                     Figure 2-9. SPI FIFO Transmit (SPIFFTX) Register – Address 704Ah
+            15                 14                13                12                    11              10              9                 8
+      SPIRST               SPIFFENA            TXFIFO          TXFFST4            TXFFST3           TXFFST2          TXFFST1           TXFFST0
+          R/W-1              R/W–0             R/W-1              R–0                R–0                 R–0            R–0               R–0
+
+
+            7                   6                5                   4                   3                2              1                 0
+ TXFFINT Flag             TXFFINT CLR         TXFFIENA          TXFFIL4           TXFFIL3            TXFFIL2          TXFFIL1           TXFFIL0
+          R/W-0              W–0               R/W-0              R/W-0            R/W-0              R/W-0            R/W-0             R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                    Table 2-10. SPI FIFO Transmit (SPIFFTX) Register Field Descriptions
+     Bit         Field                Value    Description
+     15          SPIRST                        SPI reset
+                                        0      Write 0 to reset the SPI transmit and receive channels. The SPI FIFO register configuration bits will
+                                               be left as is.
+                                        1      SPI FIFO can resume transmit or receive. No effect to the SPI registers bits.
+     14          SPIFFENA                      SPI FIFO enhancements enable
+                                        0      SPI FIFO enhancements are disabled
+                                        1      SPI FIFO enhancements are enabled
+     13          TXFIFO Reset                  Transmit FIFO reset
+                                        0      Write 0 to reset the FIFO pointer to zero, and hold in reset.
+                                        1      Re-enable Transmit FIFO operation
+     12-8        TXFFST4–0                     Transmit FIFO status
+                                      00000    Transmit FIFO is empty.
+                                      00001    Transmit FIFO has 1 word.
+                                      00010    Transmit FIFO has 2 words.
+                                      00011    Transmit FIFO has 3 words.
+                                      0xxxx    Transmit FIFO has x words.
+                                      10000    Transmit FIFO has 16 words.
+      7          TXFFINT                       TXFIFO interrupt
+                                        0      TXFIFO interrupt has not occurred, This is a read-only bit.
+                                        1      TXFIFO interrupt has occurred, This is a read-only bit.
+      6          TXFFINT CLR                   TXFIFO clear
+                                        0      Write 0 has no effect on TXFIFINT flag bit, Bit reads back a zero.
+                                        1      Write 1 to clear TXFFINT flag in bit 7.
+      5          TXFFIENA                      TX FIFO interrupt enable
+                                        0      TX FIFO interrupt based on TXFFIVL match (less than or equal to) will be disabled .
+                                        1      TX FIFO interrupt based on TXFFIVL match (less than or equal to) will be enabled.
+     4-0         TXFFIL4–0                     TXFFIL4–0 transmit FIFO interrupt level bits. Transmit FIFO will generate interrupt when the FIFO
+                                               status bits (TXFFST4–0) and FIFO level bits (TXFFIL4–0 ) match (less than or equal to).
+                                      00000    Default value is 0x00000.
+
+
+
+
+32          SPI Registers and Waveforms                                                             SPRU059E – June 2002 – Revised February 2009
+                                                                                                                 Submit Documentation Feedback
+www.ti.com                                                                                                                SPI Control Registers
+                                  Figure 2-10. SPI FIFO Receive (SPIFFRX) Register – Address 704Bh
+         15                14                 13                 12               11                  10              9               8
+RXFFOVF Flag RXFFOVF CLR                 RXFIFO Reset       RXFFST4             RXFFST3          RXFFST2          RXFFST1          RXFFST0
+         R-0               W–0              R/W–1              R–0                R–0                 R–0           R–0              R–0
+
+
+         7                    6               5                  4                    3                2              1               0
+ RXFFINT Flag          RXFFINT CLR         RXFFIENA          RXFFIL4            RXFFIL3          RXFFIL2          RXFFIL1          RXFFIL0
+         R-0               W–0              R/W–0             R/W–1              R/W–1            R/W–1            R/W–1            R/W–1
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                  Table 2-11. SPI FIFO Receive (SPIFFRX) Register Field Descriptions
+   Bit         Field               Value    Description
+   15          RXFFOVF                      Receive FIFO overflow flag
+                                     0      Receive FIFO has not overflowed. This is a read-only bit.
+                                     1      Receive FIFO has overflowed, read-only bit. More than 16 words have been received in to the
+                                            FIFO, and the first received word is lost.
+   14          RXFFOVF CLR                  Receive FIFO overflow clear
+                                     0      Write 0 does not affect RXFFOVF flag bit, Bit reads back a zero
+                                     1      Write 1 to clear RXFFOVF flag in bit 15
+   13          RXFIFO Reset                 Receive FIFO reset
+                                     0      Write 0 to reset the FIFO pointer to zero, and hold in reset.
+                                     1      Re-enable transmit FIFO operation
+  12-8         RXFFST4–0                    Receive FIFO Status
+                                   00000    Receive FIFO is empty.
+                                   00001    Receive FIFO has 1 word.
+                                   00010    Receive FIFO has 2 words.
+                                   00011    Receive FIFO has 3 words.
+                                   0xxxx    Receive FIFO has x words.
+                                   10000    Receive FIFO has 16 words. Receive FIFO has a maximum of 16 words.
+   7           RXFFINT                      Receive FIFO interrupt
+                                     0      RXFIFO interrupt has not occurred. This is a read-only bit.
+                                     1      RXFIFO interrupt has occurred. This is a read-only bit.
+   6           RXFFINT CLR                  Receive FIFO interrupt clear
+                                     0      Write 0 has no effect on RXFIFINT flag bit, Bit reads back a zero.
+                                     1      Write 1 to clear RXFFINT flag in bit 7.
+   5           RXFFIENA                     RX FIFO interrupt enable
+                                     0      RX FIFO interrupt based on RXFFIVL match (less than or equal to) will be disabled.
+                                     1      RX FIFO interrupt based on RXFFIVL match (less than or equal to) will be enabled.
+   4-0         RXFFIL4–0                    Receive FIFO interrupt level bits
+                                   11111    Receive FIFO generates an interrupt when the FIFO status bits (RXFFST4–0) and FIFO level bits
+                                            (RXFFIL4–0) match (greater than or equal to) the default value of these bits after reset (11111).
+                                            This avoids frequent interrupts after reset, as the receive FIFO will be empty most of the time.
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                                SPI Registers and Waveforms         33
+Submit Documentation Feedback
+SPI Control Registers                                                                                                                       www.ti.com
+
+                                     Figure 2-11. SPI FIFO Control (SPIFFCT) Register – Address 704Ch
+            15                                                                                                                                  8
+                                                                          Reserved
+                                                                            R-0
+
+
+            7                  6                 5                  4                  3                  2                  1                  0
+     FFTXDLY7               FFTXDLY6          FFTXDLY5         FFTXDLY4           FFTXDLY3           FFTXDLY2           FFTXDLY1          FFTXDLY0
+       R/W-0                 R/W-0             R/W-0              R/W-0              R/W-0             R/W-0              R/W-0              R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                     Table 2-12. SPI FIFO Control (SPIFFCT) Register Field Descriptions
+     Bit         Field                Value    Description
+     15-8        Reserved
+     7-0         FFTXDLY7–0                    FIFO transmit delay bits
+                                        0      These bits define the delay between every transfer from FIFO transmit buffer to transmit shift
+                                               register. The delay is defined in number SPI serial clock cycles. The 8-bit register could define a
+                                               minimum delay of 0 serial clock cycles and a maximum of 255 serial clock cycles.
+                                        1      In FIFO mode, the buffer (TXBUF) between the shift register and the FIFO should be filled only
+                                               after the shift register has completed shifting of the last bit. This is required to pass on the delay
+                                               between transfers to the data stream. In the FIFO mode TXBUF should not be treated as one
+                                               additional level of buffer.
+
+
+
+
+34          SPI Registers and Waveforms                                                               SPRU059E – June 2002 – Revised February 2009
+                                                                                                                   Submit Documentation Feedback
+www.ti.com                                                                                                          SPI Control Registers
+2.1.10 SPI Priority Control Register (SPIPRI)
+
+                            Figure 2-12. SPI Priority Control Register (SPIPRI) — Address 704Fh
+       7                6               5                  4                 3                                                      0
+             Reserved               SPI SUSP          SPI SUSP                                      Reserved
+                                     SOFT              FREE
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                            Table 2-13. SPI Priority Control Register (SPIPRI) Field Descriptions
+ Bit   Field                Value   Description
+ 7-6                                Reads return zero; writes have no effect.
+ 5-4   SPI SUSP SOFT                These bits determine what occurs when an emulation suspend occurs (for example, when the
+       SPI SUSP FREE                debugger hits a breakpoint). The peripheral can continue whatever it is doing (free-run mode) or, if in
+                                    stop mode, it can either stop immediately or stop when the current operation (the current
+                                    receive/transmit sequence) is complete.
+                             00     Transmission stops after midway in the bit stream while TSUSPEND is asserted. Once TSUSPEND
+                                    is deasserted without a system reset, the remainder of the bits pending in the DATBUF are shifted.
+                                    Example: If SPIDAT has shifted 3 out of 8 bits, the communication freezes right there. However, if
+                                    TSUSPEND is later deasserted without resetting the SPI, SPI starts transmitting from where it had
+                                    stopped (fourth bit in this case) and will transmit 8 bits from that point. The SCI module operates
+                                    differently.
+                             10     If the emulation suspend occurs before the start of a transmission, (i.e., before the first SPICLK
+                                    pulse) then the transmission will not occur. If the emulation suspend occurs after the start of a
+                                    transmission, then the data will be shifted out to completion. When the start of transmission occurs is
+                                    dependent on the baud rate used.
+                                    Standard SPI mode: Stop after transmitting the words in the shift register and buffer. That is, after
+                                    TXBUF and SPIDAT are empty.
+                                    In FIFO mode: Stop after transmitting the words in the shift register and buffer. That is, after TX FIFO
+                                    and SPIDAT are empty.
+                             x1     Free run, continue SPI operation regardless of suspend or when the suspend occurred.
+ 3-0   Reserved                     Reads return zero; writes have no effect.
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                          SPI Registers and Waveforms           35
+Submit Documentation Feedback
+SPI Example Waveforms                                                                            www.ti.com
+
+2.2   SPI Example Waveforms
+
+ Figure 2-13. CLOCK POLARITY = 0, CLOCK PHASE = 0 (All data transitions are during the rising edge,
+                            non-delayed clock. Inactive level is low.)
+
+
+
+
+                                                                                    Ch1 Period
+                                                                                     200 ns
+
+
+
+
+                                                                                    SPICLK
+
+
+
+
+                                                                                    SPISIMO
+
+
+
+
+ Figure 2-14. CLOCK POLARITY = 0, CLOCK PHASE = 1 (All data transitions are during the rising edge,
+                       but delayed by half clock cycle. Inactive level is low.)
+
+
+
+
+                                                                                    Ch1 Period
+                                                                                     200 ns
+
+
+
+
+                                                                                    SPICLK
+
+
+
+
+                                                                                    SPISIMO
+
+
+
+
+36    SPI Registers and Waveforms                                SPRU059E – June 2002 – Revised February 2009
+                                                                              Submit Documentation Feedback
+www.ti.com                                                                        SPI Example Waveforms
+
+ Figure 2-15. CLOCK POLARITY = 1, CLOCK PHASE = 0 (All data transitions are during the falling edge.
+                                     Inactive level is high.)
+
+
+
+
+                                                                                   Ch1 Period
+                                                                                    199 ns
+
+
+
+
+                                                                                   SPICLK
+
+
+
+
+                                                                                   SPISIMO
+
+
+
+
+ Figure 2-16. CLOCK POLARITY = 1, CLOCK PHASE = 1 (All data transitions are during the falling edge,
+                       but delayed by half clock cycle. Inactive level is high.)
+
+
+
+
+                                                                                    Ch1 Period
+                                                                                     200 ns
+
+
+
+
+                                                                                    SPICLK
+
+
+
+
+                                                                                    SPISIMO
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                             SPI Registers and Waveforms   37
+Submit Documentation Feedback
+SPI Example Waveforms                                                                                 www.ti.com
+
+
+      Figure 2-17. SPISTE Behavior in Master Mode (Master lowers SPISTE during the entire 16 bits of
+                                              transmission.)
+
+
+
+
+                                                                                           Ch1 Period
+                                                                                            200 ns
+
+
+
+
+                                                                                           SPICLK
+
+
+
+
+                                                                                           SPISTE
+
+
+
+
+     Figure 2-18. SPISTE Behavior in Slave Mode (Slave’s SPISTE is lowered during the entire 16 bits of
+                                             transmission.)
+
+
+
+
+                                                                                           Ch1 Period
+                                                                                            398 ns
+
+
+
+
+                                                                                           SPISIMO
+
+
+
+
+                                                                                           SPISTE
+
+
+
+
+38     SPI Registers and Waveforms                                    SPRU059E – June 2002 – Revised February 2009
+                                                                                   Submit Documentation Feedback
+                                                                                                         Appendix A
+                                                                             SPRU059E – June 2002 – Revised February 2009
+
+
+                                                                                         Revision History
+
+
+       Technical changes made in this revision are shown in Table A-1.
+
+                                               Table A-1. Changes in Revision E
+        Location                               Additions, Deletions, Modifications
+        Global                                 Title Change
+
+
+
+
+SPRU059E – June 2002 – Revised February 2009                                                         Revision History   39
+Submit Documentation Feedback
+                                                              IMPORTANT NOTICE
+Texas Instruments Incorporated and its subsidiaries (TI) reserve the right to make corrections, modifications, enhancements, improvements,
+and other changes to its products and services at any time and to discontinue any product or service without notice. Customers should
+obtain the latest relevant information before placing orders and should verify that such information is current and complete. All products are
+sold subject to TI’s terms and conditions of sale supplied at the time of order acknowledgment.
+TI warrants performance of its hardware products to the specifications applicable at the time of sale in accordance with TI’s standard
+warranty. Testing and other quality control techniques are used to the extent TI deems necessary to support this warranty. Except where
+mandated by government requirements, testing of all parameters of each product is not necessarily performed.
+TI assumes no liability for applications assistance or customer product design. Customers are responsible for their products and
+applications using TI components. To minimize the risks associated with customer products and applications, customers should provide
+adequate design and operating safeguards.
+TI does not warrant or represent that any license, either express or implied, is granted under any TI patent right, copyright, mask work right,
+or other TI intellectual property right relating to any combination, machine, or process in which TI products or services are used. Information
+published by TI regarding third-party products or services does not constitute a license from TI to use such products or services or a
+warranty or endorsement thereof. Use of such information may require a license from a third party under the patents or other intellectual
+property of the third party, or a license from TI under the patents or other intellectual property of TI.
+Reproduction of TI information in TI data books or data sheets is permissible only if reproduction is without alteration and is accompanied
+by all associated warranties, conditions, limitations, and notices. Reproduction of this information with alteration is an unfair and deceptive
+business practice. TI is not responsible or liable for such altered documentation. Information of third parties may be subject to additional
+restrictions.
+Resale of TI products or services with statements different from or beyond the parameters stated by TI for that product or service voids all
+express and any implied warranties for the associated TI product or service and is an unfair and deceptive business practice. TI is not
+responsible or liable for any such statements.
+TI products are not authorized for use in safety-critical applications (such as life support) where a failure of the TI product would reasonably
+be expected to cause severe personal injury or death, unless officers of the parties have executed an agreement specifically governing
+such use. Buyers represent that they have all necessary expertise in the safety and regulatory ramifications of their applications, and
+acknowledge and agree that they are solely responsible for all legal, regulatory and safety-related requirements concerning their products
+and any use of TI products in such safety-critical applications, notwithstanding any applications-related information or support that may be
+provided by TI. Further, Buyers must fully indemnify TI and its representatives against any damages arising out of the use of TI products in
+such safety-critical applications.
+TI products are neither designed nor intended for use in military/aerospace applications or environments unless the TI products are
+specifically designated by TI as military-grade or "enhanced plastic." Only products designated by TI as military-grade meet military
+specifications. Buyers acknowledge and agree that any such use of TI products which TI has not designated as military-grade is solely at
+the Buyer's risk, and that they are solely responsible for compliance with all legal and regulatory requirements in connection with such use.
+TI products are neither designed nor intended for use in automotive applications or environments unless the specific TI products are
+designated by TI as compliant with ISO/TS 16949 requirements. Buyers acknowledge and agree that, if they use any non-designated
+products in automotive applications, TI will not be responsible for any failure to meet such requirements.
+Following are URLs where you can obtain information on other Texas Instruments products and application solutions:
+Products                                                               Applications
+Amplifiers                      amplifier.ti.com                       Audio                         www.ti.com/audio
+Data Converters                 dataconverter.ti.com                   Automotive                    www.ti.com/automotive
+DLP® Products                   www.dlp.com                            Broadband                     www.ti.com/broadband
+DSP                             dsp.ti.com                             Digital Control               www.ti.com/digitalcontrol
+Clocks and Timers               www.ti.com/clocks                      Medical                       www.ti.com/medical
+Interface                       interface.ti.com                       Military                      www.ti.com/military
+Logic                           logic.ti.com                           Optical Networking            www.ti.com/opticalnetwork
+Power Mgmt                      power.ti.com                           Security                      www.ti.com/security
+Microcontrollers                microcontroller.ti.com                 Telephony                     www.ti.com/telephony
+RFID                            www.ti-rfid.com                        Video & Imaging               www.ti.com/video
+RF/IF and ZigBee® Solutions     www.ti.com/lprf                        Wireless                      www.ti.com/wireless
+                             Mailing Address: Texas Instruments, Post Office Box 655303, Dallas, Texas 75265
+                                            Copyright © 2009, Texas Instruments Incorporated
+

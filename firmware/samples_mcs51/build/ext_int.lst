@@ -1,0 +1,32 @@
+0000               ; ext_int: button on INT0 (P3.2, falling edge, IT0 = 1): each press toggles the LED on P1.0 and counts in 30h.
+0000               ; INT1 (P3.3) is level-triggered (IT1 = 0): while it is held low its ISR runs again after every RETI (one main-loop
+0000               ; instruction in between); the ISR counts in 31h and the main loop counts the instructions it gets in 32h/33h.
+0000                       ORG     0000h
+0000  02 00 40             LJMP    main
+0003                       ORG     0003h
+0003  02 00 63             LJMP    int0_isr
+0006                       ORG     0013h
+0013  02 00 68             LJMP    int1_isr
+0016                       ORG     0040h
+0040  75 81 5F     main:   MOV     SP, #5Fh
+0043  75 30 00             MOV     30h, #0
+0046  75 31 00             MOV     31h, #0
+0049  75 32 00             MOV     32h, #0
+004C  75 33 00             MOV     33h, #0
+004F  D2 88                SETB    IT0                     ; INT0 falling edge
+0051  C2 8A                CLR     IT1                     ; INT1 level
+0053  D2 A8                SETB    EX0
+0055  D2 AA                SETB    EX1
+0057  D2 AF                SETB    EA
+0059  05 33        idle:   INC     33h
+005B  E5 33                MOV     A, 33h
+005D  70 FA                JNZ     idle
+005F  05 32                INC     32h
+0061  80 F6                SJMP    idle
+0063               int0_isr:
+0063  B2 90                CPL     P1.0
+0065  05 30                INC     30h
+0067  32                   RETI
+0068               int1_isr:
+0068  05 31                INC     31h
+006A  32                   RETI

@@ -1,0 +1,16 @@
+# A TMS320F2808 (C2000 280x) and an MK22FN1M0VLL12 (Kinetis) talking over a UART link.
+#   A (K22) runs uart_link_sender: sends "ping N\r\n" every 2 ms on UART0, toggles PTC5 on every reply line.
+#   B (F2808) runs f2808_sci_echo: echoes every SCI-B byte uppercased, toggles GPIO34 per byte.  SCI-B is on GPIO18
+#     (SCITXDB) / GPIO19 (SCIRXDB), GPAMUX2 = 2.  GPIO18 is also a boot-mode pin (SPRS230P Table 9-1): an idle UART
+#     line is high, so the F2808 boots to flash.
+# Run:  chipem run --board boards/f2808_k22_uart.yaml --for 20ms
+# The K22 samples assume a 120 MHz core (clock_hz pins it); UART0 then runs at 115200 baud.  The F2808 programs its
+# own PLL (20 MHz x 10 / 2 = 100 MHz) about 6.6 ms after reset; bytes sent before SCI-B is enabled are lost on the
+# wire, as on hardware (uart events dir=drop).  SCI-B: LSPCLK 25 MHz, BRR 26 -> 115741 baud (+0.5 %).
+name: f2808_k22_uart
+quantum: 10us
+chips:
+  - {id: A, chip: mk22fn1m0vll12, firmware: ../firmware/samples/build/uart_link_sender.elf, clock_hz: 120000000}
+  - {id: B, chip: tms320f2808, firmware: ../firmware/samples_c2000/build/f2808_sci_echo.c28img}
+links:
+  - {type: uart, from: A.UART0, to: B.SCIB}

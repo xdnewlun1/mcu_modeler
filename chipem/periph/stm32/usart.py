@@ -37,14 +37,19 @@ character written to DR starts only while the USARTn_CTS pin reads L (H or X hol
 the pin goes low; a character already shifting completes). A CTS pin edge sets SR.CTS (CTSIE interrupt). Without a pin
 muxed to USARTn_CTS the input counts as asserted (one `info`). With RTSE the USARTn_RTS pin is driven L while the
 receiver can take a character and H while RXNE is set (deasserted at the stop bit that sets RXNE).
-Parity (CR1.PCE, PS): the parity bit takes the word's MSB, so 7 (M=0) or 8 (M=1) data bits go on the link; a received
-character gets its computed parity bit in the MSB of DR, as silicon returns it. PE is never set (links carry no
-parity errors). 9-bit words (M=1, PCE=0): board links and the host carry 8 bits, bit 8 is sent as 0 / received as 0.
+Frames (chipem/periph/uartwire.py): characters go out as Frames with their format (M-bit word, with CR1.PCE the
+MSB is the parity bit: 7 or 8 data bits + parity (PS), CR2.STOP, the real baud) and the receiver decodes every
+arriving frame at its own settings by sample point (30.3.3: samples 8/9/10 of 16, or 4/5/6 of 8 with OVER8, majority
+vote; CR3.ONEBIT: one sample, no NF; start bit 3/5/7 then 8/9/10). The word goes to DR with the received parity bit
+in its MSB, with PE (parity mismatch, PEIE interrupt), FE (first stop bit 0) and NF (samples disagree) set together
+with RXNE (none on overrun). A mismatched baud or word length gives framing / noise errors and garbage as the sample
+points dictate; 9-bit words carry bit 8.
 Break / LIN (30.3.2, 30.3.8): CR1.SBK sends a break after the character in progress: 10 (M = 0) / 11 (M = 1) low
 bits, 13 with CR2.LINEN, then the stop bits; SBK is cleared during the stop bit of the break; CTS is not checked
-(30.3.14). It is logged as a `uart` event {dir: 'tx', brk: 1} but not carried by board links. `receive_break(bits)`
-delivers a break to the receiver: FE + RXNE with 0x00, and SR.LBD (LBDIE interrupt) when CR2.LINEN = 1 and the break
-is at least 10 (LBDL = 0) / 11 (LBDL = 1) bits long. OVER8 is forced to 0 while LINEN, SCEN or IREN is set (30.6.4).
+(30.3.14). It is a `uart` event {dir: 'tx', brk: bits} and a break Frame on links. A received break (all 0
+including the stop bit) is a framing error with 0x00 (30.3.3 "Break character") and, with CR2.LINEN, sets SR.LBD
+(LBDIE interrupt) when the line stayed low at least 10 (LBDL = 0) / 11 (LBDL = 1) bit times, in mute mode too.
+`receive_break(bits)` injects one directly. OVER8 is forced to 0 while LINEN, SCEN or IREN is set (30.6.4).
 Half duplex (CR3.HDSEL): the receiver listens on the USARTn_TX pin and receives the characters it transmits (echo).
 Mute mode (CR1.RWU, 30.3.6): WAKE = 0 wakes on an idle line: an idle frame detected (one character time) after a
 received character, muted ones included, with RWU set before that detection (CR1.RWU note: a byte must have been
@@ -53,8 +58,9 @@ detection itself). WAKE = 1 on an address mark (MSB of the word = 1 and low 4 bi
 received); an address mark that does not match puts the receiver back into mute mode; RWU writes are ignored while
 RXNE = 1 in this mode. Muted
 characters do not set RXNE. Smartcard (SCEN), IrDA (IREN) and synchronous mode (CR2.CLKEN) are not modelled (one
-`warn`; the USART behaves as asynchronous). Stop mode: `clock_stop()` freezes the transmitter and drops arriving
-characters (reason clock_stopped).
+`warn`; the USART behaves as asynchronous). Stop mode (and Sleep with the RCC LPENR bit clear):
+`clock_stop()` freezes the transmitter and drops arriving characters (reason clock_stopped); the F4 USART has no
+wake-up from Stop (wake through EXTI on the RX pin).
 """
 from __future__ import annotations
 
@@ -62,7 +68,7 @@ from typing import Any
 
 from ..base import MMIOBlock
 from ..registry import register
-from ..uartwire import UartRx
+from ..uartwire import SAMPLES_8, SAMPLES_16, START_16, Frame, RxChar, RxFormat, UartRx, decode_frame
 from ._util import GatedBlock, apb_hz, build_regs, dma_request, irq_number, signal_pin_level
 
 SR_PE, SR_FE, SR_NF, SR_ORE, SR_IDLE, SR_RXNE, SR_TC, SR_TXE, SR_LBD, SR_CTS = (1 << b for b in range(10))
@@ -73,7 +79,8 @@ CR1_RE, CR1_TE, CR1_IDLEIE, CR1_RXNEIE, CR1_TCIE, CR1_TXEIE = 1 << 2, 1 << 3, 1 
 CR1_PEIE, CR1_PS, CR1_PCE, CR1_WAKE, CR1_M, CR1_UE, CR1_OVER8 = 1 << 8, 1 << 9, 1 << 10, 1 << 11, 1 << 12, 1 << 13, 1 << 15
 CR2_LBDL, CR2_LBDIE, CR2_CLKEN, CR2_LINEN = 1 << 5, 1 << 6, 1 << 11, 1 << 14
 CR3_EIE, CR3_IREN, CR3_HDSEL, CR3_SCEN = 1 << 0, 1 << 1, 1 << 3, 1 << 5
-CR3_DMAR, CR3_DMAT, CR3_RTSE, CR3_CTSE, CR3_CTSIE = 1 << 6, 1 << 7, 1 << 8, 1 << 9, 1 << 10
+CR3_DMAR, CR3_DMAT, CR3_RTSE, CR3_CTSE, CR3_CTSIE, CR3_ONEBIT = 1 << 6, 1 << 7, 1 << 8, 1 << 9, 1 << 10, 1 << 11
+START_8 = (1 / 8, 2 / 8)                   # x8 start-bit verification samples (RM0090 Figure 300)
 STOP_BITS = (1.0, 0.5, 2.0, 1.5)
 APB2_UARTS = ("USART1", "USART6")
 
@@ -150,8 +157,9 @@ class USART(UartRx, GatedBlock):
         rcc_ = self._rcc
         if rcc_ is not None and self._gate_loc is not None:
             from .rcc import _RST_REG, GATES
-            enr, bit = GATES[self.gate]
-            rst = _RST_REG.get(enr)
+            gates = getattr(rcc_, "GATES", GATES)            # the RCC's own table (stm32f1.rcc: F1 bit positions)
+            enr, bit = gates[self.gate]
+            rst = getattr(rcc_, "RST_REGS", _RST_REG).get(enr)
             if rst in rcc_.regs:
                 self._rst_loc = (rcc_.regs[rst].offset + bit // 8, 1 << (bit % 8))
 
@@ -235,6 +243,30 @@ class USART(UartRx, GatedBlock):
     def char_ns(self) -> float:
         b = self.baud()
         return self.char_bits() * 1e9 / b if b > 0 else 0.0
+
+    def _layout(self) -> tuple[int, str]:
+        """(data bits, parity) of the M-bit word: with PCE the MSB is the parity bit (RM0090 30.3.1, Table 140)."""
+        cr1 = self.get("CR1")
+        m = 9 if cr1 & CR1_M else 8
+        if cr1 & CR1_PCE:
+            return m - 1, "O" if cr1 & CR1_PS else "E"
+        return m, "N"
+
+    def tx_frame_for(self, word: int) -> Frame:
+        bits, par = self._layout()
+        return Frame(word, bits, par, self.stop_bits(), self.baud())
+
+    def rx_format(self) -> RxFormat:
+        """Receiver sampling (RM0090 30.3.3): 3 samples at 8/9/10 of 16 (OVER8: 4/5/6 of 8), majority vote, NF when
+        they disagree; ONEBIT: one sample in the middle, no NF on data bits. Start bit: samples 3/5/7 then 8/9/10
+        (2 of 3 at 0 each). Only the first stop bit is checked."""
+        bits, par = self._layout()
+        o8 = self.over8()
+        if self._cr3 & CR3_ONEBIT:
+            smp = (4 / 8,) if o8 else (8 / 16,)
+        else:
+            smp = SAMPLES_8 if o8 else SAMPLES_16
+        return RxFormat(self.baud(), bits, par, self.stop_bits(), samples=smp, start=START_8 if o8 else START_16)
 
     # ------------------------------------------------------------------ IRQ
     def _set_line(self, level: bool) -> None:
@@ -382,8 +414,8 @@ class USART(UartRx, GatedBlock):
             self._brk_active = False
             self.set("CR1", self.get("CR1") & ~CR1_SBK)
         b, self._tx_cur = self._tx_cur, None
-        if b is not None and self._cr3 & CR3_HDSEL and self._rx_enabled():
-            self._rx_arrive(b, "loop")                 # single-wire half duplex: the receiver sees the line
+        if b is not None and self._cr3 & CR3_HDSEL and self._rx_enabled() and self.tx_frame is not None:
+            self._rx_frame(self.tx_frame, "loop")       # single-wire half duplex: the receiver sees the line
         if self._brk_pending:
             self._start_break()
             return
@@ -433,13 +465,10 @@ class USART(UartRx, GatedBlock):
         """TDR (or a direct DR write while idle) -> shift register: TXE is set at once (30.3.2 "the data
         transmission starts, and the TXE bit is immediately set"); TC is set at the end of the frame if TXE is still
         set."""
-        self.output.append(b & 0xFF)
-        self.emit("uart", uart=self.name, dir="tx", byte=b & 0xFF)
-        for cb in self.tx_listeners:
-            cb(self, b & 0xFF)
+        self._tx_emit(self.tx_frame_for(b))
         self._cancel("_tx_ev")
         t = self.char_ns()
-        self._tx_cur = b & 0xFF
+        self._tx_cur = b & 0x1FF
         self._tx_data = True
         txe_was = self.get("SR") & SR_TXE
         if t > 0:
@@ -480,8 +509,8 @@ class USART(UartRx, GatedBlock):
         self._brk_active = True
         self._tx_cur = None
         self._tx_data = False
-        self.emit("uart", uart=self.name, dir="tx", brk=1)
         b = self.baud()
+        self._tx_emit(Frame.brk_frame(self.break_low_bits(), self.stop_bits(), b))
         low = self.break_low_bits() * 1e9 / b if b > 0 else 0.0
         if low > 0:
             self._tx_end_ns = self.chip.now_ns() + low + self.stop_bits() * 1e9 / b
@@ -545,45 +574,43 @@ class USART(UartRx, GatedBlock):
         return False
 
     def receive_break(self, bits: int = 13) -> None:
-        """A break of `bits` low bit times (at least one frame) ends now: FE + RXNE with 0x00 (30.3.3 "Break
-        character"); with CR2.LINEN, LBD when bits >= 10 (LBDL = 0) or 11 (LBDL = 1) (30.3.8; set at the delimiter,
-        i.e. now)."""
+        """A break of `bits` low bit times at this USART's baud ends now (used by tests; links deliver breaks as
+        frames): decoded like any character, i.e. FE + RXNE with 0x00 (30.3.3 "Break character") and, with
+        CR2.LINEN, LBD when it is at least 10 (LBDL = 0) / 11 (LBDL = 1) bits long (30.3.8)."""
         if self._rx_block_reason() is not None:
             return
-        self.breaks_rx += 1
-        self.emit("uart", uart=self.name, dir="rx", brk=1, bits=bits)
-        cr2 = self.get("CR2")
-        if cr2 & CR2_LINEN and bits >= (11 if cr2 & CR2_LBDL else 10):
-            self._sr_mod(SR_LBD)
-        self._rx_accept(0, framing=True)
+        for ch in decode_frame(Frame.brk_frame(bits, self.stop_bits(), self.baud()), self.rx_format()):
+            self._rx_char(ch)
 
-    def _rx_accept(self, b: int, framing: bool = False) -> None:
+    def _rx_accept(self, ch: RxChar) -> None:
+        """A decoded character (RM0090 30.3.3): the word goes to RDR with its parity bit in the MSB (PCE) and RXNE,
+        together with PE / FE / NF; a break (all 0 including the stop bit) is a framing error with 0x00, plus LBD in
+        LIN mode. RXNE still set: ORE, the character is lost. Mute mode (RWU) filters first."""
         self._cancel("_idle_ev")
         cr1 = self.get("CR1")
-        b &= 0x1FF if cr1 & CR1_M else 0xFF
-        if cr1 & CR1_PCE:
-            dmask = 0xFF if cr1 & CR1_M else 0x7F
-            msb = dmask + 1
-            b &= dmask
-            par = bin(b).count("1") & 1
-            if cr1 & CR1_PS:
-                par ^= 1
-            if par and not framing:
-                b |= msb
-        if (cr1 & (CR1_RWU | CR1_WAKE)) and not self._mute_filter(b, cr1):
+        bits, par = self._layout()
+        word = ch.data
+        if par != "N" and ch.pbit is not None:
+            word |= ch.pbit << bits
+        if ch.brk:
+            self.breaks_rx += 1
+            cr2 = self.get("CR2")
+            if cr2 & CR2_LINEN and ch.brk >= (11 if cr2 & CR2_LBDL else 10) - 0.01:
+                self._sr_mod(SR_LBD)                   # LIN break detection works in mute mode too (30.3.8)
+        if (cr1 & (CR1_RWU | CR1_WAKE)) and not self._mute_filter(word, cr1):
             self._last_rx_ns = self.chip.now_ns()
-            self.emit("uart", uart=self.name, dir="drop", byte=b & 0xFF, dropped=1, reason="mute")
+            self.emit("uart", uart=self.name, dir="drop", byte=word & 0xFF, dropped=1, reason="mute")
             return
         self._last_rx_ns = self.chip.now_ns()
         if self.get("SR") & SR_RXNE:
-            self._rx_drop(b, "overrun")
+            self._rx_drop(word, "overrun")
             self._sr_mod(SR_ORE)
         else:
-            self._rx_byte = b
-            self.set("DR", b)
-            if not framing:
-                self.emit("uart", uart=self.name, dir="rx", byte=b & 0xFF)
-            self._sr_mod(SR_RXNE | (SR_FE if framing else 0))
+            self._rx_byte = word
+            self.set("DR", word)
+            self._rx_event(ch, word)
+            err = (SR_FE if ch.fe else 0) | (SR_PE if ch.pe else 0) | (SR_NF if ch.nf else 0)
+            self._sr_mod(SR_RXNE | err)
         t = self.char_ns()
         if t > 0:
             self._idle_ev = self.chip.sched.in_ns(t, self._idle)

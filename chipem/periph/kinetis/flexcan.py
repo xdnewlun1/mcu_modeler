@@ -67,7 +67,9 @@ IRQs (by name from the chip YAML): "<name>_ORed_Message_buffer" = IFLAG1 & IMASK
 BOFFMSK; "<name>_Error" = ERRINT & ERRMSK; "<name>_Tx_Warning" = TWRNINT & TWRNMSK; "<name>_Rx_Warning" = RWRNINT &
 RWRNMSK (level lines).
 
-Not modelled: SUPV / supervisor access errors, low-power stop / doze / self wake-up (WAKINT never set), the BUSY
+Stop modes (`clock_stop`, 46.4.10.3): LPMACK/NOTRDY, TIMER held, Rx ignored, self wake (SLFWAK -> ESR1.WAKINT,
+"Wake_Up" interrupt with WAKMSK) on the first frame seen on the bus (at its end, not at its SOF), resync on exit.
+Not modelled: SUPV / supervisor access errors, doze mode, the wake-up filter (CTRL2/MCR.WAKSRC), the BUSY
 code bit (move-in is instantaneous), CTRL1.SMP / RJW (only affect sampling), TASD (arbitration is instantaneous at
 the end of the previous frame), CRC/stuff/form errors of corrupted frames (frames on the emulated bus are never
 corrupted), overload frames, CTRL2.WRMFRZ, ESR2 LPTM beyond the simple "lowest inactive / highest priority" rule.
@@ -130,6 +132,9 @@ class FlexCAN(GatedBlock):
         self._boff_ev = None
         self._boff_t = 0.0
         self._tmr = (0, 0.0, False, 0.0)          # (value, base time, running, bit ns)
+        self._lp_stop: str | None = None           # Stop mode acknowledged (46.4.10.3): the mode, else None
+        self._lp_wake = False                      # MCR.SLFWAK at the stop entry: self wake mechanism armed
+        self._lp_frz = False                       # stop entered from freeze mode (FRZACK negated, LPMACK set)
         self._lines: dict[str, bool] = {}
         self._irqs: dict[str, int | None] = {}
         self._pins: dict = {}
@@ -175,7 +180,7 @@ class FlexCAN(GatedBlock):
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         for key, suffix in (("mb", "ORed_Message_buffer"), ("boff", "Bus_Off"), ("err", "Error"),
-                            ("twrn", "Tx_Warning"), ("rwrn", "Rx_Warning")):
+                            ("twrn", "Tx_Warning"), ("rwrn", "Rx_Warning"), ("wake", "Wake_Up")):
             self._irqs[key] = irq_number(chip, f"{self.name}_{suffix}") or irq_number(chip, f"CAN{self.index}_{suffix}")
         self._sim = find_model(chip, "kinetis.sim", "SIM")
 
@@ -192,6 +197,7 @@ class FlexCAN(GatedBlock):
         super().reset()
         self._soft_state()
         self._tmr = (0, self.now_ns(), False, 0.0)
+        self._lp_stop, self._lp_wake, self._lp_frz = None, False, False
 
     def _soft_state(self) -> None:
         self.errors.reset()
@@ -274,6 +280,10 @@ class FlexCAN(GatedBlock):
             pin_reason(self.chip, self.rx_signal, self._pins) is None
 
     def can_rx_state(self, bus: CanBus) -> str | None:
+        if self._lp_stop is not None:                  # Stop: Rx input ignored; self wake watches the bus
+            if not self._lp_wake or bus is not self.can_bus or self.get("CTRL1") & LPB:
+                return None
+            return "listen" if pin_reason(self.chip, self.rx_signal, self._pins) is None else None
         if not self._on_bus(bus):
             return None
         if bus is not self._loop_bus and pin_reason(self.chip, self.rx_signal, self._pins) is not None:
@@ -286,6 +296,9 @@ class FlexCAN(GatedBlock):
     def can_rx(self, bus: CanBus, frame: CanFrame, t_sof: float, t: float) -> None:
         if self.can_rx_state(bus) is None:
             return
+        if self._lp_stop is not None:
+            self._self_wake()
+            return
         if not self.get("CTRL1") & LOM:
             self._err_events(self.errors.rx_ok())
         self.rx_frames += 1
@@ -293,6 +306,9 @@ class FlexCAN(GatedBlock):
 
     def can_rx_error(self, bus: CanBus, kind: str, t: float) -> None:
         if self.can_rx_state(bus) is None:
+            return
+        if self._lp_stop is not None:
+            self._self_wake()
             return
         if kind == "noack":
             self._err_flag(BIT0ERR)              # listen-only: "flags a BIT0 error without changing the REC"
@@ -397,6 +413,48 @@ class FlexCAN(GatedBlock):
             bus.request(self)
         else:
             bus.withdraw(self)
+
+    # ------------------------------------------------------------------ low-power modes (SMC)
+    def clock_stop(self, stopped: bool, mode: str) -> None:
+        """Stop / VLPS / LLS (46.4.10.3, Table 7-2: CAN "wakeup" in Stop/VLPS, static in LLS).  A frame of ours on
+        the wire completes (the bus engine finishes it), then the module ignores its Rx input, drives Tx recessive
+        (no requests), sets MCR.NOTRDY and LPMACK and its free-running TIMER stops.  Stop entered from freeze mode
+        sets LPMACK and negates FRZACK.  Self wake (MCR.SLFWAK at the stop entry, Stop/VLPS only): bus activity sets
+        ESR1.WAKINT (interrupt "Wake_Up" with MCR.WAKMSK), which wakes the core; the frame itself is not received.
+        Exit: LPMACK/NOTRDY clear and the module resynchronises to the bus (11 recessive bits).  WAIT/VLPW: the K22
+        FlexCAN has no MCR.DOZE, nothing happens."""
+        if self.chip is None or mode in ("WAIT", "VLPW"):
+            return
+        if stopped:
+            mcr = self.get("MCR")
+            if mcr & MDIS:
+                return                                       # disabled: already in its low-power state
+            now = self.now_ns()
+            self._tmr = (self._timer_value(now), now, False, self._tmr[3])
+            self._lp_stop = mode
+            self._lp_frz = not self._running()
+            self._lp_wake = bool(mcr & SLFWAK) and mode in ("STOP", "VLPS")
+            self.set("MCR", (mcr | LPMACK | NOTRDY) & ~FRZACK)
+            self._sync_t = float("inf")
+            self.chip.sched.cancel(self._sync_ev)
+            self._sync_ev = None
+            self._bus().withdraw(self)
+            return
+        if self._lp_stop is None:
+            return
+        self._lp_stop = None
+        self._lp_wake = False
+        self.set("MCR", self._mcr_status(self.get("MCR")))
+        self._timer_rebase()
+        if self._running():
+            self._start_sync()
+        self._update_irq()
+
+    def _self_wake(self) -> None:
+        """Recessive-to-dominant transition seen in Stop with self wake armed (46.4.10.3)."""
+        self._lp_wake = False
+        self._store_bits("ESR1", WAKINT, WAKINT)
+        self._update_irq()
 
     # ------------------------------------------------------------------ timer
     def _timer_value(self, t: float) -> int:
@@ -604,6 +662,7 @@ class FlexCAN(GatedBlock):
         self._set_line("err", bool(esr & ERRINT and c1 & ERRMSK))
         self._set_line("twrn", bool(esr & TWRNINT and c1 & TWRNMSK))
         self._set_line("rwrn", bool(esr & RWRNINT and c1 & RWRNMSK))
+        self._set_line("wake", bool(esr & WAKINT and self.get("MCR") & WAKMSK))
 
     def _irq_write(self, blk, reg, old, new):
         self._update_irq()

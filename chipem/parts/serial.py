@@ -21,9 +21,13 @@ How data travels (the "serial router", one per board, created with the first ser
   - ground: the driver and the receiver of every segment must share a ground (`no_ground`); a chip's ground is a net
     with a `gnd` part, `drive: L` or one of its VSS pins; a transceiver needs its `gnd` port on a grounded (L) net;
   - a disabled stage (transceiver shut down / not powered) passes nothing (`stage_off`);
-  - framing: baud > 3 % apart or another frame length -> framing errors (`framing`);
   - a chip RX pin not muxed to the UART -> `pin_not_muxed`; then the UART's own rules (not listening, overrun).
   A lost byte is a `uart` event dir=drop with the reason; the first loss per path and reason is also one `warn`.
+  Frame format: each character travels as its transmitter's frame (chipem/periph/uartwire.py `Frame`: baud, data
+  bits, parity bit, stop bits, breaks) and the receiver decodes it at its own settings: a chip UART through its line
+  decoder (framing / parity / noise errors, garbage at a wrong baud), the adapter like the PC's UART (what a raw-mode
+  tty reads: 0x00 for a framing error or a break; chipem/hostserial.py). A settings mismatch on a path is reported
+  once as a `warn` (`framing`); the bytes are decoded, not dropped.
   A path with a swapped TX/RX cable simply reaches no receiver (TXD meets TXD): nothing arrives.
   Paths are cached per wiring/owner/part-state version, so the per-byte cost is a dictionary lookup.
 * Direct chip-to-chip nets (no part in between) are not handled here: the board's automatic UART links do that.
@@ -125,9 +129,11 @@ class SerialRouter:
         for cid, chip in board.chips.items():
             blocks = chip.uart_blocks() if hasattr(chip, "uart_blocks") else {}
             for name, blk in blocks.items():
-                cb = (lambda b_, byte, _c=cid, _n=name: self._chip_tx(_c, _n, b_, byte))
-                blk.tx_listeners.append(cb)
-                self._hooks.append((blk, cb))
+                cb = (lambda b_, x, _c=cid, _n=name: self._chip_tx(_c, _n, b_, x))
+                lst = getattr(blk, "frame_listeners", None)
+                lst = lst if lst is not None else blk.tx_listeners
+                lst.append(cb)
+                self._hooks.append((lst, cb))
             if chip.pins is not None:
                 self._unsubs.append(chip.pins.subscribe(self._pin_event))
 
@@ -139,9 +145,9 @@ class SerialRouter:
         self.version += 1
 
     def close(self) -> None:
-        for blk, cb in self._hooks:
-            if cb in blk.tx_listeners:
-                blk.tx_listeners.remove(cb)
+        for lst, cb in self._hooks:
+            if cb in lst:
+                lst.remove(cb)
         self._hooks = []
         for u in self._unsubs:
             u()
@@ -340,19 +346,29 @@ class SerialRouter:
         return got
 
     # ---------------------------------------------------------------- traffic
-    def _chip_tx(self, cid: str, name: str, blk: Any, byte: int) -> None:
+    def _chip_tx(self, cid: str, name: str, blk: Any, x: Any) -> None:
+        """A chip UART transmits `x`: a Frame (frame_listeners) or a byte (models without frames)."""
         chip = self.board.chips[cid]
+        fr = None if isinstance(x, int) else x
         for pin in self._tx_pins(cid, name):
             net = self.board._net_of.get((cid, pin.id))
             if net is None or not net.ports:
                 continue
             sinks = self.sinks(("pin", cid, pin.id), net, 0, "ttl", ("chip", cid), None)
-            t = chip.now_ns() + (blk.char_ns() if hasattr(blk, "char_ns") else 0.0)
-            self.send(f"{cid}.{name}", chip, sinks, byte & 0xFF, t, src_blk=blk)
+            if fr is not None and fr.baud > 0:
+                t = chip.now_ns() + fr.duration_ns()
+            else:
+                t = chip.now_ns() + (blk.char_ns() if hasattr(blk, "char_ns") else 0.0)
+            self.send(f"{cid}.{name}", chip, sinks, (fr.data if fr is not None else x) & 0xFF, t, src_blk=blk,
+                      frame=fr)
 
     def send(self, src: str, src_chip: Any, sinks: list[_Sink], b: int, t: float, *, src_blk: Any = None,
-             src_line: Any = None) -> None:
-        """Deliver byte `b` whose stop bit ends at virtual time `t` to every sink."""
+             src_line: Any = None, frame: Any = None) -> None:
+        """Deliver byte `b` whose stop bit ends at virtual time `t` to every sink. `frame` (a uartwire.Frame) is
+        the character as transmitted; without it the frame comes from `src_line` (a hostserial.LineSettings) or, if
+        neither is given, the byte arrives in each receiver's own format (no framing check)."""
+        if frame is None and src_line is not None:
+            frame = src_line.frame(b)
         if not sinks:
             self._once(("nosink", src), "info", f"serial: {src} transmits but its line reaches no receiver "
                                                 f"(bytes go nowhere)", t)
@@ -366,14 +382,24 @@ class SerialRouter:
                 continue
             why = self._framing(s, src_blk, src_line)
             if why is not None:
+                if frame is None:
+                    self._once((src, s.label, "framing"), "warn", f"serial: {src} → {s.label}: {why}; the "
+                                                                  f"receiver sees framing errors, bytes are lost", t)
+                    self._drop(s, b, "framing", t, src_chip)
+                    continue
                 self._once((src, s.label, "framing"), "warn", f"serial: {src} → {s.label}: {why}; the receiver "
-                                                              f"sees framing errors, bytes are lost", t)
-                self._drop(s, b, "framing", t, src_chip)
-                continue
+                                                              f"decodes at its own settings (framing / parity "
+                                                              f"errors, garbage)", t)
             if s.kind == "part":
-                self._at(src_chip, t, s.part.serial_receive, b)
+                rf = getattr(s.part, "serial_receive_frame", None)
+                if frame is not None and rf is not None:
+                    self._at(src_chip, t, rf, frame)
+                elif frame is not None:
+                    self._at(src_chip, t, self._part_receive, s.part, frame)
+                else:
+                    self._at(src_chip, t, s.part.serial_receive, b)
             else:
-                self._at(self.board.chips[s.cid], t, self._pin_receive, s, b, t)
+                self._at(self.board.chips[s.cid], t, self._pin_receive, s, b, t, frame)
 
     def _framing(self, s: _Sink, src_blk: Any, src_line: Any) -> str | None:
         from ..hostserial import LineSettings, framing_mismatch
@@ -411,11 +437,24 @@ class SerialRouter:
         else:
             chip.sched.at_ns(t, fn, *args)
 
-    def _pin_receive(self, s: _Sink, b: int, t: float) -> None:
+    @staticmethod
+    def _part_receive(part: Any, frame: Any) -> None:
+        """A byte-level part sink (serial_receive only): the frame decoded at the part's `line()` (a framing error
+        or a break reads as 0x00, as on a raw tty; chipem/hostserial.py)."""
+        from ..hostserial import host_bytes_for, host_rx_format
+        ln = part.line() if hasattr(part, "line") else None
+        for b, _ch in host_bytes_for(frame, host_rx_format(ln, frame)):
+            part.serial_receive(0 if b == "break" else b)
+
+    def _pin_receive(self, s: _Sink, b: int, t: float, frame: Any = None) -> None:
         blks = self._rx_blocks(s.cid, s.pin)
         for blk, sig in blks:
             if self._owned(s.pin, sig):
-                blk.receive(bytes([b]))
+                rf = getattr(blk, "receive_frame", None)
+                if frame is not None and rf is not None:
+                    rf(frame, t)
+                elif frame is None or not frame.brk:
+                    blk.receive(bytes([b]))
                 return
         if blks:
             blks[0][0]._rx_drop(b, "pin_not_muxed")
@@ -495,6 +534,7 @@ class UsbSerialAdapter(_SerialPart):
         self.to_host = 0
         self.from_host = 0
         self.dropped = 0
+        self.errors = 0
         self.rx_tail = bytearray()
         self._q: deque[int] = deque()
         self._ev = None
@@ -573,9 +613,11 @@ class UsbSerialAdapter(_SerialPart):
         h = self.host
         if h is None:
             return
-        data = h.read()
-        if data:
-            self._send(data)
+        for item in h.read_stream():
+            if isinstance(item, tuple):
+                self._send_break(item[1])
+            else:
+                self._send(item)
         seen = (h.connected, tuple(sorted(h.modem_from_host().items())))
         if seen != self._modem_seen:
             self._modem_seen = seen
@@ -586,30 +628,69 @@ class UsbSerialAdapter(_SerialPart):
 
     def _send(self, data: bytes) -> None:
         self._q.extend(data)
-        if self._ev is None and self.board is not None:
-            self._ev = self._in(self.line().char_ns(), self._tx_tick)
+        self._kick()
+
+    def _send_break(self, seconds: float = 0.0) -> None:
+        """The PC sends a break (seconds; 0: two character times, at least 13 bits)."""
+        ln = self.line()
+        bit = 1e9 / ln.baud if ln.baud > 0 else 0.0
+        bits = max(int(seconds * 1e9 / bit), 1) if seconds and bit else max(13, int(round(2 * ln.char_bits())))
+        self._q.append(("brk", bits))
+        self._kick()
+
+    def _kick(self) -> None:
+        if self._ev is None and self.board is not None and self._q:
+            self._ev = self._in(self._item_ns(self._q[0]), self._tx_tick)
+
+    def _item_ns(self, item: Any) -> float:
+        ln = self.line()
+        if isinstance(item, tuple):
+            return (item[1] + ln.stop) * 1e9 / ln.baud if ln.baud > 0 else 0.0
+        return ln.char_ns()
 
     def _tx_tick(self) -> None:
+        from ..periph.uartwire import Frame
         self._ev = None
         if not self._q:
             return
-        b = self._q.popleft()
-        self.from_host += 1
+        item = self._q.popleft()
+        ln = self.line()
+        if isinstance(item, tuple):
+            b, fr = 0, Frame.brk_frame(item[1], ln.stop, ln.baud)
+        else:
+            b, fr = item, ln.frame(item)
+            self.from_host += 1
         board = self.board
         net = board._port_net.get((self.id, "txd")) if board is not None else None
         if net is not None:
             r = serial_router(board)
             sinks = r.sinks(("part", self.id, "txd"), net, 1 if self.domain == "rs232" else 0, self.domain, self,
                             (self, "txd"))
-            r.send(f"{self.id}.txd", board.clock_chip, sinks, b, self.now(), src_line=self.line())
-        if self._q:
-            self._ev = self._in(self.line().char_ns(), self._tx_tick)
+            r.send(f"{self.id}.txd", board.clock_chip, sinks, b, self.now(), src_line=ln, frame=fr)
+        self._kick()
 
     # ---- receive side ---------------------------------------------------------------------------------------------
     def serial_sink(self, port: str) -> dict | None:
         if port != "rxd":
             return None
         return {"inv": 1 if self.domain == "rs232" else 0, "domain": self.domain}
+
+    def serial_receive_frame(self, fr: Any) -> None:
+        """A chip frame reaches RXD: the PC's UART decodes it with the host line settings (chipem/hostserial.py:
+        a framing error or a break reads as 0x00, a break also goes to a pyserial port as a break)."""
+        from ..hostserial import host_bytes_for, host_rx_format
+        ln = self.line()
+        for b, ch in host_bytes_for(fr, host_rx_format(ln, fr)):
+            if ch is not None and ch.flags() and self.board is not None:
+                self.errors += 1
+                self.board.log.event("uart", self.now(), chip="board", uart=f"{self.id}.rxd", dir="rx",
+                                     byte=0 if b == "break" else b, **ch.flags())
+            if b == "break":
+                if self.host is not None:
+                    self.host.send_break((ch.brk if ch is not None else fr.brk) / ln.baud if ln.baud > 0 else 0.0)
+                self.rx_tail.append(0)
+                continue
+            self.serial_receive(b)
 
     def serial_receive(self, b: int) -> None:
         self.to_host += 1
@@ -630,8 +711,8 @@ class UsbSerialAdapter(_SerialPart):
         h = self.host
         d = {"transport": h.kind if h is not None else None, "path": h.describe() if h is not None else None,
              "connected": bool(h.connected) if h is not None else False, "line": str(self.line()),
-             "to_host": self.to_host, "from_host": self.from_host, "dropped": self.dropped, "queued": len(self._q),
-             "levels": self.domain, "txd": _volts(self.domain, self._out.get("txd")),
+             "to_host": self.to_host, "from_host": self.from_host, "dropped": self.dropped, "errors": self.errors,
+             "queued": len(self._q), "levels": self.domain, "txd": _volts(self.domain, self._out.get("txd")),
              "rx": self.rx_tail[-48:].decode("latin-1")}
         for p in ("dtr", "rts"):
             d[p] = self._asserted(p)
@@ -643,19 +724,22 @@ class UsbSerialAdapter(_SerialPart):
         h = self.host
         base = h.info() if h is not None else {"transport": None, "path": None, "connected": False}
         return {"name": self.id, "kind": "part", **base, "line": str(self.line()), "to_host": self.to_host,
-                "from_host": self.from_host, "dropped": self.dropped, "queued": len(self._q)}
+                "from_host": self.from_host, "dropped": self.dropped, "errors": self.errors, "queued": len(self._q)}
 
     def set(self, **values: Any) -> dict:
         for k, v in values.items():
             if k == "send":
                 self._send(_escapes(v))
+            elif k == "break":
+                self._send_break(float(v) if str(v).strip() not in ("", "1", "true", "True") else 0.0)
             elif k in ("dtr", "rts"):
                 self.manual[k] = _bool(v, f"{self.id}.{k}")
                 self._drive(k, self._modem_level(k))
             elif k == "clear":
                 self.rx_tail.clear()
             else:
-                raise ValueError(f"part {self.id} (usb_serial_adapter): cannot set {k!r} (use send, dtr, rts, clear)")
+                raise ValueError(f"part {self.id} (usb_serial_adapter): cannot set {k!r} (use send, break, dtr, rts, "
+                                 "clear)")
         return self.state()
 
     def stimulus(self, value: str) -> dict:

@@ -223,6 +223,16 @@ class CMT(GatedBlock):
         self._update()
         self._ev = chip.sched.at_ns(t, self._cycle_start, t, first)
 
+    # ------------------------------------------------------------------ low-power modes (SMC freezer)
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Normal Stop / VLPS / LLS (41.4.2, Table 7-2 "static"): the CMT clocks halt, the IRO pin holds its level
+        and the modulator resumes where it was: the SMC held the events, move the cycle times with them."""
+        from ..lowpower import shift_event_args
+        self._c0 += dns
+        self._mark_end += dns
+        self._cycle_end += dns
+        shift_event_args(self, dns, self._cycle_start, self._carrier_edge)
+
     def _cmd_values(self) -> tuple[int, int]:
         return (self.get("CMD1") << 8) | self.get("CMD2"), (self.get("CMD3") << 8) | self.get("CMD4")
 

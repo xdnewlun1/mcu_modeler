@@ -38,7 +38,9 @@
   (RSER.TFFF_DIRS/RFDF_DIRS); DMA requests use the DMAMUX sources SPI0 RX/TX = 14/15, SPI1 = 16, SPI2 = 17.
 * Every frame is recorded in `self.frames` (pcs, tx, rx); `self.output` collects the transmitted bytes.
 Not modelled (one `warn` each when enabled): continuous SCK (MCR.CONT_SCKE), the modified transfer format (MTFE;
-classic timing is used), the PCS strobe (PCSSE), Doze/Stop modes; pin input/output delays.
+classic timing is used), the PCS strobe (PCSSE), pin input/output delays.
+Stop modes and Doze (WAIT/VLPW with MCR.DOZE) (`clock_stop`, 47.4.8.1): the frame in progress completes, then the
+module is STOPPED until wake-up.
 """
 from __future__ import annotations
 
@@ -52,6 +54,7 @@ from .clockutil import bus_hz
 from .dma import dma_request
 
 MCR_MSTR, MCR_CONT_SCKE, MCR_MTFE, MCR_PCSSE, MCR_ROOE = 1 << 31, 1 << 30, 1 << 26, 1 << 25, 1 << 24
+MCR_DOZE = 1 << 15
 MCR_MDIS, MCR_DIS_TXF, MCR_DIS_RXF, MCR_CLR_TXF, MCR_CLR_RXF, MCR_HALT = 1 << 14, 1 << 13, 1 << 12, 1 << 11, \
     1 << 10, 1
 SR_TCF, SR_TXRXS, SR_EOQF, SR_TFUF, SR_TFFF, SR_RFOF, SR_RFDF = (1 << 31, 1 << 30, 1 << 28, 1 << 27, 1 << 25,
@@ -141,6 +144,7 @@ class DSPI(GatedBlock):
         self._s_rx = 0
         self._s_bit = 0
         self._s_loaded = False
+        self._lp_stop = False                   # Stop / VLPS / LLS: clocks off from the next frame boundary
 
     # ------------------------------------------------------------------ setup
     def attach(self, chip: Any) -> None:
@@ -188,7 +192,28 @@ class DSPI(GatedBlock):
     # ------------------------------------------------------------------ state
     def running(self) -> bool:
         mcr, sr = self.get("MCR"), self.get("SR")
-        return not (mcr & (MCR_HALT | MCR_MDIS)) and not sr & SR_EOQF
+        return not (mcr & (MCR_HALT | MCR_MDIS)) and not sr & SR_EOQF and not self._lp_stop
+
+    # ------------------------------------------------------------------ low-power modes (SMC)
+    def clock_stop(self, stopped: bool, mode: str) -> None:
+        """External Stop mode (47.4.8.1): a frame in progress completes (the stop acknowledge waits for the frame
+        boundary; its events keep running), then the module is STOPPED (SR.TXRXS = 0) until the clocks return: no
+        new master frame starts and slave SCK/SS edges are not seen.  WAIT/VLPW is Doze (3.9.3.8): the same with
+        MCR.DOZE = 1, nothing otherwise."""
+        if self.chip is None:
+            return
+        if stopped:
+            if mode in ("WAIT", "VLPW") and not self.get("MCR") & MCR_DOZE:
+                return
+            self._lp_stop = True
+            if self._frame is None and self._ev is not None:       # frame start pending (tDT / tASC wait): parked
+                self.chip.sched.cancel(self._ev)
+                self._ev = None
+            return
+        if not self._lp_stop:
+            return
+        self._lp_stop = False
+        self._kick()
 
     def is_master(self) -> bool:
         return bool(self.get("MCR") & MCR_MSTR)
@@ -528,7 +553,7 @@ class DSPI(GatedBlock):
             self._refresh_ports()
 
     def _pin_changed(self, pin: Any) -> None:
-        if self.chip is None or not self._slave_active():
+        if self.chip is None or self._lp_stop or not self._slave_active():
             return
         board = self.chip.pins
         owner = pin.owner

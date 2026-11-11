@@ -151,6 +151,7 @@ class I2SEngine:
 
     def __init__(self, blk: Any, idx: str, ext: bool = False):
         self.blk = blk
+        self.lp_owner = blk                       # the PWR freezer holds our events with the block's
         self.ext = ext
         self.idx = idx
         self.sig = {"CK": f"I2S{idx}_CK", "WS": f"I2S{idx}_WS", "MCK": f"I2S{idx}_MCK",

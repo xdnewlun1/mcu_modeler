@@ -41,7 +41,10 @@ words per frame.
 * Observation: `tx_words[ch]` / `rx_words[ch]` (deques of (t_ns, word)), and an `i2s` log event per
   `params.event_frames` frames (default 64) and side: `{block, dir: tx|rx, ch, frames, words: [first word of each
   slot ...], bits}` (docs/CONTRACTS.md).
-Not modelled: BCS (bit clock swap; one `warn`), BCI, Stop/Debug-mode behaviour (STOPE/DBGE), the MCLK duty cycle
+* Stop modes (`clock_stop`, 51.1.3.2 / 3.9.7.3): a side with xCSR.STOPE = 1 whose bit clock survives the stop (external,
+  or from an MCLK on the pin / OSCERCLK) keeps running and its interrupts wake the core; other sides finish the current
+  frame and stay disabled until the wake-up (LLS/VLLS: always); the MCLK output stops unless it comes from OSCERCLK.
+Not modelled: BCS (bit clock swap; one `warn`), BCI, Debug-mode behaviour (DBGE), the MCLK duty cycle
 and divider jitter (the average frequency is exact), pad delays.
 """
 from __future__ import annotations
@@ -109,6 +112,7 @@ class _Side:
         self.word_mode = False
         self.te_clear = False           # TE/RE cleared by software: reads 1 until the end of the frame
         self.bce_clear = False
+        self.lp_off = False             # Stop mode without STOPE / clock: disabled from the end of the frame
 
     # ------------------------------------------------------------------ config helpers
     def g(self, i: int) -> int:
@@ -346,6 +350,42 @@ class SAI(GatedBlock):
         if first:
             self._refresh_ports()
 
+    # ------------------------------------------------------------------ low-power modes (SMC)
+    def _clock_survives_stop(self, cs: _Side) -> bool:
+        """The bit clock of clock side `cs` keeps running in Stop/VLPS (51.1.3.2): external (BCD=0), or divided from
+        an audio master clock that keeps running (MCLK pin input with MOE=0, or OSCERCLK, MICS=1)."""
+        if not cs.g(2) & (1 << 24):
+            return True
+        if (cs.g(2) >> 26) & 3 != 1:                      # MSEL: bus clock (stopped)
+            return False
+        return not self.get("MCR") & MOE or (self.get("MCR") >> 24) & 3 == 1
+
+    def clock_stop(self, stopped: bool, mode: str) -> None:
+        """Stop / VLPS (51.1.3.2, 3.9.7.3): a side keeps operating with xCSR.STOPE = 1 and a bit clock that survives
+        the stop (an interrupt from it wakes the core through the NVIC); otherwise it is disabled after completing the
+        current frame.  LLS/VLLS (3.9.7.3.2): STOPE is ignored, both sides stop at the end of the frame.  The MCLK
+        output stops unless it comes from OSCERCLK.  WAIT/VLPW: unaffected."""
+        if self.chip is None or mode in ("WAIT", "VLPW"):
+            return
+        if stopped:
+            low_leak = mode in ("LLS", "VLLS")
+            for sd in (self.tx, self.rx):
+                cs = self._partner(sd) if sd.sync() == 1 else sd
+                keep = not low_leak and bool(sd.csr_v() & STOPE) and self._clock_survives_stop(cs)
+                sd.lp_off = not keep
+            if low_leak or (self.get("MCR") >> 24) & 3 != 1:
+                self.chip.sched.cancel(self._mclk_ev)      # MCLK divider input stopped: the pin holds its level
+                self._mclk_ev = None
+            self._reconsider()
+            for cs in (self.tx, self.rx):
+                if cs.running and not cs.in_frame and cs.lp_off and not self._served(cs):
+                    self._stop_clock(cs)
+            return
+        self.tx.lp_off = self.rx.lp_off = False
+        if self.get("MCR") & MOE and self._mclk_ev is None and 0 < self.mclk_hz() <= self.mclk_edges_max_hz:
+            self._mclk_update()
+        self._reconsider()
+
     def _set_mclk(self, lvl: str) -> None:
         self._mclk_lvl = lvl
         pins = getattr(self.chip, "pins", None)
@@ -420,7 +460,7 @@ class SAI(GatedBlock):
     def _side_active(self, sd: _Side) -> bool:
         """TE/RE set (and, synchronous, the partner's too), not in software reset."""
         v = sd.csr_v()
-        if not v & TE or v & SRST or sd.sync() in (2, 3):
+        if not v & TE or v & SRST or sd.sync() in (2, 3) or sd.lp_off:
             return False
         if sd.sync() == 1:
             return bool(self._partner(sd).csr_v() & TE)
@@ -647,7 +687,7 @@ class SAI(GatedBlock):
         if cs.bce_clear:
             cs.bce_clear = False
             self.set(cs.csr, self.get(cs.csr) & ~BCE)
-        if not cs.csr_v() & BCE and not self._served(cs):
+        if (not cs.csr_v() & BCE or cs.lp_off) and not self._served(cs):
             self._stop_clock(cs)
 
     def _emit_block(self, sd: _Side) -> None:

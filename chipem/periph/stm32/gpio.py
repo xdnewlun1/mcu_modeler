@@ -52,6 +52,9 @@ def _zero(blk, reg):
     return 0
 
 
+_zero.pure_read = True        # write-only register reads 0: the debugger may peek it (periph.base.peek_reg)
+
+
 @register("stm32.gpio")
 class GPIO(GatedBlock):
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):

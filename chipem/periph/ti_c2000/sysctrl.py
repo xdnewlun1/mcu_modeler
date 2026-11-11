@@ -34,13 +34,21 @@ PLLSTS.MCLKSTS = 1 and a missing-clock reset (MCLKRES: internal, PLLCR/PLLSTS an
 runs at the PLL limp frequency (`params.limp_hz`): limp/2 with the PLL enabled, limp / DIVSEL divider in bypass.
 MCLKCLR clears MCLKSTS and re-arms the detector (another MCLKRES if OSCCLK is still missing); XRS clears it too.
 With MCLKOFF = 1 there is no limp clock and the CPU stops until OSCCLK returns.
+
+280x layout (TMS320F280x, SPRU712H ch. 3; picked automatically when the register table's PLLSTS has a CLKINDIV
+field, e.g. chips/tms320f2808_regs.yaml): the CPU clock divider is PLLSTS.CLKINDIV (bit 1; 0 = /2 at reset, 1 = /1)
+instead of DIVSEL, so SYSCLKOUT = OSCCLK x DIV / 2 (or x DIV with CLKINDIV = 1), bypass OSCCLK / 2 (or / 1); limp mode
+runs at limp/2 with the PLL enabled and at limp/2 or limp (CLKINDIV) in bypass (SPRU712H 3.2.2).  The 280x boot ROM
+does not touch the PLL (SPRU722C 2.3), so `boot_divsel` is not applied.  A PLLCR write with CLKINDIV = 1 warns
+(Table 3-8: CLKINDIV must be 0 before writing PLLCR).  The clock gates are the PCLKCRx fields of the register table
+(280x: PCLKCR0/PCLKCR1 only, SPI-B/C/D gates; there is no PCLKCR3, so CPU timers and GPIO inputs are not gated).
 """
 from __future__ import annotations
 
 from typing import Any
 
 from ..registry import register
-from ._util import C2000Block, build_regs, fmt_hz
+from ._util import C2000Block, build_regs, fmt_hz, table
 
 GATES = {
     "PCLKCR0": {"TBCLKSYNC": 2, "ADCENCLK": 3, "I2CAENCLK": 4, "SCICENCLK": 5, "SPIAENCLK": 8, "SCIAENCLK": 10,
@@ -53,7 +61,34 @@ GATES = {
 _GATE_OF = {g: (reg, bit) for reg, d in GATES.items() for g, bit in d.items()}
 PLL_LOCK_OSC_CYCLES = 131072
 OSCOFF, MCLKOFF, MCLKSTS, MCLKCLR, PLLOFF = 1 << 5, 1 << 6, 1 << 3, 1 << 4, 1 << 2
+CLKINDIV = 1 << 1                       # 280x PLLSTS (SPRU712H Figure 3-13)
 WDINT_OSC_CYCLES = 512
+
+
+def _gates_from_table(name: str, regs_file: str | None) -> dict[str, tuple[str, int]] | None:
+    """{gate field: (PCLKCRx, bit)} from the register table's PCLKCRx fields (None: no table / no fields)."""
+    try:
+        pr = table((name, "SYSCTRL"), regs_file)
+    except Exception:
+        return None
+    if pr is None:
+        return None
+    out: dict[str, tuple[str, int]] = {}
+    for reg in ("PCLKCR0", "PCLKCR1", "PCLKCR2", "PCLKCR3"):
+        if reg not in pr:
+            continue
+        for f in pr[reg].fields:
+            if f.name.endswith("ENCLK") or f.name == "TBCLKSYNC":
+                out[f.name] = (reg, f.lsb)
+    return out or None
+
+
+def _has_clkindiv(name: str, regs_file: str | None) -> bool:
+    try:
+        pr = table((name, "SYSCTRL"), regs_file)
+        return pr is not None and "PLLSTS" in pr and pr["PLLSTS"].has_field("CLKINDIV")
+    except Exception:
+        return False
 
 
 @register("ti_c2000.sysctrl")
@@ -77,6 +112,8 @@ class SysCtrl(C2000Block):
         }
         regs = build_regs((name, "SYSCTRL"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, regs, params=params, log=log)
+        self.gate_of = _gates_from_table(name, params.get("regs_file")) or _GATE_OF
+        self.clkindiv = _has_clkindiv(name, params.get("regs_file"))      # 280x divider layout
         self.ext_hz = float(params.get("ext_hz", 30_000_000))
         self.boot_divsel = int(params.get("boot_divsel", 2))
         self.pll_lock_ns = params.get("pll_lock_ns")
@@ -124,8 +161,13 @@ class SysCtrl(C2000Block):
 
     def sysclk_hz(self) -> float:
         div = self._locked_div
-        ds = self._divsel()
         osc = self.ext_hz
+        if self.clkindiv:                          # 280x: CLKIN = (OSCCLK or OSCCLK x DIV) / (2 or 1)
+            n = 1 if self.get("PLLSTS") & CLKINDIV else 2
+            if self.limp:
+                return self.limp_hz / 2 if (self.get("PLLCR") & 0xF) != 0 else self.limp_hz / n
+            return (osc if div == 0 else osc * div) / n
+        ds = self._divsel()
         if self.limp:
             if (self.get("PLLCR") & 0xF) != 0:
                 return self.limp_hz / 2
@@ -148,7 +190,7 @@ class SysCtrl(C2000Block):
         return float(self.chip.clock.hz) if self.chip is not None else self.sysclk_hz()
 
     def clock_enabled(self, gate: str) -> bool:
-        g = _GATE_OF.get(gate)
+        g = self.gate_of.get(gate)
         if g is None:
             return True
         reg, bit = g
@@ -195,8 +237,9 @@ class SysCtrl(C2000Block):
             self.limp = False
             self._dead = False
             self._locked_div = 0
-            st = self.get("PLLSTS") & ~(3 << 7)
-            self.set("PLLSTS", st | ((self.boot_divsel & 3) << 7))
+            if not self.clkindiv:                  # 2833x boot ROM DIVSEL (the 280x ROM leaves the PLL alone)
+                st = self.get("PLLSTS") & ~(3 << 7)
+                self.set("PLLSTS", st | ((self.boot_divsel & 3) << 7))
         self._wd_key55 = False
         if self._wd_reset_flag:
             self.set("WDCR", self.get("WDCR") | 0x80)
@@ -443,7 +486,13 @@ class SysCtrl(C2000Block):
             self.limp = False
             self.emit("info", block=self.name, msg="PLLSTS.MCLKCLR: missing-clock status cleared")
             self._apply_clock("MCLKCLR")
-        if (old ^ new) & (3 << 7):
+        if self.clkindiv:
+            if (old ^ new) & CLKINDIV:
+                if new & CLKINDIV and not new & 1:
+                    self.emit("warn", block=self.name, msg="PLLSTS.CLKINDIV set while PLLLOCKS = 0 (SPRU712H: only "
+                              "after the PLL has locked)")
+                self._apply_clock("CLKINDIV")
+        elif (old ^ new) & (3 << 7):
             self._apply_clock("DIVSEL")
         if clr or (old ^ new) & (OSCOFF | MCLKOFF):
             self._osc_changed()
@@ -453,7 +502,11 @@ class SysCtrl(C2000Block):
         div = new & 0xF
         if div > 10:
             self.emit("warn", block=self.name, msg=f"PLLCR.DIV={div} is reserved (max 10)")
-        if self._divsel() not in (0, 1) and div != old & 0xF:
+        if self.clkindiv:
+            if self.get("PLLSTS") & CLKINDIV and div != old & 0xF:
+                self.emit("warn", block=self.name, msg="PLLCR written while PLLSTS.CLKINDIV = 1 (SPRU712H Table 3-8: "
+                          "CLKINDIV must be 0 before writing PLLCR)")
+        elif self._divsel() not in (0, 1) and div != old & 0xF:
             self.emit("warn", block=self.name, msg="PLLCR written while PLLSTS.DIVSEL != 0 (TRM: set DIVSEL to /4 "
                       "before changing PLLCR)")
         if div == (old & 0xF) and self._lock_ev is None:

@@ -1,0 +1,29 @@
+{
+ "format": "c28img",
+ "unit_bits": 16,
+ "entry": 4096000,
+ "segments": [
+  {
+   "addr": 4096000,
+   "data_hex": "103b22761f76c001292868001118fdff21280a001140ff6c1f76be011618cfff1f76bf010c2804001f76be011a1a04001a761f76bf010e280400a92850c3ff9cff60fa6f"
+  },
+  {
+   "addr": 4161526,
+   "data_hex": "7e000080"
+  }
+ ],
+ "symbols": {
+  "LED": 4,
+  "GPBMUX1": 28566,
+  "GPBDIR": 28570,
+  "GPBCLEAR": 28620,
+  "GPBTOGGLE": 28622,
+  "PLLSTS": 28689,
+  "PLLCR": 28705,
+  "WDCR": 28713,
+  "_c_int00": 4096000,
+  "pll": 4096010,
+  "loop": 4096027,
+  "dly": 4096031
+ }
+}

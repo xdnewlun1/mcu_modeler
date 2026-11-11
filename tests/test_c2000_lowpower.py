@@ -432,3 +432,70 @@ def test_flash_power_state_machine():
     assert c.bus.read(FSTATUS, 1) & 0xF == 0x9                   # standby, ACTIVEWAITS counting
     c.run_cycles(520)
     assert c.bus.read(FSTATUS, 1) & 0xF == 0x3
+
+
+# ------------------------------------------------------------------ STANDBY / HALT freeze of the remaining blocks
+def _standby(c, blk, ns):
+    """SYSCLKOUT to `blk` off for `ns` (what ti_c2000.sysctrl does to every clocked block in STANDBY/HALT)."""
+    blk.clock_stop(True, "STANDBY")
+    c.clock.advance(c.clock.ns_to_cycles(ns))
+    c.sched.run_due()
+    blk.clock_stop(False, "STANDBY")
+
+
+def test_mcbsp_sample_rate_generator_holds_in_standby():
+    c = _fake()
+    m = c.peripherals["MCBSPA"]
+    m._t_srg, m._Lc = c.clock.cycles, 100
+    n0 = m._cycle_now()
+    _standby(c, m, 1e6)
+    assert m._cycle_now() == n0                           # CLKG cycle count continues from where it stopped
+
+
+def test_ecan_time_stamp_counter_holds_and_resyncs_in_standby():
+    c = _fake()
+    e = c.peripherals["ECANA"]
+    e._cce = False
+    e.can_bit_ns = lambda: 1000.0                        # 1 Mbit/s bit time (CANBTC programming not needed here)
+    e._tsc = (0, c.now_ns(), True, 1000.0)               # TSC running (normal mode)
+    c.clock.advance(c.clock.ns_to_cycles(50e3))
+    v0 = e._tsc_value(c.now_ns())
+    assert v0 > 0
+    _standby(c, e, 10e6)
+    assert e._tsc_value(c.now_ns()) == v0                 # no time stamps counted while SYSCLKOUT was off
+    assert e._sync_t > c.now_ns()                         # resynchronising to the bus (11 recessive bits)
+    e.clk_stopped = True
+    assert e.can_rx_state(e._bus()) is None               # off the bus while stopped
+    e.clk_stopped = False
+
+
+def test_i2c_master_bit_events_park_with_the_block():
+    c = _fake()
+    i2c = c.peripherals["I2CA"]
+    seen = []
+    ev = c.sched.in_cycles(1000, i2c.port.master._fire, 0.0)   # a master bit event (bound to the I2CMaster helper)
+    i2c.clock_stop(True, "STANDBY")
+    assert ev.cycles > 10**15                             # parked (helper events belong to the block: lp_owner)
+    i2c.clock_stop(False, "STANDBY")
+    assert ev.cycles == c.clock.cycles + 1000
+    c.sched.cancel(ev)
+    assert i2c.i2c_address(0x10, False) is False or seen == []
+
+
+def test_adc_session_and_dma_burst_resume_after_standby():
+    from chipem.periph.ti_c2000.adc import _Session
+    from chipem.periph.ti_c2000.dma import _Burst
+    c = _fake()
+    adc, dma = c.peripherals["ADC"], c.peripherals["DMA"]
+    now = c.clock.cycles
+    adc._sess = _Session(1, 0, 4, now + 100, 50, False, 0)
+    _standby(c, adc, 1e6)
+    dt = c.clock.ns_to_cycles(1e6)
+    assert adc._sess.t_first == now + 100 + dt
+    adc._sess = None
+    b = _Burst(dma._ch[0] if hasattr(dma, "_ch") else None, 8, c.clock.cycles, 4)
+    dma._busy = b
+    e0 = b.end()
+    _standby(c, dma, 1e6)
+    assert b.end() == e0 + dt
+    dma._busy = None

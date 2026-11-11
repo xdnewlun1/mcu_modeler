@@ -1,0 +1,54 @@
+# NXP P89CV51RB2 (16 KB flash), TQFP44 (P89CV51RB2FBC): the P89CV51RD2 description with its own memory size and the TQFP44 pin numbers.
+# Source: P89CV51RB2/RC2/RD2 data sheet Rev. 03 Table 2 p.2 (flash size per type), Table 3 (pins).
+include: p89cv51rd2.yaml
+name: P89CV51RB2
+package: TQFP44
+memory:
+  - {name: FLASH, base: 0x00000, size: 0x4000, kind: flash, fill: 0xFF}   # CODE: 16 KB user flash
+  - {name: IRAM, base: 0x20000, size: 0x100, kind: ram}
+  - {name: XRAM, base: 0x40000, size: 0x300, kind: ram}
+pins:          # TQFP44, Table 3 (TQFP44 column)
+  - {num: 1, name: "P1.5/CEX2/MOSI", kind: gpio, port: "1", bit: 5, default: GPIO, functions: {GPIO: "P1.5", ALT1: "CEX2", ALT2: "SPI_MOSI"}}
+  - {num: 2, name: "P1.6/CEX3/MISO", kind: gpio, port: "1", bit: 6, default: GPIO, functions: {GPIO: "P1.6", ALT1: "CEX3", ALT2: "SPI_MISO"}}
+  - {num: 3, name: "P1.7/CEX4/SPICLK", kind: gpio, port: "1", bit: 7, default: GPIO, functions: {GPIO: "P1.7", ALT1: "CEX4", ALT2: "SPI_SCK"}}
+  - {num: 4, name: "RST", kind: special}
+  - {num: 5, name: "P3.0/RXD", kind: gpio, port: "3", bit: 0, default: GPIO, functions: {GPIO: "P3.0", ALT1: "UART_RXD"}}
+  - {num: 6, name: "n.c.", kind: special}
+  - {num: 7, name: "P3.1/TXD", kind: gpio, port: "3", bit: 1, default: GPIO, functions: {GPIO: "P3.1", ALT1: "UART_TXD"}}
+  - {num: 8, name: "P3.2/INT0", kind: gpio, port: "3", bit: 2, default: GPIO, functions: {GPIO: "P3.2", ALT1: "INT0"}}
+  - {num: 9, name: "P3.3/INT1", kind: gpio, port: "3", bit: 3, default: GPIO, functions: {GPIO: "P3.3", ALT1: "INT1"}}
+  - {num: 10, name: "P3.4/T0", kind: gpio, port: "3", bit: 4, default: GPIO, functions: {GPIO: "P3.4", ALT1: "T0"}}
+  - {num: 11, name: "P3.5/T1", kind: gpio, port: "3", bit: 5, default: GPIO, functions: {GPIO: "P3.5", ALT1: "T1"}}
+  - {num: 12, name: "P3.6/WR", kind: gpio, port: "3", bit: 6, default: GPIO, functions: {GPIO: "P3.6", ALT1: "WR"}}
+  - {num: 13, name: "P3.7/RD", kind: gpio, port: "3", bit: 7, default: GPIO, functions: {GPIO: "P3.7", ALT1: "RD"}}
+  - {num: 14, name: "XTAL2", kind: special}
+  - {num: 15, name: "XTAL1", kind: special}
+  - {num: 16, name: "VSS", kind: power}
+  - {num: 17, name: "n.c.", kind: special}
+  - {num: 18, name: "P2.0/A8", kind: gpio, port: "2", bit: 0, default: GPIO, functions: {GPIO: "P2.0", ALT1: "A8"}}
+  - {num: 19, name: "P2.1/A9", kind: gpio, port: "2", bit: 1, default: GPIO, functions: {GPIO: "P2.1", ALT1: "A9"}}
+  - {num: 20, name: "P2.2/A10", kind: gpio, port: "2", bit: 2, default: GPIO, functions: {GPIO: "P2.2", ALT1: "A10"}}
+  - {num: 21, name: "P2.3/A11", kind: gpio, port: "2", bit: 3, default: GPIO, functions: {GPIO: "P2.3", ALT1: "A11"}}
+  - {num: 22, name: "P2.4/A12", kind: gpio, port: "2", bit: 4, default: GPIO, functions: {GPIO: "P2.4", ALT1: "A12"}}
+  - {num: 23, name: "P2.5/A13", kind: gpio, port: "2", bit: 5, default: GPIO, functions: {GPIO: "P2.5", ALT1: "A13"}}
+  - {num: 24, name: "P2.6/A14", kind: gpio, port: "2", bit: 6, default: GPIO, functions: {GPIO: "P2.6", ALT1: "A14"}}
+  - {num: 25, name: "P2.7/A15", kind: gpio, port: "2", bit: 7, default: GPIO, functions: {GPIO: "P2.7", ALT1: "A15"}}
+  - {num: 26, name: "PSEN", kind: special}
+  - {num: 27, name: "ALE", kind: special}
+  - {num: 28, name: "n.c.", kind: special}
+  - {num: 29, name: "EA", kind: special}
+  - {num: 30, name: "P0.7/AD7", kind: gpio, port: "0", bit: 7, default: GPIO, functions: {GPIO: "P0.7", ALT1: "AD7"}}
+  - {num: 31, name: "P0.6/AD6", kind: gpio, port: "0", bit: 6, default: GPIO, functions: {GPIO: "P0.6", ALT1: "AD6"}}
+  - {num: 32, name: "P0.5/AD5", kind: gpio, port: "0", bit: 5, default: GPIO, functions: {GPIO: "P0.5", ALT1: "AD5"}}
+  - {num: 33, name: "P0.4/AD4", kind: gpio, port: "0", bit: 4, default: GPIO, functions: {GPIO: "P0.4", ALT1: "AD4"}}
+  - {num: 34, name: "P0.3/AD3", kind: gpio, port: "0", bit: 3, default: GPIO, functions: {GPIO: "P0.3", ALT1: "AD3"}}
+  - {num: 35, name: "P0.2/AD2", kind: gpio, port: "0", bit: 2, default: GPIO, functions: {GPIO: "P0.2", ALT1: "AD2"}}
+  - {num: 36, name: "P0.1/AD1", kind: gpio, port: "0", bit: 1, default: GPIO, functions: {GPIO: "P0.1", ALT1: "AD1"}}
+  - {num: 37, name: "P0.0/AD0", kind: gpio, port: "0", bit: 0, default: GPIO, functions: {GPIO: "P0.0", ALT1: "AD0"}}
+  - {num: 38, name: "VDD", kind: power}
+  - {num: 39, name: "n.c.", kind: special}
+  - {num: 40, name: "P1.0/T2", kind: gpio, port: "1", bit: 0, default: GPIO, functions: {GPIO: "P1.0", ALT1: "T2"}}
+  - {num: 41, name: "P1.1/T2EX", kind: gpio, port: "1", bit: 1, default: GPIO, functions: {GPIO: "P1.1", ALT1: "T2EX"}}
+  - {num: 42, name: "P1.2/ECI", kind: gpio, port: "1", bit: 2, default: GPIO, functions: {GPIO: "P1.2", ALT1: "ECI"}}
+  - {num: 43, name: "P1.3/CEX0", kind: gpio, port: "1", bit: 3, default: GPIO, functions: {GPIO: "P1.3", ALT1: "CEX0"}}
+  - {num: 44, name: "P1.4/CEX1/SS", kind: gpio, port: "1", bit: 4, default: GPIO, functions: {GPIO: "P1.4", ALT1: "CEX1", ALT2: "SPI_SS"}}

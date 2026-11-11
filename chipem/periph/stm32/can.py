@@ -306,8 +306,16 @@ class BxCAN(GatedBlock):
         return (self._on_bus(bus) and not (self.get("BTR") & SILM and bus is not self._loop_bus)
                 and self._target() == "normal")
 
+    lp_frozen: Any = False              # PWR freezer: APB1 clock off in Stop / gated Sleep
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Clock back after Stop: the TTCM timer held, the pending bus-off recovery / mode events were held."""
+        self._t0 += dns
+        if self.chip is not None and self._requesting:
+            self._bus().request(self)
+
     def can_tx_frame(self, bus: CanBus) -> CanFrame | None:
-        if not self._tx_allowed(bus):
+        if self.lp_frozen or not self._tx_allowed(bus):
             return None
         k = self._best_tx()
         return None if k is None else self._frame_of(k)
@@ -318,6 +326,8 @@ class BxCAN(GatedBlock):
         return pin_reason(self.chip, self.tx_signal, self._pins) is None and self._rx_pin_ok()
 
     def can_rx_state(self, bus: CanBus) -> str | None:
+        if self.lp_frozen:
+            return None                 # no clock in Stop: neither receives nor acknowledges (wake-up: EXTI on CANx_RX)
         if self.mode == "sleep" and bus is self.can_bus and self.chip is not None:
             self._bus_activity_asleep()
         if not self._on_bus(bus):

@@ -1,0 +1,5 @@
+; chipem mcs51 symbol map: SPACE:ADDRESS NAME
+C:0x0040 main
+C:0x0059 idle
+C:0x0063 int0_isr
+C:0x0068 int1_isr

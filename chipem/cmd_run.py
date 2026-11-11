@@ -24,7 +24,6 @@ def add_args(p) -> None:
     p.add_argument("--events", default=None, metavar="KINDS",
                    help=f"comma list of event kinds to print live ({','.join(EVENT_KINDS)}; default: all but mmio, "
                         "mmio included with --log-mmio)")
-    p.add_argument("--max-slice", type=int, default=None, metavar="N", help="max instructions per core slice")
     p.add_argument("--all-edges", action="store_true",
                    help="print every pin and board-part edge; by default a signal with 3+ edges within 10 ms "
                         "(PWM, clocks and what they drive) prints one waveform summary per 10 ms window")
@@ -91,10 +90,21 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
         w(f"firmware     : {getattr(ctx.image, 'source', '-')}\n")
     speed = insns / wall_s if wall_s > 0 else 0.0
     ratio = (dt_ns / 1e9) / wall_s if wall_s > 0 else 0.0
-    w(f"cycles       : {cycles:,} (virtual core cycles, incl. time slept in WFI)\n")
-    w(f"instructions : {insns:,} executed (1 cycle/insn model)\n")
+    if getattr(chip.core, "cycle_counted", False):            # MCS-51: clock periods, machine cycles of 12 or 6
+        mc = getattr(chip.core, "clocks_per_mc", 12)
+        w(f"cycles       : {cycles:,} oscillator periods ({cycles // mc:,} machine cycles of {mc} clocks), "
+          f"incl. time slept\n")
+        w(f"instructions : {insns:,} executed (1, 2 or 4 machine cycles each)\n")
+    else:
+        w(f"cycles       : {cycles:,} (virtual core cycles, incl. time slept in WFI)\n")
+        w(f"instructions : {insns:,} executed (1 cycle/insn model)\n")
+    share = ""
+    if multi and hasattr(session, "speed_info"):
+        cs = (session.speed_info().get("chips") or {}).get(cid) or {}
+        if cs.get("share") is not None:
+            share = f", {cs['share'] * 100:.0f} % of the board's wall time"
     w(f"wall time    : {wall_s:.3f} s, {speed / 1e6:.2f} M insn/s, {ratio:.3g}x real time"
-      f"{' (board wall time)' if multi else ''}\n")
+      f"{' (board wall time)' if multi else ''}{share}\n")
     w(f"stop         : {reason.name if reason is not None else 'interrupted'}{stop_note}; pc=0x{st['pc']:08X} "
       f"mode={st['mode']}{' (' + st['active_name'] + ')' if st.get('active_name') else ''}"
       f"{' sleeping' if st.get('sleeping') else ''}{' LOCKUP' if st.get('lockup') else ''}\n")
@@ -108,7 +118,9 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
     if rows:
         w(f"  {'pin':<6} {'num':>3}  {'owner':<14} {'dir':<6} {'lvl':<3} {'pull':<5} ext\n")
         for r in rows:
-            short = r["short"].split(".", 1)[-1]
+            short = r["short"]
+            if short.upper().startswith(f"{cid}.".upper()):          # qualified "B.PTC5" (not the "P1.0" of an 80C51)
+                short = short[len(cid) + 1:]
             w(f"  {short:<6} {r['num']:>3}  {str(r['owner']):<14} {r['direction']:<6} {r['level']:<3} "
               f"{str(r['pull'] or '-'):<5} {r['external'] or '-'}" + (f"  net {r['net']}" if r.get("net") else "")
               + "\n")
@@ -126,11 +138,21 @@ def print_summary(session: Session, *, reason: StopReason | None, wall_s: float,
                 text = text[:2000] + f"... ({len(data)} bytes)"
             w(f"  {name} ({len(data)} bytes): \"{text}\"\n")
     drops: dict[str, dict[str, int]] = {}
+    errs: dict[str, dict[str, int]] = {}
     for ev in session.events(kinds={"uart"}, chip=cid if multi else None):
         if ev.fields.get("dir") == "drop":
             d = drops.setdefault(str(ev.fields.get("uart")), {})
             why = str(ev.fields.get("reason"))
             d[why] = d.get(why, 0) + 1
+        elif ev.fields.get("dir") == "rx":
+            for k, label in (("fe", "framing"), ("pe", "parity"), ("nf", "noise"), ("brk", "break")):
+                if ev.fields.get(k):
+                    e = errs.setdefault(str(ev.fields.get("uart")), {})
+                    e[label] = e.get(label, 0) + 1
+    for name, e in errs.items():
+        any_uart = True
+        w(f"  {name} RX errors: " + ", ".join(f"{k} {v}" for k, v in e.items())
+          + " (the sender's frame format or baud differs from the receiver's, or a break)\n")
     for name, d in drops.items():
         any_uart = True
         w(f"  {name} RX dropped {sum(d.values())} byte(s): "
@@ -252,6 +274,12 @@ def print_board_summary(session: Session, out=None) -> None:
         return
     w(f"\n=== board {b.name}: {len(b.chips)} chips ({', '.join(b.chips)}), quantum {_fmt_ns(b.quantum_ns)}, "
       f"time skew {_fmt_ns(b.skew_ns())} ===\n")
+    if hasattr(session, "speed_info"):
+        from .cmd_shell import format_speed
+        p = session.perf
+        w(f"{format_speed(session)}\n")
+        w(f"settings: preset {p.preset}, max slice {p.max_slice}, quantum {_fmt_ns(b.quantum_ns)}"
+          f"{' + auto' if b.auto_quantum else ''} (cross-chip latency up to one quantum)\n")
     w(f"nets ({len(b.nets)}):\n")
     for n in b.nets:
         pins = ", ".join(n.label(i) for i in range(len(n.members)))
@@ -425,6 +453,22 @@ def main(args) -> int:
         return 0
 
 
+def _serve_gdb(session, args):
+    """`chipem run --gdb PORT`: start halted, serve one debugger session on this (the emulation) thread until the
+    client kills the target (`kill`) or detaches; the run summary follows."""
+    from .gdbserver import start_for_session
+    srv, ex = start_for_session(session, args.gdb, chip=getattr(args, "gdb_chip", None),
+                                log=lambda m: print(m, file=sys.stderr, flush=True))
+    print(f"gdb server listening on 127.0.0.1:{srv.port} (halted at reset; in gdb: target extended-remote "
+          f":{srv.port}); detach or kill ends the run", file=sys.stderr, flush=True)
+    try:
+        ex.serve(lambda: srv.killed or (srv.clients > 0 and srv.conn is None))
+    finally:
+        srv.close()
+    last = session.debug.last_stop or {}
+    return getattr(StopReason, str(last.get("reason")), StopReason.USER) if last else StopReason.USER
+
+
 def _main(args) -> int:
     dur = args.duration
     forever = dur is not None and str(dur).strip().lower() in ("forever", "inf", "until-ctrl-c")
@@ -439,9 +483,7 @@ def _main(args) -> int:
         ns = float("inf")
     chips = session.chips
     multi = len(chips) > 1
-    for chip in chips.values():
-        if args.max_slice:
-            chip.max_slice = int(args.max_slice)
+    for chip in chips.values():            # (--max-slice and the other speed options: Session.from_args, perf.py)
         if args.stop_on_fault:
             chip.halt_on_fault = True
     quiet = args.quiet or args.summary_only
@@ -473,7 +515,10 @@ def _main(args) -> int:
     reason: StopReason | None = None
     try:
         try:
-            reason = session.run_for(ns)
+            if getattr(args, "gdb", None) is not None:
+                reason = _serve_gdb(session, args)     # halted; gdb drives the run (chipem/gdbserver.py)
+            else:
+                reason = session.run_for(ns)
         except KeyboardInterrupt:
             print("\n(interrupted)", file=sys.stderr)
     finally:

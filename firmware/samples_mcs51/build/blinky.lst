@@ -1,0 +1,20 @@
+0000               ; blinky: P1.0 toggles every 50 ms, timed by Timer 0 (mode 1, polled TF0).
+0000               ; P89CV51RD2 at 11.0592 MHz, 12-clock mode: one machine cycle = 1.0851 us; 50 ms = 46080 counts
+0000               ; -> reload TH0:TL0 = 65536 - 46080 = 4C00h.
+0000                       ORG     0000h
+0000  02 00 30             LJMP    main
+0003                       ORG     0030h
+0030  75 81 5F     main:   MOV     SP, #5Fh
+0033  75 89 01             MOV     TMOD, #01h              ; Timer 0: mode 1 (16-bit), timer
+0036  75 8C 4C             MOV     TH0, #4Ch
+0039  75 8A 00             MOV     TL0, #00h
+003C  D2 8C                SETB    TR0
+003E  30 8D FD     loop:   JNB     TF0, $                  ; wait for the overflow
+0041  C2 8C                CLR     TR0
+0043  75 8C 4C             MOV     TH0, #4Ch               ; reload (the few cycles spent here are not compensated)
+0046  75 8A 00             MOV     TL0, #00h
+0049  C2 8D                CLR     TF0
+004B  D2 8C                SETB    TR0
+004D  B2 90                CPL     P1.0
+004F  05 30                INC     30h                     ; toggle counter (tests)
+0051  80 EB                SJMP    loop

@@ -1,4 +1,5 @@
-"""C2833x external interrupts (0x7070): XINT1CR..XINT7CR, XNMICR, XINT1CTR/XINT2CTR/XNMICTR.
+"""C2833x external interrupts (0x7070): XINT1CR..XINT7CR, XNMICR, XINT1CTR/XINT2CTR/XNMICTR.  The register table
+decides which exist (`present`): the 280x has only XINT1, XINT2 and XNMI (SPRS230P Table 9-30).
 
 XINTnCR: bit 0 ENABLE, bits 3:2 POLARITY (00/10 falling, 01 rising, 11 both).  The source pin is chosen in the GPIO
 block (GPIOXINT1SEL/2SEL/XNMISEL: GPIO0-31, GPIOXINT3..7SEL: GPIO32-63).  A qualifying edge of the source pin's level
@@ -38,12 +39,15 @@ class XInt(C2000Block):
         self._listeners: list[tuple[str, Any]] = []
         self.int_listeners: list = []            # cb(n) on every XINTn pulse, n = 13 for XINT13 (DMA triggers)
         self.edges = {n: 0 for n in range(8)}
+        # interrupts this part has (XNMI = 0): the register table decides (the 280x has XINT1, XINT2 and XNMI only)
+        self.present = [n for n in range(8) if ("XNMICR" if n == 0 else f"XINT{n}CR") in self.regs]
 
     def attach(self, chip: Any) -> None:
         super().attach(chip)
         self._gpio = find_model(chip, "ti_c2000.gpio")
-        for n in range(1, 8):
-            self._lines[n] = irq_line(chip, f"XINT{n}", _DEFAULT[n])
+        for n in self.present:
+            if n:
+                self._lines[n] = irq_line(chip, f"XINT{n}", _DEFAULT[n])
         self.sources_changed()
 
     def reset(self) -> None:
@@ -65,7 +69,7 @@ class XInt(C2000Block):
             if lst is not None and cb in lst:
                 lst.remove(cb)
         self._listeners = []
-        for n in range(8):
+        for n in self.present:
             pin = self._gpio.xint_pin(n)
             self._src[n] = pin
             if pin is None:

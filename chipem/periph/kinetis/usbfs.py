@@ -244,10 +244,15 @@ class UsbFs(GatedBlock):
         self._update_irq()
         return None
 
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Stop/VLPS/LLS (Table 7-2: USB FS static): the SIE's 1 ms counter held while the clocks were off."""
+        self._ms_t0 += dns
+
     def _ms_count(self) -> int:
         if self.chip is None or not self.mem[0x94] & USBENSOFEN:
             return self._ms_seen
-        return int((self.chip.now_ns() - self._ms_t0) // 1e6)
+        now = self.lp_t0_ns if getattr(self, "lp_frozen", False) else self.chip.now_ns()
+        return int((now - self._ms_t0) // 1e6)
 
     def _onemsec(self) -> None:
         if self._ms_count() > self._ms_seen and not self.mem[0x10] & ONEMSEC:
@@ -414,8 +419,8 @@ class UsbFs(GatedBlock):
 
     def _ready(self, x) -> bool:
         """Answer a token? (module enabled and clocked, transceiver awake, our address)."""
-        if self.chip is None:
-            return False
+        if self.chip is None or getattr(self, "lp_frozen", False):
+            return False                 # Stop/VLPS/LLS: static, tokens time out (USB_RESUME_INT still wakes)
         m = self.mem
         if not m[0x94] & USBENSOFEN or m[0x94] & HOSTMODEEN:
             return False

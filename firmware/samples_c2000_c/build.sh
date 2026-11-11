@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the TMS320F28232 C samples (*.c here) with TI's C2000 code generation tools into build/<name>.out:
+# Build the TMS320F28232 C samples (*.c here; f2808_*.c are TMS320F2808 samples linked with f2808.cmd) with TI's C2000 code generation tools into build/<name>.out:
 #   build/<name>.out      ELF / EABI (--abi=eabi,    rts2800_ml_eabi.lib)   the compiler's default ABI
 #   build/<name>_coff.out COFF ABI   (--abi=coffabi, rts2800_ml.lib)        if this compiler still supports COFF
 # plus <name>.map and a dis2000 listing <name>.dis.  CHIP_EM loads both (COFF and C2000 ELF are sniffed).
@@ -61,12 +61,20 @@ coff_ok() {
     "$CL" -v28 -ml --abi=coffabi --obj_directory="$probe" -c "$probe/p.c" >/dev/null 2>&1
 }
 
+# TMS320F2808 samples (f2808_*.c): their own linker file (f2808.cmd: flash at 0x3E8000, codestart 0x3F7FF6, H0 for
+# variables) and no --float_support (the 280x has no FPU; soft-float comes from the RTS as on the F28232 build).
+CFLAGS_F2808="-v28 -ml -mt -O2 -g --diag_warning=225 --display_error_number -I. -I$TI_CGT/include"
+
 build_one() {   # $1 = coff|eabi, $2 = sample name, $3 = output suffix
     abi=$1; name=$2; out="build/$name$3.out"; obj="build/obj_$abi/$name"
+    case "$name" in
+        f2808_*) cflags="$CFLAGS_F2808"; cmd=f2808.cmd ;;
+        *)       cflags="$CFLAGS"; cmd=f28232.cmd ;;
+    esac
     mkdir -p "$obj"
     echo "CL  $name ($abi) -> $out"
-    "$CL" $CFLAGS --abi="$( [ "$abi" = coff ] && echo coffabi || echo eabi )" --obj_directory="$obj" \
-        "$name.c" codestart.asm $LFLAGS -m "build/$name$3.map" -o "$out" -l "$(lib_for "$abi")" f28232.cmd
+    "$CL" $cflags --abi="$( [ "$abi" = coff ] && echo coffabi || echo eabi )" --obj_directory="$obj" \
+        "$name.c" codestart.asm $LFLAGS -m "build/$name$3.map" -o "$out" -l "$(lib_for "$abi")" "$cmd"
     if [ -x "$DIS" ]; then "$DIS" "$out" > "build/$name$3.dis" 2>/dev/null || true; fi
 }
 

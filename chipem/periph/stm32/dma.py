@@ -1,5 +1,6 @@
 """STM32F4 DMA controller (DMA1/DMA2, RM0090 ch. 10): 8 streams x 8 channels, request mapping per Tables 43/44
-(RM0090 Rev 22 numbering; the F42x/F43x-only requests SAI1/SPI4-6/UART7-8 are left out).
+(RM0090 Rev 22 numbering, including the requests that exist on the STM32F42xxx/43xxx only: SAI1_A/B, SPI4-6,
+UART7/8 -- table note 1; no other part's model raises them).
 
 Request API (used by the stm32 peripheral models; also reachable through `_util.dma_request(chip, name, level)`):
 
@@ -81,20 +82,21 @@ _T42 = [
     ("I2S3_EXT_RX", "TIM2_UP/TIM2_CH3", "I2C3_RX", "I2S2_EXT_RX", "I2C3_TX", "TIM2_CH1", "TIM2_CH2/TIM2_CH4",
      "TIM2_UP/TIM2_CH4"),
     ("UART5_RX", "USART3_RX", "UART4_RX", "USART3_TX", "UART4_TX", "USART2_RX", "USART2_TX", "UART5_TX"),
-    (None, None, "TIM3_CH4/TIM3_UP", None, "TIM3_CH1/TIM3_TRIG", "TIM3_CH2", None, "TIM3_CH3"),
+    ("UART8_TX", "UART7_TX", "TIM3_CH4/TIM3_UP", "UART7_RX", "TIM3_CH1/TIM3_TRIG", "TIM3_CH2", "UART8_RX",
+     "TIM3_CH3"),
     ("TIM5_CH3/TIM5_UP", "TIM5_CH4/TIM5_TRIG", "TIM5_CH1", "TIM5_CH4/TIM5_TRIG", "TIM5_CH2", None, "TIM5_UP", None),
     (None, "TIM6_UP", "I2C2_RX", "I2C2_RX", "USART3_TX", "DAC1", "DAC2", "I2C2_TX"),
 ]
 # RM0090 Table 44 "DMA2 request mapping"
 _T43 = [
-    ("ADC1", None, "TIM8_CH1/TIM8_CH2/TIM8_CH3", None, "ADC1", None, "TIM1_CH1/TIM1_CH2/TIM1_CH3", None),
-    (None, "DCMI", "ADC2", "ADC2", None, None, None, "DCMI"),
-    ("ADC3", "ADC3", None, None, None, "CRYP_OUT", "CRYP_IN", "HASH_IN"),
+    ("ADC1", "SAI1_A", "TIM8_CH1/TIM8_CH2/TIM8_CH3", "SAI1_A", "ADC1", "SAI1_B", "TIM1_CH1/TIM1_CH2/TIM1_CH3", None),
+    (None, "DCMI", "ADC2", "ADC2", "SAI1_B", "SPI6_TX", "SPI6_RX", "DCMI"),
+    ("ADC3", "ADC3", None, "SPI5_RX", "SPI5_TX", "CRYP_OUT", "CRYP_IN", "HASH_IN"),
     ("SPI1_RX", None, "SPI1_RX", "SPI1_TX", None, "SPI1_TX", None, None),
-    (None, None, "USART1_RX", "SDIO", None, "USART1_RX", "SDIO", "USART1_TX"),
-    (None, "USART6_RX", "USART6_RX", None, None, None, "USART6_TX", "USART6_TX"),
+    ("SPI4_RX", "SPI4_TX", "USART1_RX", "SDIO", None, "USART1_RX", "SDIO", "USART1_TX"),
+    (None, "USART6_RX", "USART6_RX", "SPI4_RX", "SPI4_TX", None, "USART6_TX", "USART6_TX"),
     ("TIM1_TRIG", "TIM1_CH1", "TIM1_CH2", "TIM1_CH1", "TIM1_CH4/TIM1_TRIG/TIM1_COM", "TIM1_UP", "TIM1_CH3", None),
-    (None, "TIM8_UP", "TIM8_CH1", "TIM8_CH2", "TIM8_CH3", None, None, "TIM8_CH4/TIM8_TRIG/TIM8_COM"),
+    (None, "TIM8_UP", "TIM8_CH1", "TIM8_CH2", "TIM8_CH3", "SPI5_RX", "SPI5_TX", "TIM8_CH4/TIM8_TRIG/TIM8_COM"),
 ]
 
 
@@ -287,7 +289,16 @@ class DMA(GatedBlock):
             if st.irq is not None and self.chip is not None:
                 self.irq(st.irq, lvl)
 
+    lp_frozen: Any = False              # PWR freezer: Stop / gated Sleep (AHB clock off)
+
+    def time_shift(self, dns: float, dcycles: int) -> None:
+        """Clock back: requests asserted while the controller had no clock are served now (the request lines are
+        levels, RM0090 10.3.5)."""
+        self._kick()
+
     def _kick(self) -> None:
+        if self.lp_frozen:
+            return                      # no HCLK: the asserted request waits for the clock (time_shift)
         if self._ev is None and not self._busy and self.chip is not None:
             self._ev = self.chip.sched.in_cycles(0, self._service)
 
@@ -624,7 +635,8 @@ def controllers(chip: Any) -> list[MMIOBlock]:
     """The chip's stm32.dma blocks (cached on the chip)."""
     c = getattr(chip, "_stm32_dmas", None)
     if c is None:
-        c = [b for b in (getattr(chip, "peripherals", {}) or {}).values() if getattr(b, "model", None) == "stm32.dma"]
+        c = [b for b in (getattr(chip, "peripherals", {}) or {}).values()
+             if getattr(b, "model", None) == "stm32.dma" or getattr(b, "stm32_dma_api", False)]   # + stm32f1.dma
         try:
             chip._stm32_dmas = c
         except AttributeError:

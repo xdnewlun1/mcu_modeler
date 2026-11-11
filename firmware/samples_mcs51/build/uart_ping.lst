@@ -1,0 +1,80 @@
+0000               ; uart_ping: chip A of boards/p89cv51_stm32_uart.yaml.  Sends "ping N\r\n" (N = 0..9, then wraps) every 2 ms on the
+0000               ; UART at 115200 8N1 and counts received bytes in 30h; every received '\n' toggles P1.0.  The STM32 partner
+0000               ; (firmware/samples_stm32/uart_link_echo.c) echoes everything uppercased, so 31h.. collect "PING N\r\n".
+0000               ; Baud: Timer 2 baud-rate generator, 11.0592 MHz / (32 x (65536 - FFFDh)) = 115200.  Timer 0 paces the 2 ms.
+0000               RXCNT   DATA    30h
+0000               RXPTR   DATA    2Fh
+0000               N       DATA    2Eh
+0000                       ORG     0000h
+0000  02 00 50             LJMP    main
+0003                       ORG     0023h
+0023  02 00 BE             LJMP    serial_isr
+0026                       ORG     0050h
+0050  75 81 6F     main:   MOV     SP, #6Fh
+0053  75 30 00             MOV     RXCNT, #0
+0056  75 2F 31             MOV     RXPTR, #31h
+0059  75 2E 30             MOV     N, #'0'
+005C  75 CB FF             MOV     RCAP2H, #0FFh
+005F  75 CA FD             MOV     RCAP2L, #0FDh
+0062  75 CD FF             MOV     TH2, #0FFh
+0065  75 CC FD             MOV     TL2, #0FDh
+0068  75 C8 34             MOV     T2CON, #34h
+006B  75 98 50             MOV     SCON, #50h
+006E  75 89 01             MOV     TMOD, #01h
+0071  D2 AC                SETB    ES
+0073  D2 AF                SETB    EA
+0075  75 8C F8     again:  MOV     TH0, #HIGH(65536 - 1843)    ; 2 ms = 1843 machine cycles
+0078  75 8A CD             MOV     TL0, #LOW(65536 - 1843)
+007B  C2 8D                CLR     TF0
+007D  D2 8C                SETB    TR0
+007F  30 8D FD             JNB     TF0, $
+0082  C2 8C                CLR     TR0
+0084  90 00 E3             MOV     DPTR, #ping
+0087  12 00 B3             LCALL   puts
+008A  E5 2E                MOV     A, N
+008C  12 00 A5             LCALL   putc
+008F  74 0D                MOV     A, #13
+0091  12 00 A5             LCALL   putc
+0094  74 0A                MOV     A, #10
+0096  12 00 A5             LCALL   putc
+0099  05 2E                INC     N
+009B  E5 2E                MOV     A, N
+009D  B4 3A D5             CJNE    A, #'9'+1, again
+00A0  75 2E 30             MOV     N, #'0'
+00A3  80 D0                SJMP    again
+00A5  C2 AC        putc:   CLR     ES
+00A7  C2 99                CLR     TI
+00A9  F5 99                MOV     SBUF, A
+00AB  30 99 FD             JNB     TI, $
+00AE  C2 99                CLR     TI
+00B0  D2 AC                SETB    ES
+00B2  22                   RET
+00B3  E4           puts:   CLR     A
+00B4  93                   MOVC    A, @A+DPTR
+00B5  60 06                JZ      puts_end
+00B7  12 00 A5             LCALL   putc
+00BA  A3                   INC     DPTR
+00BB  80 F6                SJMP    puts
+00BD               puts_end:
+00BD  22                   RET
+00BE               serial_isr:
+00BE  C0 E0                PUSH    ACC
+00C0  C0 D0                PUSH    PSW
+00C2  30 98 19             JNB     RI, s_end
+00C5  C2 98                CLR     RI
+00C7  05 30                INC     RXCNT
+00C9  E5 99                MOV     A, SBUF
+00CB  B4 0A 02             CJNE    A, #10, s_store
+00CE  B2 90                CPL     P1.0
+00D0               s_store:
+00D0  C0 00                PUSH    0                       ; R0 of bank 0
+00D2  A8 2F                MOV     R0, RXPTR
+00D4  B8 60 02             CJNE    R0, #60h, s_put
+00D7  80 03                SJMP    s_skip
+00D9  F6           s_put:  MOV     @R0, A
+00DA  05 2F                INC     RXPTR
+00DC  D0 00        s_skip: POP     0
+00DE  D0 D0        s_end:  POP     PSW
+00E0  D0 E0                POP     ACC
+00E2  32                   RETI
+00E3  70 69 6E 67 20 00 ping:   DB      "ping ", 0

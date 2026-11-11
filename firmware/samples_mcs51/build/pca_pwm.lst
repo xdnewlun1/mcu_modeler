@@ -1,0 +1,35 @@
+0000               ; pca_pwm: PCA module 0 = 8-bit PWM on CEX0 (P1.3), 25 % high (CCAP0L = C0h: low while CL < C0h);
+0000               ; module 1 = 16-bit capture of both edges on CEX1 (P1.4) with its interrupt; the ISR stores the first 8 captures
+0000               ; (CCAP1H, CCAP1L pairs) at 40h-4Fh.  PCA clock = fosc/12 (CPS = 00): PWM frequency 11.0592 MHz / 12 / 256 = 3600 Hz.
+0000               ; Wire P1.3 to P1.4 (boards/p89cv51_pca_loopback.yaml) and the captures measure the PWM: high 64 counts, period 256.
+0000               NCAP    DATA    30h
+0000                       ORG     0000h
+0000  02 00 50             LJMP    main
+0003                       ORG     0033h                   ; PCA vector (data sheet Table 41)
+0033  02 00 6F             LJMP    pca_isr
+0036                       ORG     0050h
+0050  75 81 6F     main:   MOV     SP, #6Fh
+0053  75 30 00             MOV     NCAP, #0
+0056  79 40                MOV     R1, #40h
+0058  75 D9 00             MOV     CMOD, #00h              ; fosc / 12, no overflow interrupt
+005B  75 EA C0             MOV     CCAP0L, #0C0h
+005E  75 FA C0             MOV     CCAP0H, #0C0h
+0061  75 DA 42             MOV     CCAPM0, #42h            ; ECOM0 + PWM0
+0064  75 DB 31             MOV     CCAPM1, #31h            ; CAPP1 + CAPN1 + ECCF1
+0067  D2 AE                SETB    EC
+0069  D2 AF                SETB    EA
+006B  D2 DE                SETB    CR                      ; run the PCA counter
+006D  80 FE                SJMP    $
+006F               pca_isr:
+006F  30 D9 11             JNB     CCF1, pca_out
+0072  C2 D9                CLR     CCF1
+0074  E5 30                MOV     A, NCAP
+0076  B4 08 02             CJNE    A, #8, store
+0079  80 08                SJMP    pca_out
+007B  A7 FB        store:  MOV     @R1, CCAP1H
+007D  09                   INC     R1
+007E  A7 EB                MOV     @R1, CCAP1L
+0080  09                   INC     R1
+0081  05 30                INC     NCAP
+0083               pca_out:
+0083  32                   RETI

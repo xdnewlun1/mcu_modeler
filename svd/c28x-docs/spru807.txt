@@ -1,0 +1,2131 @@
+TMS320x280x, 2801x, 2804x Enhanced Capture
+(eCAP) Module
+
+Reference Guide
+
+
+
+
+                  Literature Number: SPRU807B
+              November 2004 – Revised September 2007
+2   SPRU807B – November 2004 – Revised September 2007
+                      Submit Documentation Feedback
+                                                                                                                           Contents
+
+Preface ........................................................................................................................................ 6
+1     Introduction......................................................................................................................... 9
+2     Description.......................................................................................................................... 9
+3     Capture and APWM Operating Mode ..................................................................................... 11
+4     Capture Mode Description ................................................................................................... 12
+           4.1     Event Prescaler .......................................................................................................... 12
+           4.2     Edge Polarity Select and Qualifier .................................................................................... 13
+           4.3     Continuous/One-Shot Control .......................................................................................... 13
+           4.4     32-Bit Counter and Phase Control .................................................................................... 14
+           4.5     CAP1-CAP4 Registers .................................................................................................. 15
+           4.6     Interrupt Control.......................................................................................................... 15
+           4.7     Shadow Load and Lockout Control ................................................................................... 16
+           4.8     APWM Mode Operation ................................................................................................ 17
+5       Capture Module - Control and Status Registers ..................................................................... 18
+6       Register Mapping ............................................................................................................... 26
+7       Application of the ECAP Module ......................................................................................... 26
+           7.1     Example 1 - Absolute Time-Stamp Operation Rising Edge Trigger .............................................. 27
+           7.2     Example 2 - Absolute Time-Stamp Operation Rising and Falling Edge Trigger ................................ 30
+           7.3     Example 3 - Time Difference (Delta) Operation Rising Edge Trigger ............................................ 32
+           7.4     Example 4 - Time Difference (Delta) Operation Rising and Falling Edge Trigger .............................. 34
+8       Application of the APWM Mode ............................................................................................ 36
+           8.1     Example 1 - Simple PWM Generation (Independent Channel/s) ................................................. 36
+           8.2     Example 2 - Multi-channel PWM Generation With Synchronization .............................................. 37
+           8.3     Example 3 - Multi-channel PWM Generation With Phase Control ................................................ 39
+Appendix A Revision History ...................................................................................................... 42
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                                                     Table of Contents         3
+Submit Documentation Feedback
+                                                                                                                             www.ti.com
+
+                                                          List of Figures
+    1       Multiple eCAP Modules In A 28x System ............................................................................... 10
+    2       Capture and APWM Modes of Operation ............................................................................... 11
+    3       Capture Function Diagram ................................................................................................ 12
+    4       Event Prescale Control .................................................................................................... 13
+    5       Prescale Function Waveforms ............................................................................................ 13
+    6       Details of the Continuous/One-shot Block .............................................................................. 14
+    7       Details of the Counter and Synchronization Block ..................................................................... 15
+    8       Interrupts in eCAP Module ................................................................................................ 16
+    9       PWM Waveform Details Of APWM Mode Operation .................................................................. 17
+    10      Time-Stamp Counter Register (TSCTR) ................................................................................ 18
+    11      Counter Phase Control Register (CTRPHS) ........................................................................... 18
+    12      Capture-1 Register (CAP1) .............................................................................................. 18
+    13      Capture-2 Register (CAP2) ............................................................................................... 18
+    14      Capture-3 Register (CAP3) ............................................................................................... 19
+    15      Capture-4 Register (CAP4) ............................................................................................... 19
+    16      ECAP Control Register 1 (ECCTL1) ..................................................................................... 19
+    17      ECAP Control Register 2 (ECCTL2) ..................................................................................... 21
+    18      ECAP Interrupt Enable Register (ECEINT) ............................................................................. 23
+    19      ECAP Interrupt Flag Register (ECFLG) ................................................................................. 24
+    20      ECAP Interrupt Clear Register (ECCLR) ................................................................................ 24
+    21      ECAP Interrupt Forcing Register (ECFRC) ............................................................................. 25
+    22      Capture Sequence for Absolute Time-stamp and Rising Edge Detect.............................................. 28
+    23      Capture Sequence for Absolute Time-stamp With Rising and Falling Edge Detect ............................... 30
+    24      Capture Sequence for Delta Mode Time-stamp and Rising Edge Detect .......................................... 32
+    25      Capture Sequence for Delta Mode Time-stamp With Rising and Falling Edge Detect ........................... 34
+    26      PWM Waveform Details of APWM Mode Operation................................................................... 36
+    27      Multichannel PWM Example Using 4 eCAP Modules ................................................................. 38
+    28      Multi-phase (channel) Interleaved PWM Example Using 3 eCAP Modules ........................................ 40
+
+
+
+
+4   List of Figures                                                             SPRU807B – November 2004 – Revised September 2007
+                                                                                                  Submit Documentation Feedback
+www.ti.com
+
+                                                             List of Tables
+       1      Time-Stamp Counter Register (TSCTR) Field Descriptions .......................................................... 18
+       2      Counter Phase Control Register (CTRPHS) Field Descriptions ..................................................... 18
+       3      Capture-1 Register (CAP1) Field Descriptions ......................................................................... 18
+       4      Capture-2 Register (CAP2) Field Descriptions ......................................................................... 19
+       5      Capture-3 Register (CAP3) Field Descriptions ......................................................................... 19
+       6      Capture-4 Register (CAP4) Field Descriptions ......................................................................... 19
+       7      ECAP Control Register 1 (ECCTL1) Field Descriptions .............................................................. 20
+       8      ECAP Control Register 2 (ECCTL2) Field Descriptions .............................................................. 21
+       9      ECAP Interrupt Enable Register (ECEINT) Field Descriptions ....................................................... 23
+       10     ECAP Interrupt Flag Register (ECFLG) Field Descriptions ........................................................... 24
+       11     ECAP Interrupt Clear Register (ECCLR) Field Descriptions ......................................................... 25
+       12     ECAP Interrupt Forcing Register (ECFRC) Field Descriptions ....................................................... 25
+       13     Control and Status Register Set .......................................................................................... 26
+       A-1    Changes Made in This Revision ......................................................................................... 42
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                                                    List of Tables      5
+Submit Documentation Feedback
+                                                                                                         Preface
+                                                              SPRU807B – November 2004 – Revised September 2007
+
+
+                                                                                     Read This First
+
+
+     The enhanced capture (eCAP) module is used in systems where accurate timing of external events is
+     important. This guide describes the module and how to use it.
+     The eCAP module described in this reference guide is a Type 0 eCAP. See the TMS320C28xx, 28xxx
+     DSP Peripheral Reference Guide (SPRU566) for a list of all devices with a eCAP module of the same
+     type, to determine the differences between the types, and for a list of device-specific differences within a
+     type.
+
+Related Documentation From Texas Instruments
+     The following documents can be downloaded from the TI website (www.ti.com):
+     Data Manuals—
+     SPRS230— TMS320F2809, F2808, F2806, F2802, F2801, C2802, C2801, and F2801x DSPs Data
+           Manual contains the pinout, signal descriptions, as well as electrical and timing specifications for
+           the F280x devices.
+     SPRS357— TMS320F28044 Digital Signal Processor Data Manual contains the pinout, signal
+         descriptions, as well as electrical and timing specifications for the F28044 device.
+     CPU User's Guides—
+     SPRU430— TMS320C28x DSP CPU and Instruction Set Reference Guide describes the central
+          processing unit (CPU) and the assembly language instructions of the TMS320C28x fixed-point
+          digital signal processors (DSPs). It also describes emulation features available on these DSPs.
+     SPRUEO2— TMS320C28x Floating Point Unit and Instruction Set Reference Guide describes the
+         floating-point unit and includes the instructions for the FPU.
+     Peripheral Guides—
+     SPRU566— TMS320x28xx, 28xxx Peripheral Reference Guide describes the peripheral reference guides
+         of the 28x digital signal processors (DSPs).
+     SPRUFB0— TMS320F2833x, F2823x System Control and Interrupts Reference Guide describes the
+         various interrupts and system control features of the F2833x and F2923x digital signal controllers
+         (DSCs).
+     SPRU712— TMS320x280x, 2801x, 2804x System Control and Interrupts Reference Guide describes the
+         various interrupts and system control features of the 280x digital signal processors (DSPs).
+     SPRU812— TMS320F2833x, F2823x Analog-to-Digital Converter (ADC) Reference Guide describes how
+         to configure and use the on-chip ADC module, which is a 12-bit pipelined ADC.
+     SPRU716— TMS320x280x, 2801x, 2804x Analog-to-Digital Converter (ADC) Reference Guide describes
+         how to configure and use the on-chip ADC module, which is a 12-bit pipelined ADC.
+     SPRU949— TMS320F2833x, F2823x External Interface (XINTF) User's Guide describes the XINTF,
+         which is a nonmultiplexed asynchronous bus, as it is used on the 2833x device. devices.
+     SPRU963— TMS320F2833x, F2823x Boot ROM Reference Guide describes the purpose and features of
+         the bootloader (factory-programmed boot-loading software) and provides examples of code. It also
+         describes other contents of the device on-chip boot ROM and identifies where all of the information
+         is located within that memory.
+
+6    Preface                                                        SPRU807B – November 2004 – Revised September 2007
+                                                                                      Submit Documentation Feedback
+www.ti.com                                                           Related Documentation From Texas Instruments
+       SPRU722— TMS320x280x, 2801x, 2804x Boot ROM Reference Guide describes the purpose and
+           features of the bootloader (factory-programmed boot-loading software). It also describes other
+           contents of the device on-chip boot ROM and identifies where all of the information is located within
+           that memory.
+       SPRUFB7— TMS320F2833x, F2823x Multichannel Buffered Serial Port (McBSP) User's Guide describes
+           the McBSP available on the F2833x devices. The McBSPs allow direct interface between a DSP
+           and other devices in a system.
+       SPRUFB8— TMS320F2833x, F2823x Direct Memory Access (DMA) Reference Guide describes the DMA
+           on the 2833x devices.
+       SPRU791— TMS320x28xx, 28xxx Enhanced Pulse Width Modulator (ePWM) Module Reference Guide
+           describes the main areas of the enhanced pulse width modulator that include digital motor control,
+           switch mode power supply control, UPS (uninterruptible power supplies), and other forms of power
+           conversion.
+       SPRU924— TMS320x28xx, 28xxx High-Resolution Pulse Width Modulator (HRPWM) describes the
+           operation of the high-resolution extension to the pulse width modulator (HRPWM).
+       SPRU807— TMS320x28xx, 28xxx Enhanced Capture (eCAP) Module Reference Guide describes the
+           enhanced capture module. It includes the module description and registers.
+       SPRUFG4— TMS320F2833x, F2823x Enhanced Capture (ECAP) Module Reference Guide describes he
+           enhanced capture module. It includes the module description and registers.
+       SPRU790— TMS320x28xx, 28xxx Enhanced Quadrature Encoder Pulse (eQEP) Reference Guide
+           describes the eQEP module, which is used for interfacing with a linear or rotary incremental
+           encoder to get position, direction, and speed information from a rotating machine in high
+           performance motion and position control systems. It includes the module description and registers.
+       SPRU074— TMS320x28xx, 28xxx Enhanced Controller Area Network (eCAN) Reference Guide describes
+           the eCAN that uses established protocol to communicate serially with other controllers in electrically
+           noisy environments.
+       SPRU051— TMS320x28xx, 28xxx Serial Communication Interface (SCI) Reference Guide describes the
+           SCI, which is a two-wire asynchronous serial port, commonly known as a UART. The SCI modules
+           support digital communications between the CPU and other asynchronous peripherals that use the
+           standard non-return-to-zero (NRZ) format.
+       SPRU059— TMS320x28xx, 28xxx Serial Peripheral Interface (SPI) Reference Guide describes the SPI -
+           a high-speed synchronous serial input/output (I/O) port - that allows a serial bit stream of
+           programmed length (one to sixteen bits) to be shifted into and out of the device at a programmed
+           bit-transfer rate.
+       SPRU721— TMS320x28xx, 28xxx Inter-Integrated Circuit (I2C) Reference Guide describes the features
+           and operation of the inter-integrated circuit (I2C) module.
+       Tools Guides—
+       SPRU513— TMS320C28x Assembly Language Tools User's Guide describes the assembly language
+             tools (assembler and other tools used to develop assembly language code), assembler directives,
+             macros, common object file format, and symbolic debugging directives for the TMS320C28x device.
+       SPRU514— TMS320C28x Optimizing C Compiler User's Guide describes the TMS320C28x™ C/C++
+           compiler. This compiler accepts ANSI standard C/C++ source code and produces TMS320 DSP
+           assembly language source code for the TMS320C28x device.
+       SPRU608— The TMS320C28x Instruction Set Simulator Technical Overview describes the simulator,
+           available within the Code Composer Studio for TMS320C2000 IDE, that simulates the instruction
+           set of the C28x™ core.
+       SPRU625— TMS320C28x DSP/BIOS Application Programming Interface (API) Reference Guide
+           describes development using DSP/BIOS.
+
+
+SPRU807B – November 2004 – Revised September 2007                                             Read This First   7
+Submit Documentation Feedback
+Related Documentation From Texas Instruments                                                        www.ti.com
+
+Trademarks
+      TMS320C28x, C28x are trademarks of Texas Instruments.
+
+
+
+
+8     Read This First                                         SPRU807B – November 2004 – Revised September 2007
+                                                                                Submit Documentation Feedback
+                                                                                       Reference Guide
+                                                            SPRU807B – November 2004 – Revised September 2007
+
+
+
+                                                    Enhanced Capture (eCAP) Module
+
+
+       The enhanced Capture (eCAP) module is essential in systems where accurate timing of external events is
+       important.
+       This reference guide is applicable for the eCAP found on the TMS320x28xx and the TMS320x28xxx
+       family of processors. This includes all Flash-based, ROM-based, and RAM-based devices within the
+       280xx and 28xxx families .
+
+
+1      Introduction
+       Uses for eCAP include:
+       • Speed measurements of rotating machinery (e.g., toothed sprockets sensed via Hall sensors)
+       • Elapsed time measurements between position sensor pulses
+       • Period and duty cycle measurements of pulse train signals
+       • Decoding current or voltage amplitude derived from duty cycle encoded current/voltage sensors
+       The eCAP module described in this guide includes the following features:
+       • 32-bit time base with 10-ns time resolution with a 100-MHz system clock
+       • 4-event time-stamp registers (each 32 bits)
+       • Edge polarity selection for up to four sequenced time-stamp capture events
+       • Interrupt on either of the four events
+       • Single shot capture of up to four event time-stamps
+       • Continuous mode capture of time-stamps in a four-deep circular buffer
+       • Absolute time-stamp capture
+       • Difference (Delta) mode time-stamp capture
+       • All above resources dedicated to a single input pin
+       • When not used in capture mode, the ECAP module can be configured as a single channel PWM output
+
+2      Description
+       The eCAP module represents one complete capture channel that can be instantiated multiple times
+       depending on the target device. In the context of this guide, one eCAP channel has the following
+       independent key resources:
+       • Dedicated input capture pin
+       • 32-bit time base (counter)
+       • 4 x 32-bit time-stamp capture registers (CAP1-CAP4)
+       • 4-stage sequencer (Modulo4 counter) that is synchronized to external events, ECAP pin rising/falling
+          edges.
+       • Independent edge polarity (rising/falling edge) selection for all 4 events
+       • Input capture signal prescaling (from 2-62)
+       • One-shot compare register (2 bits) to freeze captures after 1 to 4 time-stamp events
+       • Control for continuous time-stamp captures using a 4-deep circular buffer (CAP1-CAP4) scheme
+       • Interrupt capabilities on any of the 4 capture events
+       Multiple identical eCAP modules can be contained in a system as shown in Figure 1. The number of
+       modules is device-dependent and is based on target application needs.
+
+SPRU807B – November 2004 – Revised September 2007                           Enhanced Capture (eCAP) Module   9
+Submit Documentation Feedback
+Description                                                                                             www.ti.com
+
+
+                                 Figure 1. Multiple eCAP Modules In A 28x System
+                                                        VBus32
+                                    From EPWM
+
+                                                    SyncIn
+
+                                                      ECAP1        ECAP1
+                                                      module
+
+                                        ECAP1INT
+                                                    SyncOut
+
+
+                                                    SyncIn
+
+                                                      ECAP2/       ECAP2
+                                                      APWM2                      GPIO
+                           PIE                        module                     MUX
+                                        ECAP2INT
+                                                    SyncOut
+
+
+
+
+                                                    SyncIn
+
+                                                      ECAPx/       ECAPx
+                                                      APWMx
+                                                      module
+                                        ECAPxINT
+                                                    SyncOut
+
+
+
+
+10     Enhanced Capture (eCAP) Module                             SPRU807B – November 2004 – Revised September 2007
+                                                                                    Submit Documentation Feedback
+www.ti.com                                                                                      Capture and APWM Operating Mode
+
+3        Capture and APWM Operating Mode
+         You can use the eCAP module resources to implement a single-channel PWM generator (with 32 bit
+         capabilities) when it is not being used for input captures. The counter operates in count-up mode,
+         providing a time-base for asymmetrical pulse width modulation (PWM) waveforms. The CAP1 and CAP2
+         registers become the active period and compare registers, respectively, while CAP3 and CAP4 registers
+         become the period and capture shadow registers, respectively. Figure 2 is a high-level view of both the
+         capture and auxiliary pulse-width modulator (APWM) modes of operation.
+
+                                     Figure 2. Capture and APWM Modes of Operation
+
+                                                                                         Capture
+                            SyncIn            Counter (”timer”)                           mode              Note:
+                                                                                                          Same pin
+                                                 32                                                      depends on
+                                                                                                          operating
+                                                                                                           mode
+                                                 CAP1 reg
+                                                                                                            ECAPx
+                                                 CAP2 reg                     Sequencing                     pin
+                                                                             Edge detection
+                                                                              Edge polarity
+                                                 CAP3 reg                       Prescale
+
+                                                 CAP4 reg
+
+                        ECAPxINT                Interrupt I/F
+
+
+                                                      Or
+
+                                                                                         APWM
+                            SyncIn            Counter (”timer”)                          mode
+
+                                                 32
+
+
+                                                Period reg
+                           Syncout           (active) (”CAP1”)
+
+                                               Compare reg                                                 APWMx
+                                             (active) (”CAP2”)                                               pin
+                                                                                PWM
+                                                                             Compare logic
+                                                Period reg
+                                            (shadow) (”CAP3”)
+
+                                               Compare reg
+                                            (shadow) (”CAP4”)
+
+                        ECAPxINT                Interrupt I/F
+
+
+     A     A single pin is shared between CAP and APWM functions. In capture mode, it is an input; in APWM mode, it is an
+           output.
+     B     In APWM mode, writing any value to CAP1/CAP2 active registers also writes the same value to the corresponding
+           shadow registers CAP3/CAP4. This emulates immediate mode. Writing to the shadow registers CAP3/CAP4 invokes
+           the shadow mode.
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                             Enhanced Capture (eCAP) Module   11
+Submit Documentation Feedback
+Capture Mode Description                                                                                                                                              www.ti.com
+
+4     Capture Mode Description
+      Figure 3 shows the various components that implement the capture function.
+
+                                                                 Figure 3. Capture Function Diagram
+                                   ECCTL2 [ SYNCI_EN, SYNCOSEL, SWSYNC]
+                                                                                                        ECCTL2[CAP/APWM]
+                                               CTRPHS
+                                         (phase register−32 bit)                                               APWM mode
+
+                         SYNC
+          SYNCIn
+                                                                    OVF          CTR_OVF
+                                                                                                           CTR [0−31]
+          SYNCOut                                 TSCTR
+                                                                                                                                  PWM
+                                              (counter−32 bit)
+                                                                              Delta−mode                   PRD [0−31]            compare
+                                                                    RST
+                                                                                                                                   logic
+                                                                                                           CMP [0−31]
+                                                 32
+
+                                                                   CTR [0−31]                                       CTR=PRD
+                                                                                                                    CTR=CMP
+                                                           32
+                                                                   PRD [0−31]
+                                                                                                        ECCTL1 [ CAPLDEN, CTRRSTx]
+
+                                                                                                                                                                    ECAPx
+
+
+
+
+                                                                                                                                                      MODE SELECT
+                    32                           CAP1                           LD1                                 Polarity
+                                                                     LD
+                                              (APRD active)                                                          select
+
+
+                                 APRD
+                                                        32
+                                shadow                              CMP [0−31]
+                                         32
+
+
+                    32                                                          LD2
+                                                 CAP2                                                               Polarity
+                                                                    LD
+                                              (ACMP active)                                                          select
+
+                                                                                             Event
+                                                      32          ACMP                                                                 Event
+                                                                                            qualifier
+                                                                 shadow                                                               Prescale
+
+
+                                                                                                                                   ECCTL1[EVTPS]
+                                                                                                                    Polarity
+                    32                            CAP3                           LD3
+                                                                    LD                                               select
+                                              (APRD shadow)
+
+
+
+
+                    32                            CAP4                           LD4
+                                                                    LD                                              Polarity
+                                              (ACMP shadow)                                                          select
+                                                                                                                               Edge Polarity Select
+                                                                                       4
+                                                                                                                               ECCTL1[CAPxPOL]
+                                                                           Capture events
+                                                                                                           4
+                                                                             CEVT[1:4]
+
+
+
+                                          Interrupt                                                        Continuous /
+                                           Trigger                                                           Oneshot
+                     to PIE
+                                             and                 CTR_OVF                                  Capture Control
+                                            Flag
+                                                                 CTR=PRD
+                                           control
+                                                                 CTR=CMP
+                                                                                         ECCTL2 [ RE−ARM, CONT/ONESHT, STOP_WRAP]
+                    Registers: ECEINT, ECFLG, ECCLR, ECFRC
+
+
+
+4.1   Event Prescaler
+      •     An input capture signal (pulse train) can be prescaled by N = 2-62 (in multiples of 2) or can bypass the
+            prescaler.
+            This is useful when very high frequency signals are used as inputs. Figure 4 shows a functional
+            diagram and Figure 5 shows the operation of the prescale function.
+
+
+
+
+12    Enhanced Capture (eCAP) Module                                                                                SPRU807B – November 2004 – Revised September 2007
+                                                                                                                                      Submit Documentation Feedback
+www.ti.com                                                                                                        Capture Mode Description
+
+                                                   Figure 4. Event Prescale Control
+
+                                                             Event prescaler
+
+
+                                                         0
+                                 PSout
+                                                                                                    ECAPx pin
+                                                         1              /n
+                                                                                                    (from GPIO)
+
+                                                                             5
+                                                    By−pass
+                                                                ECCTL1[EVTPS]
+                                                                prescaler [5 bits]
+                                                                   (counter)
+
+
+      A        When a prescale value of 1 is chosen (i.e. ECCTL1[13:9] = 0,0,0,0,0 ) the input capture signal by-passes the prescale
+               logic completely.
+
+                                               Figure 5. Prescale Function Waveforms
+
+              ECAPx
+
+
+              PSout
+               div 2
+
+
+              PSout
+               div 4
+
+
+              PSout
+               div 6
+
+
+              PSout
+               div 8
+
+
+              PSout
+              div 10
+
+
+4.2       Edge Polarity Select and Qualifier
+          •    Four independent edge polarity (rising edge/falling edge) selection MUXes are used, one for each
+               capture event.
+          •    Each edge (up to 4) is event qualified by the Modulo4 sequencer.
+          •    The edge event is gated to its respective CAPx register by the Mod4 counter. The CAPx register is
+               loaded on the falling edge.
+
+4.3       Continuous/One-Shot Control
+          •    The Mod4 (2 bit) counter is incremented via edge qualified events (CEVT1-CEVT4).
+          •    The Mod4 counter continues counting (0->1->2->3->0) and wraps around unless stopped.
+          •    A 2-bit stop register is used to compare the Mod4 counter output, and when equal stops the Mod4
+               counter and inhibits further loads of the CAP1-CAP4 registers. This occurs during one-shot operation.
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                                   Enhanced Capture (eCAP) Module      13
+Submit Documentation Feedback
+Capture Mode Description                                                                                      www.ti.com
+
+      The continuous/one-shot block controls the start/stop and reset (zero) functions of the Mod4 counter via a
+      mono-shot type of action that can be triggered by the stop-value comparator and re-armed via software
+      control.
+      Once armed, the eCAP module waits for 1-4 (defined by stop-value) capture events before freezing both
+      the Mod4 counter and contents of CAP1-4 registers (i.e., time-stamps).
+      Re-arming prepares the eCAP module for another capture sequence. Also re-arming clears (to zero) the
+      Mod4 counter and permits loading of CAP1-4 registers again, providing the CAPLDEN bit is set.
+      In continuous mode, the Mod4 counter continues to run (0->1->2->3->0, the one-shot action is ignored,
+      and capture values continue to be written to CAP1-4 in a circular buffer sequence.
+
+                               Figure 6. Details of the Continuous/One-shot Block
+
+
+                                                0 1 2 3
+                                                 2:4 MUX
+
+
+
+                                                     2                                 CEVT1
+                                                                                       CEVT2
+                                                     CLK
+                                            Modulo 4                                   CEVT3
+                                            counter Stop                               CEVT4
+                                                     RST
+
+
+
+                                                         Mod_eq    One−shot
+                                                                  control logic
+
+
+                              Stop value (2b)
+
+
+                           ECCTL2[STOP_WRAP]                   ECCTL2[RE−ARM]
+                                                             ECCTL2[CONT/ONESHT]
+
+
+4.4   32-Bit Counter and Phase Control
+      This counter provides the time-base for event captures, and is clocked via the system clock.
+      A phase register is provided to achieve synchronization with other counters, via a hardware and software
+      forced sync. This is useful in APWM mode when a phase offset between modules is needed.
+      On any of the four event loads, an option to reset the 32-bit counter is given. This is useful for time
+      difference capture. The 32-bit counter value is captured first, then it is reset to 0 by any of the LD1-LD4
+      signals.
+
+
+
+
+14    Enhanced Capture (eCAP) Module                                    SPRU807B – November 2004 – Revised September 2007
+                                                                                          Submit Documentation Feedback
+www.ti.com                                                                                  Capture Mode Description
+
+                           Figure 7. Details of the Counter and Synchronization Block
+
+                                                                                         SYNC
+                                                                   ECCTL2[SWSYNC]
+
+
+                                                                 ECCTL2[SYNCOSEL]
+
+                                                                SYNCI
+                                                            CTR=PRD
+                                                               Disable                   SYNCO
+                                                               Disable
+                 ECCTL2[SYNCI_EN]
+                                                                            Sync out
+                                                                             select
+                                                          CTRPHS
+
+
+
+                                                    LD_CTRPHS      RST                   Delta−mode
+                                                          TSCTR
+                                                       (counter 32b)
+                                   SYSCLK           CLK            OVF                   CTR−OVF
+
+
+
+                                                                                         CTR[31−0]
+
+
+4.5    CAP1-CAP4 Registers
+       These 32-bit registers are fed by the 32-bit counter timer bus, CTR[0-31] and are loaded (i.e., capture a
+       time-stamp) when their respective LD inputs are strobed.
+       Loading of the capture registers can be inhibited via control bit CAPLDEN. During one-shot operation, this
+       bit is cleared (loading is inhibited) automatically when a stop condition occurs, i.e. StopValue = Mod4.
+       CAP1 and CAP2 registers become the active period and compare registers, respectively, in APWM mode.
+       CAP3 and CAP4 registers become the respective shadow registers (APRD and ACMP) for CAP1 and
+       CAP2 during APWM operation.
+
+4.6    Interrupt Control
+       An Interrupt can be generated on capture events (CEVT1-CEVT4, CTROVF) or APWM events (CTR =
+       PRD, CTR = CMP).
+       A counter overflow event (FFFFFFFF->00000000) is also provided as an interrupt source (CTROVF).
+       The capture events are edge and sequencer qualified (i.e., ordered in time) by the polarity select and
+       Mod4 gating, respectively.
+       One of these events can be selected as the interrupt source (from the eCAPx module) going to the PIE.
+       Seven interrupt events (CEVT1, CEVT2, CEVT3, CEVT4, CNTOVF, CTR=PRD, CTR=CMP) can be
+       generated. The interrupt enable register (ECEINT) is used to enable/disable individual interrupt event
+       sources. The interrupt flag register (ECFLG) indicates if any interrupt event has been latched and contains
+       the global interrupt flag bit (INT). An interrupt pulse is generated to the PIE only if any of the interrupt
+       events are enabled, the flag bit is 1, and the INT flag bit is 0. The interrupt service routine must clear the
+       global interrupt flag bit and the serviced event via the interrupt clear register (ECCLR) before any other
+       interrupt pulses are generated. You can force an interrupt event via the interrupt force register (ECFRC).
+       This is useful for test purposes.
+
+
+SPRU807B – November 2004 – Revised September 2007                                Enhanced Capture (eCAP) Module    15
+Submit Documentation Feedback
+Capture Mode Description                                                                                     www.ti.com
+
+      Note: The CEVT1, CEVT2, CEVT3, CEVT4 flags are only active in capture mode (ECCTL2[CAP/APWM
+      == 0]). The CTR=PRD, CTR=CMP flags are only valid in APWM mode (ECCTL2[CAP/APWM == 1]).
+      CNTOVF flag is valid in both modes.
+
+                                        Figure 8. Interrupts in eCAP Module
+                                                                      ECFLG
+
+                                                                                Clear    ECCLR
+
+                                                                              Latch              ECFRC
+
+                                                             ECEINT               Set                CEVT1
+
+
+                                                                      ECFLG
+
+                                                                                Clear    ECCLR
+
+                                                                              Latch              ECFRC
+                                        ECFLG
+                                                             ECEINT               Set            CEVT2
+
+
+                                                                      ECFLG
+            ECCLR          Clear
+                                                                                Clear    ECCLR
+                             Latch
+                                                                              Latch              ECFRC
+                           Set
+                                                             ECEINT               Set            CEVT3
+
+
+                                                                      ECFLG
+                            Generate      1     0
+         ECAPxINT           interrupt                                           Clear    ECCLR
+                           pulse when
+                             input=1      0                                   Latch              ECFRC
+
+                                                             ECEINT               Set
+                                                                                                 CEVT4
+
+                                                                      ECFLG
+
+                                                                                Clear    ECCLR
+
+                                                                              Latch              ECFRC
+
+                                                             ECEINT               Set                    CTROVF
+
+
+                                                                      ECFLG
+
+                                                                                Clear    ECCLR
+
+                                                                              Latch              ECFRC
+
+                                                             ECEINT               Set            PRDEQ
+
+
+                                                                      ECFLG
+
+                                                                                Clear    ECCLR
+
+                                                                              Latch              ECFRC
+
+                                                             ECEINT               Set            CMPEQ
+
+
+
+
+4.7   Shadow Load and Lockout Control
+      In capture mode, this logic inhibits (locks out) any shadow loading of CAP1 or CAP2 from APRD and
+      ACMP registers, respectively.
+      In APWM mode, shadow loading is active and two choices are permitted:
+      • Immediate - APRD or ACMP are transferred to CAP1 or CAP2 immediately upon writing a new value.
+      • On period equal, i.e., CTR[31:0] = PRD[31:0]
+
+
+16    Enhanced Capture (eCAP) Module                                   SPRU807B – November 2004 – Revised September 2007
+                                                                                         Submit Documentation Feedback
+www.ti.com                                                                               Capture Mode Description
+4.8    APWM Mode Operation
+       Main operating highlights of the APWM section:
+       • The time-stamp counter bus is made available for comparison via 2 digital (32-bit) comparators.
+       • When CAP1/2 registers are not used in capture mode, their contents can be used as Period and
+          Compare values in APWM mode.
+       • Double buffering is achieved via shadow registers APRD and ACMP (CAP3/4). The shadow register
+          contents are transferred over to CAP1/2 registers either immediately upon a write, or on a CTR = PRD
+          trigger.
+       • In APWM mode, writing to CAP1/CAP2 active registers will also write the same value to the
+          corresponding shadow registers CAP3/CAP4. This emulates immediate mode. Writing to the shadow
+          registers CAP3/CAP4 will invoke the shadow mode.
+       • During initialization, you must write to the active registers for both period and compare. This
+          automatically copies the initial values into the shadow values. For subsequent compare updates, i.e.,
+          during run-time, you only need to use the shadow registers.
+
+                            Figure 9. PWM Waveform Details Of APWM Mode Operation
+                              TSCTR
+               FFFFFFFF
+
+                              1000h
+             APRD
+
+
+
+
+                              500h
+             ACMP             300h
+
+
+
+                0000000C
+
+
+                APWMx
+                (o/p pin)
+
+                                            Off−time
+                               On                                    Period
+                              time
+       The behavior of APWM active high mode (APWMPOL == 0) is as follows:
+       CMP = 0x00000000, output low for duration of period (0% duty)
+       CMP = 0x00000001, output high 1 cycle
+       CMP = 0x00000002, output high 2 cycles
+       CMP = PERIOD,         output high except for 1 cycle    (<100% duty)
+       CMP = PERIOD+1,       output high for complete period (100% duty)
+       CMP > PERIOD+1,       output high for complete period
+
+       The behavior of APWM active low mode (APWMPOL == 1) is as follows:
+       CMP = 0x00000000, output high for duration of period (0% duty)
+       CMP = 0x00000001, output low 1 cycle
+       CMP = 0x00000002, output low 2 cycles
+       CMP = PERIOD,         output low except for 1 cycle (<100% duty)
+       CMP = PERIOD+1,       output low for complete period (100% duty)
+       CMP > PERIOD+1,       output low for complete period
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                             Enhanced Capture (eCAP) Module   17
+Submit Documentation Feedback
+Capture Module - Control and Status Registers                                                                                www.ti.com
+
+5      Capture Module - Control and Status Registers
+
+                                      Figure 10. Time-Stamp Counter Register (TSCTR)
+31                                                                                                                                     0
+                                                                TSCTR
+                                                                  R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                            Table 1. Time-Stamp Counter Register (TSCTR) Field Descriptions
+         Bit(s)   Field               Description
+          31:0    TSCTR               Active 32-bit counter register that is used as the capture time-base
+
+
+
+                                    Figure 11. Counter Phase Control Register (CTRPHS)
+31                                                                                                                                     0
+                                                               CTRPHS
+                                                                  R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                          Table 2. Counter Phase Control Register (CTRPHS) Field Descriptions
+         Bit(s)   Field               Description
+          31:0    CTRPHS              Counter phase value register that can be programmed for phase lag/lead. This register shadows
+                                      TSCTR and is loaded into TSCTR upon either a SYNCI event or S/W force via a control bit. Used
+                                      to achieve phase control synchronization with respect to other eCAP and EPWM time-bases.
+
+
+
+                                               Figure 12. Capture-1 Register (CAP1)
+31                                                                                                                                     0
+                                                                  CAP1
+                                                                  R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                    Table 3. Capture-1 Register (CAP1) Field Descriptions
+         Bit(s)   Field               Description
+          31:0    CAP1                This register can be loaded (written) by :) Time-Stamp (i.e., counter value TSCTR) during a capture
+                                      event) Software - may be useful for test purposes / initialization) APRD shadow register (i.e.,
+                                      CAP3) when used in APWM mode
+
+
+
+                                               Figure 13. Capture-2 Register (CAP2)
+31                                                                                                                                     0
+                                                                  CAP2
+                                                                  R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+
+
+18     Enhanced Capture (eCAP) Module                                             SPRU807B – November 2004 – Revised September 2007
+                                                                                                    Submit Documentation Feedback
+www.ti.com                                                                          Capture Module - Control and Status Registers
+
+                                     Table 4. Capture-2 Register (CAP2) Field Descriptions
+            Bit(s)    Field            Description
+            31:0      CAP2             This register can be loaded (written) by:
+                                         • Time-Stamp (i.e., counter value) during a capture event
+                                         • Software - may be useful for test purposes
+                                         • APRD shadow register (i.e., CAP4) when used in APWM mode
+
+
+              Note:     In APWM mode, writing to CAP1/CAP2 active registers also writes the same value to the
+                        corresponding shadow registers CAP3/CAP4. This emulates immediate mode. Writing to the
+                        shadow registers CAP3/CAP4 invokes the shadow mode.
+
+
+                                               Figure 14. Capture-3 Register (CAP3)
+31                                                                                                                                    0
+                                                                  CAP3
+                                                                  R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                     Table 5. Capture-3 Register (CAP3) Field Descriptions
+            Bit(s)    Field            Description
+            31:0      CAP3             In CMP mode, this is a time-stamp capture register. In APWM mode, this is the period shadow
+                                       (APER) register. You update the PWM period value through this register. In this mode, CAP3
+                                       (APRD) shadows CAP1.
+
+
+                                               Figure 15. Capture-4 Register (CAP4)
+31                                                                                                                                    0
+                                                                  CAP4
+                                                                  R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                     Table 6. Capture-4 Register (CAP4) Field Descriptions
+            Bit(s)    Field            Description
+            31:0      CAP4             In CMP mode, this is a time-stamp capture register. In APWM mode, this is the compare shadow
+                                       (ACMP) register. You update the PWM compare value via this register. In this mode, CAP4
+                                       (ACMP) shadows CAP2.
+
+
+                                          Figure 16. ECAP Control Register 1 (ECCTL1)
+       15                     14        13               12                 11             10                9                8
+            FREE/SOFT                                                 PRESCALE                                            CAPLDEN
+               R/W-0                                                       R/W-0                                            R/W-0
+
+
+        7                     6          5                4                  3              2                1                0
+     CTRRST4           CAP4POL       CTRRST3         CAP3POL              CTRRST2       CAP2POL          CTRRST1          CAP1POL
+      R/W-0              R/W-0         R/W-0           R/W-0               R/W-0          R/W-0            R/W-0            R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                               Enhanced Capture (eCAP) Module        19
+Submit Documentation Feedback
+Capture Module - Control and Status Registers                                                                           www.ti.com
+
+                              Table 7. ECAP Control Register 1 (ECCTL1) Field Descriptions
+         Bit(s)   Field            Value      Description
+         15:14    FREE/SOFT                   Emulation Control
+                                        00    TSCTR counter stops immediately on emulation suspend
+                                        01    TSCTR counter runs until = 0
+                                        1x    TSCTR counter is unaffected by emulation suspend (Run Free)
+         13:9     PRESCALE                    Event Filter prescale select
+                                    00000     Divide by 1 (i.e,. no prescale, by-pass the prescaler)
+                                    00001     Divide by 2
+                                    00010     Divide by 4
+                                    00011     Divide by 6
+                                    00100     Divide by 8
+                                    00101     Divide by 10
+                                        ...
+                                    11110     Divide by 60
+                                    11111     Divide by 62
+           8      CAPLDEN                     Enable Loading of CAP1-4 registers on a capture event
+                                        0     Disable CAP1-4 register loads at capture event time.
+                                        1     Enable CAP1-4 register loads at capture event time.
+           7      CTRRST4                     Counter Reset on Capture Event 4
+                                        0     Do not reset counter on Capture Event 4 (absolute time stamp operation)
+                                        1     Reset counter after Capture Event 4 time-stamp has been captured
+                                              (used in difference mode operation)
+           6      CAP4POL                     Capture Event 4 Polarity select
+                                        0     Capture Event 4 triggered on a rising edge (RE)
+                                        1     Capture Event 4 triggered on a falling edge (FE)
+           5      CTRRST3                     Counter Reset on Capture Event 3
+                                        0     Do not reset counter on Capture Event 3 (absolute time stamp)
+                                        1     Reset counter after Event 3 time-stamp has been captured
+                                              (used in difference mode operation)
+           4      CAP3POL                     Capture Event 3 Polarity select
+                                        0     Capture Event 3 triggered on a rising edge (RE)
+                                        1     Capture Event 3 triggered on a falling edge (FE)
+           3      CTRRST2                     Counter Reset on Capture Event 2
+                                        0     Do not reset counter on Capture Event 2 (absolute time stamp)
+                                        1     Reset counter after Event 2 time-stamp has been captured
+                                              (used in difference mode operation)
+           2      CAP2POL                     Capture Event 2 Polarity select
+                                        0     Capture Event 2 triggered on a rising edge (RE)
+                                        1     Capture Event 2 triggered on a falling edge (FE)
+           1      CTRRST1                     Counter Reset on Capture Event 1
+                                        0     Do not reset counter on Capture Event 1 (absolute time stamp)
+                                        1     Reset counter after Event 1 time-stamp has been captured (used in difference mode
+                                              operation)
+           0      CAP1POL                     Capture Event 1 Polarity select
+                                        0     Capture Event 1 triggered on a rising edge (RE)
+                                        1     Capture Event 1 triggered on a falling edge (FE)
+
+
+
+
+20     Enhanced Capture (eCAP) Module                                           SPRU807B – November 2004 – Revised September 2007
+                                                                                                  Submit Documentation Feedback
+www.ti.com                                                                           Capture Module - Control and Status Registers
+
+                                         Figure 17. ECAP Control Register 2 (ECCTL2)
+      15                                                                   11                10                 9              8
+                                     Reserved                                           APWMPOL            CAP/APWM        SWSYNC
+                                       R-0                                                 R/W-0             R/W-0           R/W-0
+
+
+       7                     6          5                 4                 3                 2                 1              0
+           SYNCO_SEL                SYNCI_EN         TSCTRSTOP          REARM                     STOP_WRAP              CONT/ONESH
+                                                                                                                              T
+                 R/W-0                R/W-0            R/W-0             R/W-0             R/W-1             R/W-1           R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                 Table 8. ECAP Control Register 2 (ECCTL2) Field Descriptions
+           Bit(s)    Field                            Description
+           15:11     Reserved                         Reserved
+            10       APWMPOL                          APWM output polarity select. This is applicable only in APWM operating mode
+                                                0     Output is active high (i.e., Compare value defines high time)
+                                                1     Output is active low (i.e., Compare value defines low time)
+             9       CAP/APWM                         CAP/APWM operating mode select
+                                                0     ECAP module operates in capture mode. This mode forces the following
+                                                      configuration:
+                                                        • Inhibits TSCTR resets via CTR = PRD event
+                                                        • Inhibits shadow loads on CAP1 and 2 registers
+                                                        • Permits user to enable CAP1-4 register load
+                                                        • CAPx/APWMx pin operates as a capture input
+                                                1     ECAP module operates in APWM mode. This mode forces the following
+                                                      configuration:
+                                                        • Resets TSCTR on CTR = PRD event (period boundary
+                                                        • Permits shadow loading on CAP1 and 2 registers
+                                                        • Disables loading of time-stamps into CAP1-4 registers
+                                                        • CAPx/APWMx pin operates as a APWM output
+             8       SWSYNC                           Software-forced Counter (TSCTR) Synchronizing. This provides a convenient
+                                                      software method to synchronize some or all ECAP time bases. In APWM mode,
+                                                      the synchronizing can also be done via the CTR = PRD event.
+                                                0     Writing a zero has no effect. Reading always returns a zero
+                                                1     Writing a one forces a TSCTR shadow load of current ECAP module and any
+                                                      ECAP modules down-stream providing the SYNCO_SEL bits are 0,0. After writing
+                                                      a 1, this bit returns to a zero.
+                                                      Note: Selection CTR = PRD is meaningful only in APWM mode; however, you can
+                                                      choose it in CAP mode if you find doing so useful.
+            7:6      SYNCO_SEL                        Sync-Out Select
+                                                00    Select sync-in event to be the sync-out signal (pass through)
+                                                01    Select CTR = PRD event to be the sync-out signal
+                                                10    Disable sync out signal
+                                                11    Disable sync out signal
+             5       SYNCI_EN                         Counter (TSCTR) Sync-In select mode
+                                                0     Disable sync-in option
+                                                1     Enable counter (TSCTR) to be loaded from CTRPHS register upon either a SYNCI
+                                                      signal or a S/W force event.
+             4       TSCTRSTOP                        Time Stamp (TSCTR) Counter Stop (freeze) Control
+                                                0     TSCTR stopped
+                                                1     TSCTR free-running
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                                 Enhanced Capture (eCAP) Module     21
+Submit Documentation Feedback
+Capture Module - Control and Status Registers                                                                            www.ti.com
+
+
+                      Table 8. ECAP Control Register 2 (ECCTL2) Field Descriptions (continued)
+         Bit(s)   Field                         Description
+           3      RE-ARM                        One-Shot Re-Arming Control, i.e. wait for stop trigger. Note: The re-arm function is
+                                                valid in one shot or continuous mode.
+                                          0     Has no effect (reading always returns a 0)
+                                          1     Arms the one-shot sequence as follows:
+                                                1) Resets the Mod4 counter to zero
+                                                2) Unfreezes the Mod4 counter
+                                                3) Enables capture register loads
+          2:1     STOP_WRAP                     Stop value for one-shot mode. This is the number (between 1-4) of captures
+                                                allowed to occur before the CAP(1-4) registers are frozen, i.e., capture sequence is
+                                                stopped.
+                                                Wrap value for continuous mode. This is the number (between 1-4) of the capture
+                                                register in which the circular buffer wraps around and starts again.
+                                          00    Stop after Capture Event 1 in one-shot mode
+                                                Wrap after Capture Event 1 in continuous mode.
+                                          01    Stop after Capture Event 2 in one-shot mode
+                                                Wrap after Capture Event 2 in continuous mode.
+                                          10    Stop after Capture Event 3 in one-shot mode
+                                                Wrap after Capture Event 3 in continuous mode.
+                                          11    Stop after Capture Event 4 in one-shot mode
+                                                Wrap after Capture Event 4 in continuous mode.
+                                                Notes: STOP_WRAP is compared to Mod4 counter and, when equal, 2 actions
+                                                occur:
+                                                   • Mod4 counter is stopped (frozen)
+                                                   • Capture register loads are inhibited
+                                                In one-shot mode, further interrupt events are blocked until re-armed.
+           0      CONT/ONESHT                   Continuous or one-shot mode control (applicable only in capture mode)
+                                          0     Operate in continuous mode
+                                          1     Operate in one-Shot mode
+
+
+
+
+22     Enhanced Capture (eCAP) Module                                       SPRU807B – November 2004 – Revised September 2007
+                                                                                              Submit Documentation Feedback
+www.ti.com                                                                         Capture Module - Control and Status Registers
+                                      Figure 18. ECAP Interrupt Enable Register (ECEINT)
+      15                                                                                                                      8
+                                                              Reserved
+
+
+       7                  6             5                4                 3                 2                1               0
+  CTR=CMP          CTR=PRD           CTROVF           CEVT4              CEVT3          CEVT2               CETV1         Reserved
+                                       R/W             R/W               R/W                R/W              R/W
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                              Table 9. ECAP Interrupt Enable Register (ECEINT) Field Descriptions
+           Bits   Field                     Value   Description
+           15:8   Reserved
+             7    CTR=CMP                           Counter Equal Compare Interrupt Enable
+                                               0    Disable Compare Equal as an Interrupt source
+                                               1    Enable Compare Equal as an Interrupt source
+             6    CTR=PRD                           Counter Equal Period Interrupt Enable
+                                               0    Disable Period Equal as an Interrupt source
+                                               1    Enable Period Equal as an Interrupt source
+             5    CTROVF                            Counter Overflow Interrupt Enable
+                                               0    Disabled counter Overflow as an Interrupt source
+                                               1    Enable counter Overflow as an Interrupt source
+             4    CEVT4                             Capture Event 4 Interrupt Enable
+                                               0    Disable Capture Event 1 as an Interrupt source
+                                               1    Capture Event 4 Interrupt Enable
+             3    CEVT3                             Capture Event 3 Interrupt Enable
+                                               0    Disable Capture Event 1 as an Interrupt source
+                                               1    Enable Capture Event 1 as an Interrupt source
+             2    CEVT2                             Capture Event 2 Interrupt Enable
+                                               0    Disable Capture Event 1 as an Interrupt source
+                                               1    Enable Capture Event 1 as an Interrupt source
+             1    CEVT1                             Capture Event 1 Interrupt Enable
+                                               0    Disable Capture Event 1 as an Interrupt source
+                                               1    Enable Capture Event 1 as an Interrupt source
+             0    Reserved
+
+
+       The interrupt enable bits (CEVT1, ...) block any of the selected events from generating an interrupt.
+       Events will still be latched into the flag bit (ECFLG register) and can be forced/cleared via the
+       ECFRC/ECCLR registers.
+       The proper procedure for configuring peripheral modes and interrupts is as follows:
+       • Disable global interrupts
+       • Stop eCAP counter
+       • Disable eCAP interrupts
+       • Configure peripheral registers
+       • Clear spurious eCAP interrupt flags
+       • Enable eCAP interrupts
+       • Start eCAP counter
+       • Enable global interrupts
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                                Enhanced Capture (eCAP) Module      23
+Submit Documentation Feedback
+Capture Module - Control and Status Registers                                                                                  www.ti.com
+
+                                           Figure 19. ECAP Interrupt Flag Register (ECFLG)
+       15                                                                                                                         8
+                                                                     Reserved
+                                                                       R-0
+
+
+        7                   6               5                  4                  3                 2                 1           0
+     CTR=CMP         CTR=PRD          CTROVF                CEVT4               CETV3          CEVT2            CETV1            INT
+       R-0                R-0              R-0                 R-0               R-0                R-0           R-0            R-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                                Table 10. ECAP Interrupt Flag Register (ECFLG) Field Descriptions
+             Bits   Field            Value       Description
+             15:8   Reserved
+              7     CTR=CMP                      Compare Equal Compare Status Flag. This flag is active only in APWM mode.
+                                       0         Indicates no event occurred
+                                       1         Indicates the counter (TSCTR) reached the compare register value (ACMP)
+              6     CTR=PRD                      Counter Equal Period Status Flag. This flag is only active in APWM mode.
+                                       0         Indicates no event occurred
+                                       1         Indicates the counter (TSCTR) reached the period register value (APER) and was reset.
+              5     CTROVF                       Counter Overflow Status Flag. This flag is active in CAP and APWM mode.
+                                       0         Indicates no event occurred.
+                                       1         Indicates the counter (TSCTR) has made the transition from FFFFFFFF " 00000000
+              4     CEVT4                        Capture Event 4 Status Flag This flag is only active in CAP mode.
+                                       0         Indicates no event occurred
+                                       1         Indicates the fourth event occurred at ECAPx pin
+              3     CEVT3                        Capture Event 3 Status Flag. This flag is active only in CAP mode.
+                                       0         Indicates no event occurred.
+                                       1         Indicates the third event occurred at ECAPx pin.
+              2     CEVT2                        Capture Event 2 Status Flag. This flag is only active in CAP mode.
+                                       0         Indicates no event occurred.
+                                       1         Indicates the second event occurred at ECAPx pin.
+              1     CEVT1                        Capture Event 1 Status Flag. This flag is only active in CAP mode.
+                                       0         Indicates no event occurred.
+                                       1         Indicates the first event occurred at ECAPx pin.
+              0     INT                          Global Interrupt Status Flag
+                                       0         Indicates no interrupt generated.
+                                       1         Indicates that an interrupt was generated.
+
+
+
+                                           Figure 20. ECAP Interrupt Clear Register (ECCLR)
+       15                                                                                                                         8
+                                                                     Reserved
+                                                                       R-0
+
+
+        7                   6               5                  4                  3                 2                 1           0
+     CTR=CMP         CTR=PRD          CTROVF                CEVT4               CETV3          CETV2            CETV1            INT
+      R/W-0            R/W-0           R/W-0                R/W-0               R/W-0           R/W-0           R/W-0           R/W-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+
+24      Enhanced Capture (eCAP) Module                                                  SPRU807B – November 2004 – Revised September 2007
+                                                                                                          Submit Documentation Feedback
+www.ti.com                                                                            Capture Module - Control and Status Registers
+
+                                Table 11. ECAP Interrupt Clear Register (ECCLR) Field Descriptions
+           Bits   Field                               Description
+           15:8   Reserved
+             7    CTR=CMP                             Counter Equal Compare Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0
+                                                1     Writing a 1 clears the CTR=CMP flag condition
+             6    CTR=PRD                             Counter Equal Period Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0
+                                                1     Writing a 1 clears the CTR=PRD flag condition
+             5    CTROVF                              Counter Overflow Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0
+                                                1     Writing a 1 clears the CTROVF flag condition
+             4    CEVT4                               Capture Event 4 Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0.
+                                                1     Writing a 1 clears the CEVT3 flag condition.
+             3    CEVT3                               Capture Event 3 Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0.
+                                                1     Writing a 1 clears the CEVT3 flag condition.
+             2    CEVT2                               Capture Event 2 Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0.
+                                                0     Writing a 1 clears the CEVT2 flag condition.
+             1    CEVT1                               Capture Event 1 Status Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0.
+                                                1     Writing a 1 clears the CEVT1 flag condition.
+             0    INT                                 Global Interrupt Clear Flag
+                                                0     Writing a 0 has no effect. Always reads back a 0.
+                                                1     Writing a 1 clears the INT flag and enable further interrupts to be generated if any
+                                                      of the event flags are set to 1.
+
+
+                                       Figure 21. ECAP Interrupt Forcing Register (ECFRC)
+      15                  14             13               12                11                 10                9                 8
+                                                                Reserved
+                                                                  R-0
+
+
+       7                  6               5               4                  3                 2                 1                 0
+  CTR=CMP          CTR=PRD             CTROVF          CEVT4               CETV3            CETV2             CETV1            reserved
+    R/W-0            R/W-0              R/W-0           R/W-0              R/W-0             R/W-0            R/W-0               R-0
+
+LEGEND: R/W = Read/Write; R = Read only; -n = value after reset
+
+
+                               Table 12. ECAP Interrupt Forcing Register (ECFRC) Field Descriptions
+           Bits   Field                       Value   Description
+           15:8   Reserved                      0
+             7    CTR=CMP                             Force Counter Equal Compare Interrupt
+                                                0     No effect. Always reads back a 0.
+                                                1     Writing a 1 sets the CTR=CMP flag bit.
+             6    CTR=PRD                             Force Counter Equal Period Interrupt
+                                                0     No effect. Always reads back a 0.
+                                                1     Writing a 1 sets the CTR=PRD flag bit.
+
+
+
+SPRU807B – November 2004 – Revised September 2007                                                  Enhanced Capture (eCAP) Module            25
+Submit Documentation Feedback
+Register Mapping                                                                                                     www.ti.com
+
+
+                  Table 12. ECAP Interrupt Forcing Register (ECFRC) Field Descriptions (continued)
+         Bits     Field                  Value    Description
+          5       CTROVF                          Force Counter Overflow
+                                           0      No effect. Always reads back a 0.
+                                           1      Writing a 1 to this bit sets the CTROVF flag bit.
+          4       CEVT4                           Force Capture Event 4
+                                           0      No effect. Always reads back a 0.
+                                           1      Writing a 1 sets the CEVT4 flag bit
+          3       CEVT3                           Force Capture Event 3
+                                           0      No effect. Always reads back a 0.
+                                           1      Writing a 1 sets the CEVT3 flag bit
+          2       CEVT2                           Force Capture Event 2
+                                           0      No effect. Always reads back a 0.
+                                           1      Writing a 1 sets the CEVT2 flag bit.
+          1       CEVT1                           Force Capture Event 1
+                                           0      No effect. Always reads back a 0.
+                                           0      Sets the CEVT1 flag bit.
+          0       reserved                 0
+
+
+
+6     Register Mapping
+      Table 13 shows the eCAP module control and status register set.
+
+                                         Table 13. Control and Status Register Set
+                 Name                   Offset               Size (x16)                               Description
+       Time Base Module Registers
+                TSCTR                   0x0000                    2          Time-Stamp Counter
+                CTRPHS                  0x0002                    2          Counter Phase Offset Value Register
+                 CAP1                   0x0004                    2          Capture 1 Register
+                 CAP2                   0x0006                    2          Capture 2 Register
+                 CAP3                   0x0008                    2          Capture 3 Register
+                 CAP4                   0x000A                    2          Capture 4 Register
+                reserved            0x000C - 0x0013               8
+                ECCTL1                  0x0014                    1          Capture Control Register 1
+                ECCTL2                  0x0015                    1          Capture Control Register 2
+                ECEINT                  0x0016                    1          Capture Interrupt Enable Register
+                ECFLG                   0x0017                    1          Capture Interrupt Flag Register
+                ECCLR                   0x0018                    1          Capture Interrupt Clear Register
+                ECFRC                   0x0019                    1          Capture Interrupt Force Register
+                Reserved            0x001A - 0x001F               6
+
+
+
+7     Application of the ECAP Module
+      The following sections will provide Applications examples and code snippets to show how to configure and
+      operate the eCAP module. For clarity and ease of use, the examples use the eCAP “C” header files.
+      Below are useful #defines which will help in the understanding of the examples.
+      // ECCTL1 ( ECAP Control Reg 1)
+      //==========================
+      // CAPxPOL bits
+      #define    EC_RISING                       0x0
+
+
+
+26    Enhanced Capture (eCAP) Module                                           SPRU807B – November 2004 – Revised September 2007
+                                                                                                 Submit Documentation Feedback
+www.ti.com                                                                          Application of the ECAP Module
+       #define      EC_FALLING                 0x1
+
+       // CTRRSTx bits
+       #define    EC_ABS_MODE                  0x0
+       #define    EC_DELTA_MODE                0x1
+
+       // PRESCALE bits
+       #define    EC_BYPASS                    0x0
+       #define    EC_DIV1                      0x0
+       #define    EC_DIV2                      0x1
+       #define    EC_DIV4                      0x2
+       #define    EC_DIV6                      0x3
+       #define    EC_DIV8                      0x4
+       #define    EC_DIV10                     0x5
+
+       // ECCTL2 ( ECAP Control Reg 2)
+       //==========================
+       // CONT/ONESHOT bit
+       #define    EC_CONTINUOUS                0x0
+       #define    EC_ONESHOT                   0x1
+
+       // STOPVALUE bit
+       #define    EC_EVENT1                    0x0
+       #define    EC_EVENT2                    0x1
+       #define    EC_EVENT3                    0x2
+       #define    EC_EVENT4                    0x3
+
+       // RE-ARM bit
+       #define    EC_ARM                       0x1
+
+       // TSCTRSTOP bit
+       #define    EC_FREEZE                    0x0
+       #define    EC_RUN                       0x1
+
+       // SYNCO_SEL bit
+       #define    EC_SYNCIN                    0x0
+       #define    EC_CTR_PRD                   0x1
+       #define    EC_SYNCO_DIS                 0x2
+
+       // CAP/APWM mode bit
+       #define    EC_CAP_MODE                  0x0
+       #define    EC_APWM_MODE                 0x1
+
+       // APWMPOL bit
+       #define    EC_ACTV_HI                   0x0
+       #define    EC_ACTV_LO                   0x1
+
+       // Generic
+       #define    EC_DISABLE                   0x0
+       #define    EC_ENABLE                    0x1
+       #define    EC_FORCE                     0x1
+
+
+7.1    Example 1 - Absolute Time-Stamp Operation Rising Edge Trigger
+       Figure 22 shows an example of continuous capture operation (Mod4 counter wraps around). In this figure,
+       TSCTR counts-up without resetting and capture events are qualified on the rising edge only, this gives
+       period (and frequency) information.
+       On an event, the TSCTR contents (i.e., time-stamp) is first captured, then Mod4 counter is incremented to
+       the next state. When the TSCTR reaches FFFFFFFF (i.e. maximum value), it wraps around to 00000000
+       (not shown in Figure 22), if this occurs, the CTROVF (counter overflow) flag is set, and an interrupt (if
+       enabled) occurs, CTROVF (counter overflow) Flag is set, and an Interrupt (if enabled) occurs. Captured
+       Time-stamps are valid at the point indicated by the diagram, i.e. after the 4th event, hence event CEVT4
+       can conveniently be used to trigger an interrupt and the CPU can read data from the CAPx registers.
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                             Enhanced Capture (eCAP) Module   27
+Submit Documentation Feedback
+Application of the ECAP Module                                                                                      www.ti.com
+
+
+              Figure 22. Capture Sequence for Absolute Time-stamp and Rising Edge Detect
+                       CEVT1                    CEVT2              CEVT3                  CEVT4           CEVT1
+         CAPx pin
+                                                                                                              t5
+                                                                                                t4
+        FFFFFFFF                                                         t3
+                                                    t2
+        CTR[0−31]           t1
+
+         00000000
+            MOD4
+                      0                 1                     2                    3                 0             1
+             CTR
+
+
+          CAP1       XX                                            t1                                              t5
+
+
+          CAP2                    XX                                               t2
+
+
+          CAP3                                 XX                                          t3
+
+
+          CAP4                                           XX                                              t4
+                                                                                                                        t
+
+                          Polarity selection                        All capture values valid
+                                                                  (can be read) at this time
+                          Capture registers [1−4]
+
+
+
+
+28    Enhanced Capture (eCAP) Module                                    SPRU807B – November 2004 – Revised September 2007
+                                                                                          Submit Documentation Feedback
+www.ti.com                                                                       Application of the ECAP Module
+7.1.1     Code snippet for CAP mode Absolute Time, Rising Edge Trigger
+        // Code snippet for CAP mode Absolute Time, Rising edge trigger
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+            ECap1Regs.ECCTL1.bit.CAP1POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP2POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP3POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP4POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CTRRST1 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST2 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST3 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST4 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CAPLDEN = EC_ENABLE;
+            ECap1Regs.ECCTL1.bit.PRESCALE = EC_DIV1;
+
+             ECap1Regs.ECCTL2.bit.CAP_APWM = EC_CAP_MODE;
+             ECap1Regs.ECCTL2.bit.CONT_ONESHT = EC_CONTINUOUS;
+             ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS;
+             ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;
+             ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;        // Allow TSCTR to run
+
+
+        // Run Time ( e.g. CEVT4 triggered ISR call)
+        //==========================================
+            TSt1 = ECap1Regs.CAP1;        // Fetch Time-Stamp captured at t1
+            TSt2 = ECap1Regs.CAP2;        // Fetch Time-Stamp captured at t2
+            TSt3 = ECap1Regs.CAP3;        // Fetch Time-Stamp captured at t3
+            TSt4 = ECap1Regs.CAP4;        // Fetch Time-Stamp captured at t4
+
+             Period1 = TSt2-TSt1;           // Calculate 1st period
+             Period2 = TSt3-TSt2;           // Calculate 2nd period
+             Period3 = TSt4-TSt3;           // Calculate 3rd period
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                          Enhanced Capture (eCAP) Module   29
+Submit Documentation Feedback
+Application of the ECAP Module                                                                                                    www.ti.com
+
+7.2   Example 2 - Absolute Time-Stamp Operation Rising and Falling Edge Trigger
+      In Figure 23 the eCAP operating mode is almost the same as in the previous section except capture
+      events are qualified as either rising or falling edge, this now gives both period and duty cycle information,
+      i.e: Period1 = t3 – t1, Period2 = t5 – t3, …etc. Duty Cycle1 (on-time %) = (t2 – t1) / Period1 x 100%, etc.
+      Duty Cycle1 (off-time %) = (t3 – t2) / Period1 x 100%, etc.
+
+        Figure 23. Capture Sequence for Absolute Time-stamp With Rising and Falling Edge Detect
+                                 CEVT2                     CEVT4                      CEVT2         CEVT4
+                    CEVT1                          CEVT3                  CEVT1                 CEVT3     CEVT1
+       CAPx pin
+
+      FFFFFFFF                                                                                                          t9
+                                                                                                          t8
+                                                                                                t7
+                                                                                      t6
+                                                                          t5
+      CTR[0−31]                                             t4
+                                                   t3
+                                     t2
+                     t1
+
+       00000000
+
+          MOD4
+                     0           1             2           3          0               1         2              3        0
+           CTR
+
+
+       CAP1        XX                               t1                                               t5
+
+
+       CAP2               XX                                     t2                                                t6
+
+
+       CAP3                          XX                                        t3                                       t7
+
+
+       CAP4                               XX                                           t4                                    t8
+                                                                                                                                     tt
+                          Polarity selection
+                              Capture registers [1−4]
+
+
+
+
+30    Enhanced Capture (eCAP) Module                                           SPRU807B – November 2004 – Revised September 2007
+                                                                                                 Submit Documentation Feedback
+www.ti.com                                                                       Application of the ECAP Module
+7.2.1     Code snippet for CAP mode Absolute Time, Rising & Falling Edge Triggers
+        // Code snippet for CAP mode Absolute Time, Rising & Falling
+              // edge triggers
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+            ECap1Regs.ECCTL1.bit.CAP1POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP2POL = EC_FALLING;
+            ECap1Regs.ECCTL1.bit.CAP3POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP4POL = EC_FALLING;
+            ECap1Regs.ECCTL1.bit.CTRRST1 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST2 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST3 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST4 = EC_ABS_MODE;
+            ECap1Regs.ECCTL1.bit.CAPLDEN = EC_ENABLE;
+            ECap1Regs.ECCTL1.bit.PRESCALE = EC_DIV1;
+
+             ECap1Regs.ECCTL2.bit.CAP_APWM = EC_CAP_MODE;
+             ECap1Regs.ECCTL2.bit.CONT_ONESHT = EC_CONTINUOUS;
+             ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS;
+             ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;
+             ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;        // Allow TSCTR to run
+
+
+        // Run Time ( e.g. CEVT4 triggered ISR call)
+        //==========================================
+            TSt1 = ECap1Regs.CAP1;        // Fetch Time-Stamp captured at t1
+            TSt2 = ECap1Regs.CAP2;        // Fetch Time-Stamp captured at t2
+            TSt3 = ECap1Regs.CAP3;        // Fetch Time-Stamp captured at t3
+            TSt4 = ECap1Regs.CAP4;        // Fetch Time-Stamp captured at t4
+
+             Period1 = TSt3-TSt1;           // Calculate 1st period
+             DutyOnTime1 = TSt2-TSt1;       // Calculate On time
+             DutyOffTime1 = TSt3-TSt2;       // Calculate Off time
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                          Enhanced Capture (eCAP) Module   31
+Submit Documentation Feedback
+Application of the ECAP Module                                                                                         www.ti.com
+
+7.3   Example 3 - Time Difference (Delta) Operation Rising Edge Trigger
+      This example Figure 24 shows how the eCAP module can be used to collect Delta timing data from pulse
+      train waveforms. Here Continuous Capture mode (TSCTR counts-up without resetting, and Mod4 counter
+      wraps around) is used. In Delta-time mode, TSCTR is Reset back to Zero on every valid event. Here
+      Capture events are qualified as Rising edge only. On an event, TSCTR contents (i.e. Time-Stamp) is
+      captured first, and then TSCTR is reset to Zero. The Mod4 counter then increments to the next state. If
+      TSCTR reaches FFFFFFFF (i.e. Max value), before the next event, it wraps around to 00000000 and
+      continues, a CNTOVF (counter overflow) Flag is set, and an Interrupt (if enabled) occurs. The advantage
+      of Delta-time Mode is that the CAPx contents directly give timing data without the need for CPU
+      calculations, i.e. Period1 = T1, Period2 = T2,…etc. As shown in the diagram, the CEVT1 event is a good
+      trigger point to read the timing data, T1, T2, T3, T4 are all valid here.
+
+             Figure 24. Capture Sequence for Delta Mode Time-stamp and Rising Edge Detect
+                      CEVT1                      CEVT2                  CEVT3                CEVT4      CEVT1
+          CAPx pin
+
+                                       T1                                           T3
+        FFFFFFFF                                               T2                                                 T4
+
+
+
+        CTR[0−31]
+
+
+
+
+         00000000
+
+            MOD4
+             CTR      0                 1                           2                    3             0          1
+
+
+          CAP1       XX                                   CTR value at CEVT1                                      t4
+
+
+          CAP2                   XX                                                   t1
+
+
+          CAP3                              XX                                                    t2
+
+
+          CAP4                                       XX                                                      t3
+
+                                                                                                                        t
+                          Polarity selection
+                           Capture registers [1−4]                               All capture values valid
+                                                                                (can be read) at this time
+
+
+
+
+32    Enhanced Capture (eCAP) Module                                       SPRU807B – November 2004 – Revised September 2007
+                                                                                             Submit Documentation Feedback
+www.ti.com                                                                       Application of the ECAP Module
+7.3.1     Code snippet for CAP mode Delta Time, Rising Edge Trigger
+        // Code snippet for CAP mode Delta Time, Rising edge trigger
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+            ECap1Regs.ECCTL1.bit.CAP1POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP2POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP3POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP4POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CTRRST1 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST2 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST3 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST4 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CAPLDEN = EC_ENABLE;
+            ECap1Regs.ECCTL1.bit.PRESCALE = EC_DIV1;
+
+             ECap1Regs.ECCTL2.bit.CAP_APWM = EC_CAP_MODE;
+             ECap1Regs.ECCTL2.bit.CONT_ONESHT = EC_CONTINUOUS;
+             ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS;
+             ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;
+             ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;        // Allow TSCTR to run
+
+
+        // Run Time ( e.g. CEVT1 triggered ISR call)
+        //==========================================
+        // Note: here Time-stamp directly represents the Period value.
+            Period4 = ECap1Regs.CAP1;    // Fetch Time-Stamp captured at T1
+            Period1 = ECap1Regs.CAP2;    // Fetch Time-Stamp captured at T2
+            Period2 = ECap1Regs.CAP3;    // Fetch Time-Stamp captured at T3
+            Period3 = ECap1Regs.CAP4;    // Fetch Time-Stamp captured at T4
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                          Enhanced Capture (eCAP) Module   33
+Submit Documentation Feedback
+Application of the ECAP Module                                                                                                    www.ti.com
+
+7.4   Example 4 - Time Difference (Delta) Operation Rising and Falling Edge Trigger
+      In Figure 25 the eCAP operating mode is almost the same as in previous section except Capture events
+      are qualified as either Rising or Falling edge, this now gives both Period and Duty cycle information, i.e:
+      Period1 = T1+T2, Period2 = T3+T4, …etc Duty Cycle1 (on-time %) = T1 / Period1 x 100%, etc Duty Cycle1
+      (off-time %) = T2 / Period1 x 100%, etc
+
+      Figure 25. Capture Sequence for Delta Mode Time-stamp With Rising and Falling Edge Detect
+                                 CEVT2                   CEVT4                        CEVT2             CEVT4
+                       CEVT1                     CEVT3                  CEVT1                       CEVT3     CEVT5
+          CAPx pin
+
+                                            T1                     T3                          T5                            T8
+        FFFFFFFF
+                                                         T2                                               T6
+                                                                                 T4                                 T7
+
+        CTR[0−31]
+
+
+
+         00000000
+
+            MOD4
+             CTR       0         1               2        3             0             1         2         3        0
+
+
+          CAP1        XX                CTR value at CEVT1                                           t4
+
+
+          CAP2             XX                                 t1                                              t5
+
+
+          CAP3                   XX                                         t2                                     t6
+
+
+          CAP4                         XX                                                 t3                            t7
+
+                                                                                                                                  t
+                           Polarity selection
+                              Capture registers [1−4]
+
+      During initialization, you must write to the active registers for both period and compare. This will then
+      automatically copy the init values into the shadow values. For subsequent compare updates, i.e. during
+      run-time, only the shadow registers must be used.
+
+
+
+
+34    Enhanced Capture (eCAP) Module                                             SPRU807B – November 2004 – Revised September 2007
+                                                                                                   Submit Documentation Feedback
+www.ti.com                                                                       Application of the ECAP Module
+7.4.1     Code snippet for CAP mode Delta Time, Rising and Falling Edge Triggers
+        // Code snippet for CAP mode Delta Time, Rising and Falling
+               // edge triggers
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+            ECap1Regs.ECCTL1.bit.CAP1POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP2POL = EC_FALLING;
+            ECap1Regs.ECCTL1.bit.CAP3POL = EC_RISING;
+            ECap1Regs.ECCTL1.bit.CAP4POL = EC_FALLING;
+            ECap1Regs.ECCTL1.bit.CTRRST1 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST2 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST3 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CTRRST4 = EC_DELTA_MODE;
+            ECap1Regs.ECCTL1.bit.CAPLDEN = EC_ENABLE;
+            ECap1Regs.ECCTL1.bit.PRESCALE = EC_DIV1;
+
+             ECap1Regs.ECCTL2.bit.CAP_APWM = EC_CAP_MODE;
+             ECap1Regs.ECCTL2.bit.CONT_ONESHT = EC_CONTINUOUS;
+             ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS;
+             ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;
+             ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;        // Allow TSCTR to run
+
+
+        // Run Time ( e.g. CEVT1 triggered ISR call)
+        //==========================================
+        // Note: here Time-stamp directly represents the Duty cycle values.
+            DutyOnTime1 = ECap1Regs.CAP2;     // Fetch Time-Stamp captured at T2
+            DutyOffTime1 = ECap1Regs.CAP3;    // Fetch Time-Stamp captured at T3
+            DutyOnTime2 = ECap1Regs.CAP4;     // Fetch Time-Stamp captured at T4
+            DutyOffTime2 = ECap1Regs.CAP1;    // Fetch Time-Stamp captured at T1
+
+             Period1 = DutyOnTime1 + DutyOffTime1;
+             Period2 = DutyOnTime2 + DutyOffTime2;
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                          Enhanced Capture (eCAP) Module   35
+Submit Documentation Feedback
+Application of the APWM Mode                                                                              www.ti.com
+
+8     Application of the APWM Mode
+      In this example, the eCAP module is configured to operate as a PWM generator. Here a very simple
+      single channel PWM waveform is generated from output pin APWMx. The PWM polarity is active high,
+      which means that the compare value (CAP2 reg is now a compare register) represents the on-time (high
+      level) of the period. Alternatively, if the APWMPOL bit is configured for active low, then the compare value
+      represents the off-time. Note here values are in hexadecimal (“h”) notation.
+
+8.1   Example 1 - Simple PWM Generation (Independent Channel/s)
+
+                           Figure 26. PWM Waveform Details of APWM Mode Operation
+                               TSCTR
+              FFFFFFFF
+
+                             1000h
+           APRD
+
+
+
+
+                             500h
+           ACMP              300h
+
+
+
+              0000000C
+
+
+               APWMx
+               (o/p pin)
+
+                                         Off−time
+                               On                                  Period
+                              time
+
+      Example 1. Code Snippet for APWM Mode
+
+        // Code snippet for APWM mode Example 1
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+           ECap1Regs.CAP1 = 0x1000;                       // Set period value
+           ECap1Regs.CTRPHS = 0x0;                        // make phase zero
+           ECap1Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+           ECap1Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;     // Active high
+           ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;    // Synch not used
+           ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS; // Synch not used
+           ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;       // Allow TSCTR to run
+
+        // Run Time (Instant 1, e.g. ISR call)
+        //======================
+           ECap1Regs.CAP2 = 0x300;      // Set Duty cycle i.e. compare value
+
+        // Run Time (Instant 2, e.g. another ISR call)
+        //======================
+           ECap1Regs.CAP2 = 0x500;      // Set Duty cycle i.e. compare value
+
+
+
+
+36    Enhanced Capture (eCAP) Module                                SPRU807B – November 2004 – Revised September 2007
+                                                                                      Submit Documentation Feedback
+www.ti.com                                                                         Application of the APWM Mode
+8.2    Example 2 - Multi-channel PWM Generation With Synchronization
+       This example takes advantage of the synchronization feature between eCAP modules. Here 4
+       independent PWM channels are required with different frequencies, but at integer multiples of each other
+       to avoid "beat" frequencies. Hence one eCAP module is configured as the Master and the remaining 3 are
+       Slaves all receiving their synch pulse (CTR = PRD) from the master. Note the Master is chosen to have
+       the lower frequency (F1 = 1/20,000) requirement. Here Slave2 Freq = 2 x F1, Slave3 Freq = 4 x F1 and
+       Slave4 Freq = 5 x F1. Note here values are in decimal notation. Also only the APWM1 output waveform is
+       shown.
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                            Enhanced Capture (eCAP) Module   37
+Submit Documentation Feedback
+Application of the APWM Mode                                                                              www.ti.com
+
+
+                         Figure 27. Multichannel PWM Example Using 4 eCAP Modules
+                DC bus
+
+
+
+
+                               Motor             Motor             Motor                Motor
+                                dc                 dc               dc                    dc
+                               brush             brush             brush                brush
+
+
+
+
+               APWM1                   APWM2             APWM3             APWM4
+
+
+
+
+                       TSCTR
+
+                             Master APWM(1) module
+            FFFF FFFFh
+
+                             20,000
+           APRD(1)
+
+                             7,000
+          ACMP(1)
+             0000 0000
+
+                APWM1
+                (o/p pin)
+
+
+              CTR=PRD
+              (SyncOut)                                                                            Time
+
+                                                                 Phase = 0°
+                             Slave APWM(2−4) module/s
+
+                             10,000
+           APRD(2)
+
+
+
+                         0
+                             5,000
+           APRD(3)
+
+
+
+                         0
+                             4,000
+           APRD(4)
+
+
+
+                         0                                                                         Time
+
+
+
+38    Enhanced Capture (eCAP) Module                               SPRU807B – November 2004 – Revised September 2007
+                                                                                     Submit Documentation Feedback
+www.ti.com                                                                         Application of the APWM Mode
+
+       Example 2. Code Snippet for APWM Mode
+
+        // Code snippet for APWM mode Example 2
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+           ECap1Regs.CAP1 = 20000;                          // Set period value
+           ECap1Regs.CTRPHS = 0;                            // make phase zero
+           ECap1Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+           ECap1Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+           ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;      // No sync in for Master
+           ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_CTR_PRD;     // eCAP1 is Master
+           ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;         // Allow TSCTR to run
+
+        // ECAP module 2 config
+           ECap2Regs.CAP1 = 10000;                          // Set period value
+           ECap2Regs.CTRPHS = 0;
+           ECap2Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+           ECap2Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+           ECap2Regs.ECCTL2.bit.SYNCI_EN = EC_ENABLE;       // slaved off master
+           ECap2Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCI;       // sync "flow-through"
+           ECap2Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;         // Allow TSCTR to run
+
+        // ECAP module 3 config
+           ECap3Regs.CAP1 = 5000;                           // Set period value
+           ECap3Regs.CTRPHS = 0;
+           ECap3Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+           ECap3Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+           ECap3Regs.ECCTL2.bit.SYNCI_EN = EC_ENABLE;       // slaved off master
+           ECap3Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCI;       // sync "flow-through"
+           ECap3Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;         // Allow TSCTR to run
+
+
+        // ECAP module 4 config
+           ECap4Regs.CAP1 = 4000;                         // Set period value
+           ECap4Regs.CTRPHS = 0;
+           ECap4Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+           ECap4Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+           ECap4Regs.ECCTL2.bit.SYNCI_EN = EC_ENABLE;     // slaved off master
+           ECap4Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS; // "break the chain"
+           ECap4Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;       // Allow TSCTR to run
+
+
+        // Run Time (Note: Example execution of one run-time instant)
+        //============================================================
+           ECap1Regs.CAP2 = 7000;    // Set Duty cycle i.e., compare value = 7000
+           ECap2Regs.CAP2 = 2000;    // Set Duty cycle i.e., compare value = 2000
+           ECap3Regs.CAP2 = 550;     // Set Duty cycle i.e., compare value = 550
+           ECap4Regs.CAP2 = 6500;    // Set Duty cycle i.e., compare value = 6500
+
+
+
+
+8.3    Example 3 - Multi-channel PWM Generation With Phase Control
+       In this example the Phase control feature of the APWM mode is used to control a 3 phase Interleaved
+       DC/DC converter topology. This topology requires each phase to be off-set by 120° from each other.
+       Hence if “Leg” 1 (controlled by APWM1) is the reference Leg (or phase), i.e. 0°, then Leg 2 need 120°
+       off-set and Leg 3 needs 240° off-set. The waveforms in Figure 28 show the timing relationship between
+       each of the phases (Legs). Note eCAP1 module is the Master and issues a sync out pulse to the slaves
+       (modules 2, 3) whenever TSCTR = Period value.
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                            Enhanced Capture (eCAP) Module    39
+Submit Documentation Feedback
+Application of the APWM Mode                                                                       www.ti.com
+
+
+            Figure 28. Multi-phase (channel) Interleaved PWM Example Using 3 eCAP Modules
+
+
+
+
+                 Comple−                    Comple−          Comple−
+                  mentary                    mentary          mentary
+                    and                        and              and
+                 deadband                   deadband         deadband
+                   logic                      logic            logic
+
+
+
+
+                  APWM1                     APWM2             APWM3
+                                                                                            Vout
+
+                      TSCTR
+
+                           1200
+           APRD(1)
+                           700
+           APRD(1)
+
+
+                                                         SYNCO pulse
+                                                         (CTR=PRD)
+
+
+                APWM1
+
+                                        Φ2=120°          CTRPHS(2)=800
+
+
+
+
+                APWM2
+
+                                  Φ3=240°
+                                                        CTRPHS(3)=400
+
+
+
+
+                APWM3
+
+
+
+
+40    Enhanced Capture (eCAP) Module                        SPRU807B – November 2004 – Revised September 2007
+                                                                              Submit Documentation Feedback
+www.ti.com                                                                         Application of the APWM Mode
+
+       Example 3. Code Snippet for APWM Mode
+
+        // Code snippet for APWM mode Example 3
+
+        // Initialization Time
+        //=======================
+        // ECAP module 1 config
+          ECap1Regs.CAP1 = 1200;                          // Set period value
+          ECap1Regs.CTRPHS = 0;                           // make eCAP1 reference phase = zero
+          ECap1Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+          ECap1Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+          ECap1Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;     // No sync in for Master
+          ECap1Regs.ECCTL2.bit.SYNCO_SEL = EC_CTR_PRD;    // eCAP1 is Master
+          ECap1Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;        // Allow TSCTR to run
+
+        // ECAP module 2 config
+          ECap2Regs.CAP1 = 1200;                          // Set period value
+          ECap2Regs.CTRPHS = 800;                         // Phase offset = 1200-400 = 120 deg
+          ECap2Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+          ECap2Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+          ECap2Regs.ECCTL2.bit.SYNCI_EN = EC_ENABLE;      // slaved off master
+          ECap2Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCI;      // sync "flow-through"
+          ECap2Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;        // Allow TSCTR to run
+
+        // ECAP module 3 config
+          ECap3Regs.CAP1 = 1200;                         // Set period value
+          ECap3Regs.CTRPHS = 400;                        // Phase offset = 1200-800 = 240 deg
+          ECap3Regs.ECCTL2.bit.CAP_APWM = EC_APWM_MODE;
+          ECap3Regs.ECCTL2.bit.APWMPOL = EC_ACTV_HI;
+          ECap3Regs.ECCTL2.bit.SYNCI_EN = EC_ENABLE;     // slaved off master
+          ECap3Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS; // "break the chain"
+          ECap3Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;       // Allow TSCTR to run
+
+
+
+        // Run Time (Note: Example execution of one run-time instant)
+        //============================================================
+        // All phases are set to the same duty cycle
+          ECap1Regs.CAP2 = 700;     // Set Duty cycle i.e. compare value = 700
+          ECap2Regs.CAP2 = 700;     // Set Duty cycle i.e. compare value = 700
+          ECap3Regs.CAP2 = 700;     // Set Duty cycle i.e. compare value = 700
+
+
+
+
+SPRU807B – November 2004 – Revised September 2007                         Enhanced Capture (eCAP) Module     41
+Submit Documentation Feedback
+Appendix A                                                                                                         www.ti.com
+
+
+Appendix A Revision History
+
+                 Technical changes were made to this document to make it a SPRU807B from SPRU807A.
+
+
+                                         Table A-1. Changes Made in This Revision
+       Location           Additions, Deletions, Changes
+       Table 8            Modified description of SYCI_EN field
+       Figure 18          Changed Bit 6 in the ECAP Interrupt Enable Register (ECEINT)
+
+
+
+
+42    Revision History                                                       SPRU807B – November 2004 – Revised September 2007
+                                                                                               Submit Documentation Feedback
+                                                              IMPORTANT NOTICE
+Texas Instruments Incorporated and its subsidiaries (TI) reserve the right to make corrections, modifications, enhancements, improvements,
+and other changes to its products and services at any time and to discontinue any product or service without notice. Customers should
+obtain the latest relevant information before placing orders and should verify that such information is current and complete. All products are
+sold subject to TI’s terms and conditions of sale supplied at the time of order acknowledgment.
+TI warrants performance of its hardware products to the specifications applicable at the time of sale in accordance with TI’s standard
+warranty. Testing and other quality control techniques are used to the extent TI deems necessary to support this warranty. Except where
+mandated by government requirements, testing of all parameters of each product is not necessarily performed.
+TI assumes no liability for applications assistance or customer product design. Customers are responsible for their products and
+applications using TI components. To minimize the risks associated with customer products and applications, customers should provide
+adequate design and operating safeguards.
+TI does not warrant or represent that any license, either express or implied, is granted under any TI patent right, copyright, mask work right,
+or other TI intellectual property right relating to any combination, machine, or process in which TI products or services are used. Information
+published by TI regarding third-party products or services does not constitute a license from TI to use such products or services or a
+warranty or endorsement thereof. Use of such information may require a license from a third party under the patents or other intellectual
+property of the third party, or a license from TI under the patents or other intellectual property of TI.
+Reproduction of TI information in TI data books or data sheets is permissible only if reproduction is without alteration and is accompanied
+by all associated warranties, conditions, limitations, and notices. Reproduction of this information with alteration is an unfair and deceptive
+business practice. TI is not responsible or liable for such altered documentation. Information of third parties may be subject to additional
+restrictions.
+Resale of TI products or services with statements different from or beyond the parameters stated by TI for that product or service voids all
+express and any implied warranties for the associated TI product or service and is an unfair and deceptive business practice. TI is not
+responsible or liable for any such statements.
+TI products are not authorized for use in safety-critical applications (such as life support) where a failure of the TI product would reasonably
+be expected to cause severe personal injury or death, unless officers of the parties have executed an agreement specifically governing
+such use. Buyers represent that they have all necessary expertise in the safety and regulatory ramifications of their applications, and
+acknowledge and agree that they are solely responsible for all legal, regulatory and safety-related requirements concerning their products
+and any use of TI products in such safety-critical applications, notwithstanding any applications-related information or support that may be
+provided by TI. Further, Buyers must fully indemnify TI and its representatives against any damages arising out of the use of TI products in
+such safety-critical applications.
+TI products are neither designed nor intended for use in military/aerospace applications or environments unless the TI products are
+specifically designated by TI as military-grade or "enhanced plastic." Only products designated by TI as military-grade meet military
+specifications. Buyers acknowledge and agree that any such use of TI products which TI has not designated as military-grade is solely at
+the Buyer's risk, and that they are solely responsible for compliance with all legal and regulatory requirements in connection with such use.
+TI products are neither designed nor intended for use in automotive applications or environments unless the specific TI products are
+designated by TI as compliant with ISO/TS 16949 requirements. Buyers acknowledge and agree that, if they use any non-designated
+products in automotive applications, TI will not be responsible for any failure to meet such requirements.
+Following are URLs where you can obtain information on other Texas Instruments products and application solutions:
+Products                                                               Applications
+Amplifiers                      amplifier.ti.com                       Audio                         www.ti.com/audio
+Data Converters                 dataconverter.ti.com                   Automotive                    www.ti.com/automotive
+DSP                             dsp.ti.com                             Broadband                     www.ti.com/broadband
+Clocks and Timers               www.ti.com/clocks                      Digital Control               www.ti.com/digitalcontrol
+Interface                       interface.ti.com                       Medical                       www.ti.com/medical
+Logic                           logic.ti.com                           Military                      www.ti.com/military
+Power Mgmt                      power.ti.com                           Optical Networking            www.ti.com/opticalnetwork
+Microcontrollers                microcontroller.ti.com                 Security                      www.ti.com/security
+RFID                            www.ti-rfid.com                        Telephony                     www.ti.com/telephony
+RF/IF and ZigBee® Solutions     www.ti.com/lprf                        Video & Imaging               www.ti.com/video
+                                                                       Wireless                      www.ti.com/wireless
+                             Mailing Address: Texas Instruments, Post Office Box 655303, Dallas, Texas 75265
+                                            Copyright © 2008, Texas Instruments Incorporated
+

@@ -29,10 +29,24 @@ thread) only set a threading.Event so an idle real-time run wakes within a few m
 Wire rules (as chipem/periph/uartwire.py): host bytes are paced at the host's line speed (PTY: the baud the host
 program set with tcsetattr; serial: the configured one; TCP/memory: the UART's own) and each byte arrives at its
 stop bit through the UART's receive path, so it is dropped when the receiver is not listening or overruns like on
-silicon. A chip byte reaches the host when its stop bit completes. When the host line settings disagree with the
-UART (baud > 3 % apart, or frame length), the receiver would only see framing errors and garbage: the byte is dropped
-(`uart` event dir=drop reason=framing) and one `warn` names both settings. Bytes the chip sends while no host program
-has the port open are lost (`dropped_out`), like a PC driver with the port closed.
+silicon. A chip byte reaches the host when its stop bit completes. Frames carry their format both ways:
+
+* host -> chip: a host byte is a `Frame` in the host's line format (serial: the configured bits/parity/stop; PTY:
+  the baud the program set, the frame layout of the UART since a Linux pty keeps no CSIZE/PARENB; TCP/memory: the
+  UART's own format), decoded by the UART against its own settings: a mismatch gives framing / parity errors and
+  garbage characters exactly as the sample points dictate (no longer a plain drop). One `warn` names both settings.
+* chip -> host: the chip's frame is decoded with the host's line settings, like the PC's UART would (a matching PTY
+  layout is assumed). The host gets what a Linux tty in raw mode reads (termios: IGNPAR, PARMRK and INPCK clear): a
+  character with a framing error, or a break, reads as 0x00; parity is not checked. Errors are logged as `uart`
+  events {uart: "host:A.UART0", dir: "rx", fe/pe/brk}.
+* Breaks: a chip break reaches a pyserial port as `send_break(duration)` (the PC program sees its driver's break);
+  on a PTY, TCP or memory port it is the 0x00 byte a raw tty reads. Host -> chip breaks: `MemoryPort.host_break()`.
+  A program's tcsendbreak() on a Linux pty is not visible on the master side, pyserial cannot report a received
+  break, and raw TCP has no out-of-band break (RFC 2217 is not implemented: use pyserial's rfc2217:// URL with
+  --uart-port for a remote serial server), so those transports cannot send breaks to the chip; parity and framing
+  errors of the PC's own receiver are not visible to us either.
+Bytes the chip sends while no host program has the port open are lost (`dropped_out`), like a PC driver with the
+port closed.
 """
 from __future__ import annotations
 
@@ -84,6 +98,16 @@ class LineSettings:
     def char_ns(self) -> float:
         return self.char_bits() * 1e9 / self.baud if self.baud > 0 else 0.0
 
+    def frame(self, b: int):
+        """The host transmitting byte `b` in this format (chipem.periph.uartwire.Frame)."""
+        from .periph.uartwire import Frame
+        return Frame(b, self.bits, self.parity, self.stop, self.baud)
+
+    def rx_format(self):
+        """How the host's UART receives (16x sampling, majority vote)."""
+        from .periph.uartwire import RxFormat
+        return RxFormat(self.baud, self.bits, self.parity, self.stop)
+
     def __str__(self) -> str:
         base = f"{self.baud:g}"
         return f"{base} {self.bits}{self.parity}{self.stop:g}" if self.framed else f"{base} baud"
@@ -121,6 +145,9 @@ class HostPort:
 
     def __init__(self) -> None:
         self._rx = bytearray()                  # host -> emulation, filled by the I/O thread
+        self._rx_brk: list[tuple[int, float]] = []    # host breaks: (offset in _rx, duration s)
+        self.breaks_in = 0
+        self.breaks_out = 0
         self._rx_lock = threading.Lock()
         self._txq: queue.Queue = queue.Queue()  # emulation -> host: bytes | ("modem", dict) | None (stop)
         self._tx_pending = 0
@@ -146,6 +173,31 @@ class HostPort:
             data = bytes(self._rx)
             self._rx.clear()
         return data
+
+    def read_stream(self) -> list:
+        """Like read(), with the host's breaks in order: [bytes, ("break", seconds), bytes, ...]."""
+        if not self._rx and not self._rx_brk:
+            return []
+        with self._rx_lock:
+            data = bytes(self._rx)
+            marks = list(self._rx_brk)
+            self._rx.clear()
+            self._rx_brk.clear()
+        out: list = []
+        pos = 0
+        for off, dur in marks:
+            if off > pos:
+                out.append(data[pos:off])
+                pos = off
+            out.append(("break", dur))
+        if pos < len(data):
+            out.append(data[pos:])
+        return out
+
+    def send_break(self, seconds: float) -> None:
+        """Device -> host break. Default (PTY, TCP, memory): the 0x00 a raw-mode tty reads for a break."""
+        self.breaks_out += 1
+        self.write(b"\x00")
 
     def pending(self) -> int:
         return len(self._rx)
@@ -305,6 +357,14 @@ class MemoryPort(HostPort):
             data = data.encode("utf-8")
         if self.connected:
             self._host_bytes(bytes(data))
+
+    def host_break(self, seconds: float = 0.0) -> None:
+        """The host sends a break (length in seconds; 0 = the receiving UART's default)."""
+        if self.connected:
+            with self._rx_lock:
+                self._rx_brk.append((len(self._rx), float(seconds)))
+            self.breaks_in += 1
+            self._notify()
 
     def host_recv(self, timeout: float = 0.0) -> bytes:
         end = time.monotonic() + timeout
@@ -502,6 +562,9 @@ class SerialPort(HostPort):
     def _run_writer(self) -> None:
         def modem(d: dict) -> None:
             try:
+                if "seconds" in d:
+                    self.ser.send_break(duration=max(d["seconds"], 0.001))
+                    return
                 self.ser.rts = bool(d.get("cts"))                      # our RTS -> host CTS
                 self.ser.dtr = bool(d.get("dsr") or d.get("dcd"))      # our DTR -> host DSR + DCD
             except Exception:
@@ -510,6 +573,11 @@ class SerialPort(HostPort):
 
     def _apply_modem(self) -> None:
         self._txq.put(("modem", dict(self._modem_dev)))
+
+    def send_break(self, seconds: float) -> None:
+        """A real break on the port (pyserial send_break, run on the writer thread)."""
+        self.breaks_out += 1
+        self._txq.put(("break", {"seconds": max(float(seconds), 0.0)}))
 
     def _close_os(self) -> None:
         try:
@@ -678,13 +746,55 @@ def parse_bridge_arg(kind: str, arg: str) -> tuple[str, str]:
 
 
 # ------------------------------------------------------------------------------------------------ binding
+def host_rx_format(line: LineSettings | None, fr: Any):
+    """The host UART's receive format for chip frame `fr`: the host's line, or (PTY: frame unknown) the frame's own
+    layout at the host's baud; None when the host has no line settings (TCP / memory: bytes pass as they are)."""
+    from .periph.uartwire import RxFormat
+    if line is None or line.baud <= 0:
+        return None
+    if line.framed:
+        return line.rx_format()
+    return RxFormat(line.baud, fr.bits, fr.parity if fr.parity in "NEO" else "N", fr.stop, addr=fr.addr is not None,
+                    msbf=fr.msbf, inv=fr.inv)
+
+
+def host_bytes_for(fr: Any, rx: Any) -> list:
+    """What a raw-mode tty reads for chip frame `fr` (see the module docstring): [(byte | "break", RxChar | None)]."""
+    from .periph.uartwire import decode_frame
+    if rx is None:
+        return [("break", None)] if fr.brk else [(fr.data & 0xFF, None)]
+    out = []
+    for ch in decode_frame(fr, rx):
+        if ch.brk:
+            out.append(("break", ch))
+        else:
+            out.append((0 if ch.fe else ch.data & 0xFF, ch))
+    return out
+
+
+def host_frame_for(blk: Any, line: LineSettings | None, b: int):
+    """The frame a host byte `b` becomes on the line towards UART model `blk`: the host's format when known (PTY:
+    the UART's layout at the host's baud), else the UART's own format."""
+    fmt = getattr(blk, "rx_format", None)
+    own = fmt() if fmt is not None else None
+    if line is not None and line.baud > 0:
+        if line.framed:
+            return line.frame(b)
+        if own is not None:
+            from .periph.uartwire import Frame
+            return Frame(b, own.bits, own.parity, own.stop, line.baud, addr=0 if own.addr else None,
+                         msbf=own.msbf, inv=own.inv)
+    return own.frame(b) if own is not None else None
+
+
 class UartBridge:
     """A host port wired straight to a UART model's TX/RX pins (TTL level: a USB-TTL cable). Emulation thread only.
 
     Host -> chip: `pump()` drains the port; the bytes are the host's transmit buffer, sent one per host character
-    time; each arrives at its stop bit through the UART's receive path (`_rx_arrive(b, "host")`: dropped when not
-    listening / RX pin not muxed, overrun as on silicon). Chip -> host: a `tx_listeners` hook writes each byte to the
-    port when its stop bit has gone out."""
+    time as frames in the host's format; each arrives at its stop bit through the UART's receive path
+    (`_rx_frame(frame, "host")`: decoded at the UART's own settings; dropped when not listening / RX pin not muxed,
+    overrun as on silicon). Chip -> host: a `frame_listeners` hook decodes each frame with the host's line settings
+    when its stop bit has gone out and writes the result (module docstring)."""
 
     def __init__(self, chip: Any, blk: Any, port: HostPort, *, label: str):
         self.chip = chip
@@ -693,21 +803,28 @@ class UartBridge:
         self.label = label                  # "A.UART0"
         self.to_host = 0
         self.from_host = 0
-        self.dropped = 0                    # framing (settings mismatch) losses, both directions
-        self._q: deque[int] = deque()
+        self.dropped = 0                    # kept for compatibility (no longer used: mismatches are decoded)
+        self.errors = 0                     # characters the receiving side decoded with errors, both directions
+        self._q: deque = deque()
         self._ev = None
         self._warned: set = set()
         self._closed = False
-        blk.tx_listeners.append(self._on_tx)
+        fl = getattr(blk, "frame_listeners", None)
+        self._hook = (fl, self._on_frame) if fl is not None else (blk.tx_listeners, self._on_tx)
+        self._hook[0].append(self._hook[1])
 
     # ---- emulation thread ------------------------------------------------------------------------------------
     def pump(self) -> None:
-        data = self.port.read()
-        if not data:
+        stream = self.port.read_stream()
+        if not stream:
             return
-        self._q.extend(data)
+        for item in stream:
+            if isinstance(item, tuple):
+                self._q.append(item)
+            else:
+                self._q.extend(item)
         if self._ev is None:
-            self._ev = self.chip.sched.in_ns(self._char_ns(), self._tick)
+            self._ev = self.chip.sched.in_ns(self._item_ns(self._q[0]), self._tick)
 
     def _char_ns(self) -> float:
         ln = self.port.line()
@@ -716,6 +833,20 @@ class UartBridge:
             return float(bits) * 1e9 / ln.baud
         fn = getattr(self.blk, "_host_char_ns", None)
         return fn() if fn is not None else 10e9 / 115200.0
+
+    def _item_ns(self, item: Any) -> float:
+        if isinstance(item, tuple):
+            return self._brk_bits(item[1]) * self._char_ns() / 10.0 + self._char_ns() / 10.0
+        return self._char_ns()
+
+    def _brk_bits(self, seconds: float) -> int:
+        bit = self._char_ns() / 10.0
+        if seconds and bit > 0:
+            return max(int(seconds * 1e9 / bit), 1)
+        try:
+            return max(13, int(round(2 * float(self.blk.char_bits()))))
+        except Exception:
+            return 20
 
     def _mismatch(self) -> str | None:
         try:
@@ -731,33 +862,37 @@ class UartBridge:
         ln = self.port.line()
         self.chip.log.event("warn", self.chip.now_ns(), block=self.blk.name, uart=self.blk.name,
                             msg=f"host serial {self.label} ({self.port.kind} {self.port.describe()}): host line "
-                                f"{ln} does not match the UART ({why}); the receiver sees framing errors, "
-                                f"bytes {direction} are dropped")
+                                f"{ln} does not match the UART ({why}); the receiver decodes at its own settings: "
+                                f"framing / parity errors and garbage {direction}")
 
     def _tick(self) -> None:
         self._ev = None
         if self._closed or not self._q:
             return
-        b = self._q.popleft()
-        self.from_host += 1
+        item = self._q.popleft()
         why = self._mismatch()
         if why is not None:
-            self.dropped += 1
             self._warn("host→chip", why)
-            drop = getattr(self.blk, "_rx_drop", None)
-            if drop is not None:
-                drop(b, "framing")
-            else:
-                self.chip.log.event("uart", self.chip.now_ns(), uart=self.blk.name, dir="drop", byte=b, dropped=1,
-                                    reason="framing")
+        ln = self.port.line()
+        if isinstance(item, tuple):
+            from .periph.uartwire import Frame
+            own = self.blk.rx_format() if hasattr(self.blk, "rx_format") else None
+            baud = ln.baud if ln is not None and ln.baud > 0 else (own.baud if own is not None else 0.0)
+            fr = Frame.brk_frame(self._brk_bits(item[1]), 1.0, baud)
         else:
+            self.from_host += 1
+            fr = host_frame_for(self.blk, ln, item)
+        rf = getattr(self.blk, "_rx_frame", None)
+        if rf is not None and fr is not None:
+            rf(fr, "host")
+        elif not isinstance(item, tuple):
             arrive = getattr(self.blk, "_rx_arrive", None)
             if arrive is not None:
-                arrive(b, "host")
+                arrive(item, "host")
             else:
-                self.blk.feed(bytes([b]))
+                self.blk.feed(bytes([item]))
         if self._q:
-            self._ev = self.chip.sched.in_ns(self._char_ns(), self._tick)
+            self._ev = self.chip.sched.in_ns(self._item_ns(self._q[0]), self._tick)
 
     def _on_tx(self, blk: Any, byte: int) -> None:
         if self._closed:
@@ -765,28 +900,46 @@ class UartBridge:
         t = self.chip.now_ns() + (blk.char_ns() if hasattr(blk, "char_ns") else 0.0)
         self.chip.sched.at_ns(t, self._deliver, byte & 0xFF)
 
+    def _on_frame(self, blk: Any, fr: Any) -> None:
+        if self._closed:
+            return
+        self.chip.sched.at_ns(self.chip.now_ns() + fr.duration_ns(), self._deliver_frame, fr)
+
     def _deliver(self, b: int) -> None:
         if self._closed:
             return
-        why = self._mismatch()
-        if why is not None:
-            self.dropped += 1
-            self._warn("chip→host", why)
-            self.chip.log.event("uart", self.chip.now_ns(), uart=f"host:{self.label}", dir="drop", byte=b, dropped=1,
-                                reason="framing")
-            return
         self.to_host += 1
         self.port.write(bytes([b]))
+
+    def _deliver_frame(self, fr: Any) -> None:
+        if self._closed:
+            return
+        ln = self.port.line()
+        why = self._mismatch()
+        if why is not None:
+            self._warn("chip→host", why)
+        for b, ch in host_bytes_for(fr, host_rx_format(ln, fr)):
+            if ch is not None and ch.flags():
+                self.errors += 1
+                self.chip.log.event("uart", self.chip.now_ns(), uart=f"host:{self.label}", dir="rx",
+                                    byte=0 if b == "break" else b, **ch.flags())
+            if b == "break":
+                bit = 1e9 / ln.baud if ln is not None and ln.baud > 0 else 0.0
+                self.port.send_break((ch.brk if ch is not None else fr.brk) * bit / 1e9 if bit else 0.0)
+            else:
+                self.to_host += 1
+                self.port.write(bytes([b]))
 
     def pending(self) -> int:
         return len(self._q)
 
     def info(self) -> dict:
         d = {"name": self.label, "kind": "uart", **self.port.info(), "to_host": self.to_host,
-             "from_host": self.from_host, "dropped": self.dropped, "queued": len(self._q)}
+             "from_host": self.from_host, "dropped": self.dropped, "errors": self.errors, "queued": len(self._q)}
         try:
             b = float(self.blk.baud())
-            d["uart_line"] = f"{b:.0f} baud, {self.blk.char_bits():g} bits/char" if b > 0 else "no baud set"
+            fmt = self.blk.frame() if hasattr(self.blk, "frame") else f"{self.blk.char_bits():g} bits/char"
+            d["uart_line"] = f"{b:.0f} baud, {fmt}" if b > 0 else "no baud set"
         except Exception:
             pass
         return d
@@ -795,8 +948,9 @@ class UartBridge:
         if self._closed:
             return
         self._closed = True
-        if self._on_tx in self.blk.tx_listeners:
-            self.blk.tx_listeners.remove(self._on_tx)
+        lst, cb = self._hook
+        if cb in lst:
+            lst.remove(cb)
         if self._ev is not None:
             self.chip.sched.cancel(self._ev)
             self._ev = None

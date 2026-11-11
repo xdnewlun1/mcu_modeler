@@ -169,19 +169,23 @@ def test_gender_mismatch_is_an_error():
         session(d)
 
 
-def test_adapter_baud_mismatch_drops_with_one_warning():
+def test_adapter_baud_mismatch_decodes_garbage_with_one_warning():
     d = board_data()
     part(d, "PC")["baud"] = 9600
     s = session(d)
     pc = s.board.part("PC")
     try:
         s.run_for(5e6)
+        banner = pc.host.host_recv(0.2)                          # 115200 baud banner read by a 9600 baud PC
+        assert b"console" not in banner
         pc.host.host_send(b"help\r")
         s.run_for(10e6)
-        assert pc.host.host_recv(0.2) == b""
+        assert b"help" not in pc.host.host_recv(0.2)
         w = [m for m in warns(s) if "framing" in m]
         assert len(w) == 2                                        # one per direction
-        assert set(drops(s)) == {"framing"}
+        assert "framing" not in set(drops(s))                    # decoded, not dropped
+        rx = [e.fields for e in s.events(kinds={"uart"}, chip="A") if e.fields.get("dir") == "rx"]
+        assert rx and all(f.get("fe") for f in rx)                # 9600 baud bits seen at 115200: breaks
     finally:
         s.close()
 
@@ -277,7 +281,8 @@ def test_host_line_settings_from_transport_are_used():
     try:
         pc.host.set_line(LineSettings(57600))
         s.run_for(5e6)
-        assert pc.host.host_recv(0.2) == b""
+        got = pc.host.host_recv(0.2)
+        assert got and b"console" not in got                    # the PC decodes at 57600: garbage
         assert any("baud 57600" in m for m in warns(s))
     finally:
         s.close()
@@ -301,5 +306,37 @@ def test_adapter_without_transport_takes_stimulus_and_transceiver_shutdown():
         assert "stage_off" in drops(s)
         assert s.board.part("U1").state()["drivers_on"] is False
         assert any("drivers off" in m for m in warns(s))
+    finally:
+        s.close()
+
+
+def test_breaks_and_parity_travel_through_the_chain():
+    """A break from the PC crosses the RS-232 transceiver to the chip's UART (FE + 0x00 + break length); a PC set to
+    8E1 talking to an 8N1 UART: the 9-bit frame's parity bit lands where the UART samples its stop bit."""
+    s = session(board_data())
+    pc = s.board.part("PC")
+    try:
+        s.run_for(5e6)
+        pc.host.host_recv(1.0)
+        pc.set(**{"break": 0})
+        s.run_for(1e6)
+        rx = [e.fields for e in s.events(kinds={"uart"}, chip="A") if e.fields.get("dir") == "rx"]
+        assert rx and rx[-1]["fe"] and rx[-1]["byte"] == 0 and rx[-1]["brk"] >= 13
+        pc.host.host_break()                                       # the same from the host program
+        s.run_for(1e6)
+        rx = [e.fields for e in s.events(kinds={"uart"}, chip="A") if e.fields.get("dir") == "rx"]
+        assert sum(1 for f in rx if f.get("brk")) == 2
+    finally:
+        s.close()
+    d = board_data()
+    part(d, "PC")["format"] = "8E1"
+    s = session(d)
+    pc = s.board.part("PC")
+    try:
+        s.run_for(5e6)
+        pc.host.host_send(b"A")                                    # 0x41: even parity bit 0 -> stop sample 0: FE
+        s.run_for(1e6)
+        rx = [e.fields for e in s.events(kinds={"uart"}, chip="A") if e.fields.get("dir") == "rx"]
+        assert rx[-1]["byte"] == 0x41 and rx[-1]["fe"]
     finally:
         s.close()

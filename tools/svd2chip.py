@@ -546,6 +546,9 @@ def check(svd_path: str | Path, chip_path: str | Path, out=sys.stdout) -> int:
             print(f"  MISMATCH {name}: chip YAML base {hx(base, 8)} != SVD {hit} {hx(svd_base[hit], 8)}", file=out)
             continue
         ext = svd_extent(hit)
+        nxt = min((b for _, b, _ in chip_periphs if b is not None and b > base), default=None)
+        if ext is not None and nxt is not None and base + ext > nxt:
+            ext = nxt - base                            # SVD block overruns the next block (F1 BKP at +4): clamp
         sz = 0x1000 if size is None else size          # chipdesc default size
         if ext is not None and sz < ext:
             bad += 1
@@ -562,6 +565,9 @@ def check(svd_path: str | Path, chip_path: str | Path, out=sys.stdout) -> int:
     irqs = chip.get("irqs") or chip.get("interrupts") or {}
     svd_irqs = sp.interrupts()
     svd_by_name = {v: k for k, v in svd_irqs.items()}
+    # `svd_irq_names: {n: SVD name}`: the chip YAML deliberately uses another name (the vendor header / reference
+    # manual one) for IRQ n; accepted when the SVD really calls IRQ n that way
+    renamed = {int(k): str(v) for k, v in (chip.get("svd_irq_names") or {}).items()}
     if isinstance(irqs, dict):
         for n, nm in irqs.items():
             try:
@@ -573,6 +579,9 @@ def check(svd_path: str | Path, chip_path: str | Path, out=sys.stdout) -> int:
             if nm is None:
                 continue
             if svd_irqs.get(n) == nm:
+                continue
+            if n in renamed and svd_irqs.get(n) == renamed[n]:
+                print(f"  RENAMED irq {n}: SVD {renamed[n]!r}, chip YAML {nm!r}", file=out)
                 continue
             if n in omit_irq:
                 print(f"  OMITTED irq {n}: SVD {svd_irqs.get(n)!r}, chip YAML {nm!r} ({omit_irq[n]})", file=out)
