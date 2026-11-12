@@ -197,7 +197,9 @@ class DMA(GatedBlock):
             ov[f"S{s}PAR"] = {"on_write": self._prot_write(s)}
             ov[f"S{s}M0AR"] = {"on_write": self._mar_write(s, 0)}
             ov[f"S{s}M1AR"] = {"on_write": self._mar_write(s, 1)}
-            ov[f"S{s}FCR"] = {"on_write": self._fcr_write(s), "ro_mask": FS_MASK}
+            # params.fcr_strict: bits 31:8 and 6 reserved as well (RM0033 9.5.10; the default keeps them writable)
+            fcr_ro = ~(FEIE | DMDIS | FTH_MASK) & 0xFFFFFFFF if params.get("fcr_strict") else FS_MASK
+            ov[f"S{s}FCR"] = {"on_write": self._fcr_write(s), "ro_mask": fcr_ro}
         r = build_regs((name, f"DMA{self.controller}", "DMA2"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         tname = str(params.get("requests", "f40x"))

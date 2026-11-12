@@ -25,7 +25,8 @@ STM32F417]`; on other parts the model behaves like the `stub` (`_util.make_absen
   direction.  The data pins are not toggled; the PHY's interface clocks (50 MHz REF_CLK, 25/2.5 MHz TX_CLK/RX_CLK)
   are summarised as `pin` `wave` events while the MAC clock is enabled (chipem/periph/sdbus.py ClockWave).
 * MDIO (MACMIIAR/MACMIIDR): writing MB starts a clause-22 transaction of 64 MDC clocks (32-bit preamble + frame), MDC
-  = HCLK / 42, 62, 16, 26, 102 for CR = 0..4 (reserved CR: /102 and one `warn`; MDC above 2.5 MHz: one `warn`); MB
+  = HCLK / 42, 62, 16, 26, 102 for CR = 0..4 (reserved CR: /102 and one `warn`; MDC above 2.5 MHz: one `warn`;
+  `params.mdc_div` replaces the code table: the STM32F2 has CR = 0..3 only, RM0033 Table 140, 100-111 reserved); MB
   reads 1 until it ends, then a read stores the PHY register in MACMIIDR.  Writes to MACMIIAR/MACMIIDR while MB = 1
   are ignored (one `warn`).  ETH_MDC/ETH_MDIO not muxed: reads return 0xFFFF, writes are lost.  MDC is summarised as
   a gated `wave`.
@@ -343,6 +344,8 @@ class ETH(GatedBlock):
         self.event_frames = 1
         self._irqn: int | None = None
         self._line = False
+        if params.get("mdc_div") is not None:      # MACMIIAR.CR codes of this part (STM32F2: RM0033 Table 140)
+            self.MDC_DIV = {int(k): int(v) for k, v in dict(params["mdc_div"]).items()}
         self._warned: set[str] = set()
         self.stats = {"tx": 0, "rx": 0, "filtered": 0, "crc": 0, "missed": 0, "lost": 0}
         self.tx_frames: deque = deque(maxlen=10_000)          # (t_ns, frame without FCS)

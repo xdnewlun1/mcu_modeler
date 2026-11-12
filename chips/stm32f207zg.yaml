@@ -39,54 +39,58 @@ memory:
   - {name: FLASH, base: 0x08000000, size: 0x100000, kind: flash}   # 1 MB: sectors 0-3 16 KB, 4 64 KB, 5-11 128 KB
   - {name: SRAM, base: 0x20000000, size: 0x20000, kind: ram}       # SRAM1 112 KB + SRAM2 16 KB (no CCM RAM)
   - {name: BKPSRAM, base: 0x40024000, size: 0x1000, kind: ram}     # 4 KB backup SRAM (AHB1)
-  # system memory (0x1FFF0000), OTP (0x1FFF7800), unique ID (0x1FFF7A10), flash size (0x1FFF7A22) and option bytes
-  # (0x1FFFC000) are not mapped (RM0033 2.3, 32.2; same addresses as the STM32F405)
+  # system memory (0x1FFF0000, 30 KB bootloader) and option bytes (0x1FFFC000) are not mapped (RM0033 2.3.3 Table 2);
+  # the OTP area, unique ID and flash size are the SYSMEM block below
 
 # armv7m.scs (0xE000E000, SysTick/NVIC/SCB/MPU) is created by the arch layer, not listed here. Bases: RM0033 Table 1
 # (register boundary addresses) = STM32F21x.svd; svd2chip --check 0 mismatches.
 peripherals:
+  # Timers (RM0033 ch. 13-16): strict_regs = ARR resets to all ones (13.4.12, 14.4.12, 15.4.11, 15.5.9, 16.4.8), TIM3/4
+  # CNT/ARR/CCRx 16-bit (14.4.10), OR remap fields only (14.4.19-20, 15.5.11); TIM9/12 keep CR2.MMS (15.4.2); TIM1/8
+  # CCER.CC4NP read-write (13.4.9). reserved_zero: offsets that hold no register in the RM0033 register maps read 0
+  # and ignore writes (e.g. I2C 0x24, no I2C_FLTR: 23.6.10 Table 83); UART4/5 keep their 0x18 (GTPR.PSC, 24.6.7).
   # APB1
-  - {name: TIM2, model: stm32.tim, base: 0x40000000, size: 0x400}
-  - {name: TIM3, model: stm32.tim, base: 0x40000400, size: 0x400}
-  - {name: TIM4, model: stm32.tim, base: 0x40000800, size: 0x400}
-  - {name: TIM5, model: stm32.tim, base: 0x40000C00, size: 0x400}
-  - {name: TIM6, model: stm32.tim, base: 0x40001000, size: 0x400}
-  - {name: TIM7, model: stm32.tim, base: 0x40001400, size: 0x400}
-  - {name: TIM12, model: stm32.tim, base: 0x40001800, size: 0x400}
-  - {name: TIM13, model: stm32.tim, base: 0x40001C00, size: 0x400}
-  - {name: TIM14, model: stm32.tim, base: 0x40002000, size: 0x400}
-  - {name: RTC, model: stm32.rtc_f2, base: 0x40002800, size: 0x400}   # RTC v1 (no SSR/SHIFTR/CALR) + backup registers
-  - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400}
+  - {name: TIM2, model: stm32.tim, base: 0x40000000, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM3, model: stm32.tim, base: 0x40000400, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM4, model: stm32.tim, base: 0x40000800, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM5, model: stm32.tim, base: 0x40000C00, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM6, model: stm32.tim, base: 0x40001000, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM7, model: stm32.tim, base: 0x40001400, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM12, model: stm32.tim, base: 0x40001800, size: 0x400, params: {strict_regs: true, cr2: true, reserved_zero: true}}
+  - {name: TIM13, model: stm32.tim, base: 0x40001C00, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM14, model: stm32.tim, base: 0x40002000, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: RTC, model: stm32.rtc_f2, base: 0x40002800, size: 0x400, params: {reserved_zero: true}}   # RTC v1 (no SSR/SHIFTR/CALR) + backup registers
+  - {name: WWDG, model: stm32.wwdg, base: 0x40002C00, size: 0x400, params: {reserved_zero: true}}
   - {name: IWDG, model: stm32.iwdg, base: 0x40003000, size: 0x400}
-  - {name: SPI2, model: stm32.spi, base: 0x40003800, size: 0x400, params: {i2s_ck: SCK}}   # SPI2/I2S2 (no I2S2ext on the F2)
-  - {name: SPI3, model: stm32.spi, base: 0x40003C00, size: 0x400, params: {i2s_ck: SCK}}   # SPI3/I2S3 (no I2S3ext on the F2)
-  - {name: USART2, model: stm32.usart, base: 0x40004400, size: 0x400, params: {index: 2, kind: usart}}
-  - {name: USART3, model: stm32.usart, base: 0x40004800, size: 0x400, params: {index: 3, kind: usart}}
+  - {name: SPI2, model: stm32.spi, base: 0x40003800, size: 0x400, params: {i2s_ck: SCK, reserved_zero: true}}   # SPI2/I2S2 (no I2S2ext on the F2)
+  - {name: SPI3, model: stm32.spi, base: 0x40003C00, size: 0x400, params: {i2s_ck: SCK, reserved_zero: true}}   # SPI3/I2S3 (no I2S3ext on the F2)
+  - {name: USART2, model: stm32.usart, base: 0x40004400, size: 0x400, params: {index: 2, kind: usart, reserved_zero: true}}
+  - {name: USART3, model: stm32.usart, base: 0x40004800, size: 0x400, params: {index: 3, kind: usart, reserved_zero: true}}
   - {name: UART4, model: stm32.usart, base: 0x40004C00, size: 0x400, params: {index: 4, kind: uart}}
   - {name: UART5, model: stm32.usart, base: 0x40005000, size: 0x400, params: {index: 5, kind: uart}}
-  - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400}
-  - {name: I2C2, model: stm32.i2c, base: 0x40005800, size: 0x400}
-  - {name: I2C3, model: stm32.i2c, base: 0x40005C00, size: 0x400}
+  - {name: I2C1, model: stm32.i2c, base: 0x40005400, size: 0x400, params: {reserved_zero: true}}
+  - {name: I2C2, model: stm32.i2c, base: 0x40005800, size: 0x400, params: {reserved_zero: true}}
+  - {name: I2C3, model: stm32.i2c, base: 0x40005C00, size: 0x400, params: {reserved_zero: true}}
   - {name: CAN1, model: stm32.can, base: 0x40006400, size: 0x400}            # bxCAN master: owns the 28 filter banks
   - {name: CAN2, model: stm32.can, base: 0x40006800, size: 0x400}            # bxCAN slave: needs the CAN1 clock
   - {name: PWR, model: stm32.pwr_f2, base: 0x40007000, size: 0x400}          # no VOS/VOSRDY (RM0033 4.4)
-  - {name: DAC, model: stm32.dac, base: 0x40007400, size: 0x400}
+  - {name: DAC, model: stm32.dac, base: 0x40007400, size: 0x400, params: {reserved_zero: true}}
   # APB2
-  - {name: TIM1, model: stm32.tim, base: 0x40010000, size: 0x400}
-  - {name: TIM8, model: stm32.tim, base: 0x40010400, size: 0x400}
-  - {name: USART1, model: stm32.usart, base: 0x40011000, size: 0x400, params: {index: 1, kind: usart}}
-  - {name: USART6, model: stm32.usart, base: 0x40011400, size: 0x400, params: {index: 6, kind: usart}}
-  - {name: ADC1, model: stm32.adc, base: 0x40012000, size: 0x100}
-  - {name: ADC2, model: stm32.adc, base: 0x40012100, size: 0x100}
-  - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100}
+  - {name: TIM1, model: stm32.tim, base: 0x40010000, size: 0x400, params: {strict_regs: true, cc4np: true, reserved_zero: true}}
+  - {name: TIM8, model: stm32.tim, base: 0x40010400, size: 0x400, params: {strict_regs: true, cc4np: true, reserved_zero: true}}
+  - {name: USART1, model: stm32.usart, base: 0x40011000, size: 0x400, params: {index: 1, kind: usart, reserved_zero: true}}
+  - {name: USART6, model: stm32.usart, base: 0x40011400, size: 0x400, params: {index: 6, kind: usart, reserved_zero: true}}
+  - {name: ADC1, model: stm32.adc, base: 0x40012000, size: 0x100, params: {reserved_zero: true, adcclk_max: 30000000}}
+  - {name: ADC2, model: stm32.adc, base: 0x40012100, size: 0x100, params: {reserved_zero: true, adcclk_max: 30000000}}
+  - {name: ADC3, model: stm32.adc, base: 0x40012200, size: 0x100, params: {reserved_zero: true, adcclk_max: 30000000}}
   - {name: ADC_Common, model: stm32.adc_common, base: 0x40012300, size: 0x400}   # ADC common registers (CSR, CCR, CDR)
   - {name: SDIO, model: stm32.sdio, base: 0x40012C00, size: 0x400}   # SD card host (card: --sd-card / board devices)
-  - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400}
+  - {name: SPI1, model: stm32.spi, base: 0x40013000, size: 0x400, params: {reserved_zero: true}}
   - {name: SYSCFG, model: stm32.syscfg, base: 0x40013800, size: 0x400}
   - {name: EXTI, model: stm32.exti, base: 0x40013C00, size: 0x400}
-  - {name: TIM9, model: stm32.tim, base: 0x40014000, size: 0x400}
-  - {name: TIM10, model: stm32.tim, base: 0x40014400, size: 0x400}
-  - {name: TIM11, model: stm32.tim, base: 0x40014800, size: 0x400}
+  - {name: TIM9, model: stm32.tim, base: 0x40014000, size: 0x400, params: {strict_regs: true, cr2: true, reserved_zero: true}}
+  - {name: TIM10, model: stm32.tim, base: 0x40014400, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
+  - {name: TIM11, model: stm32.tim, base: 0x40014800, size: 0x400, params: {strict_regs: true, reserved_zero: true}}
   # AHB1
   - {name: GPIOA, model: stm32.gpio, base: 0x40020000, size: 0x400, params: {port: A}}
   - {name: GPIOB, model: stm32.gpio, base: 0x40020400, size: 0x400, params: {port: B}}
@@ -97,23 +101,33 @@ peripherals:
   - {name: GPIOG, model: stm32.gpio, base: 0x40021800, size: 0x400, params: {port: G}}
   - {name: GPIOH, model: stm32.gpio, base: 0x40021C00, size: 0x400, params: {port: H}}
   - {name: GPIOI, model: stm32.gpio, base: 0x40022000, size: 0x400, params: {port: I}}
-  - {name: CRC, model: stm32.crc, base: 0x40023000, size: 0x400}
+  - {name: CRC, model: stm32.crc, base: 0x40023000, size: 0x400, params: {reserved_zero: true}}
   - {name: RCC, model: stm32.rcc_f2, base: 0x40023800, size: 0x400, params: {ext_hz: 8000000}}   # 120/30/60 MHz limits
   - {name: FLASH, model: stm32.flash, base: 0x40023C00, size: 0x400}   # flash interface (ACR LATENCY 0..7 WS)
-  - {name: DMA1, model: stm32.dma, base: 0x40026000, size: 0x400, params: {controller: 1, requests: f2}}   # no memory-to-memory
-  - {name: DMA2, model: stm32.dma, base: 0x40026400, size: 0x400, params: {controller: 2, requests: f2}}
-  - {name: Ethernet_MAC, model: stm32.eth, base: 0x40028000, size: 0x1400, params: {only: [STM32F207, STM32F217]}}   # ETH MAC/MMC/PTP/DMA: STM32F207/F217 only (stub on F205/F215)
+  # DMA_SxFCR (RM0033 9.5.10): bits 31:8 and 6 reserved, FS[5:3] read-only (fcr_strict)
+  - {name: DMA1, model: stm32.dma, base: 0x40026000, size: 0x400, params: {controller: 1, requests: f2, fcr_strict: true}}   # no memory-to-memory
+  - {name: DMA2, model: stm32.dma, base: 0x40026400, size: 0x400, params: {controller: 2, requests: f2, fcr_strict: true}}
+  # ETH MAC/MMC/PTP/DMA: STM32F207/F217 only (stub on F205/F215); MACMIIAR.CR 000-011 only (RM0033 Table 140: 1xx reserved)
+  - {name: Ethernet_MAC, model: stm32.eth, base: 0x40028000, size: 0x1400, params: {only: [STM32F207, STM32F217], mdc_div: {0: 42, 1: 62, 2: 16, 3: 26}}}
   - {name: OTG_HS, model: stm32.otg_hs, base: 0x40040000, size: 0x40000}   # USB OTG HS core (256 KB window; embedded FS PHY only)
   # AHB2
-  - {name: OTG_FS, model: stm32.otg_fs, base: 0x50000000, size: 0x40000}   # USB OTG FS core (256 KB window, device mode)
+  - {name: OTG_FS, model: stm32.otg_fs, base: 0x50000000, size: 0x40000, params: {gusbcfg_reset: 0x00001440}}   # USB OTG FS core (256 KB window, device mode); GUSBCFG resets to 0x1440 (RM0033 29.16.2)
   - {name: DCMI, model: stm32.dcmi, base: 0x50050000, size: 0x400, params: {only: [STM32F207, STM32F217]}}   # STM32F207/F217 only
   - {name: CRYP, model: stm32.cryp, base: 0x50060000, size: 0x400, params: {only: [STM32F215, STM32F217]}}   # DES/TDES/AES ECB/CBC/CTR (no GCM/CCM): F215/F217 only
   - {name: HASH, model: stm32.hash, base: 0x50060400, size: 0x400, params: {only: [STM32F215, STM32F217]}}   # SHA-1/MD5/HMAC (no SHA-224/256): F215/F217 only
-  - {name: RNG, model: stm32.rng, base: 0x50060800, size: 0x400}
+  - {name: RNG, model: stm32.rng, base: 0x50060800, size: 0x400, params: {reserved_zero: true}}
   # AHB3
-  - {name: FSMC, model: stm32.fsmc, base: 0xA0000000, size: 0x1000}   # FSMC control registers; NE1-4 windows at 0x60000000
+  # FSMC control registers; NE1-4 windows at 0x60000000. RM0033 31.5.6: BCRx CPSIZE / WRAPMOD and BWTRx BUSTURN are
+  # writable, BWTRx bits 27:20 reserved (the SVD differs)
+  - {name: FSMC, model: stm32.fsmc, base: 0xA0000000, size: 0x1000, params: {bcr_rw: 0x000FFF7F, bwtr_rw: 0x300FFFFF}}
+  # OTP area 0x1FFF7800-0x1FFF7A0F (528 bytes, erased: reads 0xFF, CPU writes ignored), 96-bit unique ID at 0x1FFF7A10
+  # (RM0033 33.1) and F_SIZE at 0x1FFF7A22 (33.2: flash size in KB, from `memory`)
+  - {name: SYSMEM, model: stm32f1.sysmem, base: 0x1FFF7800, size: 0x400, params: {uid_offset: 0x210, fsize_offset: 0x222}}
   # Cortex-M3 debug MCU: DEV_ID 0x411, REV_ID 0x2003 = revision X (RM0033 32.6.1; the SVD's 0x10006411 is revision A)
-  - {name: DBGMCU, model: stm32.dbgmcu, base: 0xE0042000, size: 0x400, params: {idcode: 0x20036411}}
+  # APB1_FZ bit 10 DBG_RTC_STOP is rw (32.16.4; read-only in the SVD); CR / APB1_FZ / APB2_FZ are reset by POR only
+  # (32.16.3-32.16.5). Other revisions (REV_ID 0x1000 A, 0x1001 Z, 0x2000 B, 0x2001 Y, 0x2007 1, 0x200F V, 0x201F 2/3,
+  # 0x203F 4/5) through params.idcode.
+  - {name: DBGMCU, model: stm32.dbgmcu, base: 0xE0042000, size: 0x400, params: {idcode: 0x20036411, por_only: true, rw_masks: {DBGMCU_APB1_FZ: 0x06E01DFF}}}
 
 # External interrupt numbers (exception = 16 + n): RM0033 Table 20 = STM32F21x.svd (81 vectors; the F405's 81 FPU does
 # not exist on the Cortex-M3).

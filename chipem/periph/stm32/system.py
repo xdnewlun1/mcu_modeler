@@ -568,9 +568,26 @@ class PWR(GatedBlock):
 
 @register("stm32.dbgmcu")
 class DBGMCU(MMIOBlock):
+    """DBGMCU_IDCODE (`params.idcode`), CR, APB1_FZ, APB2_FZ (storage).  Optional `params.rw_masks` ({register:
+    writable bits}) replaces the table's read-only mask where the SVD is wrong; `params.por_only: true` keeps CR /
+    APB1_FZ / APB2_FZ across system resets (reset by power-on only, e.g. RM0033 32.16.3-32.16.5)."""
+
     def __init__(self, name: str, base: int, size: int, regs=(), *, params: dict | None = None, log: Any = None):
         params = dict(params or {})
         idcode = int(params.get("idcode", 0x10076413))
-        ov = {"DBGMCU_IDCODE": {"reset": idcode, "ro_mask": 0xFFFFFFFF}}
+        ov: dict[str, dict] = {"DBGMCU_IDCODE": {"reset": idcode, "ro_mask": 0xFFFFFFFF}}
+        for rn, m in (params.get("rw_masks") or {}).items():
+            ov[str(rn)] = {"ro_mask": ~int(m) & 0xFFFFFFFF}
         r = build_regs((name, "DBGMCU", "DBG"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
+        self._por_only = bool(params.get("por_only", False))
+        self._powered = False
+
+    def reset(self) -> None:
+        keep = {}
+        if self._por_only and self._powered:
+            keep = {rn: self.get(rn) for rn in ("DBGMCU_CR", "DBGMCU_APB1_FZ", "DBGMCU_APB2_FZ") if rn in self.regs}
+        super().reset()
+        for rn, v in keep.items():
+            self.set(rn, v)
+        self._powered = True

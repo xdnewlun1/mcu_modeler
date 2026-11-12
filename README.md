@@ -11,7 +11,7 @@ Three families are supported: NXP/Freescale Kinetis K22F (Cortex-M4F, LQFP100: `
 `MK22FX512VLL12`), ST STM32F405xx/STM32F407xx (Cortex-M4F: every part and package of data sheet DS8626, from the
 64-pin STM32F405RG to the 176-pin STM32F407IG/IE in LQFP176 and UFBGA176; the 180 MHz STM32F427xx/STM32F437xx die in
 LQFP100, LQFP144, LQFP176, UFBGA169 and UFBGA176; STM32F429xx/STM32F439xx with the LCD-TFT controller up to LQFP208
-and TFBGA216; the STM32F401/STM32F411 access line, verified against RM0368/RM0383; the STM32F446 with QUADSPI, FMPI2C, HDMI-CEC and SPDIFRX, verified against RM0390), ST STM32F205/F207/F215/F217 (Cortex-M3 STM32F2, 120 MHz, 1 MB:
+and TFBGA216; the STM32F401/STM32F411 access line, verified against RM0368/RM0383; the STM32F446 with QUADSPI, FMPI2C, HDMI-CEC and SPDIFRX, verified against RM0390), ST STM32F205/F207/F215/F217 (Cortex-M3 STM32F2, 120 MHz, 1 MB, verified against RM0033:
 LQFP64, WLCSP64+2, LQFP100, LQFP144, LQFP176, UFBGA176), ST STM32F1 (Cortex-M3, family `stm32f1`, verified against
 RM0008: STM32F103 low/medium/high density T4-T6, C4-CB ("Blue Pill" C8), R4-RE, V8-VE, ZC/ZE in VFQFPN36/LQFP48/
 LQFP64/LQFP100/LQFP144, and the connectivity line STM32F105RC/VC, STM32F107RC/VC with Ethernet, OTG_FS and two CANs), TI C2000 F2833x/F2823x (TMS320F28335 with FPU32, F28334, F28333, F28332,
@@ -921,7 +921,8 @@ Tables 8 / 10, cross-checked against ST's open pin data (chips/README.md). F2-sp
 (no sub-seconds / shift / smooth calibration, no BYPSHAD); everything else is the F4 model on the F2 register table.
 Samples: `firmware/samples_stm32f2/build.sh` (clang `thumbv7m`, `-mcpu=cortex-m3 -mfloat-abi=soft`): the F405
 samples that use common blocks, the 168 MHz ones regenerated for 120 MHz (`tim_irq`, `stop_rtc_wakeup`, `eth_ping`,
-`usb_cdc`), `clock120_uart` and `cryp_hash` (F215/F217). Tests: `tests/test_stm32f2_{chip,system,samples}.py`.
+`usb_cdc`), `clock120_uart` and `cryp_hash` (F215/F217). Verified against RM0033 Rev 10 chapter by chapter (`tests/test_stm32f2_rm0033*.py`; PM0059, the flash programming
+manual, is still missing). Tests: `tests/test_stm32f2_{chip,system,samples}.py`, `tests/test_stm32f2_rm0033*.py`.
 Differences and gaps: docs/LIMITATIONS.md "STM32F2".
 
 ```sh

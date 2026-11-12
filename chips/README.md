@@ -480,8 +480,12 @@ bits 4/5 (CRYPEN/HASHEN, CRYPRST/HASHRST); `stm32.rcc` makes them writable.
   Table 2/3 (counts), Table 8 (pin and ball definitions, pages 47-58), Table 10 (AF mapping, pages 61-66); DS17050
   Rev 9 (STM32F215xx/217xx, `docs/datasheets/st/DS_stm32f217zg.pdf`, from
   <https://nonprod.docs.rs-online.com/5360/0900766b812f91e4.pdf>, sha256
-  `a992205be02c24445ea9ff5b633cdacdf7359bfdb2c792b4f4795831967e8848`) Tables 7/9. RM0033 Rev 10 read from the HTML
-  rendition at docs.dirba.io (st.com refused the download; see docs/LIMITATIONS.md "STM32F2"). ST's CMSIS device
+  `a992205be02c24445ea9ff5b633cdacdf7359bfdb2c792b4f4795831967e8848`) Tables 7/9. RM0033 Rev 10 (May 2025, 1363 pages,
+  the official ST PDF `docs/datasheets/st/RM0033_stm32f2_reference_manual.pdf`, sha256
+  `2a8c7abda8eee02ef2c5228717375a5ddce8f2aa9546a3e6b2a1b66205b3282d`): every model and register table difference was
+  checked chapter by chapter against it (`tests/test_stm32f2_rm0033*.py`; docs/LIMITATIONS.md "STM32F2"). The first
+  version of the F2 files had been written from a third-party HTML rendition of the same revision (docs.dirba.io).
+  PM0059 (flash programming manual) is still not in the repository. ST's CMSIS device
   headers `stm32f205xx.h`/`stm32f207xx.h`/`stm32f217xx.h` (STMicroelectronics/cmsis-device-f2 @ 49321f1e) for bit
   positions (not stored).
 - **Register table** `chips/stm32f2xx_regs.yaml`: CMSIS-SVD `STM32F21x.svd` (STMicro, `<version>1.0</version>`),
@@ -499,7 +503,8 @@ bits 4/5 (CRYPEN/HASHEN, CRYPRST/HASHRST); `stm32.rcc` makes them writable.
 - **Quirks of STM32F21x.svd** (fixed in models, never in the table): CAN MCR/MSR/TSR/FMR reset 0 (RM0033 27.9:
   0x00010002 / 0x00000C02 / 0x1C000000 / 0x2A1C0E01; `stm32.can` sets them); UART5 CR3 without DMAR/DMAT
   (`stm32.usart`); SYSCFG_CMPCR.READY at bit 7 (RM0033 7.2.7: bit 8, as the model); DBGMCU_IDCODE 0x10006411 = rev A
-  (the model returns 0x20036411, rev X); no `<cpu>` element. It is otherwise a clean F2 map: no VOS/VOSRDY, RTC
+  (the model returns 0x20036411, rev X); DBGMCU_APB1_FZ.DBG_RTC_STOP (bit 10) read-only (RM0033 32.16.4: rw;
+  `params.rw_masks`); no `<cpu>` element. It is otherwise a clean F2 map: no VOS/VOSRDY, RTC
   without SSR/SHIFTR/CALR/TSSSR/ALRMxSSR, PREDIV_S 13 bits, HASH without HR5-7/HASH_HR/CSR51-53, CRYP without the
   GCM/CCM registers, DMA SxCR without bit 20, PLLI2SCFGR reset 0x20003000, AHB1ENR reset 0 (no CCMDATARAMEN).
 - **Pin tables**: generated with `pdftotext -bbox` from DS15818 Table 8 (rows anchored on the pin-type column,

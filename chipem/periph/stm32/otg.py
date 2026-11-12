@@ -6,7 +6,8 @@ embedded FS PHY) and `stm32.otg_hs` (0x40040000, 6 endpoints, 4 KB FIFO RAM, int
 FS PHY only: selecting the ULPI PHY logs a `warn` and the core never connects, since no external high-speed PHY is
 modelled).  Params: `endpoints`, `fifo_words`, `dma`, `prefix` (signal / IRQ name prefix "OTG_FS" / "OTG_HS"),
 `gate` (RCC clock gate), `exti_line` (wakeup line: 18 FS, 20 HS), `clk48_hz` (48 MHz clock when there is no RCC),
-`channels` (host channels, storage), `core: otg2`.
+`channels` (host channels, storage), `core: otg2`, `gusbcfg_reset` (GUSBCFG reset value when the part's RM differs:
+STM32F2 OTG_FS 0x00001440 = TRDT 5, RM0033 29.16.2; RM0090 34.16.2 gives 0x00000A40 = TRDT 2).
 
 `core: otg2` (STM32F446, RM0390 ch. 31, OTG 2.0 core with LPM; chip YAML 6 FS / 9 HS endpoints, 12 / 16 channels,
 Table 221): GCCFG has only PWRDWN (16) and VBDEN (21, VBUS sensing on PA9 / PB13) (31.15.15); GOTGCTL adds the
@@ -261,6 +262,7 @@ class OtgCore(GatedBlock):
         self._ctrl_wlen = 0                           # wLength of the control transfer in progress
         self._trdt_key = None
         self.stats = {"setup": 0, "out": 0, "in": 0, "nak": 0, "stall": 0, "sof": 0, "resets": 0}
+        self._p = p
         regs = self._build_regs()
         super().__init__(name, base, size, regs, log=log, params=p)
 
@@ -275,7 +277,7 @@ class OtgCore(GatedBlock):
               on_write=self._gotgctl_write),                                              # CIDSTS (live) = 1
             R("GOTGINT", 0x004, ro_mask=~0x000E0304, w1c_mask=0x000E0304, on_write=self._irq_write),
             R("GAHBCFG", 0x008, ro_mask=~(0x1BF if hs else 0x181), on_write=self._irq_write),
-            R("GUSBCFG", 0x00C, reset=0x00001440 if hs else 0x00000A40,
+            R("GUSBCFG", 0x00C, reset=int(self._p.get("gusbcfg_reset", 0x00001440 if hs else 0x00000A40)),
               ro_mask=~((0xE3FEBF47 if hs else 0xE0003F47) & (0x7FFFFFFF if self.otg2 else 0xFFFFFFFF)),
               on_write=self._gusbcfg_write),                    # otg2: bit 31 reserved (RM0390 31.15.4)
             R("GRSTCTL", 0x010, reset=AHBIDL, ro_mask=~(0x7C0 | 0x37), on_write=self._grstctl_write,

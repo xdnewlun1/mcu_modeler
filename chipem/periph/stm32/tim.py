@@ -107,8 +107,10 @@ Registers from the SVD; behaviour (RM0090 ch. 17-20):
   ETRF), CR2 CCPC/COM preload (COMG), the ETF / ICxF digital filters, TIM2_OR / TIM5_OR / TIM11_OR input remaps, the
   DMA burst registers DCR/DMAR (stored only).
 * `params.strict_regs` (STM32F401/F411 chip files, RM0368/RM0383 ch. 12-14): ARR resets to 0xFFFF (TIM2/TIM5
-  0xFFFFFFFF), CNT/ARR/CCRx bits above a 16-bit counter are reserved, TIM9/TIM12 have no CR2.  Without it the SVD
-  values are kept (ARR = 0 after reset, 32-bit storage on TIM3/4).
+  0xFFFFFFFF), CNT/ARR/CCRx bits above a 16-bit counter are reserved, TIM9/TIM12 have no CR2 (`params.cr2: true`
+  keeps it: STM32F2, RM0033 15.4.2 TIM9/12_CR2.MMS), TIM2_OR / TIM5_OR / TIM11_OR have only their remap field
+  writable (RM0033 14.4.19 / 14.4.20 / 15.5.11).  Without it the SVD values are kept (ARR = 0 after reset, 32-bit
+  storage on TIM3/4).  `params.cc4np` (STM32F2 TIM1/TIM8, RM0033 13.4.9): CCER.CC4NP (bit 15) is read-write.
 """
 from __future__ import annotations
 
@@ -243,8 +245,19 @@ class TIM(GatedBlock):
             if self.bits < 32:
                 for rn in ["CNT", "ARR"] + [f"CCR{n}" for n in range(1, 5)]:
                     ov[rn]["ro_mask"] = ~self.cmask & 0xFFFFFFFF
-            if name in ("TIM9", "TIM12"):
+            if name in ("TIM9", "TIM12") and not params.get("cr2"):
                 ov["CR2"] = {"ro_mask": 0xFFFFFFFF, "on_read": pure_read(lambda b, r: 0)}
+            # option registers: only the remap field is writable (RM0033 14.4.19 TIM2_OR ITR1_RMP[11:10], 14.4.20
+            # TIM5_OR TI4_RMP[7:6], 15.5.11 TIM11_OR TI1_RMP[1:0]); STM32F21x.svd gives TIM2_OR the TIM5 field (7:6)
+            or_rw = {"TIM2": 3 << 10, "TIM5": 3 << 6, "TIM11": 3}.get(name)
+            if or_rw is not None:
+                for rn in ("OR", f"{name}_OR"):
+                    ov[rn] = {"ro_mask": ~or_rw & 0xFFFFFFFF}
+        if params.get("cc4np"):
+            # TIM1/TIM8 CCER.CC4NP (bit 15, RM0033 13.4.9: rw; input-capture polarity of channel 4 with CC4P); the
+            # SVDs mark bit 15 reserved
+            ccer = ov["CCER"]
+            ccer["ro_mask"] = 0xFFFF4000
         r = build_regs((name, "TIM2" if name in WIDE else "TIM3"), size, ov, params.get("regs_file"))
         super().__init__(name, base, size, r, log=log, params=params)
         self._ev = None

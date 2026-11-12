@@ -27,6 +27,9 @@ bus-fault, and the FSMC interrupt (NAND/PC Card IRQ flags) is never raised.
   BCR1 0x30DB / BCR2-4 0x30D2 / BTRx, BWTRx 0x0FFFFFFF as in RM0008 21.5.6), control registers at 0xA0000000,
   gate RCC_AHBENR.FSMCEN (bit 8; read from the stm32f1.rcc GATES table), no reset bit.  The LQFP100 packages bond
   out NE1 only (no PG9/PG10/PG12 for NE2-NE4); the window still opens, the memory simply is not wired.
+* STM32F2 (RM0033 31.5.6): `params.bcr_rw: 0x000FFF7F` (BCRx CPSIZE[18:16] and BCR1 WRAPMOD writable; the F2 SVD
+  marks them read-only) and `params.bwtr_rw: 0x300FFFFF` (BWTRx: ACCMOD, BUSTURN[19:16], DATAST, ADDHLD, ADDSET;
+  bits 27:20 reserved, keeping their reset value 1; the SVD has DATLAT/CLKDIV there and BUSTURN read-only).
 """
 from __future__ import annotations
 
@@ -48,10 +51,16 @@ class FSMC(GatedBlock):
         params = dict(params or {})
         self.gate = params.get("gate", "FSMC")
         ov: dict[str, dict] = {}
+        # `bcr_rw` / `bwtr_rw`: writable bits of BCRx / BWTRx where the part's RM differs from its SVD (STM32F2)
+        bcr_rw, bwtr_rw = params.get("bcr_rw"), params.get("bwtr_rw")
         for x in range(1, 5):
             ov[f"BCR{x}"] = {"reset": 0x30DB if x == 1 else 0x30D2, "on_write": self._bcr_write(x)}
             ov[f"BTR{x}"] = {"reset": 0x0FFFFFFF}
             ov[f"BWTR{x}"] = {"reset": 0x0FFFFFFF}
+            if bcr_rw is not None:
+                ov[f"BCR{x}"]["ro_mask"] = ~int(bcr_rw) & 0xFFFFFFFF
+            if bwtr_rw is not None:
+                ov[f"BWTR{x}"]["ro_mask"] = ~int(bwtr_rw) & 0xFFFFFFFF
         for x in range(2, 5):
             ov[f"SR{x}"] = {"reset": 0x40}
         r = build_regs((name, "FSMC"), size, ov, params.get("regs_file"))

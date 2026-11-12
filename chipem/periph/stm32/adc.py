@@ -176,6 +176,9 @@ class ADC(GatedBlock):
         # sensor on IN16 and IN18, IN18 shared with VBAT where VBATE wins; RM0368/RM0383 11.3.3, 11.9, 11.10)
         self.vbat_div = float(params.get("vbat_div", VBAT_DIV))
         self.temp_channels = tuple(int(c) for c in params.get("temp_channels", (16,)))
+        # ADCCLK upper limit in Hz (one `warn` above it): STM32F2 30 MHz (RM0033 10.2 / 10.3.5, DS15818 fADC at
+        # VDDA 2.4-3.6 V); 0 = not checked
+        self.adcclk_max = float(params.get("adcclk_max", 0) or 0)
         self._ev = None
         self._pos = 0                # next position in the regular sequence
         self._burst: int | None = None   # discontinuous mode: conversions left in this subgroup
@@ -337,7 +340,11 @@ class ADC(GatedBlock):
     def adcclk_cycles(self) -> int:
         """Core cycles per ADCCLK: PCLK2 / (2, 4, 6, 8) by CCR.ADCPRE."""
         pre = 2 * ((self._ccr() >> 16 & 3) + 1)
-        return max(1, round(self.chip.clock.hz / apb_hz(self.chip, 2) * pre))
+        pclk2 = apb_hz(self.chip, 2)
+        if self.adcclk_max and pclk2 / pre > self.adcclk_max * 1.001:
+            self._warn_once(f"adcclk{round(pclk2 / pre)}", f"{self.name}: ADCCLK {pclk2 / pre / 1e6:g} MHz exceeds "
+                            f"{self.adcclk_max / 1e6:g} MHz (PCLK2 / {pre}, ADC_CCR.ADCPRE): out of specification")
+        return max(1, round(self.chip.clock.hz / pclk2 * pre))
 
     def pclk2_cycles(self) -> int:
         return max(1, round(self.chip.clock.hz / apb_hz(self.chip, 2)))

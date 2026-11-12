@@ -723,43 +723,74 @@ Still approximate or not modelled:
 
 ## STM32F2 (STM32F205 / F207 / F215 / F217)
 
-**RM0033 was read from a third-party HTML rendition, not the ST PDF.** st.com refused the automated download (HTTP/2
-stream reset); RM0033 Rev 10 (May 2025) was read from <https://docs.dirba.io/rm0033-stm32f205-207-215-217/> (chapter
-pages, text extracted in a scratch directory). Facts used: 2.3 memory map / Table 1 / flash wait states Table 3, 4.4
-PWR registers, 5.2-5.3 RCC (limits, PLL/PLLI2S ranges, reset values), Table 20 vectors, Tables 22/23 DMA, 22 RTC,
-27.9 bxCAN resets, 28 ETH MDC ranges, 32.6.1 IDCODE. Please add the ST PDF as `docs/datasheets/st/RM0033_stm32f2_reference_manual.pdf`
-and re-check those sections; the flash programming manual PM0059 (FLASH_KEYR/SR/CR/OPTCR, which RM0033 does not
-describe) was not obtained either: `stm32.flash` is the RM0090 model, **not verified against PM0059**. The data sheets
-DS15818 Rev 15 (F205/F207) and DS17050 Rev 9 (F215/F217) came from distributor mirrors (Farnell, RS); newer revisions
-exist on st.com.
+**Verified against RM0033 Rev 10** (May 2025, the official ST PDF `docs/datasheets/st/RM0033_stm32f2_reference_manual.pdf`,
+sha256 `2a8c7abd...5b3282d`), chapter by chapter, with one regression test per fix citing its section
+(`tests/test_stm32f2_rm0033.py` system blocks, `tests/test_stm32f2_rm0033_periph.py` analog / timers / serial / RTC,
+`tests/test_stm32f2_rm0033_conn.py` connectivity / crypto / FSMC). The models were first written from a third-party HTML
+rendition of the same revision (docs.dirba.io). Every fact taken from that copy was confirmed by the PDF: the 2.3 memory map
+and Table 3 wait states, the 4.4 PWR registers, the RCC limits, PLL ranges and reset values, Table 20 vectors, Tables 22/23
+DMA, the 22 RTC set, the 27.9 bxCAN resets, the Table 140 MDC ranges and the 32.6.1 IDCODE. The discrepancies listed below
+were in the models or in the SVD, not in the copy (32.6.1 lists more revisions than the old notes: 0x2007 rev 1, 0x200F V,
+0x201F 2/3, 0x203F 4/5). The flash programming manual **PM0059 is still missing**: only FLASH_ACR (2.3.4) is verified;
+FLASH_KEYR/OPTKEYR/SR/CR/OPTCR are the RM0090 `stm32.flash` model (OPTCR reset 0x0FFFAAED agrees with 4.2.2 "by default,
+BOR is off"; OPTKEYR/OPTLOCK are not enforced on this model). The data sheets are DS15818 Rev 15 (F205/F207) and DS17050
+Rev 9 (F215/F217), from distributor mirrors (Farnell, RS); newer revisions exist on st.com.
 
 What is modelled as F2 (differences from the STM32F405/407):
-- Cortex-M3, `fpu: false`, CPUID 0x410FC231, 81 IRQs (no FPU vector), 4 priority bits, SysTick HCLK/8.
-- RCC `stm32.rcc_f2`: 120/30/60 MHz HCLK/APB1/APB2 limits, PLL VCO input 1-2 MHz and output 192-432 MHz (PLLN
-  192-432), PLLP output <= 120 MHz while it drives SYSCLK, PLLI2SN 192-432 / VCO 192-432 MHz, no PLLI2SQ, no CCM
-  enable bit; flash wait states checked against RM0033 Table 3 (`params.vdd_range`, default 2.7-3.6 V). All of
-  these only `warn`; there is no wait-state timing.
-- PWR `stm32.pwr_f2`: no VOS / VOSRDY (CR/CSR bits 31:10 reserved, reset 0).
-- RTC `stm32.rtc_f2`: no SSR, SHIFTR, TSSSR, CALR, ALRMxSSR (read 0, writes ignored), no BYPSHAD/COSEL, 13-bit
-  PREDIV_S, one tamper input (no TAMP2F); coarse calibration (CALIBR/DCE) is storage as on the F4.
-- CRYP/HASH (F215/F217 only): DES/TDES/AES ECB/CBC/CTR and SHA-1/MD5/HMAC; the GCM/CCM and SHA-224/256 bits and
-  registers are absent (from the F2 register table).
-- No I2S2ext/I2S3ext (no full-duplex I2S), no CCM RAM, DBGMCU IDCODE 0x20036411 (revision X; other revisions
-  0x1000/0x1001/0x2000/0x2001 are not selectable except by `params.idcode`).
-- Reserved bits come from STM32F21x.svd (read-only in the table). Fixed in the models: CAN MCR/MSR/TSR/FMR reset
-  values (the F2 SVD says 0; now set in `stm32.can` for every family), UART5 CR3.DMAR/DMAT (missing in the F2 SVD),
-  SYSCFG_CMPCR.READY (bit 8 per RM0033; the SVD says bit 7; the model always used bit 8).
+- Cortex-M3, `fpu: false`, CPUID 0x410FC231, 81 IRQs (Table 20, no FPU vector), 4 priority bits, SysTick HCLK/8 (5.2).
+- Memory (2.3 Table 1, 2.3.1, 2.3.3 Table 2): 1 MB flash, SRAM1 112 KB + SRAM2 16 KB, 4 KB BKPSRAM, no CCM. OTP
+  (0x1FFF7800, erased), the 96-bit unique ID 0x1FFF7A10 (33.1) and F_SIZE 0x1FFF7A22 (33.2) are mapped (`SYSMEM`).
+- RCC `stm32.rcc_f2` (ch. 5; all reset values and writable masks of 5.3.1-5.3.23 equal the table): 120/30/60 MHz
+  HCLK/APB1/APB2 limits, PLLM 2..63, VCO input 1-2 MHz, PLLN 192-432, VCO output 192-432 MHz, PLLQ 2..15, PLLP output
+  <= 120 MHz while it drives SYSCLK, PLLI2SN 192-432 / VCO 192-432 MHz / R 2..7 / I2S <= 192 MHz, no PLLI2SQ, no CCM
+  enable bit; flash wait states per Table 3 (`params.vdd_range`). Range violations only `warn`; there is no wait-state
+  timing. Write rules: PLLM/PLLSRC locked while either PLL runs, PLLN/PLLP while the PLL runs, PLLI2SN while PLLI2S runs
+  (PLLQ/PLLI2SR written with a `warn`), HSEBYP locked while the HSE is on, CSR reset flags cleared only by RMVF, SSCGR
+  written with the PLL on: `warn`.
+- PWR `stm32.pwr_f2` (4.4): no VOS / VOSRDY (CR/CSR bits 31:10 reserved, reset 0); PLS levels 2.0/2.1/2.3/2.5-2.9 V and
+  Sleep/Stop/Standby as the F405 model (4.3).
+- RTC `stm32.rtc_f2` (22.6, Table 80): no SSR, SHIFTR, TSSSR, CALR, ALRMxSSR (read 0, writes ignored), no BYPSHAD/COSEL,
+  ISR bits 31:14 and 3 reserved, 13-bit PREDIV_S, one tamper input (no TAMP2F), 20 backup registers; coarse calibration
+  (CALIBR/DCE) is storage as on the F4.
+- CRYP/HASH (F215/F217 only, 19.6/21.4): DES/TDES/AES ECB/CBC/CTR and SHA-1/MD5/HMAC; no GCM/CCM, SHA-224/256, HR5-7 or
+  CSR51-53.
+- No I2S2ext/I2S3ext: Table 1 maps only SPI2/I2S2 and SPI3/I2S3, and 25.2.2 says "half-duplex communication (only
+  transmitter or receiver)". Tables 22/23 still print I2S2_ext/I2S3_ext DMA requests (a leftover in the official tables
+  too); the cells are kept and never asserted.
+- DBGMCU (32.6.1, 32.16): IDCODE 0x20036411 (revision X; others via `params.idcode`); APB1_FZ.DBG_RTC_STOP writable
+  (read-only in the SVD); CR/APB1_FZ/APB2_FZ reset by POR only.
+
+Fixed when the PDF arrived (section, model): RCC VCO-output / PLLM / PLLQ checks, PLL field locks, HSEBYP lock, CSR flag
+writes, SSCGR rule (5.2.3, 5.3.1, 5.3.2, 5.3.21-5.3.23; `stm32.rcc_f2`); DBGMCU APB1_FZ bit 10 and POR-only reset (32.16;
+`stm32.dbgmcu` `rw_masks` / `por_only`); DMA_SxFCR bits 31:8 and 6 reserved (9.5.10; `stm32.dma` `fcr_strict`); unique ID /
+flash size mapped (33.1/33.2); TIMx_ARR reset all ones (13.4.12, 14.4.12, 15.4.11, 15.5.9, 16.4.8), TIM3/TIM4 16-bit
+CNT/ARR/CCRx (14.4), TIM2_OR ITR1_RMP at bits 11:10 (14.4.19; the SVD has 7:6), TIM1/TIM8 CCER.CC4NP (13.4.9), TIM9/TIM12
+CR2.MMS kept (15.4.2) (`stm32.tim` `strict_regs`, `cc4np`, `cr2`); register-map holes read 0 on TIM, SPI, USART1/2/3/6,
+I2C (no FLTR, 23.6.10), DAC, CRC, RNG, WWDG, RTC, ADC (`reserved_zero`); ADCCLK above 30 MHz `warn` (10.2;
+`stm32.adc` `adcclk_max`); Ethernet MDC CR codes 100-111 reserved (Table 140: one `warn`, HCLK/102 assumed; `stm32.eth`
+`mdc_div`); OTG_FS GUSBCFG reset 0x00001440 (29.16.2; `gusbcfg_reset`); FSMC_BCRx CPSIZE/WRAPMOD writable and FSMC_BWTRx
+BUSTURN writable / bits 27:20 reserved (31.5.6; `stm32.fsmc` `bcr_rw` / `bwtr_rw`). Earlier fixes kept: CAN MCR/MSR/TSR/FMR
+reset values (27.9), UART5 CR3.DMAR/DMAT, SYSCFG_CMPCR.READY at bit 8 (7.2.7).
+
+Confirmed without change: GPIO reset values (6.4: port A OSPEEDR 0, unlike the F405), SYSCFG (7.2), EXTI lines 0-22
+(8.2), DMA stream registers, CRC, ADC (VBAT/2 on IN18, temperature sensor IN16, VREFINT IN17, CCR TSVREFE/VBATE),
+DAC, IWDG/WWDG, RNG, USART (OVER8 and ONEBIT present), SPI/I2S (TI mode, no ASTRTEN), SDIO, bxCAN (28 filter banks),
+ETH (enhanced descriptors, PTP incl. PTPTSSR/PTPPPSCR), OTG FS/HS (CID 0x1200/0x1100, GCCFG, 4 / 6 endpoints, 8 / 12
+channels, 1.25 / 4 KB FIFO), DCMI, FSMC reset values.
 
 Not modelled / approximate:
-- Ethernet MDC clock-range codes CR=100/101 are reserved on the F2 (RM0033 Table 140) but `stm32.eth` accepts them
-  as on the F4 (HCLK/102, /124).
-- The F2 DMA tables list I2S2_ext/I2S3_ext requests although the F2 has no such blocks; they are kept, never asserted.
-- The F2 USB OTG, SDIO, FSMC, ETH, DCMI, ADC, DAC, TIM, I2C, SPI/I2S, USART models are the RM0090 ones on the F2
-  register table; F2-specific behaviour that the SVD does not express (if any) is not modelled. Not checked in
-  detail against RM0033: ADC (no VBAT divider differences checked), I2C (no analog/digital filter on either),
-  OTG HS/FS core versions.
-- System memory, OTP, unique ID (0x1FFF7A10) and flash size (0x1FFF7A22) are not mapped (as on the F405).
-- Packages: only the 1 MB "G" parts; the B/C/E/F flash sizes and the STM32F205RE/F207IE etc. are not described.
+- FLASH_KEYR/OPTKEYR/SR/CR/OPTCR (PM0059 not available); ACR.ICRST/DCRST are written even with the cache enabled
+  (2.3.4 "can be written only when ... disabled"); no wait-state timing.
+- RCC: CIR ready interrupts, MCO outputs, spread spectrum and the "PLLN half-word / word writes only" rule are not
+  modelled.
+- Ethernet with a reserved MDC code: silicon behaviour is unspecified; HCLK/102 is assumed.
+- OTG DIEPCTL0 reads USBAEP = 1 (29.16/30.12 give reset 0 but say the bit is always 1).
+- TIM10/TIM13/TIM14 keep a storage-only OR at 0x50 (Table 67 lists TIMx_OR for the group); UART4/5 offset 0x18 is
+  storage; RTC CR.DCE/REFCKON are not restricted to init mode; timer input remaps, RTC tamper/timestamp/calibration
+  effects and the 15 MHz ADCCLK limit below VDDA 2.4 V are not modelled (as on the F4).
+- The F4 files share some of the fixed faults (FSMC BCR/BWTR masks, DMA_SxFCR reserved bits, the CSR flag writes): the
+  fixes are parameters set only in the F2 chip files.
+- System memory (bootloader) and option bytes are not mapped. Packages: only the 1 MB "G" parts.
 
 ## STM32F1 (family `stm32f1`: STM32F103 low/medium/high density, STM32F105/F107 connectivity line)
 
